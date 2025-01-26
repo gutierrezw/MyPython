@@ -10,7 +10,7 @@ from ibapi.contract import *
 from ibapi.wrapper import *
 
 from bd_conect import select_objeto
-from client import *
+from Class_Ibrks import *
 from rutinas import *
 
 """

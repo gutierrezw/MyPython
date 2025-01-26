@@ -2,7 +2,7 @@ from Modulos_Utilitarios import *
 from Modulos_python import *
 
 from pprint import pprint
-from client import IBClient
+from Class_Ibrks import IBClient
 
 # Create a new session of the IB Web API.
 ib_client = IBClient(

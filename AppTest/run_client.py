@@ -1,6 +1,6 @@
 import pathlib
 from pprint import pprint
-from client import IBClient
+from Class_Ibrks import IBClient
 #from configparser import ConfigParser
 
 

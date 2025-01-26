@@ -3,7 +3,7 @@ from operator import itemgetter
 from globales import *
 from rutinas import *
 from bd_conect import *
-from client import IBClient
+from Class_Ibrks import IBClient
 
 # Create a new session of the IB Web API.
 ib_client = IBClient(

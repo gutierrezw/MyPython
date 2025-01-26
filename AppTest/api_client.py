@@ -1,5 +1,5 @@
 from pprint import pprint
-from client import IBClient
+from Class_Ibrks import IBClient
 import requests
 import json
 import urllib3
@@ -82,17 +82,17 @@ orden = {"orders": [{"conid": 125815462,
 # pprint('--------------------------------------')
 
 # print('orderRequest')
-order = ib_client.get_live_orders()
-pprint(order)
+# order = ib_client.get_live_orders()
+# pprint(order)
 # pprint('--------------------------------------')
 
 # pprint('delete_order()')
 # response = ib_client.delete_order(account_id='U4214563', customer_order_id=str(517114816))
-response = deleteorder(account_id='U4214563', customer_order_id='1054791570', conid='9969533')
-pprint(response)
+# response = deleteorder(account_id='U4214563', customer_order_id='1054791570', conid='9969533')
+# pprint(response)
 # orderRequest(account_id='U4214563', order=orden)
 # orderconfirm(replyId='be28f00d-bb0a-4d57-8847-25e145939d2e')
-pprint('--------------------------------------')
+# pprint('--------------------------------------')
 
 # pprint('place_order_scenario()')
 # response = ib_client.place_order_scenario(account_id='U4214563', order=orden)
@@ -100,7 +100,7 @@ pprint('--------------------------------------')
 # pprint(response)
 # orderRequest(account_id='U4214563', order=orden)
 # orderconfirm(replyId='be28f00d-bb0a-4d57-8847-25e145939d2e')
-pprint('--------------------------------------')
+# pprint('--------------------------------------')
 
 # pprint('place_order_scenario()')
 # response = ib_client.place_order(account_id='U4214563', order=orden)
@@ -156,3 +156,5 @@ pprint('--------------------------------------')
 #pprint(fundamental_summ)
 #pprint('')
 
+# verification localhost
+is_localhost()
