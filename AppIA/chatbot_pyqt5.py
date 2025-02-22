@@ -61,6 +61,8 @@ class ChatbotApp(QWidget):
             # Limpiar la caja de texto de entrada
             self.user_input.clear()
 
+
+    @staticmethod
     def get_response(self, user_message):
         # Obtener respuesta del chatbot usando LangChain
         response = chain.run(user_input=user_message)

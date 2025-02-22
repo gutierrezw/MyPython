@@ -20,7 +20,7 @@ def responder(update: Update, context: CallbackContext):
 
 # Configuración del bot
 def main():
-    updater = Updater(TOKEN, use_context=True)
+    updater = Updater(TOKEN, use_context)
     dp = updater.dispatcher
 
     # Agregar comandos
