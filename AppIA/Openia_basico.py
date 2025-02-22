@@ -1,25 +1,22 @@
-from dotenv import load_dotenv
-import openai
+from openai import OpenAI
 import time
 import os
 
+Cai = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
 
-# load_dotenv()
-openai.api_key = ('sk-proj-5sAtCO7J_H4mG3ZH-Q3--IY0V3gIORDrZjncR3yDLVSNWTeCJ1tfaAfBKOaapJal029Xpbvqw'
-                   'XT3BlbkFJIP91t7QqB3Wt_4wWBC6Z3t29rBgSUjKNljgU876jrBLC71ipVfvo7jY9acMKiJRbpvUBQMHvgA')
 
 # Hacer una consulta a GPT
-def chat(x_message=None):
+def chat_openai(x_message=None):
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": x_message}]
-        )
-        return response
+        response = Cai.chat.completions.create(model="gpt-4o-mini",
+                                               messages=[{"role": "user", "content": x_message}])
+        return response.choices[0].message.content
     except Exception as e:
         print("Chat(): {}".format(e))
 
-# Mostrar la respuesta
-message = "¿Qué es LangChain?"
-resp = chat(message)
-print(resp)
+
+if __name__ == "__main__":
+    message = "¿Qué es LangChain?"
+    resp = chat_openai(message)
+
+    print(resp)

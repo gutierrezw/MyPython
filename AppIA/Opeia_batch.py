@@ -1,30 +1,21 @@
 from dotenv import load_dotenv
-import openai
+from openai import OpenAI
 import time
 import os
 
 # Configura tu clave API
-load_dotenv()
-# openai.api_key = os.environ.get('OPENAI_API_KEY')
-# openai.api_key = ('sk-svcacct-6sqkThxL2mTJTMKsjaATul9VdE7nHbFS02iBOH-kaB94we9vaBQIGUpKogVmpgw'
-#                  '5IHQdcT3BlbkFJbYJSlBKNPUmEqa5jTxli5t5ygE9gVU7ar-n34pucC3DbkBeFEhJCbCMHwb8Dkg0PmskAA')
+# load_dotenv()
+# print(os.environ.get('OPENAI_API_KEY'))
+# OpenAI.api_key = os.environ.get('OPENAI_API_KEY')
 
+Ai = OpenAI()
 
-
-solicitudes = [
-    "¿Qué es Python?",
-    "¿Cómo funciona una red neuronal?",
-    "¿Cuáles son las ventajas de la energía solar?",
-    "Explica la mecánica cuántica en términos simples.",
-    "Dame una receta de pasta carbonara.",
-]
-
-def procesar_por_lotes(solicitudes, tamaño_lote=2):
+def procesar_por_lotes(solicitudes=None, tamaño_lote=2):
     try:
         for i in range(0, len(solicitudes), tamaño_lote):
             lote = solicitudes[i:i + tamaño_lote]
             respuestas = [
-                openai.ChatCompletion.create(
+                Ai.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": pregunta}]
                 )["choices"][0]["message"]["content"]
@@ -37,5 +28,12 @@ def procesar_por_lotes(solicitudes, tamaño_lote=2):
     except EncodingWarning as e:
         print("procesar_por_lotes(): {}".format(e))
 
-
+solicitudes = [
+    "¿Qué es langchain?",
+    "¿Cómo funciona langchain?",
+    "¿Cuáles son las ventajas de langchain?",
+    "Explica la mecánica cuántica en términos simples.",
+    "Dame una receta de pasta carbonara.",
+]
 procesar_por_lotes(solicitudes, tamaño_lote=2)
+

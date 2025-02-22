@@ -1,16 +1,10 @@
-from dotenv import load_dotenv
-import openai
+from langchain_core.runnables import RunnableLambda
+from Openia_basico import chat_openai
+import time
 import os
 
-load_dotenv()
-openai.api_key = os.environ.get('OPENAI_API_KEY')
+modelo = RunnableLambda(chat_openai)
 
-from langchain_openai import ChatOpenAI
-
-llm = ChatOpenAI(model="gpt-4o-mini")
-
-response = llm.invoke(
-    "Explain concisely like I was 12 ¿Qué es LangChain?"
-)
-
-print(response.content)
+# Hacer una consulta al modelo
+respuesta = modelo.invoke("¿Qué es LangChain?")
+print("Respuesta del modelo:", respuesta)
