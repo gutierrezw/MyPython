@@ -56,7 +56,7 @@ def get_trader_insert_fiat(Response=None):
 
 if __name__ == '__main__':
 
-    cb = BB()
+    cb = BB().spot
     desde = datetime(2021, 1, 1)
     hasta = datetime.today()
 
