@@ -127,7 +127,7 @@ class MyUserDataStreamClient(SpotWebsocketAPIClient):
         print("♻️ Intentando reconectar...")
         self.stop()
         time.sleep(5)
-        self.__init__()  # reinicializa todo
+        self.__init__()
         self.start()
 
     def on_close(self, code, reason):
