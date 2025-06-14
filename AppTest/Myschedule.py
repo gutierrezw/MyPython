@@ -1,4 +1,3 @@
-# from Modulos_python import schedule
 import schedule
 
 

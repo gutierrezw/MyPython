@@ -216,7 +216,7 @@ alignments = {
 custom_tree = CustomTreeview(master=win1,
                              columns=columns,
                              fixed_columns=fixed_columns,
-                             fixed_row=True,
+                             fixed_row=False,
                              show_vscroll=True,
                              show_hscroll=True,
                              height=6,

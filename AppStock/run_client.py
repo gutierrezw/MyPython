@@ -12,8 +12,8 @@ ib_client = IBClient(
 
 # create a new session
 # ib_client.create_session()
-# print('autenticado -- en session')
-# print(ib_client.is_authenticated(False))
+print('autenticado -- en session')
+print(ib_client.is_authenticated(False))
 
 # grab the account data.
 # pprint('account_data')
@@ -28,7 +28,7 @@ ib_client = IBClient(
 
 # Grab current quotes
 # pprint('current_prices')
-# ymbol = ib_client.symbol_search('HASI')[0]
+# symbol = ib_client.symbol_search('HASI')[0]
 # print(symbol['conid'], symbol['description'])
 # quote_fields = [6070, 7282, 7284, 7290, 7293, 7294, 7655, 7674, 7675, 7676, 7677,
 #                7678, 7679, 7724, 7681, 7694, 7700, 7702, 7703, 7920]
@@ -44,6 +44,6 @@ ib_client = IBClient(
 # pprint(datos)
 
 
-pprint("portfolio_account_ledger")
-datos = ib_client.portfolio_account_ledger(account_id="U4214563")
-pprint(datos)
+# pprint("portfolio_account_ledger")
+# datos = ib_client.portfolio_account_ledger(account_id="U4214563")
+# pprint(datos)

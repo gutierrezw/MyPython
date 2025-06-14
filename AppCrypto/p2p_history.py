@@ -51,6 +51,7 @@ def get_trader_insert_fiat(Response=None):
     for i, values in enumerate(asc_trader):
         if last_date < values['fechahora']:
             insert_booktrading(values, symbol=rows['asset'])
+            print(f'insert {rows['asset']}')
 
     return asc_trader
 

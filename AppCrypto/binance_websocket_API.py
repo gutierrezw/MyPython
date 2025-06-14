@@ -7,6 +7,7 @@ from Modulos_python import (threading, logging, time, json, b64encode, b64decode
 def message_handler_wss(_, message):
     # Convertir string a JSON (diccionario)
     data = json.loads(message)
+    print(data)
 
     if data["id"] != "allOrders_5494febb":
         print(data)
@@ -14,19 +15,12 @@ def message_handler_wss(_, message):
     # traders recientes en 24 horas
     elif data["id"] == "allOrders_5494febb":
 
-        # request = OK
-        if data['status'] == 200:
-            l_orders = data['result']
-            if l_orders:
-                fields = ['symbol', 'price', 'orderId', 'origQty', 'status', 'timeInForce', 'type', 'side',
-                          'stopPrice', 'updateTime']
-                print(data)
-                print('<>' * 40)
-                # for items in l_orders:
-                #    order = {k: items[k] for k in fields if k in items}
-                #    print(order)
-                #    print('<>' * 40)
+        print(data)
+        print('<>' * 40)
 
+    elif data["id"] == "Orders_5494febb":
+        print(data)
+        print('<>' * 40)
 
 
 if __name__ == "__main__":
@@ -35,8 +29,8 @@ if __name__ == "__main__":
     app = WebsocketBinanceApiClient(stream_url="wss://ws-api.binance.com:443/ws-api/v3",
                                     mensaje_callback=message_handler_wss)
 
-    # app.my_allOrders(assets=symbols, limit=10, late=16, sleep=1)
-    app.login()
+    # app.my_allOrders(assets=symbols, limit=10, dias=16, sleep=1)
+    app.my_Orders(symbol="ADAUSDT", idOrder=6853919884)
 
 
     app.stop()

@@ -17,7 +17,7 @@ class ChatBot(tk.Frame):
 
         self.root = parent
         self.root.title("Chatbot Langchain")
-        self.root.geometry("400x450")
+        self.root.geometry("900x800")
 
         # Permitir que la ventana se expanda con weight
         self.root.grid_rowconfigure(0, weight=1)     # La fila 0 (chat) se expande
