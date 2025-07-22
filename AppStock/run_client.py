@@ -1,6 +1,8 @@
 import pathlib
 from pprint import pprint
-from Class_Ibrks import IBClient
+from API_vehiculos import IBClient
+
+# from Class_Ibrks import IBClient
 #from configparser import ConfigParser
 
 
@@ -21,9 +23,9 @@ print(ib_client.is_authenticated(False))
 # pprint(account_data)
 
 #  grab account portfolios
-# pprint('account_positions')
-# account_positions = ib_client.portfolio_account_positions(account_id="U4214563", page_id=0)
-# pprint(account_positions)
+pprint('account_positions')
+account_positions = ib_client.portfolio_account_positions(account_id="U4214563", page_id=0)
+pprint(account_positions)
 
 
 # Grab current quotes

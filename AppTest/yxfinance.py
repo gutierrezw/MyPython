@@ -2,22 +2,16 @@ import pandas as pd
 import pandas.api
 from datetime import *
 import pprint
-import globales
 import numpy as np
-import keyboard
 import yfinance as yf
-from bd_conect import select_booktrading, insert_booktrading, min_fec_booktrading, select_inversion
-from main_crypto import performa_asset
-from bd_conect import *
 
 hoy = datetime.now()
 # position = select_inversion(tipoin='Stock', ticket='all')
-symbol = '^GSPC'
-symbol = 'SPY'
+symbol = 'HASI'
 
-activo = yf.Ticker(symbol)
-datos = yf.download(symbol, period='5d')
-print(datos)
+activo = yf.Ticker('ADA-USD')
+# datos = yf.download(symbol, period='5d')
+print(f'activo :{activo.info["region"]} {activo.info["symbol"]} ')
 # last = activo.history(period='1d')['Close'].index
 # print(activo.info['symbol'], '>> info() :', last.date)
 #div = activo.dividends
