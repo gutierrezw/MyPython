@@ -1,0 +1,47 @@
+{
+    "version": "1.0.0", 
+    "start_crypto()": {
+        "WidgetVehiculo(class)": true,
+        "DatosVehiculo.run()": {
+            "carga_inversion_en_positions()": true,
+            "fetch_api_vehiculo()": true,
+            "run_schedule(Crypto)": {
+                "schedule_operativo()": true,
+                "fetch_api_vehiculo()": true,
+                "dividends_en_market_stock()": true,
+                "trader_api_vehiculo()": false,
+                "schedule_diario()": {
+                    "diaria_book_performance()": true,
+                    "proceso_update_performance()": true
+                }
+            },
+            "run_websocket_stream(Crypto)": true,
+            "run_websocket_Client(Crypto)": true          
+        },
+        "WidgetVehiculo.inicio_widget_treeview()": true,        
+        "WidgetVehiculo.run_graficos()": true,
+        "update_widget()": true
+    },
+    "statr_stock()": {
+        "WidgetVehiculo(class)": true,
+        "DatosVehiculo.run()": {
+            "carga_inversion_en_positions()": true,
+            "fetch_api_vehiculo()": true,
+            "run_schedule(Stock)": {
+                "schedule_operativo()": true,
+                "fetch_api_vehiculo()": true,
+                "dividends_en_market_stock()": true,
+                "trader_api_vehiculo()": false,
+                "schedule_diario()": {
+                    "diaria_book_performance()": true,
+                    "proceso_update_performance()": true
+                }
+            },
+            "run_websocket_stream(Stock)": true,
+            "run_websocket_Client(Stock)": true          
+        },
+        "WidgetVehiculo.inicio_widget_treeview()": true,        
+        "WidgetVehiculo.run_graficos()": true,
+        "update_widget()": true
+    }
+}
