@@ -2382,34 +2382,38 @@ class WidgetVehiculo(TickerInfo):
                 fg = Figure(figsize=(7.8, 2.3), dpi=110, layout="tight")
                 fg.set_facecolor(self.colors["cgcolor"])
                 cv = FigureCanvasTkAgg(fg, master=win)
+
                 self.graph.append((cv, fg))
                 self.graph[-1][0].draw()
                 self.graph[-1][0].get_tk_widget().pack()
 
-                bt1 = tk.Button(
-                    win,
-                    text="1w",
-                    width=2,
-                    bg=self.colors["cgcolor"],
-                    fg=self.colors["bgcolor"],
-                    relief=tk.FLAT,
-                )
                 # command=lambda: chart_setup('W', gtipo, 'p'))
-                bt2 = tk.Button(
+                bt1 = tk.Button(
                     win,
                     text="1m",
                     width=2,
                     bg=self.colors["cgcolor"],
                     fg=self.colors["bgcolor"],
                     relief=tk.FLAT,
+                    command=lambda: self.setup_graph_performa("1"),
                 )
-                bt3 = tk.Button(
+                bt2 = tk.Button(
                     win,
                     text="3m",
                     width=2,
                     bg=self.colors["cgcolor"],
                     fg=self.colors["bgcolor"],
                     relief=tk.FLAT,
+                    command=lambda: self.setup_graph_performa("3"),
+                )
+                bt3 = tk.Button(
+                    win,
+                    text="6m",
+                    width=2,
+                    bg=self.colors["cgcolor"],
+                    fg=self.colors["bgcolor"],
+                    relief=tk.FLAT,
+                    command=lambda: self.setup_graph_performa("6"),
                 )
                 bt4 = tk.Button(
                     win,
@@ -2418,15 +2422,12 @@ class WidgetVehiculo(TickerInfo):
                     bg=self.colors["cgcolor"],
                     fg=self.colors["bgcolor"],
                     relief=tk.FLAT,
+                    command=lambda: self.setup_graph_performa("12"),
                 )
-                bt5 = tk.Button(
-                    win,
-                    text="5y",
-                    width=2,
-                    bg=self.colors["cgcolor"],
-                    fg=self.colors["bgcolor"],
-                    relief=tk.FLAT,
-                )
+                bt1.place(y=20, x=750)
+                bt2.place(y=20, x=775)
+                bt3.place(y=20, x=800)
+                bt4.place(y=20, x=825)
 
         # información de sesión
         self.sesion = self.PlanInversion.select_sesion(
@@ -2551,6 +2552,7 @@ class WidgetVehiculo(TickerInfo):
         self.rns = None
         self.rnb = None
         self.symbol = None
+        self.Ddatos = None
         self.bgcolor = DataHub.colors["bgcolor"]
         self.fgcolor = DataHub.colors["fgcolor"]
         self.cgcolor = DataHub.colors["cgcolor"]
@@ -4128,6 +4130,22 @@ class WidgetVehiculo(TickerInfo):
         except EncodingWarning as e:
             print("[oportunidad_mejorar_dividends()]: {}".format(e))
 
+    def setup_graph_performa(self, tipo=None):
+
+        symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=self.vehiculo)
+        parm = {
+            "BTC": index_ref,
+            "++ index": "++ Portafolio",
+            "Value": "Value Market",
+            "Costo": "Cost basic",
+            "legend": "outside upper left",
+            "aspect": 0.21,
+            "periodo": tipo,
+            "titulo": "Performance (acumulativo) portafolio :: " + self.vehiculo,
+        }
+        self.graph_performa_portafolio(fg=self.graph[2][1], data=self.Ddatos, parm=parm)
+        # self.graph[2][0].draw()
+
     # titulo ROI vehiculo -------------------------------------------------------------------------------------------
     def graph_performance_vehiculo(self, data, parm):
         try:
@@ -4481,7 +4499,7 @@ class WidgetVehiculo(TickerInfo):
             return pdatos, ddatos, GainLoss
 
         try:
-            (Pdatos, Ddatos, GainLoss) = datos_grafico()
+            (Pdatos, self.Ddatos, GainLoss) = datos_grafico()
 
             parm = {"titulo": "ROI " + self.vehiculo, "aspect": 0.80}
             self.graph_performance_vehiculo(Pdatos, parm)
@@ -4489,7 +4507,6 @@ class WidgetVehiculo(TickerInfo):
 
             # reemplazar o mejorar Gráfico por 5 mejores y peores desempeño
             parm = {"titulo": "Top 5 - Gain/Loss " + self.vehiculo, "aspect": 0.40}
-            # self.graph_asignacion_vehiculo(Adatos, parm)
             self.graph_gain_loss(data=GainLoss, parm=parm)
             self.graph[1][0].draw()
 
@@ -4497,26 +4514,10 @@ class WidgetVehiculo(TickerInfo):
 
                 # controla que pase una vez por plot del gráfico
                 # if not DataHub.last_process["graph_performa_portafolio"]:
-                symbol, rtn_index, cum_index, index_ref = vehiculo_parm(
-                    vehiculo=self.vehiculo
-                )
-                parm = {
-                    "BTC": index_ref,
-                    "++ index": "++ Portafolio",
-                    "Value": "Value Market",
-                    "Costo": "Cost basic",
-                    "legend": "outside upper left",
-                    "aspect": 0.21,
-                    "titulo": "Performance (acumulativo) portafolio :: "
-                    + self.vehiculo,
-                }
 
-                print(f"run_graficos({self.vehiculo}): {Ddatos.shape[0]}")
+                self.setup_graph_performa(tipo=12)
+                print(f"run_graficos({self.vehiculo})")
 
-                self.graph_performa_portafolio(
-                    fg=self.graph[2][1], data=Ddatos, parm=parm
-                )
-                self.graph[2][0].draw()
                 # DataHub.last_process["graph_performa_portafolio"] = True
         except Exception as e:
             print(f"[run_gráficos()]: {e}")

@@ -1562,7 +1562,7 @@ def grupo_region(fg: object, strategy=None, parm=None):
     fg.legend(loc=parm["legend"], handles=p_legend, fontsize=6)
     fg.suptitle(parm["titulo"], fontsize="medium", color=cchart["titulo"])
 
-    ax.axhline(mean, ls=":", color=cchart["texto"])
+    ax.axhline(mean, linewidth=0.6, ls="--", color=cchart["texto"])
     media = f" μ = {mean:.0f}$"
 
     ax.text(x[5], mean * 1.2, media, fontsize=6, ha="center", color=cchart["texto"])
@@ -1791,7 +1791,7 @@ def grupo_sector(fig: object, positions=None, parm=None):
 
         #  construcción de 2.º eje, para mostrar costos
         av.plot(
-            x + width, pdatos["Peso"], color=cchart["texto"], linewidth=0.9, ls="--"
+            x + width, pdatos["Peso"], color=cchart["texto"], linewidth=0.6, ls="--"
         )
 
         tlabels = av.get_yticklabels()
