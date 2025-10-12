@@ -80,11 +80,11 @@ class DatosVehivulo(TickerInfo, MyOrders):
         self.itera = 0
         self.WsStock = None
 
-        # Accesos MySql -----------------------------------------------------------------------------------------------
+        # Accesos MySql ---------------------------------------------------------------------------------------------------------
         self.Market = MarketScreen()
         self.RepositorioOportunidades = RepositorioOportunidadesBuySell()
 
-        # Programa la tarea comunes todos los vehiculos --------------------------------------------------------------
+        # Programa la tarea comunes todos los vehiculos -------------------------------------------------------------------------
         RemoteOrder = f"schedule_order_remote({self.vehiculo})"
         oportunidad = f"schedule_oportunidades({self.vehiculo})"
         operativo = f"schedule_operativo({self.vehiculo})"
