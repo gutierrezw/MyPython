@@ -17,6 +17,8 @@ dist/
 *.spec
 
 # Archivos de logs y perfiles
+logs/
+.idea/
 *.log
 *.prof
 
@@ -29,6 +31,8 @@ tmp/
 # 2. ENTORNO VIRTUAL
 # ------------------------------------
 # Ignorar carpetas comunes de entornos virtuales
+Treeline/
+IBGateway/
 .venv/
 venv/
 env/

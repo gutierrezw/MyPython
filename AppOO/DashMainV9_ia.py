@@ -418,7 +418,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                     low = x_message.get(ix["low"], 0)
                     if is_numeric(low):
-                        self.conid_inicio[x_conid].update({"low": float(high)})
+                        # fix: update 'low' with the correct low value instead of mistakenly using high
+                        self.conid_inicio[x_conid].update({"low": float(low)})
 
                     if ix["costobase"] in x_message.keys():
                         if is_numeric(x_message[ix["costobase"]]):

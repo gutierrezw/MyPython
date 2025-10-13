@@ -1763,9 +1763,7 @@ def grupo_sector(fig: object, positions=None, parm=None):
                 )
                 p_legend.append(mpatches.Patch(color=cchart["plot4"], label=keys))
 
-        p_legend.append(
-            mpatches.Patch(color=cchart["texto"], label="weight Portafolio")
-        )
+        p_legend.append(mpatches.Patch(color=cchart["texto"], label="mean weight"))
         fg.legend(loc=dlabl["legend"], handles=p_legend, fontsize=6)
         fg.suptitle(dlabl["titulo"], fontsize="medium", color=cchart["titulo"])
 
@@ -1790,9 +1788,12 @@ def grupo_sector(fig: object, positions=None, parm=None):
         ax.tick_params(axis="y", colors=cchart["asx"])
 
         #  construcción de 2.º eje, para mostrar costos
-        av.plot(
-            x + width, pdatos["Peso"], color=cchart["texto"], linewidth=0.6, ls="--"
-        )
+        av.plot(x + width, pdatos["Peso"], color=cchart["asx"], linewidth=0.7, ls="--")
+
+        mean = pdatos["Peso"].mean()
+        media = f" μ = {mean:.1%}"
+        av.axhline(mean, linewidth=0.6, ls="--", color=cchart["texto"])
+        av.text(x[6], mean * 1.2, media, fontsize=6, ha="center", color=cchart["texto"])
 
         tlabels = av.get_yticklabels()
         plt.setp(tlabels, ha="left", fontsize=6, color=cchart["texto"])
@@ -2038,7 +2039,6 @@ def grupo_dividendo(fg: object, parm=None):
             ax.text(
                 x[6], mean * 1.2, media, fontsize=6, ha="center", color=cchart["texto"]
             )
-
     except Exception as error:
         print("grupo_dividendo(): {}".format(error))
 
