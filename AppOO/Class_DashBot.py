@@ -109,6 +109,7 @@ class Telegram:
     def __init__(self):
         self.MostrarOpcionMenu_enTelegram = "menu"
         self.SentMessage = []
+        self.DeleteMessageHash = []
         self.simulation = True
 
         # Token / ID que te da BotFather - personal (número)
@@ -290,9 +291,8 @@ class Telegram:
                         reply_markup=reply_markup,
                         parse_mode="Markdown",
                     )
-                    await self._save_message(sent_message, CHAT_ID)
+                    await self._save_message(sent_message, CHAT_ID, hash_id=hash_id)
                     return
-
         except Exception as e:
             print(f"send_Telegram(): Error: {e}")
 
@@ -428,19 +428,59 @@ class Telegram:
         except Exception as e:
             print(f"handle_callback(): Error: {e}")
 
+    # delete message puntual
+    async def _delete_message_hash(self, message):
+
+        FileMessage = define_FileCache(name="telegram_message_ids.json")
+        with open(FileMessage, "r") as f:
+            for line in f:
+                try:
+                    data = json.loads(line)
+                    # Solo borra del chat el mensajes anterior
+                    if (
+                        data.get("chat_id") == message.get("chat_id")
+                        and data.get("hash_id") == message.get("hash_id")
+                        and data.get("message_id") != message.get("message_id")
+                    ):
+                        await self.bot.delete_message(
+                            chat_id=data.get("chat_id"),
+                            message_id=data.get("message_id"),
+                        )
+                except (json.JSONDecodeError, BadRequest):
+                    continue
+
     # Path to JSON file for storing message IDs
-    async def _save_message(self, sent_message, CHAT_ID):
+    async def _save_message(self, sent_message, CHAT_ID, hash_id=None):
         try:
 
             # Obtiene el message_id del mensaje enviado
             message_id = sent_message.message_id
             FileMessage = define_FileCache(name="telegram_message_ids.json")
+            self.DeleteMessageHash = []
 
             # Guarda el chat_id y el message_id en el archivo JSON
             with open(FileMessage, "a") as f:
-                json.dump({"chat_id": int(CHAT_ID), "message_id": message_id}, f)
-                f.write("\n")
 
+                # option para mensajes comunes
+                if hash_id is None:
+                    json.dump({"chat_id": int(CHAT_ID), "message_id": message_id}, f)
+                    f.write("\n")
+
+                # option para borrar oportunidad que se ha mejorado
+                if hash_id is not None:
+
+                    # salmacena hash:id y message_id que se preservan
+                    message = {
+                        "chat_id": int(CHAT_ID),
+                        "message_id": message_id,
+                        "hash_id": hash_id,
+                    }
+                    json.dump(message, f)
+                    f.write("\n")
+
+            # elimina mensaje previo
+            if hash_id is not None:
+                await self._delete_message_hash(message)
         except Exception as e:
             print(f"_save_message(): {e}")
 
@@ -476,7 +516,6 @@ class Telegram:
                 with open(FileMessage, "a") as f:
                     json.dump(data, f)
                     f.write("\n")
-
         except (FileNotFoundError, Exception) as e:
             print(f"clear_bot_chat(): {e}")
 
@@ -637,7 +676,6 @@ class Chatbot(tk.Toplevel, AgenteIA, Telegram):
                 (df["%Roi"] >= DataHub.MaxRoi) & (df["Profit"] >= DataHub.MinProfit)
             ]
             return df_recom if not df_recom.empty else vacio
-
         except (EmptyDataError, FileNotFoundError):
             # print(f"readCSV(): El archivo {path} está vacío.")
             return vacio
@@ -706,12 +744,12 @@ class Chatbot(tk.Toplevel, AgenteIA, Telegram):
             price = f"{row['PriceMarket']:>12.4f}".strip()
 
             if modo == "system":
-                mensaje = f"📊 *System Sell: ${symbol} ({option};  @price: {price})*\n"
+                mensaje = f"🔴 *System Sell: ${symbol} ({option};  @price: {price})*\n"
                 mensaje += "```\n"
 
             elif modo == "ia":
                 confianza = row["confianza"]
-                mensaje = f"📊 *IA Sell: ${symbol} ({option};  @price: {price})*\n"
+                mensaje = f"🔴 *IA Sell: ${symbol} ({option};  @price: {price})*\n"
                 mensaje += "```\n"
 
             mensaje += f"{'Métrica':<15} {'Valor':>12}\n"
@@ -960,7 +998,7 @@ class Chatbot(tk.Toplevel, AgenteIA, Telegram):
 
                 orders.append(
                     {
-                        "timestamp": timestamp.strftime("%d-%b %H:%M:%S"),
+                        "timestamp": timestamp.strftime("%d-%b,%H%M%S"),
                         "symbol": trader[ix.index("symbol")],
                         "side": trader[ix.index("side")],
                         "quantity": trader[ix.index("quantity")],
@@ -981,7 +1019,7 @@ class Chatbot(tk.Toplevel, AgenteIA, Telegram):
                 if isinstance(o, dict):
                     lines.append(
                         f"{o.get('timestamp'):>14} {o.get('symbol'):>7} "
-                        f"{o.get('side'):<4} {o.get('quantity'):>7} {o.get('price'):>7} {o.get('status'):>10}"
+                        f"{o.get('side'):<4} {o.get('quantity'):>7} {o.get('price'):>7} {o.get('status'):>9}"
                     )
 
             message = f"🟢🔴 *Trader recent (-7 days):*\n"

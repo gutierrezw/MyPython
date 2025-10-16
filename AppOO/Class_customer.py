@@ -323,13 +323,13 @@ class DataHub:
             return 0
 
     # write CSV: Oportunity sell
-    def csv_forChatbot(account=None):
+    def csv_OptionSales_write(account=None):
         def write_file(archivo=None, accion="detalle", struct=None):
             try:
-                if (accion == "header") and (archivo == "sell"):
+                if accion == "header":
                     writer.writerow(DataHub.ColumnCsvSell)
 
-                elif (accion == "detalle") and (archivo == "sell"):
+                elif accion == "detalle":
                     writer.writerow(
                         [
                             struct["symbol"],
@@ -355,23 +355,6 @@ class DataHub:
                         ]
                     )
 
-                elif (accion == "header") and (archivo == "dividends"):
-                    writer.writerow(
-                        [
-                            "Symbol",
-                            "account",
-                            "Opcion",
-                            "Profit",
-                            "NroLotes",
-                            "CantidadSell",
-                            "PriceMarket",
-                            "CostoCum",
-                            "%Roi",
-                            "CostoBase",
-                            "Position",
-                            "Disponible",
-                        ]
-                    )
             except (EncodingWarning, Exception) as e:
                 print(f"write_file(): {e}")
 
@@ -380,11 +363,15 @@ class DataHub:
             try:
                 for i, values in enumerate(in_sell):
 
+                    # rechaza profit por debajo del umbral esperado
+                    if values["profit"] < DataHub.MinProfit:
+                        continue
+
                     ventas = DataHub.maximiza_sell_lotes(
                         account=values["account"],
                         symbol=values["symbol"],
                         last=values["last"],
-                        c_sell=values["cantidad sell"],
+                        c_sell=values["cantidad lotes"],
                         position=values["position"],
                         costobase=values["costobase"],
                     )
@@ -404,7 +391,7 @@ class DataHub:
                             struct.update({"vehiculo": values["vehiculo"]})
                             struct.update({"option": keys})
                             struct.update({"profit": sell["profit"]})
-                            struct.update({"cantidad lotes": values["cantidad lotes"]})
+                            struct.update({"cantidad lotes": sell["lotes"]})
                             struct.update({"cantidad sell": sell["cantidad sell"]})
                             struct.update({"last": values["last"]})
                             struct.update({"fecha": datetime.now().date()})
@@ -421,32 +408,24 @@ class DataHub:
                             struct.update({"Comentarios": "SinNota"})
 
                         anterior = sell["profit"]
-                        write_file(archivo=tipo, accion="detalle", struct=struct)
+                        write_file(accion="detalle", struct=struct)
             except (EncodingWarning, Exception) as e:
                 print(f"procesa_sell(): {e}")
 
         try:
+            path = define_FileCache(name=f"csv_datosIA_sell.csv")
+            s_sell = DataHub.get_info_symbols_gain()
 
-            # data = ['sell', 'dividends']
-            data = ["sell"]
+            # loock write de CSV sell
+            with DataHub.lockCsvAi:
+                with open(path, mode="w", newline="", encoding="utf-8") as file:
+                    writer = csv.writer(file)
+                    write_file(accion="header")
 
-            for tipo in data:
-                path = define_FileCache(name=f"csv_datosIA_{tipo}.csv")
-
-                # obtiene lotes ganadores
-                if tipo == "sell":
-                    s_sell = DataHub.get_info_symbols_gain()
-
-                # loock write de CSV sell
-                with DataHub.lockCsvAi:
-                    with open(path, mode="w", newline="", encoding="utf-8") as file:
-                        writer = csv.writer(file)
-                        write_file(archivo=tipo, accion="header")
-
-                        if tipo == "sell":
-                            procesa_sell(s_sell)
+                    # recorre info()
+                    procesa_sell(s_sell)
         except (EncodingWarning, Exception) as e:
-            print(f"csv_forChatbot(): {e}")
+            print(f"csv_OptionSales_write(): {e}")
 
     # recorre DataHub.info() para mostrar lo disponible para la sell
     def get_info_symbols_gain():
@@ -786,7 +765,7 @@ class DataHub:
 #  clase para colocar ordenes desde cualquier punto de la aplicacion
 class MyOrders:
 
-    def __init__(self, account, vehiculo, simulation=True):
+    def __init__(self, account, vehiculo, simulation=False):
         self.account = account
         self.vehiculo = vehiculo
         self.simulation = simulation
@@ -912,6 +891,8 @@ class MyOrders:
                             "quantity": response["origQty"],
                             "clientOrderId": response["clientOrderId"],
                             "stampPlace": datetime.fromtimestamp(stamp),
+                            "stampSubmit": datetime.fromtimestamp(stamp),
+                            "hash_id_oportunidad": hash_id_Op,
                         }
                         self.RepositorioOportunidades.insert_order_trader(
                             values=values, symbol=symbol
@@ -2193,7 +2174,7 @@ class TickerInfo(MyOrders):
             self.oportunidades_dividends()
 
             # exporta oportunadades al agente IA
-            DataHub.csv_forChatbot(account=self.account)
+            DataHub.csv_OptionSales_write(account=self.account)
 
             # contabiliza ejecución del schedule
             task = f"schedule_oportunidades({self.vehiculo})"
