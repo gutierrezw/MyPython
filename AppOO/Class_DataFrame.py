@@ -37,15 +37,110 @@ from Modulos_python import (
     mdates,
     timedelta,
     time,
-    cached,
+    wraps,
+    logging,
     TTLCache,
     HTTPError,
+    textwrap,
 )
 from API_vehiculos import BB
 
+
+import yfinance as yf
+from cachetools import TTLCache
+from functools import wraps
+import pandas as pd
+import time
+
+
+# establece cache para yfinance --------------------------------------------------------------------------------
+# ============================================================
+# 🧩 Clase de manejo de caché para DataFrames
+# ============================================================
+class DataFrameCache:
+    def __init__(self, maxsize=200, ttl=1800):
+        """
+        maxsize: cantidad máxima de elementos en caché
+        ttl: tiempo de vida (en segundos)
+        """
+        self.cache = TTLCache(maxsize=maxsize, ttl=ttl)
+        self.GetCounter = 0
+        # Asigna Nombre Logging
+        self.logger = logging.getLogger("DataFrameCache")
+        self.logger.warning("✅ Cache DataFrame inicializado correctamente.")
+
+    def get(self, key):
+        self.GetCounter += 1
+        return self.cache.get(key)
+
+    def set(self, key, value):
+        self.cache[key] = value
+
+    def keys(self):
+        return list(self.cache.keys())
+
+    def clear(self):
+        self.cache.clear()
+
+    def has(self, key):
+        return key in self.cache
+
+    def remove(self, key):
+        if key in self.cache:
+            del self.cache[key]
+
+
+# ============================================================
+# 🧠 Decorador para aplicar DataFrameCache a funciones
+# ============================================================
+def use_dataframe_cache(df_cache):
+    """
+    Decorador que usa cache para funciones que retornan DataFrames.
+    Permite desactivar el cache usando use_cache=False.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            use_cache = kwargs.pop("use_cache", True)
+            key = (func.__name__, args, tuple(sorted(kwargs.items())))
+
+            # uso datos cacheados
+            if use_cache and df_cache.has(key):
+                return df_cache.get(key)
+
+            df_cache.logger.warning(
+                textwrap.dedent(
+                    f"""
+                    ===============================================
+                    {func.__name__}():
+                    🟡 [CACHE MISS] - descargando datos frescos...
+                    ===============================================
+                    args : {args}
+                    keys : {key[2]}
+                    """
+                )
+            )
+            result = func(*args, **kwargs)
+
+            if use_cache:
+                df_cache.set(key, result)
+            return result
+
+        return wrapper
+
+    return decorator
+
+
+# ============================================================
+# 📈 Instancia global del cache
+# ============================================================
+CacheHut = DataFrameCache(maxsize=200, ttl=1800)
+
+
 # estable cache para yfinance ----------------------------------------------------------------------------------------------------
 # in RAM  >> @cached(cache)
-cache = TTLCache(maxsize=100, ttl=1000)
+# cache = TTLCache(maxsize=100, ttl=1000)
 
 
 # resumen datos fundamentales de activo ------------------------------------------------------------------------------------------
@@ -187,8 +282,10 @@ class InfoYfinance:
             print("[get_info_yf()]: {}".format(e))
 
 
-# encapsula llamados a yfinance
-@cached(cache)
+# =================================================================
+# 📊 Función principal get_yfinance: encapsula llamados a yfinance
+# =================================================================
+@use_dataframe_cache(CacheHut)
 def get_yfinance(
     ticket=None, vehiculo="Stock", period="5y", interval="1d", desde=None, hasta=None
 ):
@@ -295,7 +392,6 @@ def get_yfinance(
                 )
                 activo = {}
                 return activo, pdatos
-
     except (Exception, EncodingWarning) as e:
         print(f"[Error:: get_yfinance()]: {e}")
         time.sleep(3)

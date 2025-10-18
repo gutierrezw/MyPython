@@ -335,7 +335,7 @@ class Telegram:
     # enlace con TickerInfo() para colocar orders
     def put_order_aprovate_telegram(self, hash_id):
         try:
-            response, symbol = {}, None
+            values, symbol = {}, None
 
             # recupera info() de Oportunidad sell
             oportunidad, ix = self.RepositorioOportunidades.obtener_id_por_hash(
@@ -346,21 +346,21 @@ class Telegram:
                 return {}, None
 
             elif oportunidad[ix.index("vehiculo")] == "Stock":
-                response, symbol = self.put_order_stockTelegram(oportunidad, ix)
+                values, symbol = self.put_order_stockTelegram(oportunidad, ix)
 
             elif oportunidad[ix.index("vehiculo")] == "Crypto":
                 pass
 
             # marca oportunidad como aprobada si la orden fue aceptada
-            if response.get("estado") == "ok":
+            if values.get("status") in ("Submitted", "PreSubmitted", "FILLED"):
                 self.RepositorioOportunidades.marcar_oportunidad(
                     hash_id,
-                    status=1,
-                    estado="aprobada",
-                    razon="Aprobada y orden enviada.",
+                    recomendado=1,
+                    estado="ejecutada",
+                    razon="Aprobada desde Telegram (IA)",
                 )
 
-            return response, symbol
+            return values, symbol
         except Exception as e:
             print(f"put_order_aprovate_telegram(): Error: {e}")
 
@@ -391,7 +391,7 @@ class Telegram:
             elif accion == "rechazar":
                 self.RepositorioOportunidades.marcar_oportunidad(
                     args[0],
-                    status=-1,
+                    recomendo=-1,
                     estado="rechazada",
                     razon="Rechazada desde Telegram.",
                 )
@@ -883,7 +883,7 @@ class Chatbot(tk.Toplevel, AgenteIA, Telegram):
                                 [df_ou, pd.DataFrame([row])], ignore_index=True
                             )
                             df_ou["Comentarios"] = (
-                                f"Opportunity sent by Sell IA Model, confianza {apro['confianza']}"
+                                f"Oportunity sent by Sell IA Model, confianza {apro['confianza']}"
                             )
                             df_ou["confianza"] = apro["confianza"]
                             break

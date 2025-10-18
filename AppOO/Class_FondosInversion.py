@@ -73,12 +73,6 @@ class ArsFondosInversion(tk.Frame):
     def widgets_FCI(self):
         try:
 
-            # valida si hay nueva interfaz
-            # if self.chequea_new_loadFile():
-            #    self.load_diaria_CNV()
-            #    self.load_positions_FCI()
-            # self.update_panel_fci()
-
             # update widget ARS
             self.ars.update_panelVehiculo(orden=self.ars.orden)
 
@@ -561,8 +555,8 @@ class ArsFondosInversion(tk.Frame):
                             )
                         )
 
-                        # valida que position sea mayor a 0
-                        if last_trader[0]["stock"] > 0.01:
+                        # valida que position sea mayor que el umbral
+                        if abs(last_trader[0]["stock"]) > 0.01:
                             datos = struct_positions_fci(
                                 symbol, in_positions, last_trader
                             )

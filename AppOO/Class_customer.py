@@ -57,6 +57,7 @@ from Class_DataFrame import (
     get_yfinance,
     chart_symbol,
     chart_rendimiento_dividendos,
+    CacheHut,
 )
 from Modulos_Mysql import (
     PlanInversion,
@@ -764,7 +765,6 @@ class DataHub:
 
 #  clase para colocar ordenes desde cualquier punto de la aplicacion
 class MyOrders:
-
     def __init__(self, account, vehiculo, simulation=False):
         self.account = account
         self.vehiculo = vehiculo
@@ -1691,9 +1691,8 @@ class TickerInfo(MyOrders):
 
     # datos yfinance y otros para los activos de portafolio compartido entre clases
     def ts_yfinance_symbol(self, symbol, vehiculo=None):
-        def get_datos(symbol, vehiculo=None):
+        def get_datos(symbol, vehiculo=None, datos=None):
             try:
-                (activos, datos) = get_yfinance(ticket=symbol, vehiculo=vehiculo)
 
                 indicadores, info_lotsize = {}, {}
                 if not datos.empty:
@@ -1703,14 +1702,16 @@ class TickerInfo(MyOrders):
                     response = self.BClient.get_exchange_info(symbol=symbol)
                     if response:
                         info_lotsize = response.get(symbol, {})
-
             except (EncodingWarning, Exception) as e:
                 print("[ts_yfinance_symbol.get_datos()]: {}".format(e), symbol)
 
-            return activos, datos, indicadores, info_lotsize
+            return indicadores, info_lotsize
 
         try:
-            activos, lotSize, datos, update = {}, {}, pd.DataFrame(), False
+            (activos, datos) = get_yfinance(ticket=symbol, vehiculo=vehiculo)
+
+            # Crear clave de cache
+            key_cache = (symbol, vehiculo)
 
             # recupera ts para el symbol si existe y not None [activos, datos, update]
             if symbol in self.info.keys():
@@ -1718,13 +1719,13 @@ class TickerInfo(MyOrders):
                     if self.info[symbol]["activos"] is not None:
                         activos = self.info[symbol].get("activos", {})
                         lotSize = self.info[symbol].get("lotSize", {})
-                        datos = self.info[symbol].get("datos", pd.DataFrame())
+                        # datos = self.info[symbol].get("datos", pd.DataFrame())
                         update = self.info[symbol]["update"]
                 else:
 
                     # si no tiene activos, datos o update, lo reconstruye
-                    activos, datos, indicadores, lotSize = get_datos(
-                        symbol=symbol, vehiculo=vehiculo
+                    indicadores, lotSize = get_datos(
+                        symbol=symbol, vehiculo=vehiculo, datos=datos
                     )
 
                     update = False
@@ -1733,7 +1734,7 @@ class TickerInfo(MyOrders):
                             {
                                 symbol: {
                                     "activos": activos,  # almacena yf.Ticker.info()
-                                    "datos": datos,  # almacena yf.history()
+                                    "datos": lambda: CacheHut.get(key_cache),
                                     "lotSize": lotSize,  # almacena minQty y stepSize
                                     "datos_tecnicos": indicadores,  # almacena datos técnicos
                                     "update": update,
@@ -1747,8 +1748,8 @@ class TickerInfo(MyOrders):
             elif symbol not in self.info.keys():
 
                 # reconstruye datos del symbol
-                activos, datos, indicadores, lotSize = get_datos(
-                    symbol=symbol, vehiculo=vehiculo
+                indicadores, lotSize = get_datos(
+                    symbol=symbol, vehiculo=vehiculo, datos=datos
                 )
 
                 update = False
@@ -1757,7 +1758,7 @@ class TickerInfo(MyOrders):
                         {
                             symbol: {
                                 "activos": activos,  # almacena yf.Ticker.info()
-                                "datos": datos,  # almacena yf.history()
+                                "datos": lambda: CacheHut.get(key_cache),
                                 "lotSize": lotSize,  # almacena minQty y stepSize
                                 "datos_tecnicos": indicadores,  # almacena datos técnicos
                                 "update": update,

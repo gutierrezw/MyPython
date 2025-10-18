@@ -1,5 +1,4 @@
 from Class_debugging import ManagerEvents, MangerAfterEvents, Debugging
-from API_vehiculos import BB, IB
 from Class_DataFrame import (
     char_estrategia,
     setup_fear_greed,
@@ -10,6 +9,7 @@ from Class_DataFrame import (
     Agente_income_Manager,
     grupo_region,
 )
+from API_vehiculos import BB, IB
 from Class_gestion import GestionInversion
 from Modulos_Mysql import (
     EstrategiaInversion,

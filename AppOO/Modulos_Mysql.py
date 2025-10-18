@@ -1741,7 +1741,11 @@ class RepositorioOportunidadesBuySell(
 
     # marca una oportunidad como rechazada
     def marcar_oportunidad(
-        self, hash_id, status=-1, estado="rechazada", razon="Rechazada manualmente."
+        self,
+        hash_id,
+        recomendado=-1,
+        estado="rechazada",
+        razon="Rechazada manualmente.",
     ):
         try:
             sql = """
@@ -1758,7 +1762,7 @@ class RepositorioOportunidadesBuySell(
             """
             with self._conectar(tabla="accionoportunidades") as conn:
                 cursor = conn.cursor()
-                cursor.execute(sql, (status, estado, razon, status, hash_id))
+                cursor.execute(sql, (recomendado, estado, razon, recomendado, hash_id))
                 conn.commit()
         except (Exception, EncodingWarning, connect.Error) as error:
             print(
@@ -2178,15 +2182,9 @@ class RepositorioOportunidadesBuySell(
         try:
             conn = self._conectar(tabla="insert.booktrading")
             cursor = conn.cursor()
-            valuesins, stock, basico, gpreal, mtmgp, codigo, qry = (
-                [],
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                "",
-                "",
-            )
+            valuesins = []
+            stock, basico, gpreal = 0.0, 0.0, 0.0
+            mtmgp, codigo, qry = 0.0, "", ""
 
             account = values["cuenta"]
             idivisa = values["divisa"]
@@ -2204,14 +2202,9 @@ class RepositorioOportunidadesBuySell(
             hashId = self.get_hash_booktrading(values=values, symbol=symbol)
 
             # ubica último trader del symbol para obtener basico
-            nw_producto, ubasico, ustock, usec, uid, position = (
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-            )
+            nw_producto, ubasico, ustock = 0.0, 0.0, 0.0
+            usec, uid, position = 0.0, 0.0, 0.0
+
             utrading, ix = self.select_booktrading(
                 accion="last", account=account, idivisa=idivisa, symbol=symbol
             )
