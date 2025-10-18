@@ -2033,7 +2033,7 @@ def grupo_dividendo(fg: object, parm=None):
             ax.tick_params(axis="y", colors=cchart["asx"])
 
             # escribe linea de media
-            mean = datos["dividendos"].mean()
+            mean = datos["cobrados"].mean()
             ax.axhline(mean, linewidth=0.6, ls="--", color=cchart["texto"])
             media = f" μ = {mean:.0f}$"
             ax.text(

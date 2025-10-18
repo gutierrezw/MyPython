@@ -328,8 +328,6 @@ class Telegram:
 
             # encola la orden para ser procesada por ManagerOrderQueue
             response = DataHub.QremoteOrder[vehiculo]._request(trama)
-
-            print(f"put_order_stockTelegram(out): {response}")
             return response, symbol
         except Exception as e:
             print(f"put_order_stockTelegram(): Error: {e}")

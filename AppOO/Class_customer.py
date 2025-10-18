@@ -2376,7 +2376,7 @@ class WidgetVehiculo(TickerInfo):
                     bg=self.colors["cgcolor"],
                     fg=self.colors["bgcolor"],
                     relief=tk.FLAT,
-                    command=lambda: self.setup_graph_performa("1"),
+                    command=lambda: self.setup_graph_performa("1M"),
                 )
                 bt2 = tk.Button(
                     win,
@@ -2385,7 +2385,7 @@ class WidgetVehiculo(TickerInfo):
                     bg=self.colors["cgcolor"],
                     fg=self.colors["bgcolor"],
                     relief=tk.FLAT,
-                    command=lambda: self.setup_graph_performa("3"),
+                    command=lambda: self.setup_graph_performa("3M"),
                 )
                 bt3 = tk.Button(
                     win,
@@ -2394,7 +2394,7 @@ class WidgetVehiculo(TickerInfo):
                     bg=self.colors["cgcolor"],
                     fg=self.colors["bgcolor"],
                     relief=tk.FLAT,
-                    command=lambda: self.setup_graph_performa("6"),
+                    command=lambda: self.setup_graph_performa("6M"),
                 )
                 bt4 = tk.Button(
                     win,
@@ -2403,12 +2403,22 @@ class WidgetVehiculo(TickerInfo):
                     bg=self.colors["cgcolor"],
                     fg=self.colors["bgcolor"],
                     relief=tk.FLAT,
-                    command=lambda: self.setup_graph_performa("12"),
+                    command=lambda: self.setup_graph_performa("1Y"),
                 )
-                bt1.place(y=20, x=750)
-                bt2.place(y=20, x=775)
-                bt3.place(y=20, x=800)
-                bt4.place(y=20, x=825)
+                bt5 = tk.Button(
+                    win,
+                    text="5y",
+                    width=2,
+                    bg=self.colors["cgcolor"],
+                    fg=self.colors["bgcolor"],
+                    relief=tk.FLAT,
+                    command=lambda: self.setup_graph_performa("5Y"),
+                )
+                bt1.place(y=20, x=725)
+                bt2.place(y=20, x=750)
+                bt3.place(y=20, x=775)
+                bt4.place(y=20, x=800)
+                bt5.place(y=20, x=825)
 
         # información de sesión
         self.sesion = self.PlanInversion.select_sesion(
@@ -4113,6 +4123,15 @@ class WidgetVehiculo(TickerInfo):
 
     def setup_graph_performa(self, tipo=None):
 
+        periodos = {
+            "1M": pd.DateOffset(months=1),
+            "3M": pd.DateOffset(months=3),
+            "6M": pd.DateOffset(months=6),
+            "1Y": pd.DateOffset(years=1),
+            "5Y": pd.DateOffset(years=5),
+        }
+        hoy = pd.Timestamp.today()
+
         symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=self.vehiculo)
         parm = {
             "BTC": index_ref,
@@ -4122,10 +4141,12 @@ class WidgetVehiculo(TickerInfo):
             "legend": "outside upper left",
             "aspect": 0.21,
             "periodo": tipo,
-            "titulo": "Performance (acumulativo) portafolio :: " + self.vehiculo,
+            "titulo": f"Performance (acumulativo {tipo}) portafolio :: "
+            + self.vehiculo,
         }
-        self.graph_performa_portafolio(fg=self.graph[2][1], data=self.Ddatos, parm=parm)
-        # self.graph[2][0].draw()
+        df_plot = self.Ddatos[self.Ddatos.index >= hoy - periodos[tipo]]
+        self.graph_performa_portafolio(fg=self.graph[2][1], data=df_plot, parm=parm)
+        self.graph[2][0].draw()
 
     # titulo ROI vehiculo -------------------------------------------------------------------------------------------
     def graph_performance_vehiculo(self, data, parm):
@@ -4496,7 +4517,7 @@ class WidgetVehiculo(TickerInfo):
                 # controla que pase una vez por plot del gráfico
                 # if not DataHub.last_process["graph_performa_portafolio"]:
 
-                self.setup_graph_performa(tipo=12)
+                self.setup_graph_performa(tipo="1Y")
                 print(f"run_graficos({self.vehiculo})")
 
                 # DataHub.last_process["graph_performa_portafolio"] = True

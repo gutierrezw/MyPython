@@ -63,6 +63,8 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
                 datos = pd.DataFrame(d_datos, index=d_datos["Date"])
                 datos[index_ref] = (1 + datos["p_referencia"]).cumprod()
                 datos["++ index"] = (1 + datos["p_vehiculo"]).cumprod()
+                datos["Date"] = pd.to_datetime(datos["Date"])
+                datos = datos.set_index("Date")
 
         # obtiene DataFrame para un activo que esté en la tabla diaria
         if tipo == "activo":
