@@ -1,0 +1,15 @@
+# Archivos de caché y temporales
+__pycache__/
+*.pyc
+
+# Archivos de compilación (PyInstaller u otros)
+build/
+dist/
+*.spec
+*.exe
+
+# Archivos de caché de yfinance y otros temporales
+tmp/
+*.dat-journal
+*.prof
+*.code-workspace

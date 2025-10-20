@@ -1,30 +1,37 @@
-import datetime as dt
-import os.path
-
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+from Library_python import (
+datetime,
+timedelta,
+os,
+Request,
+Credentials,
+InstalledAppFlow,
+build,
+HttpError,
+)
+from Library_utils import define_FileCache, delete_file
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
-
 
 class GoogleCalendarManager:
     def __init__(self):
         self.service = self._authenticate()
+        self.DEFAULT_TIMEZONE = "America/Argentina/Buenos_Aires"
+        SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
     def _authenticate(self):
         creds = None
 
-        if os.path.exists("token.json"):
-            creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+        filetoken = define_FileCache(name="token.json")
+        fileCredetials = define_FileCache(name="credentials.json")
+
+        if os.path.exists(filetoken):
+            creds = Credentials.from_authorized_user_file(filetoken, SCOPES)
 
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                flow = InstalledAppFlow.from_client_secrets_file("client_secret_app_escritorio_oauth.json", SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(fileCredetials, SCOPES)
                 creds = flow.run_local_server(port=0)
 
             # Save the credentials for the next run
@@ -34,8 +41,8 @@ class GoogleCalendarManager:
         return build("calendar", "v3", credentials=creds)
 
     def list_upcoming_events(self, max_results=10):
-        now = dt.datetime.utcnow().isoformat() + "Z"
-        tomorrow = (dt.datetime.now() + dt.timedelta(days=5)).replace(hour=23, minute=59, second=0, microsecond=0).isoformat() + "Z"
+        now = datetime.utcnow().isoformat() + "Z"
+        tomorrow = (datetime.now() + timedelta(days=5)).replace(hour=23, minute=59, second=0, microsecond=0).isoformat() + "Z"
 
         events_result = self.service.events().list(
             calendarId='primary', timeMin=now, timeMax=tomorrow,
@@ -53,16 +60,16 @@ class GoogleCalendarManager:
         
         return events
 
-    def create_event(self, summary, start_time, end_time, timezone, attendees=None):
+    def create_event(self, summary, start_time, end_time, timezone=None, attendees=None):
         event = {
             'summary': summary,
             'start': {
                 'dateTime': start_time,
-                'timeZone': timezone,
+                'timeZone': self.DEFAULT_TIMEZONE,
             },
             'end': {
                 'dateTime': end_time,
-                'timeZone': timezone,
+                'timeZone': self.DEFAULT_TIMEZONE,
             }
         }
 
@@ -100,8 +107,7 @@ calendar = GoogleCalendarManager()
 
 calendar.list_upcoming_events()
 
-calendar.create_event("Le recordamos que tiene cita Depilación sede San Juan",
-                      "2043-05-15T16:30:00+02:00",
-                      "2024-05-15T17:30:00+02:00",
-                      "America/Argentina",
-                      ["gutierrez.madrid.wilmer@gmail.com", "gutierrez.madrid.wilmer@gmail.com"])
+calendar.create_event(summary=f"Le recordamos que tiene cita {"Depilación"} sede San Juan",
+                      start_time="2025-10-21T16:30:00+02:00",
+                      end_time="2025-10-21T17:30:00+02:00",
+                      attendees=["gutierrez.madrid.wilmer@gmail.com"])
