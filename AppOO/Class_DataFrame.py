@@ -58,7 +58,7 @@ import time
 # 🧩 Clase de manejo de caché para DataFrames
 # ============================================================
 class DataFrameCache:
-    def __init__(self, maxsize=200, ttl=1800):
+    def __init__(self, maxsize=200, ttl=3600):
         """
         maxsize: cantidad máxima de elementos en caché
         ttl: tiempo de vida (en segundos)

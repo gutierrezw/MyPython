@@ -83,72 +83,56 @@ class BB:
 def handle_binance_exceptions(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+
+        logger = logging.getLogger("binance.api")
         try:
             # Ejecuta el método original
             return func(*args, **kwargs)
         except ClientError as e:
-            textwrap.dedent(
-                """
+            logger.error(
+                textwrap.dedent(
+                    f"""
                   =======================================
                   handle_binance_exceptions(ClientError): 
                   =======================================  
-                  Code   : {error_code}
-                  status : {status_error}
-                  message: {error_message}
+                  Code   : {getattr(e, "error_code", None)}
+                  status : {getattr(e, "status_error", None)}
+                  message: {e, "error_message", str(e)}
                   func   : {func}
                   args   : {args}
                   kwargs : {kwargs}
-                  """.format(
-                    e.error_code,
-                    e.status_code,
-                    e.error_message,
-                    func,
-                    args,
-                    kwargs,
+                  """
                 )
             )
-
         except ConnectionError as e:
-            textwrap.dedent(
-                """
+            logger.error(
+                textwrap.dedent(
+                    f"""
                   ==============================================================
                   handle_binance_exceptions(ConnectionError): 
                   Requests: No hay conexión a internet. Reintentando en 5 seg...
                   ==============================================================  
-                  status : {status_error}
-                  message: {error_message}
+                  message: {e}
                   func   : {func}
                   args   : {args}
                   kwargs : {kwargs}
-                  """.format(
-                    e.status_code,
-                    e,
-                    func,
-                    args,
-                    kwargs,
+                  """
                 )
             )
-            time.sleep(5)
-
         except Exception as e:
-            textwrap.dedent(
-                """
+            logger.error(
+                textwrap.dedent(
+                    f"""
                   =============================
                   handle_binance_exceptions(): 
                   =============================  
                   func: {func}
                   args: {args}
                   kwargs: {kwargs}
-                  Code   : {error_code}
-                  status : {status_error}
-                  message: {error_message}
-                """.format(
-                    func,
-                    args,
-                    kwargs,
-                    e.error_code,
-                    e.status_code,
-                    e.error_message,
+                  Code   : {getattr(e, "error_code", None)}
+                  status : {getattr(e, "status_error", None)}
+                  message: {e, "error_message", str(e)}
+                """
                 )
             )
 
@@ -768,14 +752,12 @@ class IB(IBClient):
         # Log the initial Info.
         self.logger.info(
             textwrap.dedent(
-                """
+                f"""
            =================
            Create Session:
            =================
-           Auth Response: {auth_resp}
+           Auth Response: {auth_response}
            """
-            ).format(
-                auth_resp=auth_response,
             )
         )
 

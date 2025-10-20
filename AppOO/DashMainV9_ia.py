@@ -8,6 +8,7 @@ from Class_DataFrame import (
     sectores,
     Agente_income_Manager,
     grupo_region,
+    CacheHut,
 )
 from API_vehiculos import BB, IB
 from Class_gestion import GestionInversion
@@ -963,7 +964,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # Almacena ultima fecha en session que exploro API get_my_trades()
                     if efecha > DataHub.ultimoTraderCrypto:
                         DataHub.ultimoTraderCrypto = hoy + timedelta(days=-1)
-
             except (EncodingWarning, Exception) as error:
                 print("[trader_binance()]: {}".format(error))
 
@@ -3517,8 +3517,10 @@ class system_status(tk.Frame):
 
         self.process = ttk.Frame(self.system, padding=(1, 10, 1, 1), style="C.TFrame")
         self.right = ttk.Frame(self.system, padding=(1, 10, 1, 1), style="C.TFrame")
-        self.datahub = ttk.Frame(self.system, padding=(1, 1, 1, 1), style="C.TFrame")
+        self.bottom = ttk.Frame(self.system, padding=(1, 1, 1, 1), style="C.TFrame")
 
+        self.datahub = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
+        self.cache = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.figura = ttk.Frame(self.right, padding=(5, 1, 1, 5), style="C.TFrame")
         self.performa = ttk.Frame(self.right, padding=(1, 1, 1, 1), style="C.TFrame")
         self.debugging = ttk.Frame(self.right, padding=(1, 1, 1, 1), style="C.TFrame")
@@ -3539,7 +3541,9 @@ class system_status(tk.Frame):
 
         self.right.pack(side=tk.RIGHT, fill="both")
         self.process.pack(side=tk.TOP, fill="both")
-        self.datahub.pack(side=tk.BOTTOM, fill="both")
+        self.bottom.pack(side=tk.BOTTOM, fill="both")
+        self.datahub.pack(side=tk.LEFT, fill="both")
+        self.cache.pack(side=tk.LEFT, fill="both")
 
         self.process_system()
 
@@ -3760,6 +3764,7 @@ class system_status(tk.Frame):
             self.connect_api()
             self.debugging_system()
             # self.monitor_realtime()
+            self.monitor_cache()
             update_status()
         except (EncodingWarning, Exception) as e:
             print(f"process_system(): {e}")
@@ -3912,6 +3917,134 @@ class system_status(tk.Frame):
         except (EncodingWarning, Exception) as e:
             print("datahub_system(): {}".format(e))
 
+    # detalla uso de cache
+    def monitor_cache(self):
+        """
+        Clase para monitorear el estado del sistema y visualizar el contenido del TTLCache.
+        Permite:
+            ✅ Ver claves actuales del cache
+            ✅ Refrescar el contenido
+            ✅ Eliminar entradas manualmente
+            ✅ Ver los primeros registros de un DataFrame asociado
+        """
+
+        #   FUNCIONALIDAD PRINCIPAL
+        def refresh_cache():
+            """Recarga la lista de claves desde el cache."""
+            for item in tree.get_children():
+                self.tree.delete(item)
+
+            for k, v in CacheHut.cache.items():
+                tipo = type(v).__name__
+                tree.insert(
+                    "",
+                    tk.END,
+                    values=(str(k), tipo, datetime.now().strftime("%H:%M:%S")),
+                )
+
+        def remove_selected_key():
+            """Elimina la clave seleccionada del cache."""
+            item = tree.selection()
+            if not item:
+                self.messagebox.showinfo(
+                    "Información", "Seleccione una clave para eliminar."
+                )
+                return
+
+            key = tree.item(item[0], "values")[0]
+            if key in CacheHut.cache:
+                del CacheHut.cache[key]
+                self.messagebox.showinfo(
+                    "Cache", f"✅ Clave '{key}' eliminada del cache."
+                )
+                self.refresh_cache()
+            else:
+                self.messagebox.showwarning(
+                    "Cache", f"⚠️ Clave '{key}' no encontrada o ya expirada."
+                )
+
+        #   EVENTOS DE INTERFAZ
+        def _on_double_click(event):
+            """Maneja doble clic sobre una clave: muestra el DataFrame si existe."""
+            item = tree.selection()
+            if not item:
+                return
+
+            key = tree.item(item[0], "values")[0]
+            df = CacheHut.cache.get(key)
+
+            if isinstance(df, pd.DataFrame):
+                self._show_dataframe(df, str(key))
+            else:
+                self.messagebox.showwarning(
+                    "Cache", f"La clave '{key}' no contiene un DataFrame."
+                )
+
+        #   VISUALIZACIÓN DE DATAFRAME
+        def _show_dataframe(df: pd.DataFrame, title="DataFrame"):
+            """Muestra un DataFrame en una nueva ventana."""
+            win = tk.Toplevel(self.root)
+            win.title(f"📊 Vista de Datos - {title}")
+            win.geometry("900x450")
+
+            # Convertir a texto
+            text = tk.Text(win, wrap="none", font=("Consolas", 10))
+            text.pack(fill=tk.BOTH, expand=True)
+
+            # Mostrar primeras filas
+            content = df.head(50).to_string()
+            text.insert("1.0", content)
+
+            # Scrollbars
+            yscroll = ttk.Scrollbar(win, orient="vertical", command=text.yview)
+            yscroll.pack(side="right", fill="y")
+            text.configure(yscrollcommand=yscroll.set)
+
+            ttk.Button(win, text="Cerrar", command=win.destroy).pack(
+                side="bottom", pady=5
+            )
+
+        try:
+
+            # --- Tabla de claves ---
+            tree = ttk.Treeview(
+                self.cache,
+                columns=("key", "type", "timestamp"),
+                show="headings",
+                style="TFrame",
+            )
+            tree.heading("key", text="Clave de Cache")
+            tree.heading("type", text="Tipo de Dato")
+            tree.heading("timestamp", text="Hora de Registro")
+            tree.pack(fill=tk.BOTH, expand=True)
+
+            # --- Scrollbars ---
+            hsb = ttk.Scrollbar(tree, orient=tk.HORIZONTAL, command=tree.yview)
+            tree.configure(xscroll=hsb.set)
+            hsb.pack(side=tk.BOTTOM, fill=tk.X)
+
+            # --- Botonera ---
+            frame_btn = ttk.Frame(self.cache)
+            frame_btn.pack(fill=tk.X, pady=5)
+
+            ttk.Button(frame_btn, text="🔄 Refrescar", command=refresh_cache).pack(
+                side=tk.LEFT, padx=5
+            )
+            ttk.Button(
+                frame_btn, text="🧹 Eliminar Clave", command=remove_selected_key
+            ).pack(side=tk.LEFT, padx=5)
+            # ttk.Button(frame_btn, text="❌ Cerrar", command=cache.destroy).pack(
+            #    side=tk.RIGHT, padx=5
+            # )
+
+            # --- Bind para doble clic ---
+            tree.bind("<Double-1>", _on_double_click)
+
+            # --- Carga inicial ---
+            refresh_cache()
+        except (EncodingWarning, Exception) as e:
+            print(f"monitor_cache(): {e}")
+
     # detalla estados de conexiones
     def connect_api(self):
         try:
@@ -3951,6 +4084,7 @@ class system_status(tk.Frame):
         except (EncodingWarning, Exception) as e:
             print("debugging_system(): {}".format(e))
 
+    # plot uso %CPU y %RAM
     def monitor_realtime(self):
         """
         Dibuja el gráfico en tiempo real de CPU y RAM.
