@@ -1497,7 +1497,7 @@ def setup_fear_greed(fg: object, parm=None):
 
 
 # gráfica Diversificación vs tipo de activo
-def char_estrategia(fg: object, parm=None, strategy=None):
+def grupo_activos(fg: object, parm=None, strategy=None):
 
     cchart = parm["cchart"]
     fg.clear()
@@ -1568,6 +1568,7 @@ def char_estrategia(fg: object, parm=None, strategy=None):
     )
     ax.axhline(mean, linewidth=0.6, ls="--", color=cchart["texto"])
 
+    return {"data": data, "activos": keys, "media": mean}
 
 # Gráfica Diversificación vs. region
 def grupo_region(fg: object, strategy=None, parm=None):
@@ -1666,7 +1667,7 @@ def grupo_region(fg: object, strategy=None, parm=None):
     ax.set_xticks(x, keys)
     ax.yaxis.set_major_formatter(currency)
     ax.tick_params(axis="y", colors=cchart["asx"])
-
+    return {"data": data, "country": keys, "media": mean}
 
 # permite trazar el desempeño ultimos 6 meses de las inversiones globales
 def Agente_income_Manager(fg: object, parm=None):
@@ -1967,6 +1968,8 @@ def grupo_sector(fig: object, positions=None, parm=None):
             }
         )
         char_performance_sector(fig, pdatos=datos, dlabl=parm)
+
+        return {"data": datos, "summary": d_positions, "media": datos["Peso"].mean()}
     except HTTPError as e:
         if "403" in str(e):
             print(
@@ -2112,6 +2115,7 @@ def grupo_dividendo(fg: object, parm=None):
             # Configurar el eje X con los nombres de los meses y rotación para una mejor lectura
             ax.set_xticks(x)
             ax.set_xticklabels(meses, rotation=45, ha="right")
+            ax.set(xlim=[x[0], x[-1]])
             xlabels = ax.get_xticklabels()
             plt.setp(xlabels, ha="right", fontsize=6, color=cchart["asx"], rotation=25)
             ax.set_xlabel("", fontsize="x-small", color=cchart["asx"])
@@ -2135,6 +2139,8 @@ def grupo_dividendo(fg: object, parm=None):
             ax.text(
                 x[6], mean * 1.2, media, fontsize=6, ha="center", color=cchart["texto"]
             )
+
+            return {"datos": datos, "struct": struct, "media": mean}
     except Exception as error:
         print("grupo_dividendo(): {}".format(error))
 

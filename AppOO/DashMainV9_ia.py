@@ -1,6 +1,6 @@
 from Class_debugging import ManagerEvents, MangerAfterEvents, Debugging
 from Class_DataFrame import (
-    char_estrategia,
+    grupo_activos,
     setup_fear_greed,
     grupo_sector,
     grupo_dividendo,
@@ -2243,7 +2243,7 @@ class DashMain:
             bg=self.bgcolor,
             fg=self.cgcolor,
             relief=tk.FLAT,
-            command=lambda: self.setup_graph_region("3"),
+            command=lambda: self.setup_graph_income("3"),
         )
         bt2 = tk.Button(
             pn1,
@@ -2252,7 +2252,7 @@ class DashMain:
             bg=self.bgcolor,
             fg=self.cgcolor,
             relief=tk.FLAT,
-            command=lambda: self.setup_graph_region("6"),
+            command=lambda: self.setup_graph_income("6"),
         )
         bt3 = tk.Button(
             pn1,
@@ -2261,7 +2261,7 @@ class DashMain:
             bg=self.bgcolor,
             fg=self.cgcolor,
             relief=tk.FLAT,
-            command=lambda: self.setup_graph_region("12"),
+            command=lambda: self.setup_graph_income("12"),
         )
 
         gt3 = tk.Button(
@@ -3368,7 +3368,7 @@ class DashMain:
             print("detalle_graph(): {}".format(e))
 
     # performace de  ultimos n meses
-    def setup_graph_region(self, tipo=None):
+    def setup_graph_income(self, tipo=None):
 
         parm = {
             "titulo": "Ingresos",
@@ -3384,7 +3384,7 @@ class DashMain:
     def graficos_main(self):
 
         # inicia performace de  ultimos 6 meses
-        self.setup_graph_region(tipo="6")
+        self.setup_graph_income(tipo="3")
 
         # indicador de miedo y VIX
         parm = {
@@ -3405,7 +3405,7 @@ class DashMain:
             "legend": "outside upper right",
             "aspect": 0.35,
         }
-        grupo_dividendo(fg=self.rg2, parm=parm)
+        DataHub.manager_buysell["dividends"] = grupo_dividendo(fg=self.rg2, parm=parm)
         self.rv2.draw()
 
         # Diversificación por sector
@@ -3414,7 +3414,7 @@ class DashMain:
             "cchart": self.cchart,
             "aspect": 0.30,
         }
-        grupo_sector(fig=self.rg3, parm=parm)
+        DataHub.manager_buysell["sector"] = grupo_sector(fig=self.rg3, parm=parm)
         self.rv3.draw()
 
         # Diversificación vs. tipo activo
@@ -3425,7 +3425,7 @@ class DashMain:
             "legend": "outside upper right",
             "aspect": 0.30,
         }
-        char_estrategia(fg=self.rg4, parm=parm, strategy=xestrategia)
+        DataHub.manager_buysell["activos"] = grupo_activos(fg=self.rg4, parm=parm, strategy=xestrategia)
         self.rv4.draw()
 
         # Diversificación vs. región
@@ -3435,7 +3435,7 @@ class DashMain:
             "legend": "outside upper right",
             "aspect": 0.30,
         }
-        grupo_region(fg=self.rg5, strategy=xestrategia, parm=parm)
+        DataHub.manager_buysell["region"] = grupo_region(fg=self.rg5, strategy=xestrategia, parm=parm)
         self.rv5.draw()
 
         # mantiene actualizado los graficos cada 20m o 1200.000ms
@@ -3514,6 +3514,8 @@ class system_status(tk.Frame):
         self.system = master
         self.colors = colores
         self.itemsInfo = None
+        
+        self.messagebox = MyMessageBox(self.system)
 
         self.process = ttk.Frame(self.system, padding=(1, 10, 1, 1), style="C.TFrame")
         self.right = ttk.Frame(self.system, padding=(1, 10, 1, 1), style="C.TFrame")
@@ -3537,13 +3539,13 @@ class system_status(tk.Frame):
         self.performa.pack(fill=tk.X)
         self.debugging.pack(fill=tk.X)
         self.figura.pack(fill=tk.X)
-        self.connect.pack(side=tk.RIGHT, fill="both")
+        self.connect.pack(side=tk.RIGHT, fill=tk.BOTH)
 
-        self.right.pack(side=tk.RIGHT, fill="both")
-        self.process.pack(side=tk.TOP, fill="both")
-        self.bottom.pack(side=tk.BOTTOM, fill="both")
-        self.datahub.pack(side=tk.LEFT, fill="both")
-        self.cache.pack(side=tk.LEFT, fill="both")
+        self.right.pack(side=tk.RIGHT, fill=tk.BOTH)
+        self.process.pack(side=tk.TOP, fill=tk.BOTH)
+        self.bottom.pack(side=tk.BOTTOM, fill=tk.BOTH)
+        self.datahub.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.cache.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self.process_system()
 
@@ -3894,17 +3896,22 @@ class system_status(tk.Frame):
 
         try:
             # define TreeView para mostras  Lista y detalle de items DataHub.Info()
-            lista = ttk.Treeview(self.datahub, height=18, style="TFrame")
-            detalle = ttk.Treeview(self.datahub, height=18, style="TFrame")
+            lista = ttk.Treeview(self.datahub, style="TFrame")
+            detalle = ttk.Treeview(self.datahub, style="TFrame")
 
             lista.heading("#0", text="DataHub")
             detalle.heading("#0", text="Información del Activo")
 
-            lista.pack(side=tk.LEFT, pady=10)
-            detalle.pack(side=tk.LEFT, expand=True, fill="both", pady=10)
+            lista.pack(side=tk.LEFT, pady=5)
+            detalle.pack(side=tk.LEFT, expand=True, fill=tk.BOTH, pady=5)
             detalle.tag_configure("colorTex", foreground="orange")
             detalle.tag_configure("colorGroup", foreground=DataHub.bgcolor)
             lista.bind("<<TreeviewSelect>>", on_item_selected)
+
+            # --- Scrollbars ---
+            hsb = ttk.Scrollbar(detalle, orient=tk.HORIZONTAL, command=detalle.yview)
+            detalle.configure(xscroll=hsb.set)
+            hsb.pack(side=tk.BOTTOM, fill=tk.X)
 
             # inicia insert de lista
             lastClose = ": Close Market(last) "
@@ -3939,7 +3946,7 @@ class system_status(tk.Frame):
                 tree.insert(
                     "",
                     tk.END,
-                    values=(str(k), tipo, datetime.now().strftime("%H:%M:%S")),
+                    values=(str(k), datetime.now().strftime("%H:%M:%S")),
                 )
 
         def remove_selected_key():
@@ -4009,14 +4016,15 @@ class system_status(tk.Frame):
             # --- Tabla de claves ---
             tree = ttk.Treeview(
                 self.cache,
-                columns=("key", "type", "timestamp"),
+                columns=("key", "timestamp"),
                 show="headings",
                 style="TFrame",
             )
-            tree.heading("key", text="Clave de Cache")
-            tree.heading("type", text="Tipo de Dato")
-            tree.heading("timestamp", text="Hora de Registro")
-            tree.pack(fill=tk.BOTH, expand=True)
+            tree.column("key", width=50)
+            tree.column("timestamp", width=15)
+            tree.heading("key", text="Cache")
+            tree.heading("timestamp", text="Registro")
+            tree.pack(fill=tk.BOTH, expand=True, pady=5)
 
             # --- Scrollbars ---
             hsb = ttk.Scrollbar(tree, orient=tk.HORIZONTAL, command=tree.yview)
@@ -4030,9 +4038,6 @@ class system_status(tk.Frame):
             ttk.Button(frame_btn, text="🔄 Refrescar", command=refresh_cache).pack(
                 side=tk.LEFT, padx=5
             )
-            ttk.Button(
-                frame_btn, text="🧹 Eliminar Clave", command=remove_selected_key
-            ).pack(side=tk.LEFT, padx=5)
             # ttk.Button(frame_btn, text="❌ Cerrar", command=cache.destroy).pack(
             #    side=tk.RIGHT, padx=5
             # )

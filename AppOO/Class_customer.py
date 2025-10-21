@@ -185,6 +185,7 @@ class DataHub:
     QremoteOrder = {"Stock": OrderManagerSync(), "Crypto": OrderManagerSync()}
     manager_events = {}
     manager_after = {}
+    manager_buysell = {}
     procesos = []
     logger = {}
     orders = {}
@@ -4976,11 +4977,13 @@ class MyMessageBox(tk.Toplevel):
         self.left.pack(side=tk.LEFT, fill=tk.Y)
         self.right.pack(side=tk.LEFT, fill=tk.Y)
 
+        self.Bdsystem = BDsystem()
+
     # Etiqueta para el mensaje informativo
     def showinfo(self, title, message):
 
         # agrega icono de mensaje ----------------------------------------------------------------------------------
-        imagen0, xlis = self.PlanInversion.select_objeto(codigo=18)
+        imagen0, xlis = self.Bdsystem.select_objeto(codigo=18)
         imagen = Image.open(io.BytesIO(imagen0))
         imagen = imagen.resize((48, 48), Image.ADAPTIVE)
         imagen_tk = ImageTk.PhotoImage(imagen)
@@ -5026,7 +5029,7 @@ class MyMessageBox(tk.Toplevel):
         ask = "no"
 
         # agrega icono de mensaje ----------------------------------------------------------------------------------
-        imagen0, xlis = self.PlanInversion.select_objeto(codigo=19)
+        imagen0, xlis = self.Bdsystem.select_objeto(codigo=19)
         imagen = Image.open(io.BytesIO(imagen0))
         imagen = imagen.resize((48, 48), Image.ADAPTIVE)
         imagen_tk = ImageTk.PhotoImage(imagen)
