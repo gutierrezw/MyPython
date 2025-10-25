@@ -1349,7 +1349,7 @@ class PlanInversion(
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: update_otros_activos()]: {}".format(error))
 
-    def insert_otros_activos(self, symbol=None):
+    def insert_otros_activos(self, symbol=None, values=None):
         """
         @param symbol: ticket a consultar en crypto
         @return: agrega symbol en tabla otros_activos."""

@@ -25,3 +25,28 @@ def schedule_oportunidades(self):
         self.oportunidades_dividends()
 
 
+Diseño de self.info[symbol][buy]
+        datos = {
+            "buy": {
+                "ganancia precio": gypPrecio,
+                "ganancia inversión": gainInversion,
+                "cantidad buy": stock,
+                "last": position["mrkprice"],
+                "avgcost": avgCost,
+                "cantidad post": stockNew,
+                "avgCost post": precioNew,
+                "retorno post": gypProyect,
+                "objetivo": position["objetivo"],
+                "pre dividendos": position["dividendo"],
+                "post dividendos": dividendo * stockNew,
+                "pre costobase": position["costobase"],
+                "post costobase": precioNew * stockNew,
+                "country":
+                "sector":
+                "est. type Actuvo":
+                
+            }
+        }
+
+    # actualiza en diccionario self.info()
+    (d_buy, d_sell) = self.ts_oportunidades_symbol(symbol, datos)

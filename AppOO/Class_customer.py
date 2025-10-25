@@ -2378,7 +2378,7 @@ class WidgetVehiculo(TickerInfo):
                     bg=self.colors["cgcolor"],
                     fg=self.colors["bgcolor"],
                     relief=tk.FLAT,
-                    command=lambda: self.setup_graph_performa("1M"),
+                    command=lambda: self.setup_graph_performace("1M"),
                 )
                 bt2 = tk.Button(
                     win,
@@ -2387,7 +2387,7 @@ class WidgetVehiculo(TickerInfo):
                     bg=self.colors["cgcolor"],
                     fg=self.colors["bgcolor"],
                     relief=tk.FLAT,
-                    command=lambda: self.setup_graph_performa("3M"),
+                    command=lambda: self.setup_graph_performace("3M"),
                 )
                 bt3 = tk.Button(
                     win,
@@ -2396,7 +2396,7 @@ class WidgetVehiculo(TickerInfo):
                     bg=self.colors["cgcolor"],
                     fg=self.colors["bgcolor"],
                     relief=tk.FLAT,
-                    command=lambda: self.setup_graph_performa("6M"),
+                    command=lambda: self.setup_graph_performace("6M"),
                 )
                 bt4 = tk.Button(
                     win,
@@ -2405,7 +2405,7 @@ class WidgetVehiculo(TickerInfo):
                     bg=self.colors["cgcolor"],
                     fg=self.colors["bgcolor"],
                     relief=tk.FLAT,
-                    command=lambda: self.setup_graph_performa("1Y"),
+                    command=lambda: self.setup_graph_performace("1Y"),
                 )
                 bt5 = tk.Button(
                     win,
@@ -2414,7 +2414,7 @@ class WidgetVehiculo(TickerInfo):
                     bg=self.colors["cgcolor"],
                     fg=self.colors["bgcolor"],
                     relief=tk.FLAT,
-                    command=lambda: self.setup_graph_performa("5Y"),
+                    command=lambda: self.setup_graph_performace("5Y"),
                 )
                 bt1.place(y=20, x=725)
                 bt2.place(y=20, x=750)
@@ -4123,7 +4123,7 @@ class WidgetVehiculo(TickerInfo):
         except EncodingWarning as e:
             print("[oportunidad_mejorar_dividends()]: {}".format(e))
 
-    def setup_graph_performa(self, tipo=None):
+    def setup_graph_performace(self, tipo=None):
 
         periodos = {
             "1M": pd.DateOffset(months=1),
@@ -4519,8 +4519,8 @@ class WidgetVehiculo(TickerInfo):
                 # controla que pase una vez por plot del gráfico
                 # if not DataHub.last_process["graph_performa_portafolio"]:
 
-                self.setup_graph_performa(tipo="1Y")
-                print(f"run_graficos({self.vehiculo})")
+                self.setup_graph_performace(tipo="1Y")
+                # print(f"run_graficos({self.vehiculo})")
 
                 # DataHub.last_process["graph_performa_portafolio"] = True
         except Exception as e:
