@@ -270,7 +270,7 @@ class DataHub:
     last_process = {
         "Stock": {"diaria_book_performance": mrk_anterior, "wait": wait_3m},
         "Crypto": {"diaria_book_performance": dia_anterior, "wait": wait_3m},
-        "graph_performa_portafolio": False,
+        "graph_performace_portafolio": False,
         "dividends_en_market_stock": now,
     }
     ultimoTraderCrypto = None
@@ -2094,7 +2094,7 @@ class TickerInfo(MyOrders):
                 hoy = datetime.now().replace(hour=6, minute=0, second=0, microsecond=0)
                 wait = hoy + timedelta(days=1)
                 DataHub.last_process[self.vehiculo]["diaria_book_performance"] = wait
-                DataHub.last_process["graph_performa_portafolio"] = False
+                DataHub.last_process["graph_performace_portafolio"] = False
 
                 # agrega performance a la tabla
                 proceso_update_performance(account=self.account, vehiculo=self.vehiculo)
@@ -3204,7 +3204,7 @@ class WidgetVehiculo(TickerInfo):
                     "aspect": 0.21,
                     "titulo": "Performance (acumulativo) " + self.symbol,
                 }
-                self.graph_performa_portafolio(fg=fg3, data=ddatos, parm=parm)
+                self.graph_performace_portafolio(fg=fg3, data=ddatos, parm=parm)
                 cv3.draw()
             except (EncodingWarning, Exception) as error:
                 print("[window_analisis()]: {}".format(error))
@@ -4143,78 +4143,116 @@ class WidgetVehiculo(TickerInfo):
             "legend": "outside upper left",
             "aspect": 0.21,
             "periodo": tipo,
-            "titulo": f"Performance (acumulativo {tipo}) portafolio :: "
-            + self.vehiculo,
+            "titulo": f"Performance {self.vehiculo}: (in {tipo})"
+            ,
         }
         df_plot = self.Ddatos[self.Ddatos.index >= hoy - periodos[tipo]]
-        self.graph_performa_portafolio(fg=self.graph[2][1], data=df_plot, parm=parm)
+        self.graph_performace_portafolio(fg=self.graph[2][1], data=df_plot, parm=parm)
         self.graph[2][0].draw()
 
     # titulo ROI vehiculo -------------------------------------------------------------------------------------------
-    def graph_performance_vehiculo(self, data, parm):
+    def graph_ROI_vehiculo(self, data, parm):
         try:
-            if data["Inversión"] > 0:
-                cbar = ("orange", "green", "navy", "red")
-                group_data = list(data.values())
-                group_names = list(data.keys())
-                xmin = min(0, data["UnP&l"], data["Cash"])
-                xmax = max(data["Inversión"], data["UnProfit"], data["Cash"])
-                iy = round((xmax - xmin) / 3)
-                i = is_magnitud(round((xmax - xmin) / 3))
+            # Extrae valores clave
+            inversión = float(data.get("Inversión", 0.0))
+            unpnl = float(data.get("UnP&l", 0.0))
+            unprofit = float(data.get("UnProfit", unpnl))
+            cash = float(data.get("Cash", 0.0))
 
-                dx = int(iy * 10 ** (-i)) * (10**i)
-                d0 = -dx if xmin < 0 else 0
-                ix = [d0, dx, 2 * dx, 3 * dx]
+            # Preparar etiquetas y valores (excluimos UnProfit de las barras porque lo pintaremos como línea)
+            labels = []
+            values = []
+            colors = []
 
-                ltex = [3, 2, 1]
-                if data["UnP&l"] == data["UnProfit"]:
-                    data.pop("UnProfit")
-                    group_data = list(data.values())
-                    group_names = list(data.keys())
-                    ltex = [2, 1]
+            # Mantener consistencia con orden anterior: Inversión, UnProfit/UnP&l, Cash/UnProfit auxiliar
+            # Añadimos Inversión como barra principal
+            labels.append("Inversión")
+            values.append(inversión)
+            colors.append(self.cchart.get("plot5", "navy"))
 
-                self.graph[0][1].clear()
-                self.graph[0][1].suptitle(
-                    parm["titulo"], color=self.cchart["titulo"], fontsize="medium"
+            # Añadimos UnP&l como barra (si existe y distinto de Inversión) — será opcional visualmente
+            if "UnP&l" in data:
+                labels.append("UnP&l")
+                values.append(unpnl)
+                colors.append(self.cchart.get("plot1", "green"))
+
+            # Añadimos Cash como barra
+            labels.append("Cash")
+            values.append(cash)
+            colors.append(self.cchart.get("plot3", "orange"))
+
+            # Configuración del gráfico
+            self.graph[0][1].clear()
+            self.graph[0][1].suptitle(
+                parm.get("titulo", ""), color=self.cchart["titulo"], fontsize="medium"
+            )
+            ax = self.graph[0][1].add_subplot()
+            # ax.set_box_aspect(parm.get("aspect", 0.8))
+            ax.set_facecolor(self.cchart["fondo_fig"])
+
+            # posiciones y dibujo de barras horizontales
+            y_pos = np.arange(len(labels))
+            bars = ax.barh(y_pos, values, color=colors, height=0.6, alpha=0.9)
+
+
+            # Etiquetas en eje Y
+            ax.set_yticks(y_pos)
+            ax.set_yticklabels(labels, color=self.cchart["texto"], fontsize=7)
+
+            # Dibuja una línea vertical para representar UnProfit (solicitud: UnProfit como línea)
+            # Si UnProfit está definido, marcarlo con línea y etiqueta
+            if not math.isclose(unprofit, 0.0, rel_tol=1e-12) or ("UnProfit" in data):
+                ax.axvline(unprofit, color=self.cchart.get("axsx", "green"), linestyle="--", linewidth=1)
+                # añadir etiqueta de valor cerca de la línea (arriba a la derecha)
+                x_text = unprofit
+                y_text = len(labels) - 0.5
+                ax.text(
+                    x_text,
+                    y_text,
+                    " UnProfit: {:,.2f}".format(unprofit),
+                    fontsize=7,
+                    color=self.cchart.get("plot1", "green"),
+                    va="bottom",
+                    ha="left",
+                    backgroundcolor=self.cchart["fondo_fig"],
                 )
-                ax = self.graph[0][1].add_subplot()
 
-                ax.set_box_aspect(parm["aspect"])
-                ax.set_facecolor(self.cchart["fondo_fig"])
-                ax.barh(group_names, group_data, color=cbar)
-                ax.set(xlim=[xmin, xmax])
+            # Formato de eje x y ajustes visuales
+            ax.xaxis.set_major_formatter(currency)
+            ax.spines["right"].set_visible(False)
+            ax.spines["left"].set_visible(False)
+            ax.spines["top"].set_visible(False)
+            ax.spines["bottom"].set_color(self.cchart["axsx"])
+            ax.tick_params(axis="x", colors=self.cchart["axsx"], labelsize=6)
+            ax.tick_params(axis="y", colors=self.cchart["texto"], labelsize=6)
+            ax.set_xlabel(" ", fontsize=7, color=self.cchart["texto"])
 
-                for i in ltex:
-                    xi = group_data[i] + 100 if group_data[i] > 0 else 100
+
+            # Mostrar porcentaje relativo a Inversión encima de cada barra (si inversión > 0)
+            if inversión > 0:
+                for i, b in enumerate(bars):
+                    width = b.get_width()
+                    pct = width / inversión
                     ax.text(
-                        xi,
-                        i,
-                        "{:> 4.1%}".format(group_data[i] / data["Inversión"]),
+                        width + (inversión * 0.01),
+                        b.get_y() + b.get_height() / 2,
+                        "{:> 4.1%}".format(pct),
                         fontsize=6,
                         va="center",
                         color=self.cchart["texto"],
                     )
 
-                ax.xaxis.set_major_formatter(currency)
-                ax.spines.right.set_visible(False)
-                ax.spines.left.set_visible(False)
-                ax.spines.top.set_visible(False)
+            # ajusta ticks razonables
+            xmin = min(0, min(values + [unprofit]) if values else 0)
+            xmax = max(values + [unprofit]) if values else 1
+            rng = xmax - xmin if (xmax - xmin) != 0 else 1
+            # construir ticks de forma robusta
+            ticks = np.linspace(xmin, xmax, num=4)
+            ax.set_xlim([xmin - 0.05 * rng, xmax + 0.05 * rng])
+            ax.set_xticks(ticks)
 
-                ax.set_xlabel("", fontsize=6, color=self.cchart["texto"])
-
-                xlabels = ax.get_xticklabels()
-                ylabels = ax.get_yticklabels()
-                plt.setp(xlabels, ha="right", fontsize=6, color=self.cchart["texto"])
-                plt.setp(ylabels, ha="right", fontsize=6, color=self.cchart["texto"])
-                ax.set_xticks(ix)
-
-                ax.axvline(0, linewidth=0.6, ls="-", color=self.cchart["axsy"])
-                ax.spines["bottom"].set_color(self.cchart["axsx"])
-                ax.set_xlabel("", fontsize=6, color=self.cchart["axsx"])
-                ax.tick_params(axis="x", colors=self.cchart["axsx"])
-                ax.tick_params(axis="y", colors=self.cchart["axsy"])
-        except EncodingWarning as e:
-            print("[graph_performance_vehiculo()]: {}".format(e))
+        except (EncodingWarning, Exception) as e:
+            print(f"graph_ROI_vehiculo()]: {e}")
 
     # activos ganadores y perdedores
     def graph_gain_loss(self, data, parm):
@@ -4284,146 +4322,142 @@ class WidgetVehiculo(TickerInfo):
             print("[graphgraph_gain_loss()]: {}".format(e))
 
     # titulo Performance (acumulativo)
-    def graph_performa_portafolio(self, fg=None, data=None, parm=None):
+    def graph_performace_portafolio(self, fg=None, data=None, parm=None):
+        """
+        Grafica performance acumulado (eje izquierdo) y valor/costo (eje derecho).
+        Entrada:
+          - fg: matplotlib.figure.Figure
+          - data: pd.DataFrame con las series a plotear
+          - parm: dict con mapeo de etiquetas -> nombre de columna en `data`
+                   keys típicas: 'BTC', '++ index', 'Value', 'Costo', 'legend', 'aspect', 'titulo'
+        """
         try:
+            # seguridad: datos mínimos
+            if fg is None or data is None or data.empty or parm is None:
+                if fg is not None:
+                    fg.clear()
+                return
+
+            # limpiar figura y crear ejes
             fg.clear()
-            fg.suptitle(parm["titulo"], color=self.cchart["titulo"], fontsize="medium")
+            title = parm.get("titulo", "")
+            fg.suptitle(title, color=self.cchart["titulo"], fontsize="medium")
             ax = fg.add_subplot()
-
-            av = ax.twinx()
-            ax.set_box_aspect(parm["aspect"])
-            p_legend, ix = list(), list(parm)
-
-            #
-            ax.plot(
-                data.index, data[parm[ix[0]]], color=self.cchart["plot5"], linewidth=1
-            )
-            ax.plot(data.index, data[ix[1]], color=self.cchart["plot2"], linewidth=1)
-
-            xmax = max(data[parm[ix[0]]].max(), data[ix[1]].max())
-            xmin = min(data[parm[ix[0]]].min(), data[ix[1]].min())
-            ylm = [xmin, xmax]
-
             ax.set_facecolor(self.cchart["fondo_fig"])
+
+            # eje secundario (dólares / valores)
+            av = ax.twinx()
+
+            # aspecto opcional (defensivo)
+            aspect = parm.get("aspect")
+            
+            # seleccionar series a graficar en orden predecible:
+            # tomar valores de parm que sean strings y existan en data.columns
+            series_cols = [v for k, v in parm.items() if isinstance(v, str) and v in data.columns]
+            # esperamos al menos dos series para el eje izquierdo (performance comparativa)
+            left_series = series_cols[:2] if len(series_cols) >= 2 else (series_cols + [None, None])[:2]
+
+            # plot eje izquierdo (performance comparativa)
+            if left_series[0]:
+                ax.plot(data.index, data[left_series[0]], color=self.cchart["plot5"], linewidth=1)
+            if left_series[1]:
+                ax.plot(data.index, data[left_series[1]], color=self.cchart["plot2"], linewidth=1)
+
+            # formateo eje X
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
             xlabels = ax.get_xticklabels()
             plt.setp(xlabels, ha="right", rotation=20, fontsize=6)
-            ax.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
             ax.tick_params(axis="x", colors=self.cchart["axsx"])
 
+            # estilos de spines y grilla
             ax.spines["bottom"].set_color(self.cchart["axsx"])
             ax.spines["left"].set_color(self.cchart["axsy"])
-            ax.set_xlabel("", fontsize="x-small", color=self.cchart["axsx"])
-
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
             ax.grid(True, color=self.cchart["axsx"], linewidth=0.3)
 
-            ax.spines.right.set_visible(False)
-            ax.spines.top.set_visible(False)
-
-            # Set de 1er Eje Y
-            ylabels = ax.get_yticklabels()
-            ax.set_ylabel("Performance", fontsize=6, color=self.cchart["axsy"])
+            # eje Y izquierdo: porcentajes
+            ax.set_ylabel("Performance", fontsize="x-small", color=self.cchart["axsy"])
             ax.yaxis.set_major_formatter(porcentaje)
+            ylabels = ax.get_yticklabels()
             plt.setp(ylabels, ha="right", fontsize=6)
             ax.tick_params(axis="y", colors=self.cchart["axsy"])
 
-            # Set de 2do Eje Y
-            av.spines["left"].set_color(self.cchart["axsy"])
-            ax.axhline(0, linewidth=0.6, ls="--", color=self.cchart["texto"])
+            # eje derecho: Value / Costo (si existen)
+            value_col = parm.get("Value") if parm.get("Value") in data.columns else None
+            costo_col = parm.get("Costo") if parm.get("Costo") in data.columns else None
 
-            # construcción de dos ejes, para mostrar profit
-            columna = "value"
-            facecolors = [
-                self.cchart["plot1"] if y > 0 else self.cchart["plot3"]
-                for y in data[columna]
-            ]
-            edgecolors = facecolors
+            # si no están mediante parm, intentar detectar en series_cols
+            if value_col is None and "value" in data.columns:
+                value_col = "value"
+            if costo_col is None and "costo_base" in data.columns:
+                costo_col = "costo_base"
 
-            av.set_ylabel(" Dollar US", fontsize="x-small", color=self.cchart["plot1"])
-            av.tick_params(axis="y", labelcolor=self.cchart["plot1"])
-            av.yaxis.set_major_formatter(currency)
-
-            # legend
-            p_legend, ix, colors, gmin, gmax = list(), list(parm), [], 0.0, 0.0
-            p_legend.append(
-                mpatches.Patch(color=self.cchart["plot5"], label=parm[ix[0]])
-            )
-            p_legend.append(
-                mpatches.Patch(color=self.cchart["plot2"], label=parm[ix[1]])
-            )
-            if "Value" in ix:
-                colors = [self.cchart["plot1"]]
-                p_legend.append(
-                    mpatches.Patch(
-                        color=self.cchart["plot1"], label=parm[ix[2]], alpha=0.45
-                    )
-                )
-                gmin = data[columna].min()
-                gmax = data[columna].max()
-
-            if "Costo" in ix:
+            colors = []
+            if value_col:
+                colors.append(self.cchart["plot1"])
+            if costo_col:
                 colors.append(self.cchart["plot3"])
-                p_legend.append(
-                    mpatches.Patch(
-                        color=self.cchart["plot3"], label=parm[ix[3]], alpha=0.35
-                    )
-                )
-                xmin = data[columna].min()
-                xmax = data[columna].max()
 
-            # plot ambas regiones Value y Costo
-            if len(colors) == 1 and not data.empty:
-                av.plot(
-                    data.index, data[columna], color=colors[0], alpha=0.5, linewidth=1
-                )
-                av.fill_between(
-                    data.index,
-                    data[columna],
-                    where=data[columna] > 0,
-                    facecolor=colors[1],
-                    alpha=0.5,
-                )
+            # dibuja líneas/áreas en el eje derecho con relleno apropiado
+            if value_col:
+                av.plot(data.index, data[value_col], color=self.cchart["plot1"], alpha=0.5, linewidth=1)
+                av.fill_between(data.index, data[value_col], where=data[value_col] > 0,
+                                facecolor=self.cchart["plot1"], alpha=0.25)
+            if costo_col:
+                av.plot(data.index, data[costo_col], color=self.cchart["plot3"], alpha=0.5, linewidth=1)
+                # relleno entre costo y value si ambas series existen
+                if value_col:
+                    av.fill_between(data.index, data[costo_col], data[value_col],
+                                    where=(data[costo_col] > data[value_col]),
+                                    facecolor=self.cchart["plot3"], alpha=0.25)
 
-            if len(colors) == 2 and not data.empty:
-                # fill verde para ganancias y capital realizable
-                av.plot(
-                    data.index, data[columna], color=colors[0], alpha=0.4, linewidth=1
-                )
-                av.fill_between(
-                    data.index,
-                    data[columna],
-                    where=data[columna] > 0,
-                    facecolor=colors[0],
-                    alpha=0.4,
-                )
-
-                av.plot(
-                    data.index,
-                    data["costo_base"],
-                    color=colors[1],
-                    alpha=0.5,
-                    linewidth=1,
-                )
-                av.fill_between(
-                    data.index,
-                    data["costo_base"],
-                    data[columna],
-                    where=data["costo_base"] > data[columna],
-                    facecolor=colors[1],
-                    alpha=0.4,
-                )
-
-            fg.legend(handles=p_legend, loc=parm["legend"], fontsize=5)
-            vlm = [min(ylm[0], gmin, xmin), max(ylm[1], gmax, xmax)]
-
+            # formateo eje derecho
+            av.set_ylabel("Dolar US", fontsize="x-small", color=self.cchart["plot1"])
+            av.yaxis.set_major_formatter(currency)
             tlabels = av.get_yticklabels()
             plt.setp(tlabels, ha="left", fontsize=6, color=self.cchart["plot1"])
             av.tick_params(axis="y", colors=self.cchart["plot1"])
             av.spines["right"].set_color(self.cchart["plot1"])
-            av.spines.right.set_visible(True)
+            av.spines["right"].set_visible(True)
             av.axhline(0, linewidth=0.6, ls="--", color=self.cchart["plot1"])
 
+            # línea 0 en eje izquierdo para referencia
+            ax.axhline(0, linewidth=0.6, ls="--", color=self.cchart["texto"])
+
+            # leyenda: construimos patches según las series dibujadas
+            patches = []
+            if left_series[0]:
+                patches.append(mpatches.Patch(color=self.cchart["plot5"], label=left_series[0]))
+            if left_series[1]:
+                patches.append(mpatches.Patch(color=self.cchart["plot2"], label=left_series[1]))
+            if value_col:
+                patches.append(mpatches.Patch(color=self.cchart["plot1"], label=value_col, alpha=0.45))
+            if costo_col:
+                patches.append(mpatches.Patch(color=self.cchart["plot3"], label=costo_col, alpha=0.35))
+
+            legend_loc = parm.get("legend", "upper left")
+            if patches:
+                fg.legend(handles=patches, loc=legend_loc, fontsize=5)
+
+
+            # ajustar límites Y de forma robusta (si es necesario)
+            try:
+                left_vals = []
+                for s in left_series:
+                    if s and s in data.columns:
+                        left_vals.append(data[s].dropna().values)
+                if left_vals:
+                    all_left = np.concatenate(left_vals)
+                    ymin, ymax = np.nanmin(all_left), np.nanmax(all_left)
+                    if ymin != ymax:
+                        rng = ymax - ymin
+                        ax.set_ylim(ymin - 0.05 * rng, ymax + 0.05 * rng)
+            except Exception:
+                pass
+
         except Exception as e:
-            print("[graph_performa_portafolio()]: {}".format(e))
+            print(f"graph_performace_portafolio(): {e}")
 
     # (thread): coordinador de actualización de graficos
     def run_graficos(self):
@@ -4506,7 +4540,7 @@ class WidgetVehiculo(TickerInfo):
             (Pdatos, self.Ddatos, GainLoss) = datos_grafico()
 
             parm = {"titulo": "ROI " + self.vehiculo, "aspect": 0.80}
-            self.graph_performance_vehiculo(Pdatos, parm)
+            self.graph_ROI_vehiculo(Pdatos, parm)
             self.graph[0][0].draw()
 
             # reemplazar o mejorar Gráfico por 5 mejores y peores desempeño
@@ -4517,12 +4551,11 @@ class WidgetVehiculo(TickerInfo):
             if self.vehiculo != "BBVA.ARS":
 
                 # controla que pase una vez por plot del gráfico
-                # if not DataHub.last_process["graph_performa_portafolio"]:
+                # if not DataHub.last_process["graph_performace_portafolio"]:
 
                 self.setup_graph_performace(tipo="1Y")
-                # print(f"run_graficos({self.vehiculo})")
-
-                # DataHub.last_process["graph_performa_portafolio"] = True
+         
+                # DataHub.last_process["graph_performace_portafolio"] = True
         except Exception as e:
             print(f"[run_gráficos()]: {e}")
 

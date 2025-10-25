@@ -103,6 +103,7 @@ class BDsystem:  # -------------------------------------------------------------
         sesion["idcuenta"] = qry[ix.index("idcuenta")]
         sesion["userapi"] = qry[ix.index("userapi")]
         sesion["userpass"] = qry[ix.index("userpass")]
+        sesion["private_key"] = qry[ix.index("private_key")]
         sesion["vehiculo"] = qry[ix.index("vehiculo")]
         sesion["Pinvertir"] = qry[ix.index("Pinvertir")]
         sesion["fiscalYear"] = qry[ix.index("fiscalYear")]

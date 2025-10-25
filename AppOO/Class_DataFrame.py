@@ -138,11 +138,6 @@ def use_dataframe_cache(df_cache):
 CacheHut = DataFrameCache(maxsize=200, ttl=1800)
 
 
-# estable cache para yfinance ----------------------------------------------------------------------------------------------------
-# in RAM  >> @cached(cache)
-# cache = TTLCache(maxsize=100, ttl=1000)
-
-
 # resumen datos fundamentales de activo ------------------------------------------------------------------------------------------
 class InfoYfinance:
     def __init__(self, symbol, activo):
