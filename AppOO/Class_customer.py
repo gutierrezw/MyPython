@@ -4359,9 +4359,9 @@ class WidgetVehiculo(TickerInfo):
 
             # plot eje izquierdo (performance comparativa)
             if left_series[0]:
-                ax.plot(data.index, data[left_series[0]], color=self.cchart["plot5"], linewidth=1)
+                ax.plot(data.index, data[left_series[0]], color=self.cchart["plot5"], linewidth=1.3)
             if left_series[1]:
-                ax.plot(data.index, data[left_series[1]], color=self.cchart["plot2"], linewidth=1)
+                ax.plot(data.index, data[left_series[1]], color=self.cchart["plot2"], linewidth=1.3)
 
             # formateo eje X
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
@@ -4393,24 +4393,54 @@ class WidgetVehiculo(TickerInfo):
             if costo_col is None and "costo_base" in data.columns:
                 costo_col = "costo_base"
 
-            colors = []
-            if value_col:
-                colors.append(self.cchart["plot1"])
-            if costo_col:
-                colors.append(self.cchart["plot3"])
+            # Dibujar como barras: costo_col como barra de fondo, value_col como barra interior
+            if value_col or costo_col:
+                # calcular width en días (para índices datetime) de forma robusta
+                try:
+                    if isinstance(data.index, pd.DatetimeIndex) and len(data.index) > 1:
+                        diffs = data.index.to_series().diff().dropna()
+                        if not diffs.empty:
+                            # ancho en días (mediana)
+                            width_days = diffs.median().total_seconds() / 86400.0
+                        else:
+                            width_days = 0.8
+                    else:
+                        # índice no-datetime o único punto: usar ancho por defecto
+                        width_days = 0.8
+                except Exception:
+                    width_days = 0.8
 
-            # dibuja líneas/áreas en el eje derecho con relleno apropiado
-            if value_col:
-                av.plot(data.index, data[value_col], color=self.cchart["plot1"], alpha=0.5, linewidth=1)
-                av.fill_between(data.index, data[value_col], where=data[value_col] > 0,
-                                facecolor=self.cchart["plot1"], alpha=0.25)
-            if costo_col:
-                av.plot(data.index, data[costo_col], color=self.cchart["plot3"], alpha=0.5, linewidth=1)
-                # relleno entre costo y value si ambas series existen
-                if value_col:
-                    av.fill_between(data.index, data[costo_col], data[value_col],
-                                    where=(data[costo_col] > data[value_col]),
-                                    facecolor=self.cchart["plot3"], alpha=0.25)
+                # ancho para barras costo (fondo) y para value (interior)
+                width_costo = width_days * 0.9
+                width_value = width_days * 0.5
+
+                # Si sólo existe costo_col -> dibujar barras de costo
+                if costo_col and not value_col:
+                    av.bar(data.index, data[costo_col], width=width_costo,
+                           color=self.cchart["plot3"], alpha=0.25, align="center", edgecolor='none')
+                # Si existe value_col y no costo_col -> dibujar barras de value
+                elif value_col and not costo_col:
+                    av.bar(data.index, data[value_col], width=width_value,
+                           color=self.cchart["plot1"], alpha=0.9, align="center", edgecolor='none')
+                # Si existen ambas -> dibujar costo como fondo y value encima
+                elif value_col and costo_col:
+                    av.bar(data.index, data[costo_col], width=width_costo,
+                           color=self.cchart["plot3"], alpha=0.20, align="center", edgecolor='none', label=costo_col)
+                    av.bar(data.index, data[value_col], width=width_value,
+                           color=self.cchart["plot1"], alpha=0.9, align="center", edgecolor='none', label=value_col)
+
+                    # Opcional: si se quiere sombrear diferencias (cuando costo > value)
+                    try:
+                        mask = data[costo_col].notna() & data[value_col].notna()
+                        if mask.any():
+                            av.fill_between(data.index[mask],
+                                            data[costo_col][mask],
+                                            data[value_col][mask],
+                                            where=(data[costo_col][mask] > data[value_col][mask]),
+                                            facecolor=self.cchart["plot3"], alpha=0.12,
+                                            interpolate=True)
+                    except Exception:
+                        pass
 
             # formateo eje derecho
             av.set_ylabel("Dolar US", fontsize="x-small", color=self.cchart["plot1"])
@@ -4432,9 +4462,9 @@ class WidgetVehiculo(TickerInfo):
             if left_series[1]:
                 patches.append(mpatches.Patch(color=self.cchart["plot2"], label=left_series[1]))
             if value_col:
-                patches.append(mpatches.Patch(color=self.cchart["plot1"], label=value_col, alpha=0.45))
+                patches.append(mpatches.Patch(color=self.cchart["plot1"], label="Values Market", alpha=0.45))
             if costo_col:
-                patches.append(mpatches.Patch(color=self.cchart["plot3"], label=costo_col, alpha=0.35))
+                patches.append(mpatches.Patch(color=self.cchart["plot3"], label="Cost Base", alpha=0.35))
 
             legend_loc = parm.get("legend", "upper left")
             if patches:

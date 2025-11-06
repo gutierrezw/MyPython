@@ -6,6 +6,7 @@ from Modulos_python import (
     Image,
     ImageTk,
     io,
+    time,
     timedelta,
     hashlib,
     json,
@@ -1278,7 +1279,7 @@ class PlanInversion(
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: update_inversion({})]: {}".format(vehiculo, error))
 
-    def select_otros_activos(self, symbol=None, account=None):
+    def select_otros_activos(self, symbol=None, idSymbol=None, account=None, ):
         """
         @param symbol:
         @param account:
@@ -1298,6 +1299,11 @@ class PlanInversion(
                 cursor.execute(qry % account)
                 sql = cursor.fetchall()
 
+            elif idSymbol is not None:
+                qry = "SELECT * FROM otros_activos WHERE idcrypto = %s;"
+                cursor.execute(qry, idSymbol)
+                sql = cursor.fetchone()
+
             else:
                 qry = "SELECT * FROM otros_activos WHERE symbol = %s;"
                 cursor.execute(qry, symbol)
@@ -1307,10 +1313,13 @@ class PlanInversion(
                 found = True
                 ix = [columna[0] for columna in cursor.description]
 
-                if symbol != "all":
+                if idSymbol is not None:
                     xlis.append(dict(zip(ix, sql)))
 
-                if symbol == "all":
+                elif symbol != "all":
+                    xlis.append(dict(zip(ix, sql)))
+
+                elif symbol == "all":
                     for keys in sql:
                         xlis.append(dict(zip(ix, keys)))
 
@@ -2176,7 +2185,6 @@ class RepositorioOportunidadesBuySell(
                         )
 
                     eof_book, read = next(ebook, (None, None))
-
             except (Exception, EncodingWarning, connect.Error) as e:
                 print("[Mysql:: update_codigo_sell()]: {}".format(e))
 
@@ -2221,7 +2229,7 @@ class RepositorioOportunidadesBuySell(
             if inversion:
                 position = inversion[0]["position"] if inversion else 0
                 costo_avg = (
-                    inversion[0]["costobase"] / position if position > 0 else ubasico
+                    inversion[0]["costobase"] * inversion[0]["factor_cambio"] / position if position > 0 else ubasico
                 )
 
             stock = ustock + values["cantidad"]
@@ -2254,7 +2262,7 @@ class RepositorioOportunidadesBuySell(
                 gpreal = values["producto"] - (importe + values["tarifacomision"])
                 mtmgp = gpreal / abs(values["cantidad"])
 
-                # coloca inactiva todas las sell anteriores
+                # coloca inactiva todas las sell anteriores y en caso de ser la última actuliza sellc
                 update_codigo_sell(id_trader=idtrans, update=values["fechahora"])
 
             # complementa para actualizar información de la operación
@@ -2281,15 +2289,15 @@ class RepositorioOportunidadesBuySell(
                 ",".join("%s" for _ in range(len(valuesins)))
             )
             cursor.execute(qry, tuple(valuesins))
-
+            conn.commit()
+            cursor.close()
+            
+            time.sleep(0.4)
             # update basico "otros_activos" e indicador "activa", cuando sea una venta (cantidad <0)
-            cvalues = dict()
+            cvalues = {}
             cvalues.update({"avgcost": basico})
             cvalues.update({"fecupdate": values["fechahora"]})
             self.update_otros_activos(values=cvalues, symbol=symbol)
-
-            conn.commit()
-            cursor.close()
         except (Exception, EncodingWarning, connect.Error) as error:
             print(f"[Mysql:: insert_booktrading()]: {error}")
 

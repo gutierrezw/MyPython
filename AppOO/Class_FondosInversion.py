@@ -12,7 +12,7 @@ from Modulos_python import (
 )
 from Modulos_Mysql import RepositorioOportunidadesBuySell, DiariaCNV
 from Class_customer import WidgetVehiculo, DataHub
-from Modulos_Utilitarios import delete_file, buscar_ticker
+from Modulos_Utilitarios import delete_file, buscar_ticker, define_FileCache
 from Modulos_Utilitarios import is_numeric
 
 
@@ -27,6 +27,7 @@ class ArsFondosInversion(tk.Frame):
         self.path = os.getcwd()
         self.path += "\\tmp\\"
 
+        self.CNVDiaria = None
         self.archivo = None
         self.account_fiat = "ARS-0001"
         self.aliasExcel = {
@@ -208,50 +209,70 @@ class ArsFondosInversion(tk.Frame):
             )
             if diaria_CNV is not None:
                 # convierte Excel CNV en Dataframe standard / selection entidades de inversión
-                names_list = list(columns.values())
-                df = pd.read_excel(
-                    diaria_CNV,
-                    skiprows=11,
-                    header=None,  # Indicamos que no hay encabezado en el archivo
-                    names=names_list,
-                )  # Usamos tus nombres de columna
-                df.fillna(0, inplace=True)
-                df.set_index("fondo", inplace=True)
+                try:
+                    names_list = list(columns.values())
+                    self.CNVDiaria = []
+                    df = pd.read_excel(
+                        diaria_CNV,
+                        skiprows=11,
+                        header=None,  # Indicamos que no hay encabezado en el archivo
+                        names=names_list,
+                    )  # Usamos tus nombres de columna
+                    df.fillna(0, inplace=True)
+                    # df.set_index("fondo", inplace=True)
 
-                cond1 = df[columns["R"]] == "BBVA Argentina S.A."
-                cond2 = df[columns["R"]] == "Banco Santander Argentina S.A."
-                cond3 = df[columns["G"]] > 0
-                cond4 = df[columns["E"]] != 0
-                df_fci = df[(cond1 | cond2) & cond3 & cond4]
+                    cond1 = df[columns["R"]] == "BBVA Argentina S.A."
+                    cond2 = df[columns["R"]] == "Banco Santander Argentina S.A."
+                    cond3 = df[columns["G"]] > 0
+                    cond4 = df[columns["E"]] != 0
+                    df_fci = df[(cond1 | cond2) & cond3 & cond4]
+                except (ValueError, FileNotFoundError, KeyError, Exception) as e:
+                    df_fci = pd.DataFrame()
 
-                for keys in df_fci.itertuples():
-                    try:
-                        values = {}
-                        symbol = keys.Código_CAFCI
-                        fecha = datetime.strptime(keys.Fecha, "%d/%m/%y")
-                        values.update({"fecha": fecha.date()})
-                        values.update({"fondo": keys.index})
-                        values.update({"moneda": keys.Moneda})
-                        values.update({"region": keys.Region})
-                        values.update({"horizonte": keys.Horizonte})
-                        values.update({"valorActual": keys.V_actual})
-                        values.update({"valorAnterior": keys.V_anterior})
-                        values.update({"variacion": keys.variation})
-                        values.update({"valorPesos": keys.Reexp_Pesos})
-                        values.update({"variacion30dias": keys.var_30d})
-                        values.update({"variacion60dias": keys.var_60d})
-                        values.update({"variacion90dias": keys.var_90d})
-                        values.update({"patrimonioActual": keys.Patrimonio_actual})
-                        values.update({"patrimonioAnterior": keys.Patrimonio_anterior})
-                        values.update({"marketShare": keys.Market_Share})
-                        values.update({"sociedadDepositaria": keys.Soc_Depositaria})
-                        values.update({"codigoCNV": keys.Codigo_CNV})
-                        values.update({"codSociedadDep": keys.Código_SocDep})
-                        values.update({"monedaFondo": keys.Código_Moneda})
+                if not df_fci.empty:
+                    for keys in df_fci.itertuples():
+                        try:
+                            # valida existencia del fondo en cartera
+                            activo, found = self.RepositorioOportunidades.select_otros_activos(idSymbol=keys.Código_CAFCI)
+                            if not found :
+                               self.CNVDiaria.append({"idcrypto": keys.Código_CAFCI,
+                                                      "descripcion": keys.fondo,
+                                                      "base_asset": "ARS",
+                                                      "quote_asset": "USD"
+                                                      })
+                               continue
 
-                        self.ClassCNV.insert(values=values, symbol=symbol)
-                    except ValueError:
-                        continue
+                            values = {}
+                            symbol = keys.Código_CAFCI
+                            fecha = datetime.strptime(keys.Fecha, "%d/%m/%y")
+                       
+                            values.update({"fecha": fecha.date()})
+                            values.update({"fondo": keys.fondo})
+                            values.update({"moneda": keys.Moneda})
+                            values.update({"region": keys.Region})
+                            values.update({"horizonte": keys.Horizonte})
+                            values.update({"valorActual": keys.V_actual})
+                            values.update({"valorAnterior": keys.V_anterior})
+                            values.update({"variacion": keys.variation})
+                            values.update({"valorPesos": keys.Reexp_Pesos})
+                            values.update({"variacion30dias": keys.var_30d})
+                            values.update({"variacion60dias": keys.var_60d})
+                            values.update({"variacion90dias": keys.var_90d})
+                            values.update({"patrimonioActual": keys.Patrimonio_actual})
+                            values.update({"patrimonioAnterior": keys.Patrimonio_anterior})
+                            values.update({"marketShare": keys.Market_Share})
+                            values.update({"sociedadDepositaria": keys.Soc_Depositaria})
+                            values.update({"codigoCNV": keys.Codigo_CNV})
+                            values.update({"codSociedadDep": keys.Código_SocDep})
+                            values.update({"monedaFondo": keys.Código_Moneda})
+
+                            self.ClassCNV.insert(values=values, symbol=symbol)
+                        except ValueError:
+                            continue
+
+                    # Almacena archivo CNV que no estan en otros_activos
+                    # file_CNV = define_FileCache("CNV_FCI_missing_activos.json")
+
 
                 delete_file(ruta=diaria_CNV, display=False)
         except (EncodingWarning, Exception) as e:
@@ -354,7 +375,6 @@ class ArsFondosInversion(tk.Frame):
 
                 # elimina archivo procesado
                 delete_file(ruta=self.archivo, display=True)
-
             except (EncodingWarning, Exception) as error:
                 print("[fci_BBVA()]: {}".format(error))
 

@@ -50,3 +50,61 @@ Diseño de self.info[symbol][buy]
 
     # actualiza en diccionario self.info()
     (d_buy, d_sell) = self.ts_oportunidades_symbol(symbol, datos)
+
+
+
+Flujo para construir valuador de acciones y localizador de archivos EDGAR:
+
+1) Ingreso de ticker (por input o parámetro directo).
+
+2) Verificación del entorno EDGAR:
+
+	- Comprueba si existe el directorio raíz EDGAR/<TICKER>_EDGAR_Files/.
+
+	- Si no existe, ejecuta automáticamente edgar_downloader.py para descargar la información de EDGAR.
+
+	- Si existe, continúa sin volver a descargar.
+
+	- Clasificación automática:
+
+		- Si existen carpetas 10K_Filings / 10Q_Filings → empresa doméstica.
+
+		- Si existen carpetas 20F_Filings / 6K_Filings → empresa extranjera.
+
+	- Carga el archivo metadata.json. 
+
+	- Busca dentro de las carpetas correspondientes los archivos más recientes:
+
+		- Prioridad: último 10-Q → si no hay, último 10-K (o su equivalente 6-K / 20-F).
+
+		- Identifica y abre el archivo XBRL/XML o HTML.
+
+
+3) Procesamiento / extracción (FFO, FCF, EPS, etc.).
+
+	- Detecta automáticamente REIT vs Non-REIT (por sector/texto en metadata o en yfinance).
+
+	- Sin prints innecesarios (solo estado del proceso y resultados relevantes de las validaciones y valoración).
+
+	- Si se usó edgar_downloader.py, marca "downloaded": True.
+
+	- Soporta DDM (Gordon) y DCF para empresas generales; FFO / AFFO + Gordon-FFO (múltiplo) para REITs.
+
+	-  Devolverá solo un diccionario JSON (DCF, DDM, REIT-FFO si aplica), listo para almacenar o usar por el agente. 
+
+	- Devuelve adicional otro diccionario JSON-ready métricas, y los Datos obtenidos (de JSON, XBRL, HTML)
+
+4) Modulos que comparto y que debos presenvar los nombre y logica que te indique:
+
+	- edgar_downloader.py: modulo externo solo de referencia o para obtener datos -- No modificar
+	- ValuationEngine.py: Modulo que estaremos iterando y que solo ajustaremos segun indicaciones de cambio que pasare en punto 5.
+
+5) cambios para aplicar:
+
+	Casificación automática:
+
+	- Si existen carpetas 10K_Filings / 10Q_Filings → empresa doméstica.
+
+	- Si existen carpetas 20F_Filings / 6K_Filings → empresa extranjera.
+
+	- Carga el archivo metadata.json.

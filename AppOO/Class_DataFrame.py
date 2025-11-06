@@ -550,7 +550,6 @@ def cagar_archivo(account=None, titulo=None, tipo="csv"):
             return {}, ilog
         else:
             return extracto, ilog
-
     except Exception as error:
         print("[Error::  cagar_archivo()]: {}".format(error))
         return {}, None
@@ -576,7 +575,7 @@ def get_extractos_csv(account=None, ruta=None):
                     if "Period" in row:
                         f_inicio, f_fin = row[-1].split(" - ")
                         f_fin = f_fin.strip()
-
+                      
                         f_obj = datetime.strptime(f_fin, "%B %d, %Y")
                         fecha = f_obj.strftime("%Y-%m-%d")
                         extracto.update(
