@@ -11,6 +11,7 @@ dist/
 # Archivos de caché de yfinance y otros temporales
 tmp/
 Dividends/
+EDGAR/
 *.dat-journal
 *.prof
 *.code-workspace

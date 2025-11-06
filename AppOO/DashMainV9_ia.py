@@ -2085,13 +2085,13 @@ class DashMain:
         self.win6 = ttk.Frame(self.nb, style="C.TFrame", width=self.dw, height=self.dh)
 
         # Añadir padding a los frames
-        self.win0.pack(fill="both", expand=True)
-        self.win1.pack(fill="both", expand=True)
-        self.win2.pack(fill="both", expand=True)
-        self.win3.pack(fill="both", expand=True)
-        self.win4.pack(fill="both", expand=True)
-        self.win5.pack(fill="both", expand=True)
-        self.win6.pack(fill="both", expand=True)
+        self.win0.pack(fill=tk.BOTH, expand=True)
+        self.win1.pack(fill=tk.BOTH, expand=True)
+        self.win2.pack(fill=tk.BOTH, expand=True)
+        self.win3.pack(fill=tk.BOTH, expand=True)
+        self.win4.pack(fill=tk.BOTH, expand=True)
+        self.win5.pack(fill=tk.BOTH, expand=True)
+        self.win6.pack(fill=tk.BOTH, expand=True)
 
         self.nb.add(self.win1, text="Crypto         ")
         self.nb.add(self.win0, text="Stock          ")
@@ -2212,6 +2212,8 @@ class DashMain:
             self.rg5, master=pn6
         )  # canvas de Diversificación por region
 
+        self.rg0.set_facecolor(self.colors["bgcolor"])
+        self.rg0.set_facecolor(self.colors["bgcolor"])
         self.rg0.set_facecolor(self.colors["bgcolor"])
         self.rg1.set_facecolor(self.colors["bgcolor"])
         self.rg2.set_facecolor(self.colors["bgcolor"])
