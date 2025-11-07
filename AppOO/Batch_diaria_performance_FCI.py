@@ -1,5 +1,5 @@
 from Class_DataFrame import get_yfinance
-from Modulos_Mysql import (RepositorioOportunidadesBuySell,  IPerformance,  DiariaCNV)
+from Modulos_Mysql import (RepositorioOportunidadesBuySell,  IPerformance,  DiariaCNV, PlanInversion)
 from Modulos_Utilitarios import vehiculo_parm, convierte_ticket_crypto, porcentaje
 from Modulos_Comunes import crea_dataframe_index
 from Modulos_python import *
@@ -20,6 +20,8 @@ from Modulos_python import *
 class FondosInversion:
     def __init__(self):
         self.ClassCNV = DiariaCNV()
+        self.Performance = IPerformance()
+        self.PlanInversion = PlanInversion()
         self.ROportunidades = RepositorioOportunidadesBuySell()
 
         self.sesion = self.ClassCNV.select_sesion(
@@ -55,36 +57,42 @@ class FondosInversion:
 
 def date_minima(book, ix):
     DateMin = datetime(9999, 12, 31, 0, 0, 0)
+
     for row in book:
         fecha_op = row[ix.index("fechahora")]
         if fecha_op < DateMin:
             DateMin = fecha_op
     return DateMin
 
-def proceso_symbol(symbol, vehiculo, dateInc, book, ix):
+def proceso_symbol(symbol, vehiculo, fci, dateInc, book, ix):
     indice, index_ref, rtn_index = crea_dataframe_index(vehiculo=vehiculo, desde=dateInc)
 
     print(f" symbol: {symbol} - history: {len(book)} - desde: {dateInc} - index: {len(indice)}")
-    bkey, diaria, ebook = None, [], enumerate(book)
-    eof_book, read = next(ebook, (None, None))
+    detalle = fci.PlanInversion.get_yf_CNV(symbol=symbol)
+
+    print(f" detalle: {detalle}")
+
+    # bkey, diaria, ebook = None, [], enumerate(book)
+    # eof_book, read = next(ebook, (None, None))
     
     
 
 
 
 def proceso_FCI():
-    fci = FondosInversion()
     DateMin = datetime(9999, 12, 31, 0, 0, 0)
+    fci = FondosInversion()
+ 
     for symbol, values in fci.positions.items():  
 
         trader, ix = fci.ROportunidades.select_booktrading(
-            accion="select",
+            accion="select*",
             account=values.get("useraccount"),
             idivisa="ARS",
             symbol=symbol,
         )
         DateMin = min(DateMin, date_minima(book=trader, ix=ix))
-        proceso_symbol(symbol=symbol, vehiculo=values.get("vehiculo"), dateInc=DateMin.date(), book=trader, ix=ix) 
+        proceso_symbol(symbol=symbol, vehiculo=values.get("vehiculo"), fci=fci, dateInc=DateMin.date(), book=trader, ix=ix) 
 
 
 if __name__ == "__main__":

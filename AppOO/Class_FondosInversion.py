@@ -9,6 +9,7 @@ from Modulos_python import (
     copy,
     itemgetter,
     threading,
+    datetime,
 )
 from Modulos_Mysql import RepositorioOportunidadesBuySell, DiariaCNV
 from Class_customer import WidgetVehiculo, DataHub
@@ -97,6 +98,28 @@ class ArsFondosInversion(tk.Frame):
                 costo += keys["costobase"]
                 dgyp += keys["dgyp"]
                 unprofit += keys["unrealizedpnl"] if keys["unrealizedpnl"] > 0 else 0
+
+                symbol = keys["ticket"]
+                conid = keys["conid"]
+                Stimestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                d_precio = {
+                    symbol: {
+                        "last": keys["mrkprice"],
+                        "open": keys["open"],
+                        "ask": keys["mrkprice"],
+                        "bid": keys["mrkprice"],
+                        "high": keys["mrkprice"],
+                        "low": keys["mrkprice"],
+                        "timestamp": Stimestamp,
+                    }
+                }
+
+                # agrega precio update a info() -- revisar como agrego esto
+                # self.update_precio_DataHubInfo(
+                #    symbol=symbol, conid=conid, precio=d_precio
+                # )
+
 
             per = costo / unprofit if unprofit > 0 else 0
             self.ars.set_header_panel(

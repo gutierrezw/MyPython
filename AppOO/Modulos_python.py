@@ -47,6 +47,7 @@ from diskcache import Cache
 from operator import itemgetter
 from pathlib import Path
 from pymysql import connect, Error
+from sqlalchemy import create_engine
 from dateutil import parser
 from concurrent.futures import Future
 from pandas.errors import EmptyDataError
@@ -72,6 +73,7 @@ from pprint import *
 from typing import Dict
 from typing import List
 from typing import Union
+from typing import Optional
 from multiprocessing import Process
 
 from requests.adapters import HTTPAdapter

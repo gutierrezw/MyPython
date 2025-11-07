@@ -261,7 +261,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     tarea="schedule_WebsocketBinanceApiClient(Crypto)",
                     itera=self.WsClient.counter,
                 )
-
             except EncodingWarning as e:
                 print("procesa_orders_crypto(): {}".format(e))
 
@@ -277,7 +276,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
             # elif 'id' in data.keys():
             #         if data["id"] == "allOrders_5494febb":
             #            procesa_orders_crypto(data)
-
         except json.JSONDecodeError or EncodingWarning as error:
             print("[on_message_binance_websocket()]: {}".format(error))
             time.sleep(1)

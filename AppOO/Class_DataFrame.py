@@ -318,6 +318,7 @@ def get_yfinance(
 
             return activo, pdatos
 
+        # exclusivo para el mundo Crypto
         elif vehiculo == "Crypto":
             dat = yf.Ticker(convierte_ticket_crypto(ticket))
 
@@ -326,6 +327,12 @@ def get_yfinance(
                 symbol=ticket, period=period, desde=desde, hasta=hasta
             )
             return activo, pdatos
+
+        # exclusivo para FCi Argentina, obtiene data desde Diaaria_CNV
+        elif vehiculo == "BBVA.ARS":
+            Otr = PlanInversion()
+            activo = {}
+            pdatos = Otr.get_yf_otros_activos(symbol=ticket, start=desde, end=hasta)
 
         # esta opción para obtener solo info()
         elif vehiculo == "info()":
@@ -500,9 +507,8 @@ def get_klines_info(symbol=None, period="5y", interval="1d", desde=None, hasta=N
         # print(f"df {symbol} -- {datos}")
         return datos
 
-    # except (Exception, AttributeError, Exception) as error:
-    except EncodingWarning as error:
-        print("[Error:: get_klines_info()]: {}".format(error))
+    except (Exception, AttributeError, Exception) as e:
+        print(f"[Error:: get_klines_info()]: {e}")
 
 
 def get_ultimo_dia_mercado(market="Stock"):
