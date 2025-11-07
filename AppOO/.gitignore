@@ -15,3 +15,7 @@ EDGAR/
 *.dat-journal
 *.prof
 *.code-workspace
+
+# otros proyectos
+AppOliday/
+

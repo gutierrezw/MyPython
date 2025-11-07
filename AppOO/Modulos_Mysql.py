@@ -12,6 +12,8 @@ from Modulos_python import (
     json,
     connect,
     Error,
+    Optional,
+    create_engine,
 )
 from Modulos_Utilitarios import (
     is_none,
@@ -23,6 +25,12 @@ from Modulos_Utilitarios import (
 class BDsystem:  # ----------------------------------------------------------------------------------------------------
     """
     clase para manejar accesos genericos a mysql."""
+    DB_CONFIG = {
+    'user': 'root',
+    'password': 'Daga2004',
+    'host': 'localhost',
+    'database': 'bdinv'
+    }
 
     def select_sesion(
         fecha,
@@ -164,7 +172,8 @@ class BDsystem:  # -------------------------------------------------------------
         try:
             conn = None
             conn = connect(
-                host="localhost", user="root", password="Daga2004", database="bdinv"
+                host=BDsystem.DB_CONFIG.get("host"), user=BDsystem.DB_CONFIG.get("user"), 
+                password=BDsystem.DB_CONFIG.get("password"), database=BDsystem.DB_CONFIG.get("database")
             )
             if display:
                 print("[Message]: connect a Mysql: " + tabla)
@@ -1323,11 +1332,12 @@ class PlanInversion(
                     for keys in sql:
                         xlis.append(dict(zip(ix, keys)))
 
-            cursor.close()
-            conn.close()
             return xlis, found
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: select_otros_activos()]: {}".format(error))
+        finally:
+            cursor.close()
+            conn.close()
 
     def update_otros_activos(self, values=None, symbol=None):
         """
@@ -1358,6 +1368,82 @@ class PlanInversion(
             cursor.close()
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: update_otros_activos()]: {}".format(error))
+
+    # get info from en formato yfinance into otros_activos
+    def get_yf_CNV(self,
+        symbol: str, 
+        start: Optional[str] = None, 
+        end: Optional[str] = None
+    ):   
+        """
+        Simula la función yf.download, extrayendo datos de rendimiento y volumen
+        calculado de la tabla 'diaria_cnv' de MySQL.
+
+        Args:
+            symbol (str): El codCAFCI (ej. 'FCI001').
+            start (str, opcional): Fecha de inicio para el filtro (YYYY-MM-DD).
+            end (str, opcional): Fecha de fin para el filtro (YYYY-MM-DD).
+
+        Returns:
+            pd.DataFrame: DataFrame con las columnas 'Close' y 'Volume', 
+                        indexado por 'Date'.
+        """
+        
+        # obtiene idcrypto desde tabla otros_activos
+        OtrActivos, found = self.select_otros_activos(symbol=symbol)
+   
+        # 1. Construir la consulta SQL con los cálculos y el filtro principal
+        sql_query = f"""
+        SELECT
+            fecha AS Date,
+            valorAnterior/1000 Open, 
+            GREATEST(valorAnterior, valoractual)/1000 High , 
+            LEAST(valorAnterior, valoractual)/1000 Low, 
+            valorActual / 1000 AS Close,
+            TRUNCATE(patrimonioActual / valorActual, 0) AS Volume
+        FROM
+            diaria_cnv
+        WHERE
+            codCAFCI = '{OtrActivos[0]["idcrypto"]}'
+        """
+        
+        # 2. Añadir filtros de fecha si se proporcionan
+        if start:
+            sql_query += f" AND fecha >= '{start}'"
+
+        elif start is None:
+            inicio = datetime.now() - timedelta(days=365)
+            desde = inicio.strftime("%Y-%m-%d")
+            sql_query += f" AND fecha >= '{desde}'"
+        
+        if end:
+            sql_query += f" AND fecha <= '{end}'"
+        elif end is None:
+            sql_query += f" AND fecha <= CURDATE()"
+            
+        sql_query += " ORDER BY fecha ASC" # Es buena práctica ordenar por fecha
+
+        
+        # 3. Conexión y ejecución (Bloque robusto try...except)
+        try:
+            # Intentar establecer la conexión
+            db_uri = f"mysql+pymysql://{BDsystem.DB_CONFIG.get("user")}:{BDsystem.DB_CONFIG.get("password")}"
+            db_uri += f"@{BDsystem.DB_CONFIG.get("host")}/{BDsystem.DB_CONFIG.get("database")}"
+
+            # Usar pd.read_sql_query para ejecutar el query y obtener el DataFrame directamente
+            df = pd.read_sql_query(sql_query, db_uri)
+            
+            # 4. Formatear la salida (como un resultado de yfinance)
+            if not df.empty:
+                df.set_index('Date', inplace=True)
+                df.index = pd.to_datetime(df.index)
+                
+            return df
+
+        except  (Exception, EncodingWarning, connect.Error) as e:
+            print(f"get_yf_CNV(): {e}")
+            return pd.DataFrame() # Devolver DataFrame vacío en caso de error
+
 
     def insert_otros_activos(self, symbol=None, values=None):
         """
@@ -1418,7 +1504,6 @@ class PlanInversion(
 
             else:
                 xlis.append(dict(zip(ix, row))["cuenta"])
-
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql::  insert_otros_activos()]: {}".format(error))
 
