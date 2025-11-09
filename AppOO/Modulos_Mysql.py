@@ -205,15 +205,33 @@ class IPerformance(
         @param accion: tipo de consulta
         @param referencia: Qué índice acompaña el vehículo de inversión
         @return: entrega lista de filas según parámetros de entrada."""
+
+        conn = self._conectar(tabla="select.performa_inversion")
         try:
-            conn = self._conectar(tabla="select.performa_inversion")
             cursor = conn.cursor()
-            if is_none(accion) and is_none(referencia):
-                qry = """SELECT  fechaclose, p_referencia, p_vehiculo, nr_gyp, value, costo_base FROM performa_inversion 
+
+            # exclusivo para sumar valores por vehiculo (caso: BBVA.ARS)
+            if is_none(account):
+                qry = """SELECT fechaclose, p_referencia, 
+                                sum(p_vehiculo) p_vehiculo, 
+                                sum(nr_gyp) nr_gyp, 
+                                sum(value) value, 
+                                sum(costo_base) 
+                         FROM performa_inversion 
+                        WHERE vehiculo = '%s' 
+                        GROUP BY fechaclose, p_referencia
+                        ORDER by fechaclose ASC;"""
+                cursor.execute(qry % (vehiculo))
+                sql = cursor.fetchall()
+
+            # uso mas frecuente para sumar valores por account y vehiculo
+            elif is_none(accion) and is_none(referencia):
+                qry = """SELECT fechaclose, p_referencia, p_vehiculo, nr_gyp, value, costo_base FROM performa_inversion 
                         WHERE idcuenta = '%s'  AND vehiculo = '%s' ORDER by fechaclose ASC;"""
                 cursor.execute(qry % (account, vehiculo))
                 sql = cursor.fetchall()
 
+            # consulta por acción y referencia específica
             elif not is_none(accion) and not is_none(referencia):
                 qry = """SELECT * FROM performa_inversion WHERE idcuenta = '%s'  AND vehiculo = '%s' 
                                                             AND fechaclose ='%s' AND referencia = '%s';"""
@@ -242,7 +260,10 @@ class IPerformance(
             ix = [columna[0] for columna in cursor.description]
             return sql, ix
         except (Exception, EncodingWarning, connect.Error) as error:
-            print("[Mysql:: select_performa_inversion()]: {}".format(error))
+            print(f"Mysql:: select_performa_inversion(): {error}")
+        finally:
+            cursor.close()
+            conn.close()
 
     def insert_performa_inversion(self, values=None):
         """
@@ -340,8 +361,8 @@ class IPerformance(
         @param symbol: ticket a consultar en booktrading
         @return:
         """
+        conn = self._conectar(tabla="insert.diaria_performance")
         try:
-            conn = self._conectar(tabla="insert.diaria_performance")
             cursor = conn.cursor()
             valuesins = list()
 
@@ -355,15 +376,12 @@ class IPerformance(
                 ",".join("%s" for _ in range(len(valuesins)))
             )
             cursor.execute(qry, tuple(valuesins))
+        except (Exception, EncodingWarning, connect.Error) as error:
+            print(f"Mysql:: insert_diaria_performance()]: {error} {qry}={tuple(valuesins)}")
+        finally:
             conn.commit()
             cursor.close()
 
-        except (Exception, EncodingWarning, connect.Error) as error:
-            print(
-                "[Mysql:: insert_diaria_performance()]: {} {}={}".format(
-                    error, qry, tuple(valuesins)
-                )
-            )
 
 
 class DiariaCNV(
@@ -1423,7 +1441,6 @@ class PlanInversion(
             
         sql_query += " ORDER BY fecha ASC" # Es buena práctica ordenar por fecha
 
-        
         # 3. Conexión y ejecución (Bloque robusto try...except)
         try:
             # Intentar establecer la conexión
@@ -1437,7 +1454,7 @@ class PlanInversion(
             if not df.empty:
                 df.set_index('Date', inplace=True)
                 df.index = pd.to_datetime(df.index)
-                
+
             return df
 
         except  (Exception, EncodingWarning, connect.Error) as e:

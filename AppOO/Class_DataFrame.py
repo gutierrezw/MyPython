@@ -332,7 +332,8 @@ def get_yfinance(
         elif vehiculo == "BBVA.ARS":
             Otr = PlanInversion()
             activo = {}
-            pdatos = Otr.get_yf_otros_activos(symbol=ticket, start=desde, end=hasta)
+            pdatos = Otr.get_yf_CNV(symbol=ticket, start=desde, end=hasta)
+            return activo, pdatos
 
         # esta opción para obtener solo info()
         elif vehiculo == "info()":

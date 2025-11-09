@@ -51,14 +51,21 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
             "value",
             "costo_base",
         ]
-        sql = Performa.select_performa_inversion(account=account, vehiculo=vehiculo)
+
+        # establece consulta SQL en función del vehículo
+        if vehiculo == 'BBVA.ARS':
+            sql = Performa.select_performa_inversion(vehiculo=vehiculo)
+
+        elif vehiculo != 'BBVA.ARS':
+            sql = Performa.select_performa_inversion(account=account, vehiculo=vehiculo)
+
+        # constryuye diccionario de datos a partir de sql
         d_datos = {
             columnas: columna for columnas, columna in zip(columnas, zip(*sql[0]))
         }
 
         # obtiene DataFrame para portafolios
-        # if tipo in ('Stock', 'Crypto', 'BBVA.ARS'):
-        if tipo in ("Stock", "Crypto"):
+        if tipo in ('Stock', 'Crypto', 'BBVA.ARS'):
             if sql:
                 datos = pd.DataFrame(d_datos, index=d_datos["Date"])
                 datos[index_ref] = (1 + datos["p_referencia"]).cumprod()
@@ -138,46 +145,60 @@ def read_csv_insert_diaria(path=None, insert=None):
 def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio"):
 
     def write_csv(gyp, fee):
-        nonlocal ebook, idatos, row, eof_book, read, a_read
+        try:
+            nonlocal ebook, idatos, row, eof_book, read, a_read, writer
 
-        skey = a_read[ix.index("simbolo")]
-        stock = float(a_read[ix.index("stock")])
-        basic = float(a_read[ix.index("basico")])
+            skey = a_read[ix.index("simbolo")]
+            stock = float(a_read[ix.index("stock")])
 
-        value = row["Close"] * stock
-        div = row["Dividends"] * stock if "Dividends" in row else 0
-        costo = basic * stock
-        nr_gyp = 0.0
+            # controla factor de cambio en divisa
+            factor = float(a_read[ix.index("factor_cambio")])
 
-        # escribe porque hay stock o reportar gyp
-        if (costo >= 0) or (gyp != 0):
+            basic = float(a_read[ix.index("basico")] / factor) 
+            close = float(row["Close"] / factor)
 
-            if costo > 0:
-                nr_gyp = value - costo
-                perf = nr_gyp / costo
+            value = close * stock
+            div = row["Dividends"] / factor * stock if "Dividends" in row else 0
 
-            if (costo <= 0) and (gyp != 0):
-                costo = 0.0
-                stock = float(abs(a_read[ix.index("cantidad")]))
-                x_cost = basic * stock
-                perf = (gyp / x_cost) if x_cost > 0 else 0.0
+            GyP = gyp / factor
+            
+            value = value 
+            costo = basic * stock 
+            nr_gyp, perf = .0, .0
 
-            writer.writerow(
-                [
-                    account,
-                    eof_datos.date(),
-                    skey,
-                    row["Close"],
-                    value,
-                    stock,
-                    costo,
-                    perf,
-                    gyp,
-                    nr_gyp,
-                    fee,
-                    div,
-                ]
-            )
+            # escribe porque hay stock o reportar gyp
+            if (costo >= 0) or (GyP != 0):
+
+                if costo > 0:
+                    nr_gyp = value - costo
+                    perf = nr_gyp / costo
+
+                if (costo <= 0) and (GyP != 0):
+                    costo = 0.0
+                    stock = float(abs(a_read[ix.index("cantidad")]))
+                    x_cost = basic * stock
+                    perf = (GyP / x_cost) if x_cost > 0 else 0.0
+
+                writer.writerow(
+                    [
+                        account,
+                        eof_datos.date(),
+                        skey,
+                        close,
+                        value,
+                        stock,
+                        costo,
+                        perf,
+                        GyP,
+                        nr_gyp,
+                        fee,
+                        div,
+                        factor
+                    ]
+                )
+        except Exception as error:
+            print(f"write_csv({vehiculo})]: {error}")
+
 
     def acumula_igual_date():
         nonlocal ebook, idatos, row, eof_book, read, a_read
@@ -236,6 +257,7 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                     "nr_gyp",
                     "comisiones",
                     "dividends",
+                    "factor_cambio",
                 ]
             )
 
@@ -258,6 +280,12 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                     activo, datos = get_yfinance(
                         ticket=bkey, vehiculo="Dividends", desde=f_desde, hasta=f_hasta
                     )
+
+                elif read[ix.index("categoria")] == "BBVA.ARS":
+                    activo, datos = get_yfinance(
+                        ticket=bkey, vehiculo="BBVA.ARS", desde=f_desde, hasta=f_hasta
+                    )
+
                 else:
                     activo, datos = get_yfinance(
                         ticket=bkey, vehiculo="download", desde=f_desde, hasta=f_hasta
