@@ -2149,6 +2149,7 @@ class TickerInfo(MyOrders):
 
         # programa las actualizaciones de API's cada minuto
 
+
     def schedule_trader(self):
         try:
             # revisa update trader vehículos
@@ -4146,6 +4147,8 @@ class WidgetVehiculo(TickerInfo):
             "titulo": f"Performance {self.vehiculo}: (in {tipo})"
             ,
         }
+
+        # ajusta a tempralidad seleccionada
         df_plot = self.Ddatos[self.Ddatos.index >= hoy - periodos[tipo]]
         self.graph_performace_portafolio(fg=self.graph[2][1], data=df_plot, parm=parm)
         self.graph[2][0].draw()
@@ -4374,7 +4377,7 @@ class WidgetVehiculo(TickerInfo):
             ax.spines["left"].set_color(self.cchart["axsy"])
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
-            ax.grid(True, color=self.cchart["axsx"], linewidth=0.3)
+            ax.grid(True, color=self.cchart["axsx"], linewidth=0.3, axis="y", alpha=0.9)
 
             # eje Y izquierdo: porcentajes
             ax.set_ylabel("Performance", fontsize="x-small", color=self.cchart["axsy"])
@@ -4418,16 +4421,48 @@ class WidgetVehiculo(TickerInfo):
                 if costo_col and not value_col:
                     av.bar(data.index, data[costo_col], width=width_costo,
                            color=self.cchart["plot3"], alpha=0.25, align="center", edgecolor='none')
+                    
+                    # Marca costo en el eje y 
+                    l_ix = len(data.index)
+                    ycos = data[costo_col].iloc[-1] if costo_col else None
+                    av.plot(l_ix, ycos, marker=">", color=self.cchart["plot3"])
+
                 # Si existe value_col y no costo_col -> dibujar barras de value
                 elif value_col and not costo_col:
                     av.bar(data.index, data[value_col], width=width_value,
                            color=self.cchart["plot1"], alpha=0.9, align="center", edgecolor='none')
+ 
+                    # Marca value en el eje y 
+                    yval = data[value_col].iloc[-1] if value_col else None
+                    av.plot(l_ix, yval, marker=">", color=self.cchart["plot1"])
+
+ 
                 # Si existen ambas -> dibujar costo como fondo y value encima
                 elif value_col and costo_col:
                     av.bar(data.index, data[costo_col], width=width_costo,
                            color=self.cchart["plot3"], alpha=0.20, align="center", edgecolor='none', label=costo_col)
                     av.bar(data.index, data[value_col], width=width_value,
                            color=self.cchart["plot1"], alpha=0.9, align="center", edgecolor='none', label=value_col)
+
+                    # Marca costo en el eje y 
+                    l_ix = data.index[-1]
+                    ycos = data[costo_col].iloc[-1] if costo_col else None
+                    yval = data[value_col].iloc[-1] if value_col else None
+                    av.plot(l_ix, yval, marker=">", color=self.cchart["plot1"])
+                    av.plot(l_ix, ycos, marker=">", color=self.cchart["plot3"])
+
+                    if yval is not None and ycos is not None:
+                        pmedio = max(ycos, yval) - abs(yval - ycos) / 2 
+                        performa = (yval - ycos) / ycos if ycos != 0 else 0.0
+                        ycolor =  self.cchart["plot1"] if performa > 0 else self.cchart["plot3"]
+                        av.annotate(
+                            f"{performa:>3.1%}",
+                            xy=(l_ix, pmedio),
+                            xytext=(l_ix, pmedio),  # desplaza 5% arriba
+                            fontsize=5,
+                            color=ycolor,
+                            ha="left"
+                        )
 
                     # Opcional: si se quiere sombrear diferencias (cuando costo > value)
                     try:
@@ -4442,6 +4477,7 @@ class WidgetVehiculo(TickerInfo):
                     except Exception:
                         pass
 
+
             # formateo eje derecho
             av.set_ylabel("Dolar US", fontsize="x-small", color=self.cchart["plot1"])
             av.yaxis.set_major_formatter(currency)
@@ -4451,6 +4487,8 @@ class WidgetVehiculo(TickerInfo):
             av.spines["right"].set_color(self.cchart["plot1"])
             av.spines["right"].set_visible(True)
             av.axhline(0, linewidth=0.6, ls="--", color=self.cchart["plot1"])
+
+
 
             # línea 0 en eje izquierdo para referencia
             ax.axhline(0, linewidth=0.6, ls="--", color=self.cchart["texto"])
@@ -4470,7 +4508,6 @@ class WidgetVehiculo(TickerInfo):
             if patches:
                 fg.legend(handles=patches, loc=legend_loc, fontsize=5)
 
-
             # ajustar límites Y de forma robusta (si es necesario)
             try:
                 left_vals = []
@@ -4485,7 +4522,6 @@ class WidgetVehiculo(TickerInfo):
                         ax.set_ylim(ymin - 0.05 * rng, ymax + 0.05 * rng)
             except Exception:
                 pass
-
         except Exception as e:
             print(f"graph_performace_portafolio(): {e}")
 
@@ -4542,7 +4578,7 @@ class WidgetVehiculo(TickerInfo):
                 wdebi.append(odeu)
                 wlabe.append("Otros")
 
-            if self.vehiculo == "Stock":
+            if self.vehiculo in ("Stock", "BBVA.ARS"):
                 if self.resumen:
                     cash = float(self.resumen[" Cash       :"])
                 pdatos = {
@@ -4552,7 +4588,7 @@ class WidgetVehiculo(TickerInfo):
                     "Cash": cash,
                 }
 
-            elif self.vehiculo != "Stock":
+            elif self.vehiculo == "Crypto":
                 pdatos = {
                     "Inversión": tcos,
                     "UnProfit": tpro,
@@ -4560,10 +4596,10 @@ class WidgetVehiculo(TickerInfo):
                     "Cash": -sum(wdebi),
                 }
 
+            # Obtiene Dataframe de performance
             ddatos = performa_asset(
                 account=self.account, vehiculo=self.vehiculo, tipo=self.vehiculo
             )
-
             return pdatos, ddatos, GainLoss
 
         try:
@@ -4578,14 +4614,9 @@ class WidgetVehiculo(TickerInfo):
             self.graph_gain_loss(data=GainLoss, parm=parm)
             self.graph[1][0].draw()
 
-            if self.vehiculo != "BBVA.ARS":
-
-                # controla que pase una vez por plot del gráfico
-                # if not DataHub.last_process["graph_performace_portafolio"]:
-
-                self.setup_graph_performace(tipo="1Y")
+            # ajusta gráfico performance portafolio i setea a 1
+            self.setup_graph_performace(tipo="1Y")
          
-                # DataHub.last_process["graph_performace_portafolio"] = True
         except Exception as e:
             print(f"[run_gráficos()]: {e}")
 

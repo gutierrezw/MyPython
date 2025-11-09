@@ -1,5 +1,5 @@
 from Class_DataFrame import get_yfinance
-from Modulos_Mysql import (select_booktrading, Performance,    select_diaria_performance)
+from Modulos_Mysql import (IPerformance, RepositorioOportunidadesBuySell)
 from Modulos_Utilitarios import vehiculo_parm, convierte_ticket_crypto, porcentaje
 from Modulos_Comunes import detalle_book, read_csv_insert_diaria, crea_dataframe_performa_Index
 from Modulos_python import *
@@ -15,6 +15,9 @@ from Modulos_python import *
          4) hay que cargar tabla diaria_performa antes de iniciar el paso (5) 
          6) cambiar a False switch diaria para iniciar carga performa_inversion
 """
+
+ROp = RepositorioOportunidadesBuySell()
+Inv = IPerformance()
 
 
 def plot_index(wperf, fg, log=True):
@@ -78,16 +81,30 @@ def inserta_index_performa(df=None, insert=True):
         values.update({'dividends': rows['dividends']})
 
         if insert:
-            Performa.insert_performa_inversion(values)
+            Inv.insert_performa_inversion(values)
 
 
 # Leer el archivo CSV y convertirlo en una lista
-def read_csv_file(path=None):
+def read_csv_insert_diaria(path=None, insert=False):
 
     with open(path, mode='r', newline='') as file:
         reader = csv.reader(file)
         ix = next(reader)
         diaria = [rows for rows in reader]
+
+        if insert:
+            for read in diaria:
+                values = {}
+                for i, col in enumerate(ix, start=0):
+                    if col == 'symbol':
+                        symbol = read[i]
+                    
+                    elif col != 'symbol':
+                        values.update({col: read[i]})
+
+                # print(f"Insertando diaria_performance {symbol} - {values}")
+                if float(values['cantidad']) > 0:
+                    Inv.insert_diaria_performance(values, symbol=symbol) 
 
     return diaria, ix
 
@@ -97,20 +114,21 @@ def procesar_cuenta_desde_inicio(new_diaria=True, insert=False):
 
     #  True para construir diaria y graficar
     if new_diaria:
-        book, ix = select_booktrading(accion='cartera', account=account, idivisa=divisa)
+        book, ix = ROp.select_booktrading(accion='cartera', account=account, idivisa=divisa)
         path = detalle_book(account=account, vehiculo=vehiculo, book=book, ix=ix)
 
         # Leer el archivo CSV y convierte en lista
-        diaria, iy = read_csv_file(path)
+        diaria, iy = read_csv_insert_diaria(path, insert)
+            
         df_performa = crea_dataframe_performa_Index(account=account,
-                                            vehiculo=vehiculo,
-                                            display=True,
-                                            diaria=diaria,
-                                            iy=iy)
+                                                    vehiculo=vehiculo,
+                                                    display=True,
+                                                    diaria=diaria,
+                                                    iy=iy)
 
     else:
         # caso que toma diaria de las tablas
-        diaria, iy = select_diaria_performance(account=account)
+        diaria, iy = Inv.select_diaria_performance(account=account)
         df_performa = crea_dataframe_performa_Index(account=account,
                                             vehiculo=vehiculo,
                                             display=True,
@@ -121,7 +139,7 @@ def procesar_cuenta_desde_inicio(new_diaria=True, insert=False):
 
     # inserta tabla inversion_performance desde el inicio
     if insert:
-        inserta_index_performa(df_performa)
+       inserta_index_performa(df_performa)
 
 
 def procesar_cuenta_desde_app(new_diaria=True, insert=False):
@@ -129,7 +147,7 @@ def procesar_cuenta_desde_app(new_diaria=True, insert=False):
 
     #  True para construir diaria y graficar
     if new_diaria:
-        book, ix = select_booktrading(accion='diaria_app', account=account, idivisa=divisa)
+        book, ix = ROp.select_booktrading(accion='diaria_app', account=account, idivisa=divisa)
         path = detalle_book(account=account, vehiculo=vehiculo, book=book, ix=ix, option='app')
 
         # Leer CSV e inserta después de ultima diaria
@@ -162,9 +180,8 @@ if __name__ == '__main__':
 
     # cuentas = {'Stock': {'account': 'U4214563', 'divisa': 'USD'}}
     # cuentas = {'Crypto':{'account': 'B0000001', 'divisa': 'USD'}}
-    cuentas = {'BBVA.ARS':{'account': 'SANT0001', 'divisa': 'ARS'}}
     cuentas = {'BBVA.ARS':{'account': 'BBVA0001', 'divisa': 'ARS'}}
-    cuentas = {'Crypto':{'account': 'B0000001', 'divisa': 'USD'}}
+    cuentas = {'BBVA.ARS':{'account': 'SANT0001', 'divisa': 'ARS'}}
 
     Performa = Performance()
 
@@ -175,7 +192,7 @@ if __name__ == '__main__':
         symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=vehiculo)
         hoy = datetime.now().date()
 
-        procesar_cuenta_desde_inicio(new_diaria=True, insert=False)
+        procesar_cuenta_desde_inicio(new_diaria=True, insert=True)
         # procesar_cuenta_desde_app(new_diaria=True, insert=True)
 
     win.mainloop()
