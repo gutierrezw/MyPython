@@ -110,7 +110,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
         )
         DataHub.manager_events.register_job(
             name=diario,
-            interval_sec=10800,
+            interval_sec=600,
             func=self.schedule_diario,
         )
         DataHub.manager_events.register_job(

@@ -2,5 +2,40 @@
     "files.autoSave": "onFocusChange",
     "terminal.integrated.stickyScroll.enabled": false,
     "python.formatting.provider": "black",
-    "editor.formatOnSave": true
+    "editor.formatOnSave": true,
+    "tabnine.experimentalAutoImports": true,
+    "security.workspace.trust.banner": "never",
+    "workbench.colorTheme": "Visual Studio Dark",
+    "git.openRepositoryInParentFolders": "always",
+    "editor.minimap.renderCharacters": false,
+    "editor.minimap.enabled": false,
+    "code-runner.runInTerminal": true,
+    "terminal.integrated.cwd": "C:\\Users\\InversionesWildaga\\Documents\\MyPython",
+    "python.defaultInterpreterPath": "C:/Users/InversionesWildaga/Documents/MyPython/.venv/Scripts/python.exe",
+    "python.terminal.activateEnvironment": true,
+    "[python]": {
+        "diffEditor.ignoreTrimWhitespace": false,
+        "editor.defaultColorDecorators": "never",
+        "editor.formatOnType": true,
+        "editor.wordBasedSuggestions": "off"
+    },
+    "grunt.autoDetect": "on",
+    "gulp.autoDetect": "on",
+    "terminal.integrated.enableMultiLinePasteWarning": "never",
+    "editor.rulers": [
+        130
+    ],
+    "files.candidateGuessEncodings": [
+        "utf8"
+    ],
+    "files.encoding": "utf8",
+    "files.autoGuessEncoding": true,
+    "workbench.settings.useSplitJSON": true,
+    "files.associations": {
+        "*.py": "hlsl"
+    },
+    "python.envFile": "${workspaceFolder}/.env",
+    "python.env": {
+        "PYTHONPATH": "${workspaceFolder};${workspaceFolder}/AppOO"
+    }
 }

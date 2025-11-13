@@ -2087,12 +2087,24 @@ class RepositorioOportunidadesBuySell(
                 hasta = datetime.now() - timedelta(days=1)
                 desde = datetime.now() - timedelta(days=10)
                 f_hasta = hasta.strftime("%Y-%m-%d")
+                hasta_mes = hasta.month
+                hasta_año = hasta.year
 
-                qrq = """SELECT a.* from (SELECT cuenta, simbolo,  max(fechahora) fechahora, sum(cantidad) cantidad
-                                            FROM bdinv.booktrading  WHERE cuenta = '%s' and date(fechahora) < '%s'
-                                            GROUP by cuenta, simbolo) as A  
-                        ORDER by fechahora ASC;"""
-                cursor.execute(qrq % (account, f_hasta))
+                qrq = f"""
+                        SELECT X.cuenta, X.simbolo,  X.fechahora, sum(cantidad) as cantidad
+                        FROM
+                        (SELECT a.* from (SELECT cuenta, simbolo,  max(fechahora) fechahora, sum(cantidad) cantidad
+                                        FROM bdinv.booktrading  WHERE cuenta = '{account}' and date(fechahora) < '{f_hasta}'
+                                        GROUP by cuenta, simbolo) as a  
+                        UNION 
+                        SELECT a.* from (SELECT cuenta, simbolo,  fechahora, sum(cantidad) cantidad
+                                        FROM bdinv.booktrading  WHERE cuenta = '{account}' and date(fechahora) < '{f_hasta}' 
+                                                                  and month(fechahora) = {hasta_mes} and year(fechahora) = {hasta_año}
+                                        GROUP by cuenta, simbolo, fechahora) as a) as X
+                        GROUP by X.cuenta, X.simbolo, X.fechahora 
+                        ORDER by simbolo, fechahora ASC;
+                      """
+                cursor.execute(qrq)
                 ix = [columna[0] for columna in cursor.description]
                 sqx = cursor.fetchall()
 
