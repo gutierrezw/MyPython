@@ -717,6 +717,10 @@ def style_app(main=None) -> object:
     # TNoteBook
     style.configure("TNotebook", background="DarkCyan", borderwidth=1)
     style.configure("TNotebook.Tab", background="DarkCyan", foreground="black")
+    style.configure("I.TNotebook.Tab", 
+                background="lightcoral",   # Color de fondo cuando NO está seleccionada
+                foreground="white"         # Color del texto
+    )
 
     style.configure(
         "Custom.TNotebook.Tab", background="lightblue", font=("Arial", 10, "bold")

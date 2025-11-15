@@ -516,9 +516,13 @@ def get_ultimo_dia_mercado(market="Stock"):
     # Descarga los datos históricos del índice
     if market == "Stock":
         (activo, datos) = get_yfinance(ticket="^GSPC", period="7d", vehiculo="download")
-    else:
+    elif market == "Crypto":
         (activo, datos) = get_yfinance(
             ticket="BTC-USD", period="7d", vehiculo="download"
+        )
+    elif market == "BBVA.ARS":
+        (activo, datos) = get_yfinance(
+            ticket="^MERV", period="7d", vehiculo="download"
         )
 
     # Obtén el último día hábil

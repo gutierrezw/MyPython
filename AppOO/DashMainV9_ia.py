@@ -2081,6 +2081,8 @@ class DashMain:
         self.win4 = ttk.Frame(self.nb, style="C.TFrame", width=self.dw, height=self.dh)
         self.win5 = ttk.Frame(self.nb, style="C.TFrame", width=self.dw, height=self.dh)
         self.win6 = ttk.Frame(self.nb, style="C.TFrame", width=self.dw, height=self.dh)
+        self.win7 = ttk.Frame(self.nb, style="C.TFrame", width=self.dw, height=self.dh)
+        self.win8 = ttk.Frame(self.nb, style="C.TFrame", width=self.dw, height=self.dh)
 
         # Añadir padding a los frames
         self.win0.pack(fill=tk.BOTH, expand=True)
@@ -2090,11 +2092,15 @@ class DashMain:
         self.win4.pack(fill=tk.BOTH, expand=True)
         self.win5.pack(fill=tk.BOTH, expand=True)
         self.win6.pack(fill=tk.BOTH, expand=True)
+        self.win7.pack(fill=tk.BOTH, expand=True)
+        self.win8.pack(fill=tk.BOTH, expand=True)
 
         self.nb.add(self.win1, text="Crypto         ")
         self.nb.add(self.win0, text="Stock          ")
         self.nb.add(self.win4, text="Ars            ")
-        self.nb.add(self.win6, text="FuturoCrypto   ")
+        self.nb.add(self.win7, text="Ves            ", state= "disabled")
+        self.nb.add(self.win8, text="Crowfonding    ", state= "disabled")
+        self.nb.add(self.win6, text="FuturoCrypto   ", state= "disabled")
         self.nb.add(self.win2, text="Screener       ")
         self.nb.add(self.win3, text="Gestión        ")
         self.nb.add(self.win5, text="System         ")
