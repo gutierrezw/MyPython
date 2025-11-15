@@ -266,10 +266,12 @@ class DataHub:
     now = datetime.now()
     mrk_anterior = get_ultimo_dia_mercado(market="Stock")
     dia_anterior = get_ultimo_dia_mercado(market="Crypto")
+    mrv_anterior = get_ultimo_dia_mercado(market="BBVA.ARS")
     wait_3m = now + timedelta(minutes=3)
     last_process = {
         "Stock": {"diaria_book_performance": mrk_anterior, "wait": wait_3m},
         "Crypto": {"diaria_book_performance": dia_anterior, "wait": wait_3m},
+        "BBVA.ARS": {"diaria_book_performance": mrv_anterior, "wait": wait_3m},
         "graph_performace_portafolio": False,
         "dividends_en_market_stock": now,
     }
@@ -2417,11 +2419,11 @@ class WidgetVehiculo(TickerInfo):
                     relief=tk.FLAT,
                     command=lambda: self.setup_graph_performace("5Y"),
                 )
-                bt1.place(y=20, x=725)
-                bt2.place(y=20, x=750)
-                bt3.place(y=20, x=775)
-                bt4.place(y=20, x=800)
-                bt5.place(y=20, x=825)
+                bt1.place(y=15, x=725)
+                bt2.place(y=15, x=750)
+                bt3.place(y=15, x=775)
+                bt4.place(y=15, x=800)
+                bt5.place(y=15, x=825)
 
         # información de sesión
         self.sesion = self.PlanInversion.select_sesion(
@@ -4367,14 +4369,16 @@ class WidgetVehiculo(TickerInfo):
                 ax.plot(data.index, data[left_series[1]], color=self.cchart["plot2"], linewidth=1.3)
 
             # formateo eje X
-            ax.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
+            Xformatter = "%b-%y" if parm.get("periodo") in ('6M', '1Y', '5Y') else "%d-%b"
+            ax.xaxis.set_major_formatter(mdates.DateFormatter(Xformatter))
+
             xlabels = ax.get_xticklabels()
             plt.setp(xlabels, ha="right", rotation=20, fontsize=6)
-            ax.tick_params(axis="x", colors=self.cchart["axsx"])
+            ax.tick_params(axis="x", colors=self.cchart["plot5"])
 
             # estilos de spines y grilla
-            ax.spines["bottom"].set_color(self.cchart["axsx"])
-            ax.spines["left"].set_color(self.cchart["axsy"])
+            ax.spines["bottom"].set_color(self.cchart["plot5"])
+            ax.spines["left"].set_color(self.cchart["plot5"])
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
             ax.grid(True, color=self.cchart["axsx"], linewidth=0.3, axis="y", alpha=0.9)
@@ -4384,7 +4388,7 @@ class WidgetVehiculo(TickerInfo):
             ax.yaxis.set_major_formatter(porcentaje)
             ylabels = ax.get_yticklabels()
             plt.setp(ylabels, ha="right", fontsize=6)
-            ax.tick_params(axis="y", colors=self.cchart["axsy"])
+            ax.tick_params(axis="y", colors=self.cchart["plot5"])
 
             # eje derecho: Value / Costo (si existen)
             value_col = parm.get("Value") if parm.get("Value") in data.columns else None
@@ -4420,7 +4424,7 @@ class WidgetVehiculo(TickerInfo):
                 # Si sólo existe costo_col -> dibujar barras de costo
                 if costo_col and not value_col:
                     av.bar(data.index, data[costo_col], width=width_costo,
-                           color=self.cchart["plot3"], alpha=0.25, align="center", edgecolor='none')
+                           color=self.cchart["plot31"], alpha=0.35, align="center", edgecolor='none')
                     
                     # Marca costo en el eje y 
                     l_ix = len(data.index)
@@ -4434,13 +4438,13 @@ class WidgetVehiculo(TickerInfo):
  
                     # Marca value en el eje y 
                     yval = data[value_col].iloc[-1] if value_col else None
-                    av.plot(l_ix, yval, marker=">", color=self.cchart["plot1"])
+                    av.plot(l_ix, yval, marker=">", color=self.cchart["plot8"])
 
  
                 # Si existen ambas -> dibujar costo como fondo y value encima
                 elif value_col and costo_col:
                     av.bar(data.index, data[costo_col], width=width_costo,
-                           color=self.cchart["plot3"], alpha=0.20, align="center", edgecolor='none', label=costo_col)
+                           color=self.cchart["plot31"], alpha=0.35, align="center", edgecolor='none', label=costo_col)
                     av.bar(data.index, data[value_col], width=width_value,
                            color=self.cchart["plot1"], alpha=0.9, align="center", edgecolor='none', label=value_col)
 
@@ -4448,20 +4452,21 @@ class WidgetVehiculo(TickerInfo):
                     l_ix = data.index[-1]
                     ycos = data[costo_col].iloc[-1] if costo_col else None
                     yval = data[value_col].iloc[-1] if value_col else None
-                    av.plot(l_ix, yval, marker=">", color=self.cchart["plot1"])
-                    av.plot(l_ix, ycos, marker=">", color=self.cchart["plot3"])
+                    av.plot(l_ix, yval, marker=">", color=self.cchart["plot9"])
+                    av.plot(l_ix, ycos, marker=">", color=self.cchart["plot31"])
 
                     if yval is not None and ycos is not None:
                         pmedio = max(ycos, yval) - abs(yval - ycos) / 2 
                         performa = (yval - ycos) / ycos if ycos != 0 else 0.0
-                        ycolor =  self.cchart["plot1"] if performa > 0 else self.cchart["plot3"]
+                        # ycolor =  self.cchart["plot8"] if performa > 0 else self.cchart["plot31"]
+                        ycolor =  self.cchart["texto"]
                         av.annotate(
                             f"{performa:>3.1%}",
                             xy=(l_ix, pmedio),
                             xytext=(l_ix, pmedio),  # desplaza 5% arriba
                             fontsize=5,
                             color=ycolor,
-                            ha="left"
+                            ha="left",
                         )
 
                     # Opcional: si se quiere sombrear diferencias (cuando costo > value)

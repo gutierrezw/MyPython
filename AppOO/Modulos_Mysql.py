@@ -2031,6 +2031,17 @@ class RepositorioOportunidadesBuySell(
                 cursor.execute(qry % (account, idivisa, symbol))
                 sql = cursor.fetchall()
 
+            # para obtener tasa de cambio mas reciente
+            elif accion == "tasa_cambio":
+                qry = """SELECT a.* FROM (SELECT * FROM booktrading WHERE cuenta = '%s'  AND divisa = '%s' 
+                                                                    AND simbolo = '%s' AND activa = 'Y') AS a 
+                                                                    ORDER BY fechahora DESC, sec DESC;"""
+
+                cursor.execute(qry % (account, idivisa, symbol))
+                sql = cursor.fetchall()
+
+
+
             elif accion == "cuenta":
                 qry = """SELECT a.* FROM (SELECT * FROM booktrading WHERE cuenta = '%s'  AND divisa = '%s') AS a 
                                         ORDER BY fechahora ASC, sec ASC;"""

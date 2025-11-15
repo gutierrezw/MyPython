@@ -10,12 +10,12 @@ from Modulos_python import (
     itemgetter,
     threading,
     datetime,
+    timedelta,
 )
 from Modulos_Mysql import RepositorioOportunidadesBuySell, DiariaCNV
 from Class_customer import WidgetVehiculo, DataHub
-from Modulos_Utilitarios import delete_file, buscar_ticker, define_FileCache
-from Modulos_Utilitarios import is_numeric
-
+from Modulos_Utilitarios import delete_file, buscar_ticker, define_FileCache, is_numeric
+from Modulos_Comunes import diaria_book_performance, proceso_update_performance
 
 class ArsFondosInversion(tk.Frame):
     def __init__(self, parent=None, master=None, colores=None):
@@ -85,7 +85,13 @@ class ArsFondosInversion(tk.Frame):
     def update_panel_fci(self):
         def change_a_ARS():
             nav, unpyl, dgyp, unprofit, costo, fecha = 0.0, 0.0, 0.0, 0.0, 0.0, None
+            
+            # obtiene tasa de cambio USDT-ARS
+            hoy = datetime.now()
+            tasa_cambio = self.get_tasa_cambio_USDT(fiat="ARS", date=hoy.date())
+
             for keys in self.ars.positions:
+                keys["factor_cambio"] = tasa_cambio
                 keys["mrkprice"] = keys["mrkprice"] * keys["factor_cambio"]
                 keys["mktvalue"] = keys["mrkprice"] * keys["position"]
                 keys["costobase"] = keys["costobase"] * keys["factor_cambio"]
@@ -645,7 +651,7 @@ class ArsFondosInversion(tk.Frame):
         try:
             if date is None:
                 book, ix = self.RepositorioOportunidades.select_booktrading(
-                    accion="select*",
+                    accion="tasa_cambio",
                     account=self.account_fiat,
                     idivisa="USD",
                     symbol="USDT",
@@ -669,13 +675,15 @@ class ArsFondosInversion(tk.Frame):
 
                         break
 
-                    elif values[ix.index("fechahora")].date() == date:
+                    # toma tasa mas reciente anterior a la fecha dada
+                    elif values[ix.index("fechahora")].date() <= date:
 
                         tasa = values[ix.index("preciotrans")]
                         break
 
                     else:
                         anterior = values[ix.index("preciotrans")]
+                      
 
                 return tasa if tasa > 0 else anterior
         except (EncodingWarning, Exception) as e:
@@ -710,6 +718,29 @@ class ArsFondosInversion(tk.Frame):
 
         return existe
 
+    def schedule_diaria_performace(self):
+
+        print(f"[schedule_diaria_performace]: Iniciando proceso para {self.vehiculo}")
+        for account in self.account_fci:
+            t_wait, update = DataHub.last_process[self.vehiculo], False
+            update = diaria_book_performance(
+                    account=account, vehiculo=self.vehiculo, proces=t_wait
+            )
+            print(f"[schedule_diaria_performace]: {self.vehiculo} - {account} - Update: {update}")
+
+            # si actualizó tabla diaria, calcula proxima fecha de update
+            if update:
+                # agrega performance a la tabla
+                proceso_update_performance(account=account, vehiculo=self.vehiculo)
+
+        # eof() programa próxima ejecución
+        hoy = datetime.now().replace(hour=23, minute=0, second=0, microsecond=0)
+        wait = hoy + timedelta(days=2)
+        DataHub.last_process[self.vehiculo]["diaria_book_performance"] = wait
+        DataHub.last_process["graph_performace_portafolio"] = False
+
+
+
     # vericica cada 90 segundos si hay nueva interfaz para cargar
     def run_loads(self):
         def run_schedule(task=None):
@@ -720,6 +751,8 @@ class ArsFondosInversion(tk.Frame):
                     self.load_positions_FCI()
 
                     self.update_panel_fci()
+                
+                    self.schedule_diaria_performace()
 
                 self.counter += 1
                 DataHub.update_self_procesos(
