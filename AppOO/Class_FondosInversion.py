@@ -720,13 +720,11 @@ class ArsFondosInversion(tk.Frame):
 
     def schedule_diaria_performace(self):
 
-        print(f"[schedule_diaria_performace]: Iniciando proceso para {self.vehiculo}")
         for account in self.account_fci:
             t_wait, update = DataHub.last_process[self.vehiculo], False
             update = diaria_book_performance(
                     account=account, vehiculo=self.vehiculo, proces=t_wait
             )
-            print(f"[schedule_diaria_performace]: {self.vehiculo} - {account} - Update: {update}")
 
             # si actualizó tabla diaria, calcula proxima fecha de update
             if update:

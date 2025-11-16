@@ -267,11 +267,13 @@ class DataHub:
     mrk_anterior = get_ultimo_dia_mercado(market="Stock")
     dia_anterior = get_ultimo_dia_mercado(market="Crypto")
     mrv_anterior = get_ultimo_dia_mercado(market="BBVA.ARS")
+    mrv_safeday = mrv_anterior + timedelta(days=1)  # BBVA.ARS cierra un dia después
+
     wait_3m = now + timedelta(minutes=3)
     last_process = {
         "Stock": {"diaria_book_performance": mrk_anterior, "wait": wait_3m},
         "Crypto": {"diaria_book_performance": dia_anterior, "wait": wait_3m},
-        "BBVA.ARS": {"diaria_book_performance": mrv_anterior, "wait": wait_3m},
+        "BBVA.ARS": {"diaria_book_performance": mrv_safeday, "wait": wait_3m},
         "graph_performace_portafolio": False,
         "dividends_en_market_stock": now,
     }
