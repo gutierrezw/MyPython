@@ -1,4 +1,4 @@
-# engine.py
+# Valuation_engine.py
 """
 Valuation Engine — Orquestador principal
 
@@ -59,6 +59,8 @@ class ValuationEngine:
 
         # 2) Parse XBRL y agregar TTM
         parsed_agg = aggregate_xbrl_metrics(files)
+        print(f"keys parsed_agg: {list(parsed_agg.keys())}")
+        
         self._log("🧾 Agregado XBRL (resumen):")
         if self.verbose:
             # imprimir keys importantes

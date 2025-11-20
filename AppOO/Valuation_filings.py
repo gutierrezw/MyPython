@@ -6,151 +6,77 @@ Módulo responsable de:
 - Fallback escaneando carpetas locales si metadata no existe
 - Detección textual básica de REIT
 """
-
-import json
-import re
-from pathlib import Path
-from datetime import datetime
-
+from Modulos_python import json, os, re, Path, datetime
 
 # ============================================================
 # 📁 Obtener lista de filings relevantes
 # ============================================================
 def get_filing_list(ticker_dir: Path):
     """
-    Retorna lista de Path ordenada:
+    Selección REAL para análisis financiero:
 
-    1. Todos los 10-Q del año actual (si existen)
-    2. Últimos 5 10-K
-    3. Fallback: últimos 5 archivos cualquiera disponibles
-
-    La metadata.json permite reconstruir fácilmente los paths.
+    1) Tomar los últimos 4 × 10-Q (independientemente del año)
+    2) Tomar el último 10-K
+    3) Mantener orden por fecha descendente
     """
+
     metadata_path = ticker_dir / "metadata.json"
     candidates = []
 
-    # --------------------------------------------------------
-    # 1️⃣ LEER metadata.json (si existe)
-    # --------------------------------------------------------
+    # ---------------------------------------------------------------
+    # 1. Cargar metadata.json
+    # ---------------------------------------------------------------
     if metadata_path.exists():
         try:
             md = json.loads(metadata_path.read_text(encoding="utf-8"))
             for item in md.get("downloaded_files", []):
-                if not isinstance(item, dict):
-                    continue
-
-                pstr = (
-                    item.get("path")
-                    or item.get("local_path")
-                    or item.get("file")
-                    or item.get("local_name")
-                )
-
                 form = (item.get("form") or "").upper()
-                date_str = (
-                    item.get("date")
-                    or item.get("downloaded_date")
-                    or item.get("timestamp")
-                )
-
-                if not pstr:
-                    continue
-
-                # Normaliza path
-                p = Path(pstr)
-                if not p.is_absolute():
-                    p = ticker_dir / p
-
+                p = Path(item["path"])
                 if not p.exists():
                     continue
+                dt = datetime.fromisoformat(item["date"])
 
-                # Normaliza fecha
-                dt = None
-                if isinstance(date_str, str):
-                    for fmt in (
-                        "%Y-%m-%d",
-                        "%Y-%m-%dT%H:%M:%S",
-                        "%Y-%m-%dT%H:%M:%S.%f",
-                    ):
-                        try:
-                            dt = datetime.fromisoformat(date_str)
-                            break
-                        except:
-                            try:
-                                dt = datetime.strptime(date_str, fmt)
-                                break
-                            except:
-                                dt = None
-                if dt is None:
-                    try:
-                        dt = datetime.fromtimestamp(p.stat().st_mtime)
-                    except:
-                        dt = datetime(1900, 1, 1)
+                candidates.append({
+                    "path": p,
+                    "form": form,
+                    "dt": dt
+                })
 
-                # Guardar como candidato
-                if p.suffix.lower() in (".htm", ".html", ".xml"):
-                    candidates.append(
-                        {"path": p, "form": form, "dt": dt}
-                    )
         except Exception as e:
-            print(f"⚠️ Error leyendo metadata.json: {e}")
-
-    # --------------------------------------------------------
-    # 2️⃣ Fallback: buscar archivos manualmente en carpetas 10Q/10K
-    # --------------------------------------------------------
-    if not candidates:
-        for sub in ["10Q_Filings", "10K_Filings", "6K_Filings", "20F_Filings"]:
-            d = ticker_dir / sub
-            if d.exists():
-                for ext in ("*.htm", "*.html", "*.xml"):
-                    for f in d.glob(ext):
-                        form = ""
-                        if "10q" in sub.lower() or re.search(r"10-?q", f.name, re.I):
-                            form = "10-Q"
-                        elif "10k" in sub.lower() or re.search(r"10-?k", f.name, re.I):
-                            form = "10-K"
-
-                        dt = datetime.fromtimestamp(f.stat().st_mtime)
-                        candidates.append(
-                            {"path": f, "form": form, "dt": dt}
-                        )
+            print(f"[WARN] Error leyendo metadata.json → {e}")
 
     if not candidates:
         return []
 
-    # --------------------------------------------------------
-    # 3️⃣ Selección: 10-Q del año actual + últimos 10-K
-    # --------------------------------------------------------
-    year_now = datetime.now().year
+    # ---------------------------------------------------------------
+    # 2. Separar 10-Q y 10-K
+    # ---------------------------------------------------------------
+    q = [c for c in candidates if c["form"] == "10-Q"]
+    k = [c for c in candidates if c["form"] == "10-K"]
 
-    # Filtrar 10-Q
-    ten_qs = [
-        c for c in candidates
-        if c["form"].upper().startswith("10-Q")
-           or re.search(r"10-?q", c["path"].name, re.I)
-    ]
-    ten_qs_year = [c for c in ten_qs if c["dt"].year == year_now]
-    ten_qs_year = sorted(ten_qs_year, key=lambda x: x["dt"], reverse=True)
+    # selecciona para empresas extranjera
+    if not q and not k:
+        q = [c for c in candidates if c["form"] == "20-F"]
+        k = [c for c in candidates if c["form"] == "6-K"]
 
-    # Filtrar 10-K
-    ten_ks = [
-        c for c in candidates
-        if c["form"].upper().startswith("10-K")
-           or re.search(r"10-?k", c["path"].name, re.I)
-    ]
-    ten_ks = sorted(ten_ks, key=lambda x: x["dt"], reverse=True)[:5]
+    q_sorted = sorted(q, key=lambda x: x["dt"], reverse=True)
+    k_sorted = sorted(k, key=lambda x: x["dt"], reverse=True)
 
-    chosen = ten_qs_year + ten_ks
+    # Tomar últimos 4 trimestres
+    last_four_q = q_sorted[:4]
 
-    # Si no hay nada del año actual, tomar el último 10-Q
-    if not chosen:
-        if ten_qs:
-            chosen = [sorted(ten_qs, key=lambda x: x["dt"], reverse=True)[0]] + ten_ks
-        else:
-            # Últimos 5 cualquiera
-            chosen = sorted(candidates, key=lambda x: x["dt"], reverse=True)[:5]
+    # Tomar el último 10-K
+    last_k = k_sorted[:1]
 
-    return [c["path"] for c in chosen]
+    # ---------------------------------------------------------------
+    # 3. Combinar
+    # ---------------------------------------------------------------
+    final = last_four_q + last_k
+
+    # Ordenar por fecha
+    final = sorted(final, key=lambda x: x["dt"], reverse=True)
+
+    return [c["path"] for c in final]
 
 
 # ============================================================

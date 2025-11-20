@@ -346,6 +346,10 @@ class Debugging:
         self.logger.update({"DataFrameCache": logging.getLogger("DataFrameCache")})
         self.logger["DataFrameCache"].setLevel(logging.WARNING)
 
+        # manager logging
+        self.logger.update({"ClassAgenteIA": logging.getLogger("ClassAgenteIA")})
+        self.logger["ClassAgenteIA"].setLevel(logging.WARNING)
+
     def handled_CacheLogger_name(self):
         """
         Captura manejo de cache y filename para logger

@@ -7,6 +7,7 @@ Funciones utilitarias:
 """
 
 import os
+import re
 import json
 import time
 import requests
@@ -14,7 +15,53 @@ from pathlib import Path
 from datetime import datetime, date
 from typing import Dict, Any, Optional
 
+# ============================================================
+# 🔢 Normaliza texto
+# ============================================================
+def _normalize_number_text(s: str):
+    """Extrae número de un texto (ej: '1,234', '(1,234)', '$1,234') -> float."""
+    if not s:
+        return None
+    s = s.replace("\u2013", "-").replace("\u2014", "-")
+    m = re.search(r"[-+]?\d{1,3}(?:[,\d]{0,})(?:\.\d+)?", s.replace("(", "-").replace(")", ""))
+    if not m:
+        # try float in scientific
+        m2 = re.search(r"[-+]?\d+\.\d+e[-+]?\d+", s, re.I)
+        if m2:
+            try:
+                return float(m2.group(0))
+            except:
+                return None
+        return None
+    try:
+        return float(m.group(0).replace(",", ""))
+    except:
+        return None
 
+# ============================================================
+# 🔢 Busca texto numerico
+# ============================================================
+def _find_number_in_adjacent_cells(tr, keywords):
+    """Busca en las celdas del mismo <tr> un texto numérico cercano a keywords."""
+    tds = tr.find_all(["td", "th"])
+    # flatten texts
+    texts = [ (i, td.get_text(" ", strip=True)) for i, td in enumerate(tds) ]
+    for i, txt in texts:
+        low = txt.lower()
+        for kw in keywords:
+            if kw in low:
+                # prefer right-most numeric cell after keyword
+                # scan right
+                for j in range(i+1, len(tds)):
+                    val = _normalize_number_text(tds[j].get_text(" ", strip=True))
+                    if val is not None:
+                        return val
+                # else scan left
+                for j in range(i-1, -1, -1):
+                    val = _normalize_number_text(tds[j].get_text(" ", strip=True))
+                    if val is not None:
+                        return val
+    return None
 # ============================================================
 # 🔢 guarda json resultado en directorio
 # ============================================================

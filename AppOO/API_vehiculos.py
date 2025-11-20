@@ -595,8 +595,9 @@ class WebsocketBinanceStreams(SpotWebsocketStreamClient):
         self.running = False
 
     def on_error(self, code, error):
-        self.running = False
+        # self.running = False
         # self.stop()
+        print(f"WebsocketBinanceStreams(): {code} Error: {error}")
 
     # subscribe cryptos al websocket
     def SUBSCRIBE(self):
@@ -606,7 +607,7 @@ class WebsocketBinanceStreams(SpotWebsocketStreamClient):
             self.subscribe(stream=self.symbols, id="24hrTicker_5494febb")
         except (ssl.SSLEOFError, Exception) as e:
             print(f"SUBSCRIBE():: running:{self.running}:: {e}")
-            self.reconnect = False
+            # self.reconnect = False
 
     # loop de reconexión en websocket
     def websocket_loop(self, limit=None, log=True, reconnect=True):
@@ -620,7 +621,7 @@ class WebsocketBinanceStreams(SpotWebsocketStreamClient):
 
         except (ssl.SSLEOFError, Exception) as e:
             print(f"websocket_loop():: {e}")
-            self.running = False
+            # self.running = False
             raise
 
 

@@ -1,6 +1,7 @@
 import os
 import io
 import ta
+import re 
 import sys
 import csv
 import ast
@@ -85,7 +86,7 @@ from urllib3.util.retry import Retry
 from functools import wraps
 
 from tkinter import ttk, messagebox, VERTICAL, HORIZONTAL, N, S, E, W
-from datetime import datetime, date, timedelta, time as dtime
+from datetime import datetime, date, timedelta, timezone, time as dtime
 from base64 import urlsafe_b64decode, urlsafe_b64encode, b64encode, b64decode
 from dateutil.relativedelta import relativedelta
 from fake_useragent import UserAgent

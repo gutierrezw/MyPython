@@ -1,7 +1,7 @@
 {
     "files.autoSave": "onFocusChange",
     "terminal.integrated.stickyScroll.enabled": false,
-    "python.formatting.provider": "black",
+    "editor.defaultFormatter": "ms-python.black-formatter",
     "editor.formatOnSave": true,
     "tabnine.experimentalAutoImports": true,
     "security.workspace.trust.banner": "never",
@@ -32,7 +32,7 @@
     "files.autoGuessEncoding": true,
     "workbench.settings.useSplitJSON": true,
     "files.associations": {
-        "*.py": "hlsl"
+        "*.py": "python"
     },
     "python.envFile": "${workspaceFolder}/.env",
     "python.env": {
