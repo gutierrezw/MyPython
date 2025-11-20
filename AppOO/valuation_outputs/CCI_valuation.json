@@ -1,13 +1,13 @@
 {
   "ticker": "CCI",
-  "timestamp": "2025-11-16T02:32:18.150675+00:00",
-  "price": 91.68,
+  "timestamp": "2025-11-19T23:59:53.892484+00:00",
+  "price": 91.05,
   "is_reit": true,
   "source_file": "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\EDGAR\\CCI_EDGAR_Files\\10Q_Filings\\cci-20250630.htm",
   "valuations": {
-    "EPS": 1.736587,
+    "EPS": null,
     "FCF": null,
-    "P/E": 52.793,
+    "P/E": null,
     "P/S": null,
     "P/FCF": null,
     "FFO_per_share": null,
@@ -17,15 +17,15 @@
     "Dividend_per_share": null,
     "DDM_value": null,
     "DCF_value_per_share": null,
-    "SharesOutstanding": 436000000,
-    "NetIncome": 757152000,
+    "SharesOutstanding": null,
+    "NetIncome": null,
     "Revenues": null,
-    "OperatingCashFlow": 2119844000,
+    "OperatingCashFlow": null,
     "CapitalExpenditures": null,
     "DividendsPaid": null,
     "FFO": null,
     "AFFO": null,
-    "Price": 91.68,
+    "Price": 91.05,
     "is_reit": true
   }
 }

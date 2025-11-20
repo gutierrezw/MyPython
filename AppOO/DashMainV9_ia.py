@@ -110,7 +110,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
         )
         DataHub.manager_events.register_job(
             name=diario,
-            interval_sec=600,
+            interval_sec=10800,
             func=self.schedule_diario,
         )
         DataHub.manager_events.register_job(
@@ -536,7 +536,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
         except EncodingWarning as e:
             print("[update_peso_position({})]: {}".format(self.vehiculo, e))
 
-    # mantiene self.position igual a la tabla inversiones
+    # mantiene self.position igual a la tabla inversionesError
+    # mantiene self.position igual a la tabla inversionesError@
     def update_self_positions(self, in_positions=None):
         try:
             ibook = enumerate(in_positions)

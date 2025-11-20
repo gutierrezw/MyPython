@@ -1,4 +1,5 @@
-""" "
+# Class_DasBot.py
+"""
 ┌─────────────────────┐       ┌──────────────────────┐        ┌──────────────────────┐
 │ Dashmain            │ ----> | cvs_forChatbot(Write)|        | Agente_ManagerSell() |
 │ (analiza, detecta)  │       │schedule_oportunidades|  ||    | readCSV(file)        |
@@ -22,7 +23,6 @@
 │ (notificación)      │
 └─────────────────────┘
 """
-
 from Modulos_python import (
     asyncio,
     Bot,
@@ -45,16 +45,84 @@ from Modulos_python import (
     asyncio,
     textwrap,
     datetime,
+    timedelta,
+    Path,
+    wraps,
 )
-from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem
+from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion
+from Valuation_edgar_downloader import BASE_DIR, download_filing 
+from Valuation_filings import get_filing_list 
 from Class_customer import DataHub, TickerInfo
 from Class_IA_modelos import ModeloOportunidadesSell
 from Modulos_Utilitarios import define_FileCache
 
-
-class AgenteIA:
+# Admistrador de Agentes IA
+class ClassAgenteIA:
     def __init__(self):
-        pass
+
+        # Obiene valores de session Stock
+        self.vehiculo = 'Stock'
+        self.positions = []
+        self.NotFound = []
+        self.PlanInversion = PlanInversion()
+        self.sesion = self.PlanInversion.select_sesion(
+            datetime.now(), accion="select", vehiculo=self.vehiculo
+        )
+
+         # Asigna Nombre Logging
+        self.logger = logging.getLogger("ClassAgenteIA")
+
+    # decorador para limitar ejecuciones 
+    def wait_rate(intervalo_segundos: int):
+        """
+        Fábrica de Decoradores: Restringe la ejecución de la función 
+        a un máximo de una vez por el intervalo de tiempo especificado.
+
+        Args:
+            intervalo_segundos (int): Tiempo mínimo de espera entre llamadas (en segundos).
+        """
+        
+        def decorator(func):
+            # 1. Almacenamos la hora de la última ejecución en el objeto de la función
+            func.last_run = 0 
+            
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                tiempo_actual = time.time()
+                tiempo_transcurrido = tiempo_actual - func.last_run
+                
+                # 2. Usamos la variable 'intervalo_segundos' del ámbito externo
+                if tiempo_transcurrido < intervalo_segundos:
+                    
+                    tiempo_restante = intervalo_segundos - tiempo_transcurrido
+                    td = timedelta(seconds=int(tiempo_restante))
+                    return None 
+                    
+                else:
+                    # El tiempo ha transcurrido, ejecutar la función
+                    resultado = func(*args, **kwargs)
+                    
+                    # 3. Actualizar el tiempo de la última ejecución
+                    func.last_run = tiempo_actual
+                    logger = logging.getLogger("ClassAgenteIA")
+                    logger.warning(
+                        textwrap.dedent(
+                            f"""
+                            ==============================================================================================
+                            Agente_downloads_filings_EDGAR(): 
+                            = 
+                            🛑 BLOQUEADO: La función '{func.__name__}' está limitada a 1 llamada cada {intervalo_segundos}s.
+                            ==============================================================================================
+
+                            """
+                        )
+                    )       
+                    return resultado
+
+            return wrapper
+            
+        return decorator   
+
 
     # Controla si el mensaje debe enviarse a Telegram según reglas:
     def Agente_message_Manager(self, row):
@@ -86,6 +154,7 @@ class AgenteIA:
         self.ultimo_envio[symbol] = {"roi": roi, "time": ahora}
         return True
 
+
     # agente para las recomendaciones de ventas ---------------------------------------------------------------------------------
     async def Agente_ManagerSell(self):
         try:
@@ -104,7 +173,55 @@ class AgenteIA:
         except (EncodingWarning, Exception) as e:
             print(f"Agente_ManagerSell(): {e}")
 
+    # agente paras las descargas de filings cada 3600 seg
+    @wait_rate(3600)
+    def Agente_downloads_filings_EDGAR(self):
+        try:
+            # desacrga la estructura positions
+            self.positions = self.PlanInversion.select_inversion(
+                tipoin=self.vehiculo, ticket="all"
+            )
 
+            counter = 1
+            for positio in self.positions:
+                ticker = positio.get("ticket")
+
+                # skip not found
+                if ticker in self.NotFound:
+                    continue
+
+                # valida filings en directorio
+                ticker_dir = Path(BASE_DIR) / f"{positio.get("ticket")}_EDGAR_Files"     
+                files = get_filing_list(ticker_dir=ticker_dir)            
+                if files:
+                    continue
+
+                # procede con la descarga de EDGAR
+                counter += 1
+                found = download_filing(ticker=ticker)
+                if not found:
+                    self.NotFound.append(ticker) 
+                    self.logger.warning(
+                            textwrap.dedent(
+                            f"""
+                            ==============================================================================================
+                            Agente_downloads_filings_EDGAR(): 
+                            = 
+                            🚨 FILINGS DENEGADO. Posible deslistado del ticker: {ticker}
+                            ==============================================================================================
+
+                            """
+                        )
+                    )       
+                
+                elif found:
+                    # controla que no haga mas de 2 downloads en EDGAR
+                    if counter > 2:
+                        return None
+        except Exception as e:
+            print(f"Angente_downloads_filings_EDGAR(): {e}")
+     
+# Admistrador de mensajeria Telegram
 class Telegram:
     def __init__(self):
         self.MostrarOpcionMenu_enTelegram = "menu"
@@ -517,11 +634,11 @@ class Telegram:
         except (FileNotFoundError, Exception) as e:
             print(f"clear_bot_chat(): {e}")
 
-
-class Chatbot(tk.Toplevel, AgenteIA, Telegram):
+# Main ChatBot
+class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
     def __init__(self, master=None, on_minimizar=None):
         super().__init__(master)
-        AgenteIA.__init__(self)  # Inicializa los atributos de AgenteIA
+        ClassAgenteIA.__init__(self)  # Inicializa los atributos de AgenteIA
         Telegram.__init__(self)  # Inicializa los atributos de Telegram
 
         self.bgcolor = "#252526"
@@ -712,7 +829,12 @@ class Chatbot(tk.Toplevel, AgenteIA, Telegram):
             try:
 
                 while True:
+                    # Agente for Sell
                     self.exec_modulo_async(self.Agente_ManagerSell())
+
+                    # Agente for Donloads filings
+                    self.Agente_downloads_filings_EDGAR()
+                    
                     time.sleep(15)
                     self.counter += 1
 
@@ -1031,7 +1153,6 @@ class Chatbot(tk.Toplevel, AgenteIA, Telegram):
         except Exception as e:
             print(f"list_orders_exec(): {e}")
 
-
 # Inicio chatbot ----------------------------------------------------------------------------------------------------------------
 class BotonFlotante(tk.Toplevel):
     def __init__(self, master=None, on_click=None):
@@ -1066,7 +1187,6 @@ class BotonFlotante(tk.Toplevel):
         self.withdraw()
         if self.on_click:
             self.on_click()
-
 
 # 🎯 Integración ---------------------------------------------------------------------------------------------------------------
 def AsistenteChatbot(root=None):

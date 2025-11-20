@@ -1,8 +1,14 @@
-import os
-import time
-import json
-import requests
-from datetime import datetime, timezone
+# Valuation_edgar_downloader.py 
+"""
+Módulo para descargar filings de la SEC desde EDGAR.
+Funciones principales:
+- get_cik_from_ticker(ticker): Obtiene el CIK a partir del ticker.      
+- get_filings_metadata(cik): Obtiene metadata de filings desde submissions.json.
+- download_filing_file(cik, accession, filename, save_dir): Descarga un archivo específico del filing.
+- is_foreign_filer(form_list): Detecta si una empresa presenta formularios extranjeros (20-F, 6-K).
+"""
+
+from Modulos_python import os, time, json, requests, datetime, timezone
 
 # =====================================================
 # Configuración
@@ -81,23 +87,27 @@ def is_foreign_filer(form_list: list[str]) -> bool:
 # =====================================================
 # Función principal
 # =====================================================
-def main():
-    print("=" * 70)
-    ticker = input("💼 Ingrese el ticker (ej: CCI, HASI, AAPL): ").strip().upper()
-    print("=" * 70)
-    print(f"📊 Buscando los últimos filings para {ticker}...\n")
+def download_filing(ticker=None, display=False):
+
+    if ticker is None:
+        print("=" * 70)
+        ticker = input("💼 Ingrese el ticker (ej: CCI, HASI, AAPL): ").strip().upper()
+        print("=" * 70)
+        print(f"📊 Buscando los últimos filings para {ticker}...\n")
 
     # Buscar CIK
     cik = get_cik_from_ticker(ticker)
     if not cik:
-        print(f"❌ No se encontró CIK para {ticker}.")
+        if display:
+            print(f"❌ No se encontró CIK para {ticker}.")
         return
 
     # Obtener metadata
     filings = get_filings_metadata(cik)
     if not filings:
-        print("⚠️ No se pudo obtener metadata de filings.")
-        return
+        if display:
+            print("⚠️ No se pudo obtener metadata de filings.")
+        return False
 
     form_types = filings.get("form", [])
     filing_dates = filings.get("filingDate", [])
@@ -108,11 +118,13 @@ def main():
     if is_foreign_filer(form_types):
         target_forms = FOREIGN_FORMS
         company_type = "foreign"
-        print("🌍 Empresa extranjera detectada (formularios 20-F / 6-K).\n")
+        if display:
+            print("🌍 Empresa extranjera detectada (formularios 20-F / 6-K).\n")
     else:
         target_forms = DOMESTIC_FORMS
         company_type = "domestic"
-        print("🏛️ Empresa doméstica detectada (formularios 10-K / 10-Q).\n")
+        if display:
+            print("🏛️ Empresa doméstica detectada (formularios 10-K / 10-Q).\n")
 
     # Crear directorios
     ticker_dir = os.path.join(BASE_DIR, f"{ticker}_EDGAR_Files")
@@ -136,9 +148,9 @@ def main():
     for form, entries in categorized.items():
         if not entries:
             continue
-        # print(f"📁 Preparando descarga: {len(entries)} × {form}\n")
+        if display:
+            print(f"📁 Preparando descarga: {len(entries)} × {form}\n")
         for date, acc, file in entries:
-            # print(f"⬇️ {form} {date} ({acc})")
             download_filing_file(cik, acc, file, dirs[form])
             downloaded_files.append({
                 "form": form,
@@ -161,14 +173,16 @@ def main():
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=4, ensure_ascii=False)
 
-    print("\n=== ✅ Descarga completada ===")
-    print(f"Ticker: {ticker} | CIK: {cik}")
-    print(f"📂 Metadata guardada en: {metadata_path}")
-    print(f"Fecha de ejecución: {datetime.now(timezone.utc).isoformat()}")
+    if display:
+        print("\n=== ✅ Descarga completada ===")
+        print(f"Ticker: {ticker} | CIK: {cik}")
+        print(f"📂 Metadata guardada en: {metadata_path}")
+        print(f"Fecha de ejecución: {datetime.now(timezone.utc).isoformat()}")
 
+    return True
 
 # =====================================================
 # Entry Point
 # =====================================================
 if __name__ == "__main__":
-    main()
+    download_filing(display=True)
