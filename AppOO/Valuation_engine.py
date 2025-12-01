@@ -11,23 +11,32 @@ O desde CLI:
     python -m valuation.engine AAPL
 """
 
+import os
 import sys
 import json
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
-from Valuation_filings import get_filing_list, detect_reit_status_from_text
+from Valuation_filings import get_zip_files, detect_reit_status_from_text
 from Valuation_xbrl_parser import aggregate_xbrl_metrics, detect_reit_enhanced
 from Valuation_calculators import calc_valuations
-from Valuation_utils import get_yf_price, make_json_safe, save_result_to_file, print_valuation, print_valuation_from_file
+from Valuation_utils import (
+    get_yf_price,
+    make_json_safe,
+    save_result_to_file,
+    print_valuation,
+    print_valuation_from_file,
+)
 
 # Default base dir (ajusta si usas otro path)
 DEFAULT_BASE_DIR = Path(r"C:\Users\InversionesWildaga\Documents\MyPython\AppOO\EDGAR")
 
 
 class ValuationEngine:
-    def __init__(self, ticker: str, base_dir: Optional[Path] = None, verbose: bool = False):
+    def __init__(
+        self, ticker: str, base_dir: Optional[Path] = None, verbose: bool = False
+    ):
         self.ticker = ticker.upper()
         self.base_dir = Path(base_dir) if base_dir else DEFAULT_BASE_DIR
         self.ticker_dir = Path(self.base_dir) / f"{self.ticker}_EDGAR_Files"
@@ -36,6 +45,7 @@ class ValuationEngine:
     def _log(self, *args, **kwargs):
         if self.verbose:
             print(*args, **kwargs)
+            print()
 
     def run(self) -> Optional[Dict[str, Any]]:
         """
@@ -44,23 +54,42 @@ class ValuationEngine:
         """
         self._log(f"🔎 ValuationEngine.run -> ticker={self.ticker}")
         if not self.ticker_dir.exists():
-            print(f"📂 No existe carpeta para {self.ticker} en {self.ticker_dir}. Ejecuta el downloader primero.")
+            print(
+                f"📂 No existe carpeta para {self.ticker} en {self.ticker_dir}. Ejecuta el downloader primero."
+            )
             return None
 
-        # 1) Seleccionar filings relevantes
-        files = get_filing_list(self.ticker_dir)
-        if not files:
-            print("❌ No se encontraron filings relevantes.")
-            return None
+        # 1. Obtener todos los ZIP dentro del directorio del ticker
+        zip_files = get_zip_files(self.ticker_dir)
 
-        self._log("📄 Archivos seleccionados (ordenados más reciente primero):")
+        all_instance_files = []
+        for path, inst_list in zip_files:
+
+            # Caso 1: archivo .htm → INLINE iXBRL
+            if inst_list == ["INLINE"]:
+                all_instance_files.append(f"{path}::INLINE")
+                continue
+
+            # Caso 2: ZIP sin instance → se ignora
+            if inst_list == []:
+                continue
+
+            # Caso 3: ZIP con uno o varios instance XML reales
+            for inst in inst_list:
+
+                all_instance_files.append(f"{path}::{inst}")
+
+        # 3. Asignar archivos encontrados
+        files = all_instance_files
+
+        print("📄 Archivos seleccionados (ordenados más reciente primero):")
         for f in files:
-            self._log("  -", f)
+            print("  -", f)
 
-        # 2) Parse XBRL y agregar TTM
+        # 4) Parse XBRL y agregar TTM
         parsed_agg = aggregate_xbrl_metrics(files)
         print(f"keys parsed_agg: {list(parsed_agg.keys())}")
-        
+
         self._log("🧾 Agregado XBRL (resumen):")
         if self.verbose:
             # imprimir keys importantes
@@ -68,7 +97,7 @@ class ValuationEngine:
             self._log("  ttm keys:", list(parsed_agg.get("ttm", {}).keys()))
             self._log("  shares:", parsed_agg.get("shares"))
 
-        # 3) Detectar REIT (mejorado) y fallback textual
+        # 5) Detectar REIT (mejorado) y fallback textual
         is_reit = detect_reit_enhanced(parsed_agg, self.ticker)
         if not is_reit and files:
             try:
@@ -78,11 +107,11 @@ class ValuationEngine:
                 pass
         self._log("🏢 is_reit:", is_reit)
 
-        # 4) Obtener precio (Yahoo)
+        # 6) Obtener precio (Yahoo)
         price = get_yf_price(self.ticker)
         self._log("💵 Precio (Yahoo):", price)
 
-        # 5) Preparar métricas para calculators.calc_valuations
+        # 7) Preparar métricas para calculators.calc_valuations
         t = parsed_agg.get("ttm", {}) or {}
         metrics_for_calc = {
             "NetIncome": t.get("NetIncome_TTM"),
@@ -93,23 +122,25 @@ class ValuationEngine:
             "AFFO": t.get("AFFO_TTM"),
             "DividendsPaid": t.get("DividendsPaid_TTM"),
             # Revenues no se agrega por ahora al TTM (puede derivarse de parsed_agg.per_file si necesario)
-            "Revenues": None
+            "Revenues": None,
         }
 
         self._log("🧮 Métricas TTM (para cálculos):", metrics_for_calc)
 
-        # 6) Calcular múltiples y valores intrínsecos
+        # 8) Calcular múltiples y valores intrínsecos
         valuations = calc_valuations(metrics_for_calc, price, is_reit)
         self._log("📊 Valuations (resumen):")
         if self.verbose:
             for k, v in valuations.items():
                 self._log(f"  {k}: {v}")
 
-        # 7) Armar resultado final
+        # 9) Armar resultado final
         # Convertir rutas dentro de parsed_agg a strings si no lo están
         try:
             if "files_used" in parsed_agg:
-                parsed_agg["files_used"] = [str(x) for x in parsed_agg.get("files_used", [])]
+                parsed_agg["files_used"] = [
+                    str(x) for x in parsed_agg.get("files_used", [])
+                ]
             if "per_file" in parsed_agg:
                 for entry in parsed_agg.get("per_file", []):
                     if isinstance(entry.get("path"), Path):
@@ -128,7 +159,7 @@ class ValuationEngine:
             **({"parsed_agg": parsed_agg} if self.verbose else {}),
         }
 
-        # 8) Guardar resultado en JSON y retornar
+        # 10) Guardar resultado en JSON y retornar
         safe_result = make_json_safe(result)
         save_result_to_file(self.ticker, safe_result)
 
@@ -158,11 +189,11 @@ def _cli_main(argv):
 if __name__ == "__main__":
     # _cli_main(sys.argv)
     BASE_DIR = Path(r"C:\Users\InversionesWildaga\Documents\MyPython\AppOO\EDGAR")
-    VERBOSE = False
+    VERBOSE = True
     ticker = input("💼 Ingrese el ticker (ej: CCI, HASI, AAPL): ").strip().upper()
-   
+
     eng = ValuationEngine(ticker, base_dir=BASE_DIR, verbose=VERBOSE)
     result = eng.run()
-    print_valuation_from_file(f"valuation_outputs/{ticker}_valuation.json")
+    # print_valuation_from_file(f"valuation_outputs/{ticker}_valuation.json")
     if result is not None:
         print("Resultado guardado para", ticker)

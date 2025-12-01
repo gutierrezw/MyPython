@@ -537,7 +537,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
             print("[update_peso_position({})]: {}".format(self.vehiculo, e))
 
     # mantiene self.position igual a la tabla inversionesError
-    # mantiene self.position igual a la tabla inversionesError@
     def update_self_positions(self, in_positions=None):
         try:
             ibook = enumerate(in_positions)
@@ -2099,9 +2098,9 @@ class DashMain:
         self.nb.add(self.win1, text="Crypto         ")
         self.nb.add(self.win0, text="Stock          ")
         self.nb.add(self.win4, text="Ars            ")
-        self.nb.add(self.win7, text="Ves            ", state= "disabled")
-        self.nb.add(self.win8, text="Crowfonding    ", state= "disabled")
-        self.nb.add(self.win6, text="FuturoCrypto   ", state= "disabled")
+        self.nb.add(self.win7, text="Ves            ", state="disabled")
+        self.nb.add(self.win8, text="Crowfonding    ", state="disabled")
+        self.nb.add(self.win6, text="FuturoCrypto   ", state="disabled")
         self.nb.add(self.win2, text="Screener       ")
         self.nb.add(self.win3, text="Gestión        ")
         self.nb.add(self.win5, text="System         ")
@@ -3432,7 +3431,9 @@ class DashMain:
             "legend": "outside upper right",
             "aspect": 0.30,
         }
-        DataHub.manager_buysell["activos"] = grupo_activos(fg=self.rg4, parm=parm, strategy=xestrategia)
+        DataHub.manager_buysell["activos"] = grupo_activos(
+            fg=self.rg4, parm=parm, strategy=xestrategia
+        )
         self.rv4.draw()
 
         # Diversificación vs. región
@@ -3442,7 +3443,9 @@ class DashMain:
             "legend": "outside upper right",
             "aspect": 0.30,
         }
-        DataHub.manager_buysell["region"] = grupo_region(fg=self.rg5, strategy=xestrategia, parm=parm)
+        DataHub.manager_buysell["region"] = grupo_region(
+            fg=self.rg5, strategy=xestrategia, parm=parm
+        )
         self.rv5.draw()
 
         # mantiene actualizado los graficos cada 20m o 1200.000ms
@@ -3521,7 +3524,7 @@ class system_status(tk.Frame):
         self.system = master
         self.colors = colores
         self.itemsInfo = None
-        
+
         self.messagebox = MyMessageBox(self.system)
 
         self.process = ttk.Frame(self.system, padding=(1, 10, 1, 1), style="C.TFrame")

@@ -521,9 +521,7 @@ def get_ultimo_dia_mercado(market="Stock"):
             ticket="BTC-USD", period="7d", vehiculo="download"
         )
     elif market == "BBVA.ARS":
-        (activo, datos) = get_yfinance(
-            ticket="^MERV", period="7d", vehiculo="download"
-        )
+        (activo, datos) = get_yfinance(ticket="^MERV", period="7d", vehiculo="download")
 
     # Obtén el último día hábil
     if not datos.empty:
@@ -586,7 +584,7 @@ def get_extractos_csv(account=None, ruta=None):
                     if "Period" in row:
                         f_inicio, f_fin = row[-1].split(" - ")
                         f_fin = f_fin.strip()
-                      
+
                         f_obj = datetime.strptime(f_fin, "%B %d, %Y")
                         fecha = f_obj.strftime("%Y-%m-%d")
                         extracto.update(
@@ -1575,6 +1573,7 @@ def grupo_activos(fg: object, parm=None, strategy=None):
 
     return {"data": data, "activos": keys, "media": mean}
 
+
 # Gráfica Diversificación vs. region
 def grupo_region(fg: object, strategy=None, parm=None):
 
@@ -1673,6 +1672,7 @@ def grupo_region(fg: object, strategy=None, parm=None):
     ax.yaxis.set_major_formatter(currency)
     ax.tick_params(axis="y", colors=cchart["asx"])
     return {"data": data, "country": keys, "media": mean}
+
 
 # permite trazar el desempeño ultimos 6 meses de las inversiones globales
 def Agente_income_Manager(fg: object, parm=None):

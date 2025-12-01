@@ -11,6 +11,8 @@ Contiene:
 
 import re
 import warnings
+import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
@@ -122,6 +124,261 @@ def _extract_row_numbers_simple(row):
     return nums if nums else None
 
 
+def debug_list_all_tags_from_xml_string(xml_string, limit=200):
+    """
+    Lista tags (local-name) encontrados en el mini-XML generado desde iXBRL.
+    Útil para identificar cómo una empresa etiqueta FFO, AFFO, Revenues, etc.
+    """
+    try:
+        root = ET.fromstring(xml_string)
+    except Exception as e:
+        print("[debug] ERROR parsing XML:", e)
+        return
+
+    print("\n============================")
+    print("TAGS ENCONTRADOS EN MINI-XML")
+    print("============================")
+
+    count = 0
+    seen = set()
+
+    for el in root.iter():
+        if count >= limit:
+            print("... (limit reached)")
+            break
+
+        tag = el.tag
+        if "}" in tag:
+            local = tag.split("}", 1)[1]
+        else:
+            local = tag
+
+        if local in seen:
+            continue
+        seen.add(local)
+
+        txt = (el.text or "").strip().replace("\n", " ")
+
+        print(f"- {local}: '{txt[:80]}'")
+        count += 1
+
+    print("============================\n")
+
+
+# ------------------------------------------------------
+# Extrae .zip sin realizar escritura en disco
+# ------------------------------------------------------
+def extract_from_zip(zip_path):
+    """
+    Abre un ZIP XBRL y devuelve una lista de (archivo, contenido_xml)
+    sin escribir nada a disco.
+    """
+    results = []
+
+    with zipfile.ZipFile(zip_path, "r") as z:
+        for name in z.namelist():
+            if name.lower().endswith(".xml"):  # solo XML relevantes
+                try:
+                    data = z.read(name).decode("utf-8", errors="ignore")
+                    results.append((name, data))
+                except Exception:
+                    continue
+
+    return results
+
+
+# ------------------------------------------------------
+# Detección automática y parsing
+# ------------------------------------------------------
+def parse_xbrl_auto(path_like):
+    """
+    Detección automática de XBRL:
+      - HTML/iXBRL → extracción robusta de ix:nonFraction + wrap XML válido.
+      - XML → parse directo.
+      - ZIP → extrae xmls, prioriza instance, parsea y fusiona.
+    """
+
+    p = Path(path_like) if not isinstance(path_like, Path) else path_like
+    suffix = p.suffix.lower()
+
+    print(f"[parse_xbrl_auto] usando: {p}, tipo: {suffix}")
+
+    # ---------------------------------------------------
+    # Helper: genera cabecera con TODOS los prefijos detectados
+    # ---------------------------------------------------
+    def wrap_with_namespaces(mini_xml: str):
+        """
+        Detecta prefijos usados en el mini-XML y genera xmlns:* automático.
+        Garantiza que el XML sea 100% parseable.
+        """
+        prefixes_needed = set()
+
+        # buscar prefijos tipo "xbrli:" o "ix:"
+        for m in re.findall(r"([A-Za-z0-9_\-]+):[A-Za-z0-9_\-]+", mini_xml):
+            prefixes_needed.add(m)
+
+        # namespaces comunes del ecosistema XBRL
+        ns_map = {
+            "xbrli": "http://www.xbrl.org/2003/instance",
+            "link": "http://www.xbrl.org/2003/linkbase",
+            "xlink": "http://www.w3.org/1999/xlink",
+            "ix": "http://www.xbrl.org/2013/inlineXBRL",
+            "xbrldi": "http://xbrl.org/2006/xbrldi",
+            "iso4217": "http://www.xbrl.org/2003/iso4217",
+            "utr": "http://www.xbrl.org/2009/utr",
+            "dei": "http://xbrl.sec.gov/dei/2022-01-31",
+            "us-gaap": "http://fasb.org/us-gaap/2022-01-31",
+            "us-roles": "http://fasb.org/us-roles/2022-01-31",
+            "srt": "http://fasb.org/srt",
+            "num": "http://www.xbrl.org/dtr/type/numeric",
+            "nonnum": "http://www.xbrl.org/dtr/type/non-numeric",
+            "xbrldt": "http://xbrl.org/2005/xbrldt",
+        }
+
+        # construir xmlns dinámicos
+        ns_parts = []
+        for pref in prefixes_needed:
+            if pref in ns_map:
+                ns_parts.append(f'xmlns:{pref}="{ns_map[pref]}"')
+            else:
+                # namespace desconocido → generar un placeholder válido
+                ns_parts.append(f'xmlns:{pref}="http://auto.namespace/{pref}"')
+
+        ns_text = " ".join(ns_parts)
+
+        wrapped = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            f"<xbrl {ns_text}>\n"
+            f"{mini_xml}\n"
+            "</xbrl>"
+        )
+
+        print("[wrap_with_namespaces] namespaces agregados:", prefixes_needed)
+        return wrapped
+
+    # ---------------------------------------------------
+    # 1) HTML / INLINE iXBRL
+    # ---------------------------------------------------
+    if suffix in (".htm", ".html"):
+
+        try:
+            html = p.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            print("[parse_xbrl_auto] ERROR leyendo HTML")
+            return {}
+
+        # --- EXTRACCIÓN INLINE ROBUSTA ---
+        mini = extract_inline_xbrl_from_html(html)
+        print("[parse_xbrl_auto] inline extraído? ->", bool(mini))
+
+        if mini:
+            print("[mini-inline-preview]:", mini[:400])
+
+        if mini:
+            try:
+                # limpieza de entidades
+                mini_clean = (
+                    mini.replace("&nbsp;", " ")
+                    .replace("&amp;", "&")
+                    .replace("&ndash;", "-")
+                    .replace("&mdash;", "-")
+                )
+
+                # NUEVO WRAP → usa namespaces dinámicos detectados
+                wrapped = wrap_with_namespaces(mini_clean)
+
+                print("[parse_xbrl_auto] XML WRAPPED generado.")
+                debug_list_all_tags_from_xml_string(wrapped)
+
+                parsed = parse_xml_string(wrapped)
+
+                if parsed:
+                    return parsed
+
+                print("[parse_xbrl_auto] Falló parse de inline → fallback")
+
+            except Exception as e:
+                print("[parse_xbrl_auto] EXCEPTION procesando inline:", e)
+
+        # Fallback → HTML extractor
+        print("[parse_xbrl_auto] usando fallback extract_xbrl_metrics_improved()")
+        try:
+            return extract_xbrl_metrics_improved(p) or {}
+        except Exception:
+            return {}
+
+    # ---------------------------------------------------
+    # 2) XML directo
+    # ---------------------------------------------------
+    if suffix == ".xml":
+        try:
+            xml_text = p.read_text(encoding="utf-8", errors="ignore")
+            return parse_xml_string(xml_text) or {}
+        except Exception:
+            print("[parse_xbrl_auto] ERROR leyendo XML")
+            return {}
+
+    # ---------------------------------------------------
+    # 3) ZIP → múltiples XML
+    # ---------------------------------------------------
+    if suffix == ".zip":
+        try:
+            xml_entries = extract_from_zip(p)
+        except Exception:
+            xml_entries = []
+
+        if not xml_entries:
+            print("[parse_xbrl_auto] ZIP vacío")
+            return {}
+
+        def is_linkbase(n):
+            n = n.lower()
+            return any(x in n for x in ("_cal.xml", "_pre.xml", "_lab.xml", "_def.xml"))
+
+        candidates = [x for x in xml_entries if not is_linkbase(x[0])]
+        if not candidates:
+            candidates = xml_entries
+
+        merged = {}
+
+        for name, xml_text in candidates:
+            try:
+                if (
+                    "<context" not in xml_text.lower()
+                    and "<xbrl" not in xml_text.lower()
+                    and "ix:" not in xml_text.lower()
+                ):
+                    continue
+
+                parsed_local = parse_xml_string(xml_text) or {}
+                for k, v in parsed_local.items():
+                    if v is None:
+                        continue
+                    if merged.get(k) is None:
+                        merged[k] = v
+            except:
+                continue
+
+        if not merged:
+            for name, xml_text in xml_entries:
+                try:
+                    parsed_local = parse_xml_string(xml_text) or {}
+                    for k, v in parsed_local.items():
+                        if v is None:
+                            continue
+                        if merged.get(k) is None:
+                            merged[k] = v
+                except:
+                    continue
+
+        return merged
+
+    # ---------------------------------------------------
+    # 4) fallback final
+    # ---------------------------------------------------
+    return {}
+
+
 # ------------------------------------------------------
 # Extrae todos los <context>
 # ------------------------------------------------------
@@ -186,7 +443,7 @@ def _select_best_context(contexts, want_type="duration"):
 
     sortable = []
     for cid, c in filtered.items():
-        d = parse_date(c["end"])
+        d = parse_date(c["end"]) if c.get("end") else None
         if d:
             sortable.append((d, cid))
 
@@ -285,7 +542,6 @@ def extract_xbrl_metrics_improved(file_path: Path):
                 },
             }
         )
-
     except Exception as e:
         res["_extraction_audit"].append(
             {"source": "context_selection_error", "error": str(e)}
@@ -314,8 +570,6 @@ def extract_xbrl_metrics_improved(file_path: Path):
             "netsales",
             "sales",
             "revenues",
-            "cci:revenues",
-            "khc:netsales",
         ],
         "NetIncome": [
             "us-gaap:netincomeloss",
@@ -515,41 +769,482 @@ def extract_xbrl_metrics_improved(file_path: Path):
     return res
 
 
-# ============================================================
-# Facade: aggregate_xbrl_metrics + REIT detector
-# ============================================================
+# ------------------------------------------------------
+# parse standar directamente desde ZIP
+# ------------------------------------------------------
+def parse_xml_string(xml_string):
+    """
+    Parser universal para XBRL con namespaces dinámicos (versión robusta).
+    Extrae métricas GAAP + FFO/AFFO típicas de REITs.
+    Evita XPath complejos: busca por local-name iterando el árbol.
+    """
+    out = {
+        "NetIncome": None,
+        "OperatingCashFlow": None,
+        "CapitalExpenditures": None,
+        "DividendsPaid": None,
+        "SharesOutstanding": None,
+        "FFO": None,
+        "AFFO": None,
+        "entity": {"sic": None, "registrant_name": None},
+        "_extraction_audit": [],
+    }
+
+    try:
+        # parse XML (ElementTree)
+        root = ET.fromstring(xml_string)
+
+        # función para obtener local-name (quita namespace si existe)
+        def local_name(tag):
+            if isinstance(tag, str) and "}" in tag:
+                return tag.split("}", 1)[1]
+            return tag
+
+        # función que busca el primer elemento cuyo local-name está en possible_tags
+        # y cuyo texto parece un número (entero o float). Devuelve texto sin limpiar.
+        def find_tag_by_localname(possible_tags):
+            poss = set(possible_tags)
+            for el in root.iter():
+                ln = local_name(el.tag)
+                if ln in poss:
+                    txt = el.text
+                    if txt:
+                        txt = txt.strip()
+                        # normalizar numeros simples: quitar comas y signos de paréntesis
+                        txt_norm = txt.replace(",", "").replace("\u2212", "-")
+                        if txt_norm.startswith("(") and txt_norm.endswith(")"):
+                            txt_norm = "-" + txt_norm[1:-1]
+                        # permitir floats/ints negativos
+                        if re.match(r"^-?\d+(\.\d+)?$", txt_norm):
+                            # devolver como float (si contiene punto) o int
+                            try:
+                                if "." in txt_norm:
+                                    return float(txt_norm)
+                                else:
+                                    return float(int(txt_norm))
+                            except Exception:
+                                # si falla conversión, devolver None y seguir
+                                continue
+            return None
+
+        # extraer por lista de nombres esperados (sin namespace)
+        out["NetIncome"] = find_tag_by_localname(
+            ["NetIncomeLoss", "ProfitLoss", "NetIncome", "NetEarnings"]
+        )
+        out["OperatingCashFlow"] = find_tag_by_localname(
+            [
+                "NetCashProvidedByUsedInOperatingActivities",
+                "NetCashProvidedByOperatingActivities",
+                "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+            ]
+        )
+        out["CapitalExpenditures"] = find_tag_by_localname(
+            [
+                "CapitalExpenditures",
+                "PaymentsToAcquirePropertyPlantAndEquipment",
+                "PaymentsToAcquirePropertyPlantAndEquipmentAndIntangibleAssets",
+            ]
+        )
+        out["DividendsPaid"] = find_tag_by_localname(
+            ["PaymentsOfDividends", "DividendsPaid", "DividendsDeclared"]
+        )
+        out["SharesOutstanding"] = find_tag_by_localname(
+            [
+                "WeightedAverageNumberOfSharesOutstandingBasic",
+                "WeightedAverageNumberOfSharesOutstanding",
+                "CommonStockSharesOutstanding",
+                "SharesOutstanding",
+            ]
+        )
+
+        # REIT: FFO / AFFO (buscamos varios tag names posibles)
+        out["FFO"] = find_tag_by_localname(
+            [
+                "FundsFromOperations",
+                "FFO",
+                "FundsFromOperationsBasic",
+                "FundsFromOperationsContinuingOperations",
+            ]
+        )
+        out["AFFO"] = find_tag_by_localname(
+            ["AdjustedFundsFromOperations", "AFFO", "AdjustedFundsFromOperationsBasic"]
+        )
+
+        # entity / DEI: buscar codigo SIC y registrant name (texto simple)
+        # SIC: buscar un elemento con local-name 'EntityCentralIndexKey' o 'EntitySIC'
+        # Si no es numérico, lo dejamos como None
+        sic_val = None
+        registrant = None
+        for el in root.iter():
+            ln = local_name(el.tag)
+            if ln in (
+                "EntityCentralIndexKey",
+                "EntityRegistrantIdentifier",
+                "EntitySIC",
+                "SIC",
+            ):
+                txt = (el.text or "").strip()
+                if txt:
+                    # si parece numero (ECIK es numeric-like) guardar
+                    if re.match(r"^\d+$", txt):
+                        sic_val = txt
+                        break
+            if ln in ("EntityRegistrantName", "RegistrantName", "EntityRegistrant"):
+                txt = (el.text or "").strip()
+                if txt:
+                    registrant = txt
+                    # no break: queremos dar preferencia a sic si aparece luego
+
+        out["entity"]["sic"] = sic_val
+        out["entity"]["registrant_name"] = registrant
+
+        out["_extraction_audit"].append("parse_xml_string OK (iterative search)")
+
+    except ET.ParseError as e:
+        out["_extraction_audit"].append(f"ERROR: parse error: {e}")
+    except Exception as e:
+        out["_extraction_audit"].append(f"ERROR: {e}")
+
+    return out
+
+
+# ------------------------------------------------------
+# Normaliza números inline
+# ------------------------------------------------------
+def _normalize_inline_number(s: str):
+    """
+    Normaliza valores numéricos de iXBRL:
+      - "(1,234)"   -> "-1234"
+      - "1,234.56"  -> "1234.56"
+      - "−123"      -> "-123"        (minus unicode)
+      - " 1 234 "   -> "1234"
+      - "P5D", "Q3", "2025", fechas → se devuelven sin tocar
+
+    Regresa:
+        string normalizado o None si está vacío.
+    """
+    if s is None:
+        return None
+
+    t = s.strip()
+    if t == "":
+        return None
+
+    # ⚠️ Si contiene letras mezcladas con números, lo dejamos como está
+    # Ej: "Q3", "P5D", "September 30, 2025"
+    if re.search(r"[A-Za-z]", t):
+        return t
+
+    # Reemplazos básicos
+    t = t.replace("\u2212", "-")  # unicode minus
+    t = t.replace(",", "")
+
+    # (1234) → -1234
+    if t.startswith("(") and t.endswith(")"):
+        t = "-" + t[1:-1]
+
+    # Si después de procesar no queda nada, devolver None
+    t2 = t.strip()
+    if t2 == "":
+        return None
+
+    return t2
+
+
+# ------------------------------------------------------
+# Extrae inline XBRL desde HTML/iXBRL
+# ------------------------------------------------------
+def extract_inline_xbrl_from_html(html_text: str):
+    """
+    Extrae hechos inline XBRL desde HTML/iXBRL y produce un mini-XML consistente,
+    sin prefijos, con contextos y unidades reconstruidos correctamente.
+
+    Esta versión:
+      - NO copia <context> ni <unit> del HTML.
+      - Reconstruye contextos a partir de los contextRef detectados.
+      - Soporta ix:nonFraction, ix:nonNumeric, Workiva, data-*.
+      - Produce XML limpio sin prefijos (lo que tu motor espera).
+    """
+
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+    soup = BeautifulSoup(html_text, "lxml")
+
+    # -------------------------------------------
+    # 1) Detectar todos los hechos inline
+    # -------------------------------------------
+
+    # candidatos
+    candidates = []
+
+    # A) ix:nonfraction / ix:nonnumeric
+    candidates.extend(
+        soup.find_all(
+            lambda t: t.name
+            and any(kw in t.name.lower() for kw in ("ix:nonfraction", "ix:nonnumeric"))
+        )
+    )
+
+    # B) nombres que terminan nonfraction/nonnumeric (Workiva)
+    candidates.extend(
+        soup.find_all(
+            lambda t: t.name
+            and (
+                t.name.lower().endswith("nonfraction")
+                or t.name.lower().endswith("nonnumeric")
+            )
+        )
+    )
+
+    # C) tags con name, data-name
+    candidates.extend(
+        [
+            t
+            for t in soup.find_all(True)
+            if t.has_attr("name") or t.has_attr("data-name")
+        ]
+    )
+
+    # D) tags con metadata Workiva data-*
+    for t in soup.find_all(True):
+        for k in t.attrs:
+            if k.startswith("data-") and any(x in k for x in ("fact", "name", "ix")):
+                candidates.append(t)
+                break
+
+    # remover duplicados
+    seen = set()
+    inline_tags = []
+    for t in candidates:
+        ident = id(t)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        inline_tags.append(t)
+
+    # -------------------------------------------
+    # 2) Procesar hechos → lista de dicts
+    # -------------------------------------------
+    extracted_facts = []
+    context_refs = set()
+    unit_refs = set()
+
+    for tag in inline_tags:
+        # nombre del hecho
+        name_attr = (
+            tag.get("name")
+            or tag.get("data-name")
+            or tag.get("data-fact-name")
+            or tag.get("data-ix-name")
+        )
+
+        if not name_attr:
+            name_attr = tag.get("title") or tag.get("aria-label")
+
+        if not name_attr:
+            # buscar strings tipo "us-gaap:Revenues"
+            for v in tag.attrs.values():
+                if isinstance(v, str) and ":" in v:
+                    if re.match(r"[A-Za-z0-9_\-]+:[A-Za-z0-9_]+", v):
+                        name_attr = v
+                        break
+
+        if not name_attr:
+            continue
+
+        local = name_attr.split(":")[-1].strip()
+
+        # contextRef, unitRef
+        ctx = (
+            tag.get("contextref")
+            or tag.get("contextRef")
+            or tag.get("data-context")
+            or tag.get("context")
+        )
+        unit = (
+            tag.get("unitref")
+            or tag.get("unitRef")
+            or tag.get("data-unit")
+            or tag.get("unit")
+        )
+        decimals = tag.get("decimals") or tag.get("data-decimals")
+
+        # valor
+        txt = tag.get_text(" ", strip=True)
+        val = _normalize_inline_number(txt)
+        if not val:
+            alt = tag.get("value") or tag.get("content") or tag.get("data-value")
+            if alt:
+                val = _normalize_inline_number(alt)
+
+        if not val:
+            continue
+
+        if ctx:
+            context_refs.add(ctx)
+        if unit:
+            unit_refs.add(unit)
+
+        extracted_facts.append(
+            {
+                "local": local,
+                "value": val,
+                "ctx": ctx,
+                "unit": unit,
+                "decimals": decimals,
+            }
+        )
+
+    if not extracted_facts:
+        return ""
+
+    # -------------------------------------------
+    # 3) Reconstruir contextos limpios
+    # -------------------------------------------
+    contexts_xml = []
+    for c in sorted(context_refs):
+        # ⚠️ No sabemos periodos reales aquí (intervalos).
+        # Generamos context placeholder seguro, consistente.
+        contexts_xml.append(
+            f'<context id="{c}"><entity><identifier>Dummy</identifier></entity>'
+            f"<period><instant>1970-01-01</instant></period></context>"
+        )
+
+    # -------------------------------------------
+    # 4) Reconstruir units (solo placeholder)
+    # -------------------------------------------
+    units_xml = []
+    for u in sorted(unit_refs):
+        units_xml.append(f'<unit id="{u}"><measure>pure</measure></unit>')
+
+    # -------------------------------------------
+    # 5) Construir los hechos
+    # -------------------------------------------
+    facts_xml = []
+    for f in extracted_facts:
+        attrs = []
+        if f["ctx"]:
+            attrs.append(f'contextRef="{f["ctx"]}"')
+        if f["unit"]:
+            attrs.append(f'unitRef="{f["unit"]}"')
+        if f["decimals"] is not None:
+            attrs.append(f'decimals="{f["decimals"]}"')
+
+        attr_text = (" " + " ".join(attrs)) if attrs else ""
+
+        val = f["value"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        facts_xml.append(f"<{f['local']}{attr_text}>{val}</{f['local']}>")
+
+    # -------------------------------------------
+    # 6) Armar mini-XBRL final
+    # -------------------------------------------
+    mini = ["<xbrl>"]
+    mini.extend(contexts_xml)
+    mini.extend(units_xml)
+    mini.extend(facts_xml)
+    mini.append("</xbrl>")
+
+    return "\n".join(mini)
+
+
+# ------------------------------------------------------
+# # Facade: aggregate_xbrl_metrics + REIT detector
+# ------------------------------------------------------
 def aggregate_xbrl_metrics(file_paths):
     """
     Produce parsed_agg compatible con lo que espera Valuation_engine:
     {
-      "files_used": [str(paths...)],
-      "per_file": [ {"path": Path, "dt": datetime, "parsed": {...} }, ... ],
-      "ttm": { "NetIncome_TTM": ..., "OperatingCashFlow_TTM": ..., "FFO_TTM": ..., ... },
-      "shares": <first shares found or None>,
-      "raw_series": { ... },
-      "entity": {"sic":..., "registrant_name":...}
+      "files_used": [...],
+      "per_file": [...],
+      "ttm": {...},
+      "shares": ...,
+      "raw_series": {...},
+      "entity": {...}
     }
     """
     per_file = []
+
     for p in file_paths:
-        try:
-            parsed = extract_xbrl_metrics_improved(
-                Path(p) if not isinstance(p, Path) else p
-            )
-            print(f" path {p}")
-            print(f" audit: {parsed["_extraction_audit"]}")
+        # ----------------------------------------------
+        # SOPORTE PARA FORMATOS:
+        #  - path::INLINE
+        #  - path::instance.xml
+        #  - path normal
+        # ----------------------------------------------
+        if "::" in str(p):
+            base_path, suffix = str(p).split("::", 1)
+            base_path = Path(base_path)
 
-            per_file.append(
-                {
-                    "path": p,
-                    "dt": datetime.fromtimestamp(Path(p).stat().st_mtime),
-                    "parsed": parsed,
-                }
-            )
-        except Exception as e:
-            # keep going if one file fails
-            continue
+            # ==========================================================
+            # CASO INLINE iXBRL
+            # ==========================================================
+            if suffix.upper() == "INLINE":
+                try:
+                    with open(base_path, "r", encoding="utf-8", errors="ignore") as f:
+                        html = f.read()
 
+                    # 1) mini-inline extractor
+                    xml_text = extract_inline_xbrl_from_html(html)
+
+                    # Heurística para verificar si vale la pena intentar parsear
+                    looks_like_xml = (
+                        xml_text
+                        and isinstance(xml_text, str)
+                        and xml_text.count("<") >= 5
+                        and xml_text.count(">") >= 5
+                    )
+
+                    parsed = None
+
+                    # Intentar parse si parece XML real
+                    if looks_like_xml:
+                        try:
+                            parsed = parse_xml_string(xml_text)
+                        except Exception:
+                            parsed = None
+
+                    # 2) Fallback SIEMPRE que mini-inline falle
+                    if not parsed:
+                        parsed = parse_xbrl_auto(base_path)
+
+                    per_file.append(
+                        {
+                            "path": f"{base_path}::INLINE",
+                            "dt": datetime.fromtimestamp(base_path.stat().st_mtime),
+                            "parsed": parsed or {},
+                        }
+                    )
+                except Exception as e:
+                    print(f"INLINE ERROR {base_path}: {e}")
+                continue
+
+            # ==========================================================
+            # CASO ZIP::instance.xml
+            # ==========================================================
+            elif base_path.suffix.lower() == ".zip":
+                try:
+                    with zipfile.ZipFile(base_path, "r") as z:
+                        if suffix in z.namelist():
+                            xml_text = z.read(suffix).decode("utf-8", errors="ignore")
+                            parsed = parse_xml_string(xml_text)
+                        else:
+                            parsed = {}
+                except Exception as e:
+                    print(f"ZIP INSTANCE ERROR {base_path}::{suffix}: {e}")
+                    continue
+
+                per_file.append(
+                    {
+                        "path": f"{base_path}::{suffix}",
+                        "dt": datetime.fromtimestamp(base_path.stat().st_mtime),
+                        "parsed": parsed,
+                    }
+                )
+                continue  # fin ZIP
+
+    # ----------------------------------------------------------------
+    # Si no se pudo procesar nada
+    # ----------------------------------------------------------------
     if not per_file:
         return {
             "files_used": [],
@@ -560,10 +1255,14 @@ def aggregate_xbrl_metrics(file_paths):
             "entity": {"sic": None, "registrant_name": None},
         }
 
-    # order by date desc
+    # ----------------------------------------------------------------
+    # ORDENAR archivos por fecha
+    # ----------------------------------------------------------------
     per_file = sorted(per_file, key=lambda x: x["dt"], reverse=True)
 
-    # keys we aggregate for TTM (same names as in parsed)
+    # ----------------------------------------------------------------
+    # SERIES A AGREGAR
+    # ----------------------------------------------------------------
     keys = [
         "NetIncome",
         "OperatingCashFlow",
@@ -572,15 +1271,21 @@ def aggregate_xbrl_metrics(file_paths):
         "FFO",
         "AFFO",
     ]
+
     series = {k: [] for k in keys}
     shares_list = []
 
+    # Procesar todos los parseados
     for entry in per_file:
         parsed = entry.get("parsed", {}) or {}
+
+        # series numéricas para TTM
         for k in keys:
             v = parsed.get(k)
             if isinstance(v, (int, float)):
                 series[k].append({"value": v, "path": entry["path"], "dt": entry["dt"]})
+
+        # shares
         shares_val = (
             parsed.get("SharesOutstanding")
             or parsed.get("sharesoutstanding")
@@ -591,6 +1296,9 @@ def aggregate_xbrl_metrics(file_paths):
                 {"value": shares_val, "path": entry["path"], "dt": entry["dt"]}
             )
 
+    # ----------------------------------------------------------------
+    # TTM: suma últimos 4
+    # ----------------------------------------------------------------
     def sum_top_k(k, kcount=4):
         vals = [
             it["value"]
@@ -599,19 +1307,24 @@ def aggregate_xbrl_metrics(file_paths):
         ]
         return round(sum(vals), 2) if vals else None
 
-    # ttm keys with suffix
     ttm = {f"{k}_TTM": sum_top_k(k, 4) for k in keys}
+
+    # Shares
     shares = shares_list[0]["value"] if shares_list else None
 
     raw_series = {k: v for k, v in series.items()}
 
-    # entity: take first non-empty entity info from per_file parsed
+    # ----------------------------------------------------------------
+    # ENTITY INFO
+    # ----------------------------------------------------------------
     entity = {"sic": None, "registrant_name": None}
     for entry in per_file:
         ent = entry.get("parsed", {}).get("entity", {}) or {}
         if ent and (ent.get("sic") or ent.get("registrant_name")):
             entity = ent
             break
+
+    print(f"aggregate_xbrl_metrics: processed {per_file} files.")
 
     return {
         "files_used": [str(e["path"]) for e in per_file],
@@ -623,6 +1336,9 @@ def aggregate_xbrl_metrics(file_paths):
     }
 
 
+# ------------------------------------------------------
+# Heuristica robusta para detectar REITs
+# ------------------------------------------------------
 def detect_reit_enhanced(parsed_agg: dict, ticker: str = None):
     """
     Robust REIT detection:
