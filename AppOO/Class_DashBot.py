@@ -50,18 +50,19 @@ from Modulos_python import (
     wraps,
 )
 from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion
-from Valuation_edgar_downloader import BASE_DIR, download_filing 
-from Valuation_filings import get_filing_list 
+from Valuation_edgar_downloader import BASE_DIR, download_filing
+from Valuation_filings import get_zip_files
 from Class_customer import DataHub, TickerInfo
 from Class_IA_modelos import ModeloOportunidadesSell
 from Modulos_Utilitarios import define_FileCache
+
 
 # Admistrador de Agentes IA
 class ClassAgenteIA:
     def __init__(self):
 
         # Obiene valores de session Stock
-        self.vehiculo = 'Stock'
+        self.vehiculo = "Stock"
         self.positions = []
         self.NotFound = []
         self.PlanInversion = PlanInversion()
@@ -69,39 +70,39 @@ class ClassAgenteIA:
             datetime.now(), accion="select", vehiculo=self.vehiculo
         )
 
-         # Asigna Nombre Logging
+        # Asigna Nombre Logging
         self.logger = logging.getLogger("ClassAgenteIA")
 
-    # decorador para limitar ejecuciones 
+    # decorador para limitar ejecuciones
     def wait_rate(intervalo_segundos: int):
         """
-        Fábrica de Decoradores: Restringe la ejecución de la función 
+        Fábrica de Decoradores: Restringe la ejecución de la función
         a un máximo de una vez por el intervalo de tiempo especificado.
 
         Args:
             intervalo_segundos (int): Tiempo mínimo de espera entre llamadas (en segundos).
         """
-        
+
         def decorator(func):
             # 1. Almacenamos la hora de la última ejecución en el objeto de la función
-            func.last_run = 0 
-            
+            func.last_run = 0
+
             @wraps(func)
             def wrapper(*args, **kwargs):
                 tiempo_actual = time.time()
                 tiempo_transcurrido = tiempo_actual - func.last_run
-                
+
                 # 2. Usamos la variable 'intervalo_segundos' del ámbito externo
                 if tiempo_transcurrido < intervalo_segundos:
-                    
+
                     tiempo_restante = intervalo_segundos - tiempo_transcurrido
                     td = timedelta(seconds=int(tiempo_restante))
-                    return None 
-                    
+                    return None
+
                 else:
                     # El tiempo ha transcurrido, ejecutar la función
                     resultado = func(*args, **kwargs)
-                    
+
                     # 3. Actualizar el tiempo de la última ejecución
                     func.last_run = tiempo_actual
                     logger = logging.getLogger("ClassAgenteIA")
@@ -116,13 +117,12 @@ class ClassAgenteIA:
 
                             """
                         )
-                    )       
+                    )
                     return resultado
 
             return wrapper
-            
-        return decorator   
 
+        return decorator
 
     # Controla si el mensaje debe enviarse a Telegram según reglas:
     def Agente_message_Manager(self, row):
@@ -153,7 +153,6 @@ class ClassAgenteIA:
         # si pasó todas las reglas → actualiza registro
         self.ultimo_envio[symbol] = {"roi": roi, "time": ahora}
         return True
-
 
     # agente para las recomendaciones de ventas ---------------------------------------------------------------------------------
     async def Agente_ManagerSell(self):
@@ -191,8 +190,8 @@ class ClassAgenteIA:
                     continue
 
                 # valida filings en directorio
-                ticker_dir = Path(BASE_DIR) / f"{positio.get("ticket")}_EDGAR_Files"     
-                files = get_filing_list(ticker_dir=ticker_dir)            
+                ticker_dir = Path(BASE_DIR) / f"{positio.get("ticket")}_EDGAR_Files"
+                files = get_zip_files(ticker_dir=ticker_dir)
                 if files:
                     continue
 
@@ -200,9 +199,9 @@ class ClassAgenteIA:
                 counter += 1
                 found = download_filing(ticker=ticker)
                 if not found:
-                    self.NotFound.append(ticker) 
+                    self.NotFound.append(ticker)
                     self.logger.warning(
-                            textwrap.dedent(
+                        textwrap.dedent(
                             f"""
                             ==============================================================================================
                             Agente_downloads_filings_EDGAR(): 
@@ -212,15 +211,16 @@ class ClassAgenteIA:
 
                             """
                         )
-                    )       
-                
+                    )
+
                 elif found:
                     # controla que no haga mas de 2 downloads en EDGAR
                     if counter > 2:
                         return None
         except Exception as e:
             print(f"Angente_downloads_filings_EDGAR(): {e}")
-     
+
+
 # Admistrador de mensajeria Telegram
 class Telegram:
     def __init__(self):
@@ -634,6 +634,7 @@ class Telegram:
         except (FileNotFoundError, Exception) as e:
             print(f"clear_bot_chat(): {e}")
 
+
 # Main ChatBot
 class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
     def __init__(self, master=None, on_minimizar=None):
@@ -834,7 +835,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
                     # Agente for Donloads filings
                     self.Agente_downloads_filings_EDGAR()
-                    
+
                     time.sleep(15)
                     self.counter += 1
 
@@ -1153,6 +1154,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         except Exception as e:
             print(f"list_orders_exec(): {e}")
 
+
 # Inicio chatbot ----------------------------------------------------------------------------------------------------------------
 class BotonFlotante(tk.Toplevel):
     def __init__(self, master=None, on_click=None):
@@ -1187,6 +1189,7 @@ class BotonFlotante(tk.Toplevel):
         self.withdraw()
         if self.on_click:
             self.on_click()
+
 
 # 🎯 Integración ---------------------------------------------------------------------------------------------------------------
 def AsistenteChatbot(root=None):

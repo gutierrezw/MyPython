@@ -2153,7 +2153,6 @@ class TickerInfo(MyOrders):
 
         # programa las actualizaciones de API's cada minuto
 
-
     def schedule_trader(self):
         try:
             # revisa update trader vehículos
@@ -4148,8 +4147,7 @@ class WidgetVehiculo(TickerInfo):
             "legend": "outside upper left",
             "aspect": 0.21,
             "periodo": tipo,
-            "titulo": f"Performance {self.vehiculo}: (in {tipo})"
-            ,
+            "titulo": f"Performance {self.vehiculo}: (in {tipo})",
         }
 
         # ajusta a tempralidad seleccionada
@@ -4201,7 +4199,6 @@ class WidgetVehiculo(TickerInfo):
             y_pos = np.arange(len(labels))
             bars = ax.barh(y_pos, values, color=colors, height=0.6, alpha=0.9)
 
-
             # Etiquetas en eje Y
             ax.set_yticks(y_pos)
             ax.set_yticklabels(labels, color=self.cchart["texto"], fontsize=7)
@@ -4209,7 +4206,12 @@ class WidgetVehiculo(TickerInfo):
             # Dibuja una línea vertical para representar UnProfit (solicitud: UnProfit como línea)
             # Si UnProfit está definido, marcarlo con línea y etiqueta
             if not math.isclose(unprofit, 0.0, rel_tol=1e-12) or ("UnProfit" in data):
-                ax.axvline(unprofit, color=self.cchart.get("axsx", "green"), linestyle="--", linewidth=1)
+                ax.axvline(
+                    unprofit,
+                    color=self.cchart.get("axsx", "green"),
+                    linestyle="--",
+                    linewidth=1,
+                )
                 # añadir etiqueta de valor cerca de la línea (arriba a la derecha)
                 x_text = unprofit
                 y_text = len(labels) - 0.5
@@ -4233,7 +4235,6 @@ class WidgetVehiculo(TickerInfo):
             ax.tick_params(axis="x", colors=self.cchart["axsx"], labelsize=6)
             ax.tick_params(axis="y", colors=self.cchart["texto"], labelsize=6)
             ax.set_xlabel(" ", fontsize=7, color=self.cchart["texto"])
-
 
             # Mostrar porcentaje relativo a Inversión encima de cada barra (si inversión > 0)
             if inversión > 0:
@@ -4357,21 +4358,39 @@ class WidgetVehiculo(TickerInfo):
 
             # aspecto opcional (defensivo)
             aspect = parm.get("aspect")
-            
+
             # seleccionar series a graficar en orden predecible:
             # tomar valores de parm que sean strings y existan en data.columns
-            series_cols = [v for k, v in parm.items() if isinstance(v, str) and v in data.columns]
+            series_cols = [
+                v for k, v in parm.items() if isinstance(v, str) and v in data.columns
+            ]
             # esperamos al menos dos series para el eje izquierdo (performance comparativa)
-            left_series = series_cols[:2] if len(series_cols) >= 2 else (series_cols + [None, None])[:2]
+            left_series = (
+                series_cols[:2]
+                if len(series_cols) >= 2
+                else (series_cols + [None, None])[:2]
+            )
 
             # plot eje izquierdo (performance comparativa)
             if left_series[0]:
-                ax.plot(data.index, data[left_series[0]], color=self.cchart["plot5"], linewidth=1.3)
+                ax.plot(
+                    data.index,
+                    data[left_series[0]],
+                    color=self.cchart["plot5"],
+                    linewidth=1.3,
+                )
             if left_series[1]:
-                ax.plot(data.index, data[left_series[1]], color=self.cchart["plot2"], linewidth=1.3)
+                ax.plot(
+                    data.index,
+                    data[left_series[1]],
+                    color=self.cchart["plot2"],
+                    linewidth=1.3,
+                )
 
             # formateo eje X
-            Xformatter = "%b-%y" if parm.get("periodo") in ('6M', '1Y', '5Y') else "%d-%b"
+            Xformatter = (
+                "%b-%y" if parm.get("periodo") in ("6M", "1Y", "5Y") else "%d-%b"
+            )
             ax.xaxis.set_major_formatter(mdates.DateFormatter(Xformatter))
 
             xlabels = ax.get_xticklabels()
@@ -4425,32 +4444,61 @@ class WidgetVehiculo(TickerInfo):
 
                 # Si sólo existe costo_col -> dibujar barras de costo
                 if costo_col and not value_col:
-                    av.bar(data.index, data[costo_col], width=width_costo,
-                           color=self.cchart["plot31"], alpha=0.35, align="center", edgecolor='none')
-                    
-                    # Marca costo en el eje y 
+                    av.bar(
+                        data.index,
+                        data[costo_col],
+                        width=width_costo,
+                        color=self.cchart["plot31"],
+                        alpha=0.35,
+                        align="center",
+                        edgecolor="none",
+                    )
+
+                    # Marca costo en el eje y
                     l_ix = len(data.index)
                     ycos = data[costo_col].iloc[-1] if costo_col else None
                     av.plot(l_ix, ycos, marker=">", color=self.cchart["plot3"])
 
                 # Si existe value_col y no costo_col -> dibujar barras de value
                 elif value_col and not costo_col:
-                    av.bar(data.index, data[value_col], width=width_value,
-                           color=self.cchart["plot1"], alpha=0.9, align="center", edgecolor='none')
- 
-                    # Marca value en el eje y 
+                    av.bar(
+                        data.index,
+                        data[value_col],
+                        width=width_value,
+                        color=self.cchart["plot1"],
+                        alpha=0.9,
+                        align="center",
+                        edgecolor="none",
+                    )
+
+                    # Marca value en el eje y
                     yval = data[value_col].iloc[-1] if value_col else None
                     av.plot(l_ix, yval, marker=">", color=self.cchart["plot8"])
 
- 
                 # Si existen ambas -> dibujar costo como fondo y value encima
                 elif value_col and costo_col:
-                    av.bar(data.index, data[costo_col], width=width_costo,
-                           color=self.cchart["plot31"], alpha=0.35, align="center", edgecolor='none', label=costo_col)
-                    av.bar(data.index, data[value_col], width=width_value,
-                           color=self.cchart["plot1"], alpha=0.9, align="center", edgecolor='none', label=value_col)
+                    av.bar(
+                        data.index,
+                        data[costo_col],
+                        width=width_costo,
+                        color=self.cchart["plot31"],
+                        alpha=0.35,
+                        align="center",
+                        edgecolor="none",
+                        label=costo_col,
+                    )
+                    av.bar(
+                        data.index,
+                        data[value_col],
+                        width=width_value,
+                        color=self.cchart["plot1"],
+                        alpha=0.9,
+                        align="center",
+                        edgecolor="none",
+                        label=value_col,
+                    )
 
-                    # Marca costo en el eje y 
+                    # Marca costo en el eje y
                     l_ix = data.index[-1]
                     ycos = data[costo_col].iloc[-1] if costo_col else None
                     yval = data[value_col].iloc[-1] if value_col else None
@@ -4458,10 +4506,10 @@ class WidgetVehiculo(TickerInfo):
                     av.plot(l_ix, ycos, marker=">", color=self.cchart["plot31"])
 
                     if yval is not None and ycos is not None:
-                        pmedio = max(ycos, yval) - abs(yval - ycos) / 2 
+                        pmedio = max(ycos, yval) - abs(yval - ycos) / 2
                         performa = (yval - ycos) / ycos if ycos != 0 else 0.0
                         # ycolor =  self.cchart["plot8"] if performa > 0 else self.cchart["plot31"]
-                        ycolor =  self.cchart["texto"]
+                        ycolor = self.cchart["texto"]
                         av.annotate(
                             f"{performa:>3.1%}",
                             xy=(l_ix, pmedio),
@@ -4475,15 +4523,17 @@ class WidgetVehiculo(TickerInfo):
                     try:
                         mask = data[costo_col].notna() & data[value_col].notna()
                         if mask.any():
-                            av.fill_between(data.index[mask],
-                                            data[costo_col][mask],
-                                            data[value_col][mask],
-                                            where=(data[costo_col][mask] > data[value_col][mask]),
-                                            facecolor=self.cchart["plot3"], alpha=0.12,
-                                            interpolate=True)
+                            av.fill_between(
+                                data.index[mask],
+                                data[costo_col][mask],
+                                data[value_col][mask],
+                                where=(data[costo_col][mask] > data[value_col][mask]),
+                                facecolor=self.cchart["plot3"],
+                                alpha=0.12,
+                                interpolate=True,
+                            )
                     except Exception:
                         pass
-
 
             # formateo eje derecho
             av.set_ylabel("Dolar US", fontsize="x-small", color=self.cchart["plot1"])
@@ -4495,21 +4545,31 @@ class WidgetVehiculo(TickerInfo):
             av.spines["right"].set_visible(True)
             av.axhline(0, linewidth=0.6, ls="--", color=self.cchart["plot1"])
 
-
-
             # línea 0 en eje izquierdo para referencia
             ax.axhline(0, linewidth=0.6, ls="--", color=self.cchart["texto"])
 
             # leyenda: construimos patches según las series dibujadas
             patches = []
             if left_series[0]:
-                patches.append(mpatches.Patch(color=self.cchart["plot5"], label=left_series[0]))
+                patches.append(
+                    mpatches.Patch(color=self.cchart["plot5"], label=left_series[0])
+                )
             if left_series[1]:
-                patches.append(mpatches.Patch(color=self.cchart["plot2"], label=left_series[1]))
+                patches.append(
+                    mpatches.Patch(color=self.cchart["plot2"], label=left_series[1])
+                )
             if value_col:
-                patches.append(mpatches.Patch(color=self.cchart["plot1"], label="Values Market", alpha=0.45))
+                patches.append(
+                    mpatches.Patch(
+                        color=self.cchart["plot1"], label="Values Market", alpha=0.45
+                    )
+                )
             if costo_col:
-                patches.append(mpatches.Patch(color=self.cchart["plot3"], label="Cost Base", alpha=0.35))
+                patches.append(
+                    mpatches.Patch(
+                        color=self.cchart["plot3"], label="Cost Base", alpha=0.35
+                    )
+                )
 
             legend_loc = parm.get("legend", "upper left")
             if patches:
@@ -4623,7 +4683,7 @@ class WidgetVehiculo(TickerInfo):
 
             # ajusta gráfico performance portafolio i setea a 1
             self.setup_graph_performace(tipo="1Y")
-         
+
         except Exception as e:
             print(f"[run_gráficos()]: {e}")
 

@@ -1,8 +1,8 @@
-# Valuation_edgar_downloader.py 
+# Valuation_edgar_downloader.py
 """
 Módulo para descargar filings de la SEC desde EDGAR.
 Funciones principales:
-- get_cik_from_ticker(ticker): Obtiene el CIK a partir del ticker.      
+- get_cik_from_ticker(ticker): Obtiene el CIK a partir del ticker.
 - get_filings_metadata(cik): Obtiene metadata de filings desde submissions.json.
 - download_filing_file(cik, accession, filename, save_dir): Descarga un archivo específico del filing.
 - is_foreign_filer(form_list): Detecta si una empresa presenta formularios extranjeros (20-F, 6-K).
@@ -23,6 +23,7 @@ SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 # Formularios disponibles
 DOMESTIC_FORMS = ["10-K", "10-Q"]
 FOREIGN_FORMS = ["20-F", "6-K"]
+
 
 # =====================================================
 # Funciones auxiliares
@@ -85,6 +86,56 @@ def is_foreign_filer(form_list: list[str]) -> bool:
 
 
 # =====================================================
+# busca y descarga archivos ZIP asociados
+# =====================================================
+def download_zip_files(cik: str, ticker: str, accession: str, save_dir: str):
+    """
+    Descarga automáticamente cualquier archivo ZIP asociado al filing.
+    Retorna una lista con los ZIP descargados.
+    """
+    index_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}/index.json"
+    zip_files_downloaded = []
+
+    try:
+        r = requests.get(index_url, headers=HEADERS)
+        if r.status_code == 404:
+            return []
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        print(f"⚠️ No se pudo leer index.json para {accession}: {e}")
+        return []
+
+    items = data.get("directory", {}).get("item", [])
+    zip_files = [it["name"] for it in items if it["name"].lower().endswith(".zip")]
+
+    for zfile in zip_files:
+        url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}/{zfile}"
+        local_path = os.path.join(save_dir, zfile)
+
+        if not os.path.exists(local_path):
+            try:
+                rz = requests.get(url, headers=HEADERS)
+                if rz.status_code == 404:
+                    continue
+                rz.raise_for_status()
+
+                with open(local_path, "wb") as f:
+                    f.write(rz.content)
+
+                # print(f"📦 ZIP descargado: {ticker} - {zfile}")
+                time.sleep(0.5)
+
+            except Exception as e:
+                print(f"❌ Error descargando ZIP {ticker} - {zfile}: {e}")
+                continue
+
+        zip_files_downloaded.append({"zip_file": zfile, "path": local_path})
+
+    return zip_files_downloaded
+
+
+# =====================================================
 # Función principal
 # =====================================================
 def download_filing(ticker=None, display=False):
@@ -128,7 +179,10 @@ def download_filing(ticker=None, display=False):
 
     # Crear directorios
     ticker_dir = os.path.join(BASE_DIR, f"{ticker}_EDGAR_Files")
-    dirs = {form: os.path.join(ticker_dir, f"{form.replace('-', '')}_Filings") for form in target_forms}
+    dirs = {
+        form: os.path.join(ticker_dir, f"{form.replace('-', '')}_Filings")
+        for form in target_forms
+    }
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
 
@@ -141,7 +195,7 @@ def download_filing(ticker=None, display=False):
     # Limitar cantidad
     limits = {"10-K": 5, "10-Q": 3, "20-F": 3, "6-K": 3}
     for f in target_forms:
-        categorized[f] = sorted(categorized[f], reverse=True)[:limits.get(f, 3)]
+        categorized[f] = sorted(categorized[f], reverse=True)[: limits.get(f, 3)]
 
     # Descargar
     downloaded_files = []
@@ -151,14 +205,36 @@ def download_filing(ticker=None, display=False):
         if display:
             print(f"📁 Preparando descarga: {len(entries)} × {form}\n")
         for date, acc, file in entries:
+            # 1. Descargar documento principal
             download_filing_file(cik, acc, file, dirs[form])
-            downloaded_files.append({
-                "form": form,
-                "date": date,
-                "accession": acc,
-                "file": file,
-                "path": os.path.join(dirs[form], file)
-            })
+
+            # 2. Descargar ZIPs
+            zip_entries = download_zip_files(cik, ticker, acc, dirs[form])
+
+            # 3. Registrar el documento principal
+            downloaded_files.append(
+                {
+                    "form": form,
+                    "date": date,
+                    "accession": acc,
+                    "file": file,
+                    "path": os.path.join(dirs[form], file),
+                    "is_zip": False,
+                }
+            )
+
+            # 4. Registrar cada ZIP
+            for z in zip_entries:
+                downloaded_files.append(
+                    {
+                        "form": form,
+                        "date": date,
+                        "accession": acc,
+                        "file": z["zip_file"],
+                        "path": z["path"],
+                        "is_zip": True,
+                    }
+                )
 
     # Guardar JSON resumen
     metadata_path = os.path.join(ticker_dir, "metadata.json")
@@ -168,7 +244,7 @@ def download_filing(ticker=None, display=False):
         "company_type": company_type,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "directories": dirs,
-        "downloaded_files": downloaded_files
+        "downloaded_files": downloaded_files,
     }
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=4, ensure_ascii=False)
@@ -180,6 +256,7 @@ def download_filing(ticker=None, display=False):
         print(f"Fecha de ejecución: {datetime.now(timezone.utc).isoformat()}")
 
     return True
+
 
 # =====================================================
 # Entry Point

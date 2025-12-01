@@ -8,75 +8,79 @@ Módulo responsable de:
 """
 from Modulos_python import json, os, re, Path, datetime
 
+
 # ============================================================
-# 📁 Obtener lista de filings relevantes
+# 📁 Obtener .zip de filings relevantes
 # ============================================================
-def get_filing_list(ticker_dir: Path):
+def get_zip_files(ticker_dir: Path):
+    import os
+
+
+import json
+import zipfile
+from datetime import datetime
+
+
+def get_zip_files(ticker_dir, display_logs=False):
     """
-    Selección REAL para análisis financiero:
+    Usa metadata.json para retornar los filings relevantes:
+    - ZIP → con lista de INSTANCE FILES internos
+    - HTM → se marca como INLINE XBRL
+    - XML sueltos → se toman directamente
 
-    1) Tomar los últimos 4 × 10-Q (independientemente del año)
-    2) Tomar el último 10-K
-    3) Mantener orden por fecha descendente
+    Retorna lista: [ (path, instance_list), ... ] ordenados por fecha.
     """
 
-    metadata_path = ticker_dir / "metadata.json"
-    candidates = []
-
-    # ---------------------------------------------------------------
-    # 1. Cargar metadata.json
-    # ---------------------------------------------------------------
-    if metadata_path.exists():
-        try:
-            md = json.loads(metadata_path.read_text(encoding="utf-8"))
-            for item in md.get("downloaded_files", []):
-                form = (item.get("form") or "").upper()
-                p = Path(item["path"])
-                if not p.exists():
-                    continue
-                dt = datetime.fromisoformat(item["date"])
-
-                candidates.append({
-                    "path": p,
-                    "form": form,
-                    "dt": dt
-                })
-
-        except Exception as e:
-            print(f"[WARN] Error leyendo metadata.json → {e}")
-
-    if not candidates:
+    metadata_path = os.path.join(ticker_dir, "metadata.json")
+    if not os.path.exists(metadata_path):
+        if display_logs:
+            print("⚠ No existe metadata.json")
         return []
 
-    # ---------------------------------------------------------------
-    # 2. Separar 10-Q y 10-K
-    # ---------------------------------------------------------------
-    q = [c for c in candidates if c["form"] == "10-Q"]
-    k = [c for c in candidates if c["form"] == "10-K"]
+    with open(metadata_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
 
-    # selecciona para empresas extranjera
-    if not q and not k:
-        q = [c for c in candidates if c["form"] == "20-F"]
-        k = [c for c in candidates if c["form"] == "6-K"]
+    files = []
+    for item in meta.get("downloaded_files", []):
+        date_str = item.get("date", "1900-01-01")
+        try:
+            dt = datetime.fromisoformat(date_str)
+        except:
+            dt = datetime.min
 
-    q_sorted = sorted(q, key=lambda x: x["dt"], reverse=True)
-    k_sorted = sorted(k, key=lambda x: x["dt"], reverse=True)
+        path = item.get("path")
+        if not path or not os.path.exists(path):
+            continue
 
-    # Tomar últimos 4 trimestres
-    last_four_q = q_sorted[:4]
+        if item.get("is_zip", False):
+            # inspeccionar ZIP
+            inst = []
+            try:
+                with zipfile.ZipFile(path, "r") as z:
+                    for name in z.namelist():
+                        low = name.lower()
+                        if low.endswith(".xml") and not any(
+                            k in low for k in ["cal", "pre", "def", "lab"]
+                        ):
+                            inst.append(name)
+            except:
+                pass
 
-    # Tomar el último 10-K
-    last_k = k_sorted[:1]
+            files.append((dt, path, inst))
 
-    # ---------------------------------------------------------------
-    # 3. Combinar
-    # ---------------------------------------------------------------
-    final = last_four_q + last_k
+        else:
+            # HTM inline XBRL
+            if path.lower().endswith(".htm"):
+                files.append((dt, path, ["INLINE"]))
+            # XML suelto
+            elif path.lower().endswith(".xml"):
+                files.append((dt, path, [path]))
 
-    # Ordenar por fecha
-    final = sorted(final, key=lambda x: x["dt"], reverse=True)
+    # ordenar por fecha
+    files.sort(key=lambda x: x[0], reverse=True)
 
-    return [c["path"] for c in final]
+    # devolver (path, instance_list)
+    return [(p, inst) for _, p, inst in files]
 
 
 # ============================================================
