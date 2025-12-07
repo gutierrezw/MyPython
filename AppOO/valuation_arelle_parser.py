@@ -1,81 +1,66 @@
 # ================================================
-# valuation_arelle_parser.py
+# valuation_arelle_parser.py (SIMPLIFIED VERSION)
 # Capa: acceso directo a Arelle
 # ================================================
 
-# valuation_arelle_parser.py
-# ----------------------------------------------
-# Nueva versión limpia del loader iXBRL + XBRL
-# ----------------------------------------------
-
-from arelle import Cntlr
-from arelle import ModelXbrl
 from zipfile import ZipFile
 from pathlib import Path
+from arelle import Cntlr, ModelManager, FileSource
 
 
-# ----------------------------------------------
-# Cargador universal usando Arelle
-# ----------------------------------------------
-def load_xbrl_with_arelle(path, instance=None):
+def load_xbrl_with_arelle(path, instance=None, display_logs=False):
     """
-    Carga cualquier formato soportado:
-        - .htm / .html  → Inline XBRL
-        - .xml / .xbrl → instancia clásica
-        - .zip         → paquetes SEC
-    Retorna: modelXbrl (Arelle)
+    Loader universal para Inline XBRL, XML y ZIP.
+    Versión simplificada que funciona con cualquier versión de Arelle.
     """
     path = str(path)
     p = Path(path)
 
-    # Crear el controlador
+    # Controlador sin GUI
     cntlr = Cntlr.Cntlr(logFileName=None)
 
-    # Detectar extensión
     ext = p.suffix.lower()
 
-    # Resolver instancia principal (htm/xml/zip)
-    if ext in [".htm", ".html", ".xml", ".xbrl"]:
-        open_file = path
+    # --- Resolver archivo a abrir ---
+    if ext in [".htm", ".html"]:
+        file_to_open = path
+
+    elif ext in [".xml", ".xbrl"]:
+        file_to_open = path
 
     elif ext == ".zip":
-        with ZipFile(path, "r") as z:
-            candidates = [
-                f
-                for f in z.namelist()
-                if f.lower().endswith((".xml", ".xbrl"))
-                and "cal" not in f.lower()
-                and "pre" not in f.lower()
-                and "def" not in f.lower()
-                and "lab" not in f.lower()
-            ]
-
-            if not candidates:
-                raise Exception(f"No se encontró instancia en ZIP: {path}")
-
-            if instance:
-                open_file = f"{path}::{instance}"
-            else:
-                open_file = f"{path}::{candidates[0]}"
-
+        if instance:
+            file_to_open = f"{path}::{instance}"
+        else:
+            with ZipFile(path, "r") as z:
+                candidates = [
+                    f
+                    for f in z.namelist()
+                    if f.lower().endswith((".xml", ".xbrl"))
+                    and not any(k in f.lower() for k in ["cal", "pre", "def", "lab"])
+                ]
+                if not candidates:
+                    raise Exception(f"No instancia XML dentro del ZIP: {path}")
+                file_to_open = f"{path}::{candidates[0]}"
     else:
         raise Exception(f"Tipo no soportado: {path}")
 
-    # 🔥 CARGA REAL QUE FUNCIONA EN TU VERSION DE ARELLE
-    try:
-        model = cntlr.modelManager.load(open_file)
-    except Exception as e:
-        raise Exception(f"Arelle no pudo cargar {open_file}: {e}")
+    # ✅ MÉTODO SIMPLE: usar ModelManager.load() directamente
+    model_manager = cntlr.modelManager
 
-    if model is None:
-        raise Exception(f"Arelle devolvió model=None: {open_file}")
+    # Cargar el modelo
+    model_xbrl = model_manager.load(file_to_open)
 
-    return model
+    if model_xbrl is None:
+        raise Exception(f"No se pudo cargar el filing: {file_to_open}")
+
+    if display_logs:
+        print(f"✅ Arelle cargó exitosamente: {p.name}")
+        print(f"   Total facts: {len(model_xbrl.facts)}")
+
+    return model_xbrl
 
 
-# ----------------------------------------------
-# Extraer hechos
-# ----------------------------------------------
 def extract_facts(model):
     """
     Devuelve un diccionario:
@@ -97,9 +82,6 @@ def extract_facts(model):
     return facts
 
 
-# ----------------------------------------------
-# Extraer contextos
-# ----------------------------------------------
 def extract_contexts(model):
     """
     Devuelve diccionario:
@@ -114,7 +96,7 @@ def extract_contexts(model):
         info = {}
 
         if c.isInstantPeriod:
-            info["instant"] = c.instantDate
+            info["instant"] = c.instantDatetime
 
         if c.isStartEndPeriod:
             info["start"] = c.startDatetime
@@ -125,9 +107,6 @@ def extract_contexts(model):
     return ctx
 
 
-# ----------------------------------------------
-# Extraer unidades
-# ----------------------------------------------
 def extract_units(model):
     """
     Devuelve unidades:

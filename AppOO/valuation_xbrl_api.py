@@ -1,13 +1,7 @@
 # ================================================
-# valuation_xbrl_api.py
+# valuation_xbrl_api.py (FIXED VERSION)
 # Capa: API estándar para el motor
 # ================================================
-
-# valuation_xbrl_api.py
-# -----------------------------------------------------
-# Interfaz de alto nivel para el motor de valoración.
-# Usa valuation_arelle_parser para cargar y consultar facts.
-# -----------------------------------------------------
 
 import os
 import zipfile
@@ -40,6 +34,35 @@ class Filing:
 
 
 # -----------------------------------------------------
+# ✅ FIX: Obtener valor del fact (múltiples métodos)
+# -----------------------------------------------------
+def get_fact_value(fact):
+    """
+    Intenta obtener el valor de un fact usando diferentes métodos.
+    Inline XBRL puede tener el valor en diferentes atributos.
+    """
+    # Método 1: xValue
+    if hasattr(fact, "xValue") and fact.xValue is not None:
+        return fact.xValue
+
+    # Método 2: value
+    if hasattr(fact, "value") and fact.value is not None:
+        try:
+            return float(str(fact.value).replace(",", ""))
+        except:
+            return fact.value
+
+    # Método 3: text
+    if hasattr(fact, "text") and fact.text:
+        try:
+            return float(str(fact.text).replace(",", ""))
+        except:
+            return fact.text
+
+    return None
+
+
+# -----------------------------------------------------
 # Función de carga principal
 # -----------------------------------------------------
 def load_filing(path, instance=None):
@@ -47,7 +70,7 @@ def load_filing(path, instance=None):
     path: ruta al archivo (htm, xml o zip)
     instance: si es ZIP, el nombre del XML que contiene la instancia
     """
-    model = load_xbrl_with_arelle(path, instance)
+    model = load_xbrl_with_arelle(path, instance, display_logs=False)
 
     facts = extract_facts(model)
     contexts = extract_contexts(model)
@@ -63,7 +86,7 @@ def load_filing(path, instance=None):
 
 
 # -----------------------------------------------------
-# Selecciona el hecho más apropiado entre múltiples contextos
+# ✅ FIX: Selecciona el hecho más apropiado
 # -----------------------------------------------------
 def select_best_fact(facts, contexts, prefer="duration"):
     """
@@ -103,9 +126,13 @@ def select_best_fact(facts, contexts, prefer="duration"):
             except:
                 continue
 
-        # valor numérico
+        # ✅ FIX: Usar get_fact_value()
+        val = get_fact_value(f)
+        if val is None:
+            continue
+
         try:
-            val = float(f.xValue)
+            val = float(val)
         except:
             continue
 
@@ -134,23 +161,16 @@ def get_fact(filing, name, prefer="duration"):
 
 
 # -----------------------------------------------------
-# Construye TTM a partir de los últimos 4 filings
+# ✅ FIX: Build TTM con los conceptos correctos
 # -----------------------------------------------------
 def build_ttm(filings):
     """
     filings → lista de Filing cargados
-    Retorna dict con:
-        NetIncome
-        OperatingCF
-        CapEx
-        Dividends
-        Shares
-        Revenues
-        FFO
-        AFFO
+    Retorna dict con métricas clave para valoración
     """
 
     def try_names(primary, fallback=None, prefer="duration"):
+        """Busca el primer fact disponible en la lista de nombres"""
         for name in primary:
             for f in filings:
                 v = get_fact(f, name, prefer)
@@ -166,19 +186,85 @@ def build_ttm(filings):
 
         return None
 
+    # ✅ CONCEPTOS ACTUALIZADOS BASADOS EN EL DIAGNÓSTICO
     return {
-        "NetIncome": try_names(["us-gaap:NetIncomeLoss", "us-gaap:ProfitLoss"]),
-        "OperatingCF": try_names(
-            ["us-gaap:NetCashProvidedByUsedInOperatingActivities"]
+        # Net Income - HASI usa ProfitLoss
+        "NetIncome": try_names(
+            ["us-gaap:ProfitLoss", "us-gaap:NetIncomeLoss"], prefer="duration"
         ),
-        "CapEx": try_names(["us-gaap:CapitalExpenditures"], prefer="duration"),
-        "Dividends": try_names(["us-gaap:PaymentsOfDividends"]),
-        "Shares": try_names(
-            ["us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding"],
-            ["us-gaap:WeightedAverageNumberOfSharesOutstandingBasic"],
+        "Depreciation": try_names(
+            [
+                "us-gaap:DepreciationDepletionAndAmortization",
+                "us-gaap:Depreciation",
+                "us-gaap:DepreciationAndAmortization",
+            ],
             prefer="duration",
         ),
-        "Revenues": try_names(["us-gaap:Revenues", "us-gaap:SalesRevenueNet"]),
-        "FFO": try_names(["us-gaap:FundsFromOperations"], prefer="duration"),
-        "AFFO": try_names(["us-gaap:AdjustedFundsFromOperations"], prefer="duration"),
+        "GainsOnRealEstateSales": try_names(
+            [
+                "us-gaap:ProceedsFromSaleOfRealEstateHeldforinvestment",
+                "us-gaap:GainLossOnSaleOfProperties",
+                "us-gaap:GainLossOnSaleOfPropertyPlantEquipment",
+            ],
+            prefer="duration",
+        ),
+        # Operating Cash Flow
+        "OperatingCF": try_names(
+            [
+                "us-gaap:NetCashProvidedByUsedInOperatingActivities",
+                "us-gaap:CashProvidedByUsedInOperatingActivities",
+            ],
+            prefer="duration",
+        ),
+        # CapEx
+        "CapEx": try_names(
+            [
+                "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
+                "us-gaap:CapitalExpenditures",
+            ],
+            prefer="duration",
+        ),
+        # Dividendos - HASI usa DividendsCommonStockCash
+        "DividendsPaid": try_names(
+            [
+                "us-gaap:DividendsCommonStockCash",
+                "us-gaap:PaymentsOfDividends",
+                "us-gaap:PaymentsOfDividendsCommonStock",
+            ],
+            prefer="duration",
+        ),
+        # Shares Outstanding
+        "Shares": try_names(
+            [
+                "us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding",
+                "us-gaap:WeightedAverageNumberOfSharesOutstandingBasic",
+                "dei:EntityCommonStockSharesOutstanding",
+            ],
+            prefer="instant",
+        ),
+        # Revenue
+        "Revenues": try_names(
+            [
+                "us-gaap:RevenueFromContractWithCustomerIncludingAssessedTax",  # ✅ KHC usa este
+                "us-gaap:Revenues",
+                "us-gaap:SalesRevenueNet",
+                "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+            ],
+            prefer="duration",
+        ),
+        # FFO (Funds From Operations) - para REITs
+        "FFO": try_names(
+            ["us-gaap:FundsFromOperations", "hasi:FundsFromOperations"],
+            prefer="duration",
+        ),
+        # AFFO (Adjusted FFO) - para REITs
+        "AFFO": try_names(
+            ["us-gaap:AdjustedFundsFromOperations", "hasi:AdjustedFundsFromOperations"],
+            prefer="duration",
+        ),
+        # Assets y Equity para análisis adicional
+        "TotalAssets": try_names(["us-gaap:Assets"], prefer="instant"),
+        "TotalEquity": try_names(
+            ["us-gaap:StockholdersEquity", "us-gaap:Equity"], prefer="instant"
+        ),
     }
