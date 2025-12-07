@@ -12,7 +12,7 @@ import numpy as np
 from datetime import datetime
 from pathlib import Path
 
-from valuation_xbrl_api import load_filing, build_ttm
+from valuation_xbrl_api import load_filing, build_ttm, analyze_dividend_history
 from valuation_ddm import DividendDiscountModel
 
 
@@ -360,6 +360,7 @@ def run_valuation(file_list, ticker, price):
     ddm_results = None
     if vals.get("Dividend_Per_Share"):
         ddm_results = run_ddm_analysis(vals["Dividend_Per_Share"], price)
+        analyze_divideds = analyze_dividend_history(ticker)
 
     # ✅ ESTRUCTURA PARA DB
     return {
@@ -416,6 +417,7 @@ def run_valuation(file_list, ticker, price):
             "payout_ratio_percent": vals["Payout_Ratio_Percent"],
         },
         "ddm_valuation": ddm_results,
+        "dividend_analysis": analyze_divideds,
         "raw_ttm_data": ttm,  # Por si querés guardar los datos crudos también
     }
 
@@ -489,7 +491,7 @@ if __name__ == "__main__":
     result = run_valuation(file_list, ticker, price)
 
     # Resumen en pantalla
-    print_summary(result)
+    # print_summary(result)
 
     # ✅ DICCIONARIO IDENTADO LISTO PARA DB
     print("\n" + "=" * 70)

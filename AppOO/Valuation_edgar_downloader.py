@@ -1,4 +1,4 @@
-# Valuation_edgar_downloader.py
+# valuation_edgar_downloader.py
 """
 Módulo para descargar filings de la SEC desde EDGAR.
 Funciones principales:
