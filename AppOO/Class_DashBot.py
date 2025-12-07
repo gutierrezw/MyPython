@@ -50,8 +50,8 @@ from Modulos_python import (
     wraps,
 )
 from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion
-from Valuation_edgar_downloader import BASE_DIR, download_filing
-from Valuation_filings import get_zip_files
+from valuation_edgar_downloader import BASE_DIR, download_filing
+from valuation_xbrl_api import get_zip_files
 from Class_customer import DataHub, TickerInfo
 from Class_IA_modelos import ModeloOportunidadesSell
 from Modulos_Utilitarios import define_FileCache
