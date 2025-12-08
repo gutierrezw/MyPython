@@ -21,36 +21,72 @@ from valuation_alerts import generate_alerts, get_overall_risk_level, format_ale
 
 def is_reit(ttm: dict):
     """
-    Detecta si la empresa es un REIT basándose SOLO en los datos
+    Detecta si la empresa es un REIT basándose en señales algorítmicas.
+    Versión mejorada para evitar falsos positivos.
     """
-    # Señal 1: Si reporta FFO/AFFO nativo
+
+    # ============================================================
+    # Señal 1: Si reporta FFO/AFFO nativo en los filings
+    # ============================================================
     if ttm.get("FFO") is not None or ttm.get("AFFO") is not None:
         return True
 
-    # Señal 2: Si tiene gains significativos en RE sales
-    gains = ttm.get("GainsOnRealEstateSales")
-    if gains and abs(gains) > 1000000:
-        return True
-
-    # Señal 3: Depreciation muy alta relativa a ingresos (típico de REITs)
-    # REITs tienen mucha depreciation porque tienen muchas propiedades
     depreciation = ttm.get("Depreciation") or 0
-    revenues = ttm.get("Revenues") or 1  # Evitar división por 0
+    revenues = ttm.get("Revenues") or 0
+    gains = ttm.get("GainsOnRealEstateSales") or 0
 
-    if revenues > 0:
-        depreciation_ratio = abs(depreciation) / revenues
-        # Si depreciation > 30% de revenues, probablemente es REIT
-        if depreciation_ratio > 0.30:
+    # ============================================================
+    # Señal 2 (MEJORADA): Gains significativos en ventas de Real Estate
+    # PERO solo si son materiales relativos a revenues
+    # ============================================================
+    if revenues > 0 and gains != 0:
+        gains_ratio = abs(gains) / revenues
+        # Solo si gains > 5% de revenues (evita ventas corporativas ocasionales)
+        if gains_ratio > 0.05 and abs(gains) > 10_000_000:
             return True
 
-    # Señal 4: Payout ratio muy alto (REITs pagan >90% por ley)
-    dividends = ttm.get("DividendsPaid") or 0
-    ocf = ttm.get("OperatingCF") or 1
+    # ============================================================
+    # Señal 3: Depreciation muy alta relativa a revenues
+    # REITs deprecian mucho porque tienen muchas propiedades
+    # ============================================================
+    if revenues > 0 and depreciation > 0:
+        depreciation_ratio = abs(depreciation) / revenues
+        # Si depreciation > 35% de revenues, es casi seguro un REIT
+        # (Aumentado de 30% a 35% para ser más conservador)
+        if depreciation_ratio > 0.35:
+            return True
 
-    if ocf > 0 and dividends > 0:
+    # ============================================================
+    # Señal 4 (MEJORADA): Payout alto + Depreciation alta
+    # AMBAS condiciones deben cumplirse para evitar falsos positivos
+    # ============================================================
+    dividends = ttm.get("DividendsPaid") or 0
+    ocf = ttm.get("OperatingCF") or 0
+
+    if ocf > 0 and dividends > 0 and revenues > 0:
         payout = dividends / ocf
-        # REITs típicamente pagan >70% del OCF
-        if payout > 0.70:
+        depreciation_ratio = abs(depreciation) / revenues
+
+        # ✅ CAMBIO CLAVE: Requiere AMBAS condiciones
+        # Payout alto (>80%) Y depreciation alta (>25%)
+        # Aumentado umbrales para ser más estricto
+        if payout > 0.80 and depreciation_ratio > 0.25:
+            return True
+
+    # ============================================================
+    # Señal 5: REITs de infraestructura (torres, data centers)
+    # Tienen payout muy alto pero depreciation moderada
+    # ============================================================
+    net_income = ttm.get("NetIncome") or 0
+
+    # Recalcular variables para Señal 5
+    if ocf > 0 and dividends > 0 and revenues > 0:
+        payout_ocf = dividends / ocf
+        depreciation_ratio = abs(depreciation) / revenues
+
+        # REITs de infraestructura: payout altísimo (>90%) + depreciation moderada (>15%)
+        # Y típicamente tienen pérdidas contables (net income negativo)
+        if payout_ocf > 0.90 and depreciation_ratio > 0.15 and net_income < 0:
             return True
 
     return False
@@ -145,7 +181,11 @@ def build_file_list(BASE_DIR: Path, ticker: str, display_logs=False):
     return out
 
 
-def get_yf_price(ticker: str):
+def get_yf_data(ticker: str):
+    """
+    Obtiene precio actual y nombre de la compañía desde Yahoo Finance.
+    Retorna: (price: float, company_name: str) o (None, None) si falla
+    """
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0)"}
     urls = [
         f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
@@ -153,6 +193,10 @@ def get_yf_price(ticker: str):
         f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}",
     ]
 
+    price = None
+    company_name = None
+
+    # Intento 1: obtener desde /v8/finance/chart (más confiable para precio)
     for attempt in range(3):
         for url in urls:
             try:
@@ -163,22 +207,89 @@ def get_yf_price(ticker: str):
                 r.raise_for_status()
                 data = r.json()
 
+                # Extrae precio
                 try:
-                    return data["chart"]["result"][0]["meta"]["regularMarketPrice"]
+                    price = data["chart"]["result"][0]["meta"]["regularMarketPrice"]
                 except:
                     pass
 
+                # Extrae nombre de la compañía
                 try:
-                    return data["quoteSummary"]["result"][0]["price"][
+                    company_name = data["chart"]["result"][0]["meta"]["longName"]
+                except:
+                    try:
+                        company_name = data["chart"]["result"][0]["meta"]["shortName"]
+                    except:
+                        pass
+
+                if price:
+                    break
+
+            except:
+                time.sleep(0.5 + attempt)
+
+        if price:
+            break
+
+    # Intento 2: Fallback a /v10/finance/quoteSummary si el anterior falló
+    if not price or not company_name:
+        try:
+            url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker}?modules=price,assetProfile"
+            r = requests.get(url, headers=headers, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+
+            if not price:
+                try:
+                    price = data["quoteSummary"]["result"][0]["price"][
                         "regularMarketPrice"
                     ]["raw"]
                 except:
                     pass
 
-            except:
-                time.sleep(0.5 + attempt)
+            if not company_name:
+                try:
+                    company_name = data["quoteSummary"]["result"][0]["assetProfile"][
+                        "longBusinessSummary"
+                    ]
+                    # Si es muy largo, intenta obtener el nombre corto
+                    try:
+                        company_name = data["quoteSummary"]["result"][0]["price"][
+                            "longName"
+                        ]
+                    except:
+                        pass
+                except:
+                    try:
+                        company_name = data["quoteSummary"]["result"][0]["price"][
+                            "shortName"
+                        ]
+                    except:
+                        pass
 
-    return None
+        except:
+            pass
+
+    # Intento 3: Fallback a yfinance como último recurso
+    if not price or not company_name:
+        try:
+            import yfinance as yf
+
+            tk = yf.Ticker(ticker)
+            info = tk.info
+
+            if not price and "regularMarketPrice" in info:
+                price = info["regularMarketPrice"]
+
+            if not company_name and "longName" in info:
+                company_name = info["longName"]
+            elif not company_name and "shortName" in info:
+                company_name = info["shortName"]
+
+        except:
+            pass
+
+    return price, company_name
 
 
 def compute_reit_metrics(ttm: dict):
@@ -359,7 +470,7 @@ def run_ddm_analysis(dividend_per_share, price, required_return=0.10):
     return results
 
 
-def run_valuation(file_list, ticker, price):
+def run_valuation(file_list, ticker, price, company_name):
     """
     ✅ RETORNA DICCIONARIO COMPLETO - LISTO PARA DB
     """
@@ -377,6 +488,10 @@ def run_valuation(file_list, ticker, price):
 
     ttm = build_ttm(filings)
     vals = compute_valuations(ttm, price)
+    reit_metrics = {}
+    alerts = []
+    risk_assessment = {}
+    analyze_divideds = []
 
     # Ejecutar análisis DDM
     ddm_results = None
@@ -386,6 +501,7 @@ def run_valuation(file_list, ticker, price):
 
         # ✅ NUEVO: Generar alertas
         reit_metrics = {
+            "is_reit": is_reit(ttm),  # ✅ AGREGADO
             "ffo_total": vals["FFO_Total"],
             "affo_total": vals["AFFO_Total"],
             "ffo_per_share": vals["FFO_Per_Share"],
@@ -399,6 +515,7 @@ def run_valuation(file_list, ticker, price):
     return {
         "metadata": {
             "ticker": ticker,
+            "company_name": company_name,
             "is_reit": is_reit(ttm),
             "analysis_date": datetime.now().isoformat(),
             "price_date": datetime.now().date().isoformat(),
@@ -524,16 +641,14 @@ if __name__ == "__main__":
     BASE_DIR = Path(r"C:\Users\InversionesWildaga\Documents\MyPython\AppOO\EDGAR")
 
     ticker = input("💼 Ingrese el ticker: ").strip().upper()
-    price = get_yf_price(ticker)
+    price, company_name = get_yf_data(ticker)  # ✅ Desempaca tupla
 
     if not price:
         print("❌ No se pudo obtener el precio de Yahoo Finance")
-
     elif price > 0:
-        file_list = build_file_list(BASE_DIR, ticker, display_logs=False)
 
-        # print(f"\n⚙️  Analizando {ticker}...")
-        result = run_valuation(file_list, ticker, price)
+        file_list = build_file_list(BASE_DIR, ticker, display_logs=False)
+        result = run_valuation(file_list, ticker, price, company_name)
 
         # Resumen en pantalla
         # print_summary(result)

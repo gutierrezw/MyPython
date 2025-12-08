@@ -21,6 +21,11 @@ def generate_alerts(
 
     is_reit = reit_metrics.get("is_reit", False)
 
+    # Extraer variables comunes al inicio
+    dividends = vals.get("Dividends_Total")
+    net_income = vals.get("NetIncome_Total")
+    ocf = vals.get("OperatingCF_Total")
+
     # ============================================================
     # ALERTAS CRÍTICAS
     # ============================================================
@@ -28,32 +33,60 @@ def generate_alerts(
     # 1. FFO negativo para REITs
     if is_reit:
         ffo = reit_metrics.get("ffo_total")
+
+        # Solo alertar si FFO negativo Y OCF también es bajo/negativo
         if ffo is not None and ffo < 0:
-            alerts["critical"].append(
-                {
-                    "type": "FFO_NEGATIVE",
-                    "message": "🚨 FFO NEGATIVO - El REIT no genera suficiente cash operativo",
-                    "severity": "CRITICAL",
-                    "value": ffo,
-                    "recommendation": "Investigar causas: ¿Cargos one-time o problema estructural?",
-                }
-            )
+            # Si OCF positivo y cubre dividendos, degradar a warning
+            if ocf and ocf > 0 and dividends and ocf > dividends:
+                alerts["warnings"].append(
+                    {
+                        "type": "FFO_NEGATIVE_OCF_POSITIVE",
+                        "message": f"⚠️ FFO negativo (${ffo/1e9:.1f}B) pero OCF positivo (${ocf/1e9:.1f}B)",
+                        "severity": "WARNING",
+                        "ffo": ffo,
+                        "ocf": ocf,
+                        "recommendation": "Revisar cargos no-cash (impairments, write-downs). OCF positivo es buena señal.",
+                    }
+                )
+            else:
+                # FFO negativo y OCF bajo = problema real
+                alerts["critical"].append(
+                    {
+                        "type": "FFO_NEGATIVE",
+                        "message": "🚨 FFO NEGATIVO - El REIT no genera suficiente cash operativo",
+                        "severity": "CRITICAL",
+                        "value": ffo,
+                        "recommendation": "Investigar causas: ¿Cargos one-time o problema estructural?",
+                    }
+                )
 
     # 2. Net Income negativo pero paga dividendos
-    net_income = vals.get("NetIncome_Total")
-    dividends = vals.get("Dividends_Total")
-
     if net_income and dividends and net_income < 0 and dividends > 0:
-        alerts["critical"].append(
-            {
-                "type": "NEGATIVE_EARNINGS_PAYING_DIVIDENDS",
-                "message": "🚨 Pérdidas contables pero paga dividendos",
-                "severity": "CRITICAL",
-                "net_income": net_income,
-                "dividends": dividends,
-                "recommendation": "Verificar sostenibilidad del dividendo",
-            }
-        )
+        # Si es REIT con OCF positivo que cubre dividendos, degradar a warning
+        if is_reit and ocf and ocf > 0 and ocf > dividends:
+            alerts["warnings"].append(
+                {
+                    "type": "NEGATIVE_EARNINGS_OCF_POSITIVE",
+                    "message": f"⚠️ Pérdidas contables (${net_income/1e9:.1f}B) pero OCF cubre dividendos",
+                    "severity": "WARNING",
+                    "net_income": net_income,
+                    "ocf": ocf,
+                    "dividends": dividends,
+                    "recommendation": "Para REITs, pérdidas contables pueden ser cargos no-cash. OCF positivo es buena señal.",
+                }
+            )
+        else:
+            # No REIT o OCF no cubre dividendos = problema real
+            alerts["critical"].append(
+                {
+                    "type": "NEGATIVE_EARNINGS_PAYING_DIVIDENDS",
+                    "message": "🚨 Pérdidas contables pero paga dividendos",
+                    "severity": "CRITICAL",
+                    "net_income": net_income,
+                    "dividends": dividends,
+                    "recommendation": "Verificar sostenibilidad del dividendo",
+                }
+            )
 
     # 3. Payout ratio > 100% (para empresas normales)
     if not is_reit:
@@ -87,12 +120,29 @@ def generate_alerts(
     # ADVERTENCIAS
     # ============================================================
 
-    # 1. Payout ratio muy alto para REITs (>95% del OCF)
+    # 1. Payout ratio muy alto para REITs
+    # Usar FFO si está disponible, sino OCF
     if is_reit:
+        ffo = reit_metrics.get("ffo_total")
         ocf = vals.get("OperatingCF_Total")
-        if ocf and dividends and ocf > 0:
+
+        # Preferir FFO sobre OCF para REITs
+        if ffo and dividends and ffo > 0:
+            payout_ffo = (dividends / ffo) * 100
+            if payout_ffo > 95:
+                alerts["warnings"].append(
+                    {
+                        "type": "HIGH_PAYOUT_FFO",
+                        "message": f"⚠️ Payout {payout_ffo:.1f}% del FFO - margen muy ajustado",
+                        "severity": "WARNING",
+                        "value": payout_ffo,
+                        "recommendation": "Poco margen para crecimiento del dividendo",
+                    }
+                )
+        elif ocf and dividends and ocf > 0:
             payout_ocf = (dividends / ocf) * 100
-            if payout_ocf > 95:
+            # Solo alertar si OCF > $50M (evita REITs de financiamiento con OCF bajo)
+            if payout_ocf > 95 and ocf > 50_000_000:
                 alerts["warnings"].append(
                     {
                         "type": "HIGH_PAYOUT_OCF",
