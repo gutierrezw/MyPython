@@ -2,6 +2,7 @@
 # valuation_arelle_parser.py (SIMPLIFIED VERSION)
 # Capa: acceso directo a Arelle
 # ================================================
+from Modulos_python import Path, ZipFile
 
 from zipfile import ZipFile
 from pathlib import Path

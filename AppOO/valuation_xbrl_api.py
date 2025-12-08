@@ -2,16 +2,7 @@
 # valuation_xbrl_api.py (FIXED VERSION)
 # Capa: API estándar para el motor
 # ================================================
-
-import os
-import sys
-import json
-import zipfile
-import yfinance as yf
-import pandas as pd
-from datetime import datetime
-from dataclasses import dataclass
-from pathlib import Path
+from Modulos_python import os, sys, json, yf, pd, datetime, dataclass, Path, ZipFile
 from valuation_arelle_parser import (
     load_xbrl_with_arelle,
     extract_facts,
@@ -60,6 +51,25 @@ def analyze_dividend_history(ticker, years=10, display_log=False):
     # Agrupar por año
     dividends_annual = dividends.groupby(dividends.index.year).sum()
 
+    # ✅ NUEVO: Filtrar año actual si está incompleto
+    current_year = datetime.now().year
+    current_month = datetime.now().month
+
+    # Si estamos antes de noviembre, excluir año actual
+    # O si el año actual tiene dividendos sospechosamente bajos
+    if current_year in dividends_annual.index:
+        if len(dividends_annual) > 1:
+            current_year_div = dividends_annual[current_year]
+            previous_year_div = dividends_annual.iloc[-2]  # Penúltimo
+
+            # Si el dividendo actual es < 80% del año anterior, probablemente incompleto
+            if current_month < 12 or current_year_div < (previous_year_div * 0.80):
+                if display_log:
+                    print(
+                        f"\n⚠️  Excluyendo {current_year} (año incompleto: ${current_year_div:.4f})"
+                    )
+                dividends_annual = dividends_annual[:-1]  # Remover último año
+
     # Limitar a últimos N años
     dividends_annual = dividends_annual.tail(years)
 
@@ -94,17 +104,17 @@ def analyze_dividend_history(ticker, years=10, display_log=False):
                 # Proyección simple
                 print(f"\n🔮 PROYECCIÓN (si mantiene CAGR {cagr*100:.2f}%):")
                 print("-" * 70)
-
-        current_year = datetime.now().year
-        sescenario, message = "", ""
-        for i in range(1, 6):
-            future_div = end_div * ((1 + cagr) ** i)
-            print(f"  {current_year + i}: ${future_div:.4f}")
+                for i in range(1, 6):
+                    future_div = end_div * ((1 + cagr) ** i)
+                    print(f"  {dividends_annual.index[-1] + i}: ${future_div:.4f}")
 
             # Recomendación DDM
             if display_log:
                 print(f"\n💡 RECOMENDACIÓN PARA DDM:")
                 print("-" * 70)
+
+            message = ""
+            escenario = ""
 
             if cagr < 0:
                 message = f"  ⚠️  Dividendos han DECRECIDO {abs(cagr)*100:.2f}%/año"
@@ -118,6 +128,10 @@ def analyze_dividend_history(ticker, years=10, display_log=False):
             else:
                 message = f"  🚀 Crecimiento alto: {cagr*100:.2f}%/año"
                 escenario = f"  💭 Usar escenario optimista: 5-7%"
+
+            if display_log:
+                print(message)
+                print(escenario)
 
             return {
                 "ticker": ticker,
@@ -134,6 +148,9 @@ def analyze_dividend_history(ticker, years=10, display_log=False):
     return None
 
 
+# -----------------------------------------------------
+# ✅ Compara histórico de dividendos de múltiples tickers
+# -----------------------------------------------------
 def compare_tickers(tickers, years=10, display_log=False):
     """
     Compara histórico de dividendos de múltiples tickers
@@ -178,6 +195,9 @@ def compare_tickers(tickers, years=10, display_log=False):
     return results
 
 
+# -----------------------------------------------------
+# ✅ coordindador de analisis de dividendos
+# -----------------------------------------------------
 def Analyze_options(ticker=None, years=10, input_mode=False):
 
     # Si pasan ticker como argumento
@@ -259,7 +279,7 @@ def get_zip_files(ticker_dir, display_logs=False):
             # inspeccionar ZIP
             inst = []
             try:
-                with zipfile.ZipFile(path, "r") as z:
+                with ZipFile(path, "r") as z:
                     for name in z.namelist():
                         low = name.lower()
                         if low.endswith(".xml") and not any(

@@ -1,7 +1,7 @@
 import os
 import io
 import ta
-import re 
+import re
 import sys
 import csv
 import ast
@@ -47,9 +47,11 @@ import threading as threading
 from diskcache import Cache
 from operator import itemgetter
 from pathlib import Path
+from zipfile import ZipFile
 from pymysql import connect, Error
 from sqlalchemy import create_engine
 from dateutil import parser
+from dataclasses import dataclass
 from concurrent.futures import Future
 from pandas.errors import EmptyDataError
 from tkinter import filedialog, scrolledtext, mainloop

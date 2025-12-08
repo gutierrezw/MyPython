@@ -2,34 +2,56 @@
 # valuation_arelle_engine.py (DB READY VERSION)
 # Output estructurado para base de datos
 # ================================================
-
-import os
-import json
-import zipfile
-import time
-import requests
-import numpy as np
-from datetime import datetime
-from pathlib import Path
-
+from Modulos_python import (
+    os,
+    sys,
+    json,
+    datetime,
+    dataclass,
+    Path,
+    time,
+    requests,
+    np,
+    ZipFile,
+)
 from valuation_xbrl_api import load_filing, build_ttm, analyze_dividend_history
 from valuation_ddm import DividendDiscountModel
+from valuation_alerts import generate_alerts, get_overall_risk_level, format_alerts_text
 
 
 def is_reit(ttm: dict):
     """
-    Detecta si la empresa es un REIT basándose en:
-    1. Si reporta FFO o AFFO directamente en filings
-    2. Si tiene GainsOnRealEstateSales significativos
+    Detecta si la empresa es un REIT basándose SOLO en los datos
     """
-    # Si reporta FFO/AFFO nativo, definitivamente es REIT
+    # Señal 1: Si reporta FFO/AFFO nativo
     if ttm.get("FFO") is not None or ttm.get("AFFO") is not None:
         return True
 
-    # Si tiene gains significativos en RE sales, probablemente REIT
+    # Señal 2: Si tiene gains significativos en RE sales
     gains = ttm.get("GainsOnRealEstateSales")
-    if gains and abs(gains) > 1000000:  # Más de $1M
+    if gains and abs(gains) > 1000000:
         return True
+
+    # Señal 3: Depreciation muy alta relativa a ingresos (típico de REITs)
+    # REITs tienen mucha depreciation porque tienen muchas propiedades
+    depreciation = ttm.get("Depreciation") or 0
+    revenues = ttm.get("Revenues") or 1  # Evitar división por 0
+
+    if revenues > 0:
+        depreciation_ratio = abs(depreciation) / revenues
+        # Si depreciation > 30% de revenues, probablemente es REIT
+        if depreciation_ratio > 0.30:
+            return True
+
+    # Señal 4: Payout ratio muy alto (REITs pagan >90% por ley)
+    dividends = ttm.get("DividendsPaid") or 0
+    ocf = ttm.get("OperatingCF") or 1
+
+    if ocf > 0 and dividends > 0:
+        payout = dividends / ocf
+        # REITs típicamente pagan >70% del OCF
+        if payout > 0.70:
+            return True
 
     return False
 
@@ -49,7 +71,7 @@ def load_metadata(ticker_dir: Path):
 def extract_instances_from_zip(zip_path: str):
     instances = []
     try:
-        with zipfile.ZipFile(zip_path, "r") as z:
+        with ZipFile(zip_path, "r") as z:
             for name in z.namelist():
                 low = name.lower()
                 if low.endswith(".xml") and not any(
@@ -362,10 +384,22 @@ def run_valuation(file_list, ticker, price):
         ddm_results = run_ddm_analysis(vals["Dividend_Per_Share"], price)
         analyze_divideds = analyze_dividend_history(ticker)
 
+        # ✅ NUEVO: Generar alertas
+        reit_metrics = {
+            "ffo_total": vals["FFO_Total"],
+            "affo_total": vals["AFFO_Total"],
+            "ffo_per_share": vals["FFO_Per_Share"],
+            "affo_per_share": vals["AFFO_Per_Share"],
+        }
+
+        alerts = generate_alerts(ttm, vals, reit_metrics, analyze_divideds)
+        risk_assessment = get_overall_risk_level(alerts)
+
     # ✅ ESTRUCTURA PARA DB
     return {
         "metadata": {
             "ticker": ticker,
+            "is_reit": is_reit(ttm),
             "analysis_date": datetime.now().isoformat(),
             "price_date": datetime.now().date().isoformat(),
             "files_processed": [Path(p).name for p, _ in file_list],
@@ -391,13 +425,9 @@ def run_valuation(file_list, ticker, price):
                 "total_equity": vals["Total_Equity"],
             },
         },
-        "reit_metrics": {
-            "ffo_total": vals["FFO_Total"],
-            "affo_total": vals["AFFO_Total"],
-            "ffo_per_share": vals["FFO_Per_Share"],
-            "affo_per_share": vals["AFFO_Per_Share"],
-            "is_reit": is_reit(ttm),
-        },
+        "reit_metrics": reit_metrics,
+        "alerts": alerts,
+        "risk_assessment": risk_assessment,
         "per_share_metrics": {
             "eps": vals["EPS"],
             "revenue_per_share": vals["Revenue_Per_Share"],
@@ -416,9 +446,9 @@ def run_valuation(file_list, ticker, price):
             "dividend_yield_percent": vals["Dividend_Yield_Percent"],
             "payout_ratio_percent": vals["Payout_Ratio_Percent"],
         },
-        "ddm_valuation": ddm_results,
+        "raw_ttm_data": ttm,
         "dividend_analysis": analyze_divideds,
-        "raw_ttm_data": ttm,  # Por si querés guardar los datos crudos también
+        "ddm_valuation": ddm_results,
     }
 
 
@@ -472,6 +502,21 @@ def print_summary(result):
             print(f"    Margen: {data['margin_of_safety_percent']:+.1f}%")
             print(f"    📌 {data['recommendation']}")
 
+    # ✅ NUEVO: Mostrar alertas
+    if "alerts" in result:
+        print(format_alerts_text(result["alerts"]))
+
+    # ✅ NUEVO: Mostrar evaluación de riesgo
+    if "risk_assessment" in result:
+        risk = result["risk_assessment"]
+        print("\n" + "=" * 70)
+        print("⚖️  EVALUACIÓN DE RIESGO")
+        print("=" * 70)
+        print(f"\n{risk['message']}")
+        print(f"  Alertas críticas: {risk['critical_count']}")
+        print(f"  Advertencias: {risk['warning_count']}")
+        print(f"  Puntos positivos: {risk['info_count']}")
+
     print("\n" + "=" * 70)
 
 
@@ -483,30 +528,30 @@ if __name__ == "__main__":
 
     if not price:
         print("❌ No se pudo obtener el precio de Yahoo Finance")
-        price = float(input("Ingrese el precio manualmente: "))
 
-    file_list = build_file_list(BASE_DIR, ticker, display_logs=False)
+    elif price > 0:
+        file_list = build_file_list(BASE_DIR, ticker, display_logs=False)
 
-    # print(f"\n⚙️  Analizando {ticker}...")
-    result = run_valuation(file_list, ticker, price)
+        # print(f"\n⚙️  Analizando {ticker}...")
+        result = run_valuation(file_list, ticker, price)
 
-    # Resumen en pantalla
-    # print_summary(result)
+        # Resumen en pantalla
+        # print_summary(result)
 
-    # ✅ DICCIONARIO IDENTADO LISTO PARA DB
-    print("\n" + "=" * 70)
-    print("💾 ESTRUCTURA DE DATOS (lista para DB):")
-    print("=" * 70)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+        # ✅ DICCIONARIO IDENTADO LISTO PARA DB
+        print("\n" + "=" * 70)
+        print("💾 ESTRUCTURA DE DATOS (lista para DB):")
+        print("=" * 70)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
 
-    # Crear carpeta valuations si no existe
-    valuations_dir = BASE_DIR / f"{ticker.upper()}_EDGAR_Files" / "valuations"
-    valuations_dir.mkdir(parents=True, exist_ok=True)
+        # Crear carpeta valuations si no existe
+        valuations_dir = BASE_DIR / f"{ticker.upper()}_EDGAR_Files" / "valuations"
+        valuations_dir.mkdir(parents=True, exist_ok=True)
 
-    # Guardar archivo
-    filename = f"{ticker}_valuation_{datetime.now().strftime('%Y%m%d')}.json"
-    output_file = valuations_dir / filename
+        # Guardar archivo
+        filename = f"{ticker}_valuation_{datetime.now().strftime('%Y%m%d')}.json"
+        output_file = valuations_dir / filename
 
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2, ensure_ascii=False)
-    print(f"✅ Guardado en: {output_file}")
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        print(f"✅ Guardado en: {output_file}")
