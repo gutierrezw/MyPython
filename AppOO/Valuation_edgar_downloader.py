@@ -22,7 +22,7 @@ SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 
 # Formularios disponibles
 DOMESTIC_FORMS = ["10-K", "10-Q"]
-FOREIGN_FORMS = ["20-F", "6-K"]
+FOREIGN_FORMS = ["20-F"]  # Solo 20-F (anuales). 6-K son eventos, no financials.
 
 
 # =====================================================
@@ -193,7 +193,7 @@ def download_filing(ticker=None, display=False):
             categorized[form].append((date, acc, file))
 
     # Limitar cantidad
-    limits = {"10-K": 5, "10-Q": 3, "20-F": 3, "6-K": 3}
+    limits = {"10-K": 5, "10-Q": 3, "20-F": 3}
     for f in target_forms:
         categorized[f] = sorted(categorized[f], reverse=True)[: limits.get(f, 3)]
 

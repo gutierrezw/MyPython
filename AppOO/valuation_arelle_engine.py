@@ -123,8 +123,8 @@ def build_file_list(BASE_DIR: Path, ticker: str, display_logs=False):
     ticker_dir = get_ticker_dir(BASE_DIR, ticker)
     meta = load_metadata(ticker_dir)
 
-    items_10k = []
-    items_10q = []
+    items_10k = []  # También incluirá 20-F (annual reports)
+    items_10q = []  # Solo 10-Q (quarterly reports)
 
     for entry in meta.get("downloaded_files", []):
         date_str = entry.get("date", "1900-01-01")
@@ -143,23 +143,24 @@ def build_file_list(BASE_DIR: Path, ticker: str, display_logs=False):
         if entry.get("is_zip"):
             insts = extract_instances_from_zip(path)
             for inst in insts:
-                if form == "10-K":
+                # 20-F es equivalente a 10-K (annual report)
+                if form in ["10-K", "20-F"]:
                     items_10k.append((dt, path, inst))
-                else:
+                elif form == "10-Q":
                     items_10q.append((dt, path, inst))
             continue
 
         if low.endswith(".htm"):
-            if form == "10-K":
+            if form in ["10-K", "20-F"]:
                 items_10k.append((dt, path, None))
-            else:
+            elif form == "10-Q":
                 items_10q.append((dt, path, None))
             continue
 
         if low.endswith(".xml"):
-            if form == "10-K":
+            if form in ["10-K", "20-F"]:
                 items_10k.append((dt, path, None))
-            else:
+            elif form == "10-Q":
                 items_10q.append((dt, path, None))
             continue
 
@@ -470,9 +471,10 @@ def run_ddm_analysis(dividend_per_share, price, required_return=0.10):
     return results
 
 
-def run_valuation(file_list, ticker, price, company_name):
+def run_valuation(file_list, ticker, price, company_name, company_type="domestic"):
     """
     ✅ RETORNA DICCIONARIO COMPLETO - LISTO PARA DB
+    ✅ Ahora soporta empresas extranjeras con IFRS (20-F forms)
     """
     filings = []
 
@@ -516,6 +518,7 @@ def run_valuation(file_list, ticker, price, company_name):
         "metadata": {
             "ticker": ticker,
             "company_name": company_name,
+            "company_type": company_type,  # ✅ "domestic" o "foreign"
             "is_reit": is_reit(ttm),
             "analysis_date": datetime.now().isoformat(),
             "price_date": datetime.now().date().isoformat(),
@@ -647,8 +650,16 @@ if __name__ == "__main__":
         print("❌ No se pudo obtener el precio de Yahoo Finance")
     elif price > 0:
 
+        # ✅ Cargar metadata para detectar company_type
+        ticker_dir = get_ticker_dir(BASE_DIR, ticker)
+        try:
+            meta = load_metadata(ticker_dir)
+            company_type = meta.get("company_type", "domestic")
+        except FileNotFoundError:
+            company_type = "domestic"
+
         file_list = build_file_list(BASE_DIR, ticker, display_logs=False)
-        result = run_valuation(file_list, ticker, price, company_name)
+        result = run_valuation(file_list, ticker, price, company_name, company_type)
 
         # Resumen en pantalla
         # print_summary(result)

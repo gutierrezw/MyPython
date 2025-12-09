@@ -430,17 +430,23 @@ def build_ttm(filings):
 
         return None
 
-    # ✅ CONCEPTOS ACTUALIZADOS BASADOS EN EL DIAGNÓSTICO
+    # ✅ CONCEPTOS CON SOPORTE IFRS (empresas extranjeras con 20-F)
     return {
-        # Net Income - HASI usa ProfitLoss
+        # Net Income - HASI usa ProfitLoss | IFRS usa ProfitLoss
         "NetIncome": try_names(
-            ["us-gaap:ProfitLoss", "us-gaap:NetIncomeLoss"], prefer="duration"
+            [
+                "us-gaap:ProfitLoss",
+                "us-gaap:NetIncomeLoss",
+                "ifrs-full:ProfitLoss",  # ✅ IFRS
+            ],
+            prefer="duration",
         ),
         "Depreciation": try_names(
             [
                 "us-gaap:DepreciationDepletionAndAmortization",
                 "us-gaap:Depreciation",
                 "us-gaap:DepreciationAndAmortization",
+                "ifrs-full:DepreciationAndAmortisationExpense",  # ✅ IFRS
             ],
             prefer="duration",
         ),
@@ -449,6 +455,7 @@ def build_ttm(filings):
                 "us-gaap:ProceedsFromSaleOfRealEstateHeldforinvestment",
                 "us-gaap:GainLossOnSaleOfProperties",
                 "us-gaap:GainLossOnSaleOfPropertyPlantEquipment",
+                "ifrs-full:GainsLossesOnDisposalsOfPropertyPlantAndEquipment",  # ✅ IFRS
             ],
             prefer="duration",
         ),
@@ -457,6 +464,12 @@ def build_ttm(filings):
             [
                 "us-gaap:NetCashProvidedByUsedInOperatingActivities",
                 "us-gaap:CashProvidedByUsedInOperatingActivities",
+                "ifrs-full:CashFlowsFromUsedInOperatingActivities",  # ✅ IFRS estándar
+            ],
+            fallback=[
+                # ✅ IFRS custom (VALE usa continuing operations)
+                "vale:CashFlowsFromUsedInOperatingActivitiesContinuingOperation",
+                "ifrs-full:CashFlowsFromUsedInOperatingActivitiesContinuingOperations",
             ],
             prefer="duration",
         ),
@@ -465,6 +478,11 @@ def build_ttm(filings):
             [
                 "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
                 "us-gaap:CapitalExpenditures",
+                "ifrs-full:PurchaseOfPropertyPlantAndEquipment",  # ✅ IFRS estándar
+            ],
+            fallback=[
+                # ✅ IFRS custom (VALE incluye intangibles)
+                "vale:AcquisitionOfPropertyPlantAndEquipmentAndIntangibleAssets",
             ],
             prefer="duration",
         ),
@@ -474,6 +492,8 @@ def build_ttm(filings):
                 "us-gaap:DividendsCommonStockCash",
                 "us-gaap:PaymentsOfDividends",
                 "us-gaap:PaymentsOfDividendsCommonStock",
+                "ifrs-full:DividendsPaidClassifiedAsFinancingActivities",  # ✅ IFRS
+                "ifrs-full:DividendsRecognisedAsDistributionsToOwnersOfParent",  # ✅ IFRS (equity changes)
             ],
             prefer="duration",
         ),
@@ -483,6 +503,7 @@ def build_ttm(filings):
                 "us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding",
                 "us-gaap:WeightedAverageNumberOfSharesOutstandingBasic",
                 "dei:EntityCommonStockSharesOutstanding",
+                "ifrs-full:WeightedAverageNumberOfOrdinarySharesOutstanding",  # ✅ IFRS
             ],
             prefer="instant",
         ),
@@ -493,6 +514,7 @@ def build_ttm(filings):
                 "us-gaap:Revenues",
                 "us-gaap:SalesRevenueNet",
                 "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+                "ifrs-full:Revenue",  # ✅ IFRS
             ],
             prefer="duration",
         ),
@@ -507,8 +529,19 @@ def build_ttm(filings):
             prefer="duration",
         ),
         # Assets y Equity para análisis adicional
-        "TotalAssets": try_names(["us-gaap:Assets"], prefer="instant"),
+        "TotalAssets": try_names(
+            [
+                "us-gaap:Assets",
+                "ifrs-full:Assets",  # ✅ IFRS
+            ],
+            prefer="instant",
+        ),
         "TotalEquity": try_names(
-            ["us-gaap:StockholdersEquity", "us-gaap:Equity"], prefer="instant"
+            [
+                "us-gaap:StockholdersEquity",
+                "us-gaap:Equity",
+                "ifrs-full:Equity",  # ✅ IFRS
+            ],
+            prefer="instant",
         ),
     }
