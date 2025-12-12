@@ -59,6 +59,7 @@ from Modulos_python import (
     logging,
     mpatches,
     ticker,
+    filedialog,
 )
 from Class_FondosInversion import ArsFondosInversion
 from Class_Screener import Screener
@@ -1951,7 +1952,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
             def websocket_stream(limit, task):
                 nonlocal iteraStream
                 try:
-                    url = "wss://localhost:5000/v1/api/ws"
+                    url = f"wss://localhost:{DataHub.ib_gateway_port}/v1/api/ws"
                     while True:
 
                         self.WsStock = MyWebsocket(
@@ -2146,7 +2147,11 @@ class DashMain:
 
         now = datetime.now()
         self.user = tk.Button(
-            lpn, image=imagen_tk, bg=self.colors["bgcolor"], relief=tk.FLAT
+            lpn,
+            image=imagen_tk,
+            bg=self.colors["bgcolor"],
+            relief=tk.FLAT,
+            command=lambda: self.setup(),
         )
         self.user.imagen = imagen_tk
 
@@ -3453,6 +3458,572 @@ class DashMain:
         # DataHub.manager_after._safe(1200000, self.graficos_main(), name="graficos_main")
 
     # Detener cada módulo de forma ordenada
+    def setup(self):
+        """
+        Abre ventana de gestión de sesiones con operaciones CRUD.
+        Crea ventana Toplevel posicionada para no solapar el notebook principal.
+        """
+        # Variable para almacenar referencia al tree y session_window
+        tree = None
+        session_window = None
+
+        def refresh_sessions():
+            """Recarga datos de sesión desde BD y actualiza TreeView"""
+            nonlocal tree, session_window
+            try:
+                # Limpiar TreeView
+                for item in tree.tree_fixed.get_children():
+                    tree.tree_fixed.delete(item)
+                for item in tree.tree_scroll.get_children():
+                    tree.tree_scroll.delete(item)
+
+                # Cargar datos desde BD
+                sessions = BDsystem.select_all_sesion()
+
+                for session in sessions:
+                    # Formatear fechas
+                    fesesion_str = (
+                        session["fesesion"].strftime("%Y-%m-%d %H:%M")
+                        if session.get("fesesion")
+                        else ""
+                    )
+                    fiscalYear_str = (
+                        session["fiscalYear"].strftime("%Y-%m-%d")
+                        if session.get("fiscalYear")
+                        else ""
+                    )
+                    fefund_str = (
+                        session["fefund"].strftime("%Y-%m-%d")
+                        if session.get("fefund")
+                        else ""
+                    )
+
+                    # Solo incluir campos visibles (sin id, orcartera, xstrategy, userapi, userpass, private_key, public_key)
+                    row_values = [
+                        session.get("vehiculo", ""),
+                        fesesion_str,
+                        session.get("iduser", ""),
+                        session.get("idcuenta", ""),
+                        fiscalYear_str,
+                        fefund_str,
+                        session.get("Pinvertir", 0),
+                        session.get("web", ""),
+                    ]
+
+                    tree.insert_row(values=row_values)
+
+            except Exception as e:
+                print(f"[refresh_sessions()]: {e}")
+                MyMessageBox(session_window).showerror(
+                    "Error", f"Error al cargar sesiones: {str(e)}"
+                )
+
+        def on_double_click(event):
+            """Maneja doble-click en fila para abrir editor"""
+            nonlocal tree
+            try:
+                selected_fixed = tree.tree_fixed.selection()
+
+                if selected_fixed:
+                    # Obtener índice de la fila
+                    item_id = selected_fixed[0]
+                    index = tree.tree_fixed.index(item_id)
+
+                    # Recuperar datos completos de BD
+                    sessions = BDsystem.select_all_sesion()
+                    if index < len(sessions):
+                        selected_session = sessions[index]
+                        open_session_editor(selected_session, edit_mode=True)
+            except Exception as e:
+                print(f"[on_double_click()]: {e}")
+
+        def on_add_click():
+            """Maneja botón Agregar"""
+            open_session_editor(session_data=None, edit_mode=False)
+
+        def on_delete_click():
+            """Maneja botón Eliminar con confirmación"""
+            nonlocal tree, session_window
+            try:
+                selected_fixed = tree.tree_fixed.selection()
+
+                if not selected_fixed:
+                    MyMessageBox(session_window).showwarning(
+                        "Advertencia", "Por favor seleccione una sesión para eliminar"
+                    )
+                    return
+
+                # Confirmar eliminación
+                response = MyMessageBox(session_window).askquestion(
+                    "Confirmar Eliminación",
+                    "¿Está seguro de que desea eliminar esta sesión?\nEsta acción no se puede deshacer.",
+                )
+
+                if response == "yes":
+                    # Obtener datos de la fila
+                    item_id = selected_fixed[0]
+                    index = tree.tree_fixed.index(item_id)
+                    sessions = BDsystem.select_all_sesion()
+
+                    if index < len(sessions):
+                        session = sessions[index]
+                        success = BDsystem.delete_sesion(
+                            session["id"], session["vehiculo"]
+                        )
+
+                        if success:
+                            MyMessageBox(session_window).showinfo(
+                                "Éxito", "Sesión eliminada correctamente"
+                            )
+                            refresh_sessions()
+                        else:
+                            MyMessageBox(session_window).showerror(
+                                "Error", "No se pudo eliminar la sesión"
+                            )
+            except Exception as e:
+                print(f"[on_delete_click()]: {e}")
+                MyMessageBox(session_window).showerror(
+                    "Error", f"Error al eliminar sesión: {str(e)}"
+                )
+
+        def open_session_editor(session_data, edit_mode):
+            """
+            Abre ventana Toplevel para editar/crear sesión
+
+            Args:
+                session_data: dict con datos (None para nueva sesión)
+                edit_mode: True=editar, False=crear
+            """
+
+            def save_session():
+                """Valida y guarda sesión"""
+                try:
+                    # Recopilar valores del formulario
+                    values = {
+                        "vehiculo": entry_vehiculo.get().strip(),
+                        "fesesion": entry_fesesion.get().strip(),
+                        "iduser": entry_iduser.get().strip(),
+                        "idcuenta": entry_idcuenta.get().strip(),
+                        "orcartera": entry_orcartera.get().strip(),
+                        "fiscalYear": entry_fiscalYear.get().strip(),
+                        "fefund": entry_fefund.get().strip(),
+                        "Pinvertir": entry_Pinvertir.get().strip(),
+                        "xstrategy": entry_xstrategy.get().strip(),
+                        "userapi": (
+                            blob_userapi.get("1.0", tk.END).strip().encode("utf-8")
+                            if blob_userapi.get("1.0", tk.END).strip()
+                            else None
+                        ),
+                        "userpass": (
+                            blob_userpass.get("1.0", tk.END).strip().encode("utf-8")
+                            if blob_userpass.get("1.0", tk.END).strip()
+                            else None
+                        ),
+                        "private_key": (
+                            blob_private_key.get("1.0", tk.END).strip().encode("utf-8")
+                            if blob_private_key.get("1.0", tk.END).strip()
+                            else None
+                        ),
+                        "public_key": (
+                            blob_public_key.get("1.0", tk.END).strip().encode("utf-8")
+                            if blob_public_key.get("1.0", tk.END).strip()
+                            else None
+                        ),
+                        "web": entry_web.get().strip(),
+                    }
+
+                    # Validación de campos requeridos
+                    if not values["vehiculo"]:
+                        MyMessageBox(session_window).showerror(
+                            "Error de Validación", "El campo 'vehiculo' es requerido"
+                        )
+                        return
+
+                    # Convertir fechas a formato apropiado
+                    try:
+                        if values["fesesion"]:
+                            values["fesesion"] = datetime.strptime(
+                                values["fesesion"], "%Y-%m-%d %H:%M:%S"
+                            )
+                        else:
+                            values["fesesion"] = None
+
+                        if values["fiscalYear"]:
+                            values["fiscalYear"] = datetime.strptime(
+                                values["fiscalYear"], "%Y-%m-%d"
+                            ).date()
+                        else:
+                            values["fiscalYear"] = None
+
+                        if values["fefund"]:
+                            values["fefund"] = datetime.strptime(
+                                values["fefund"], "%Y-%m-%d"
+                            ).date()
+                        else:
+                            values["fefund"] = None
+                    except ValueError as ve:
+                        MyMessageBox(session_window).showerror(
+                            "Error de Validación", f"Formato de fecha inválido: {ve}"
+                        )
+                        return
+
+                    # Convertir Pinvertir a int
+                    try:
+                        values["Pinvertir"] = (
+                            int(values["Pinvertir"]) if values["Pinvertir"] else 0
+                        )
+                    except ValueError:
+                        MyMessageBox(session_window).showerror(
+                            "Error de Validación", "Pinvertir debe ser un número"
+                        )
+                        return
+
+                    # Guardar en BD
+                    if edit_mode:
+                        success = BDsystem.update_sesion(
+                            session_data["id"], session_data["vehiculo"], values
+                        )
+                        msg = (
+                            "Sesión actualizada correctamente"
+                            if success
+                            else "No se pudo actualizar la sesión"
+                        )
+                    else:
+                        success = BDsystem.insert_sesion(values)
+                        msg = (
+                            "Sesión creada correctamente"
+                            if success
+                            else "No se pudo crear la sesión"
+                        )
+
+                    if success:
+                        MyMessageBox(session_window).showinfo("Éxito", msg)
+                        editor_window.destroy()
+                        refresh_sessions()
+                    else:
+                        MyMessageBox(session_window).showerror("Error", msg)
+
+                except Exception as e:
+                    print(f"[save_session()]: {e}")
+                    MyMessageBox(session_window).showerror(
+                        "Error", f"Error al guardar sesión: {str(e)}"
+                    )
+
+            def import_blob_file(text_widget):
+                """Abre diálogo para importar archivo a campo BLOB"""
+                try:
+                    file_path = filedialog.askopenfilename(
+                        title="Seleccionar archivo para importar",
+                        filetypes=[
+                            ("Todos los archivos", "*.*"),
+                            ("Archivos de texto", "*.txt"),
+                            ("Archivos PEM", "*.pem"),
+                        ],
+                    )
+                    if file_path:
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            content = f.read()
+                            text_widget.delete("1.0", tk.END)
+                            text_widget.insert("1.0", content)
+                except Exception as e:
+                    MyMessageBox(session_window).showerror(
+                        "Error", f"Error al importar archivo: {str(e)}"
+                    )
+
+            def cancel_edit():
+                """Cierra editor sin guardar"""
+                editor_window.destroy()
+
+            # Crear ventana del editor
+            editor_window = tk.Toplevel(session_window)
+            title = "Editar Sesión" if edit_mode else "Nueva Sesión"
+            editor_window.title(title)
+
+            # Posicionar a la derecha de la ventana de sesiones
+            session_x = session_window.winfo_x()
+            session_y = session_window.winfo_y()
+            session_width = session_window.winfo_width()
+            editor_window.geometry(
+                f"700x700+{session_x + session_width + 10}+{session_y}"
+            )
+
+            editor_window.resizable(False, False)
+            editor_window.config(bg=self.colors["bgcolor"])
+            editor_window.grab_set()
+            editor_window.focus()
+
+            # Crear canvas scrollable
+            canvas = tk.Canvas(editor_window, bg=self.colors["bgcolor"])
+            scrollbar = ttk.Scrollbar(
+                editor_window, orient="vertical", command=canvas.yview
+            )
+            scrollable_frame = ttk.Frame(canvas, style="C.TFrame")
+
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
+            )
+
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+
+            # Campos del formulario
+            row = 0
+
+            # Campos normales con Entry
+            fields_config = [
+                (
+                    "vehiculo",
+                    "Vehículo (char 10):",
+                    "normal" if not edit_mode else "readonly",
+                ),
+                ("fesesion", "Fecha Sesión (YYYY-MM-DD HH:MM:SS):", "normal"),
+                ("iduser", "ID Usuario (char 10):", "normal"),
+                ("idcuenta", "ID Cuenta (char 10):", "normal"),
+                ("orcartera", "Orden Cartera (char 50):", "normal"),
+                ("fiscalYear", "Año Fiscal (YYYY-MM-DD):", "normal"),
+                ("fefund", "Fecha Fundación (YYYY-MM-DD):", "normal"),
+                ("Pinvertir", "Monto a Invertir (int):", "normal"),
+                ("xstrategy", "Estrategia (char 60):", "normal"),
+                ("web", "Sitio Web (varchar 200):", "normal"),
+            ]
+
+            # Crear widgets de entrada
+            entry_vehiculo = None
+            entry_fesesion = None
+            entry_iduser = None
+            entry_idcuenta = None
+            entry_orcartera = None
+            entry_fiscalYear = None
+            entry_fefund = None
+            entry_Pinvertir = None
+            entry_xstrategy = None
+            entry_web = None
+
+            for field_name, label_text, state in fields_config:
+                label = tk.Label(
+                    scrollable_frame,
+                    text=label_text,
+                    bg=self.colors["bgcolor"],
+                    fg="white",
+                    anchor="w",
+                )
+                label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
+
+                entry = tk.Entry(scrollable_frame, width=50, state=state)
+                entry.grid(row=row, column=1, padx=10, pady=5)
+
+                # Poblar con datos existentes si está en modo edición
+                if edit_mode and session_data:
+                    value = session_data.get(field_name, "")
+                    if value:
+                        if field_name == "fesesion" and hasattr(value, "strftime"):
+                            entry.insert(0, value.strftime("%Y-%m-%d %H:%M:%S"))
+                        elif field_name in ["fiscalYear", "fefund"] and hasattr(
+                            value, "strftime"
+                        ):
+                            entry.insert(0, value.strftime("%Y-%m-%d"))
+                        else:
+                            entry.insert(0, str(value))
+
+                # Asignar a variable
+                if field_name == "vehiculo":
+                    entry_vehiculo = entry
+                elif field_name == "fesesion":
+                    entry_fesesion = entry
+                elif field_name == "iduser":
+                    entry_iduser = entry
+                elif field_name == "idcuenta":
+                    entry_idcuenta = entry
+                elif field_name == "orcartera":
+                    entry_orcartera = entry
+                elif field_name == "fiscalYear":
+                    entry_fiscalYear = entry
+                elif field_name == "fefund":
+                    entry_fefund = entry
+                elif field_name == "Pinvertir":
+                    entry_Pinvertir = entry
+                elif field_name == "xstrategy":
+                    entry_xstrategy = entry
+                elif field_name == "web":
+                    entry_web = entry
+
+                row += 1
+
+            # Campos BLOB con Text widget
+            blob_fields = [
+                ("userapi", "API Key Usuario (BLOB):"),
+                ("userpass", "Password Usuario (BLOB):"),
+                ("private_key", "Llave Privada (BLOB):"),
+                ("public_key", "Llave Pública (BLOB):"),
+            ]
+
+            blob_userapi = None
+            blob_userpass = None
+            blob_private_key = None
+            blob_public_key = None
+
+            for field_name, label_text in blob_fields:
+                # Label
+                label = tk.Label(
+                    scrollable_frame,
+                    text=label_text,
+                    bg=self.colors["bgcolor"],
+                    fg="white",
+                    anchor="w",
+                )
+                label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
+
+                # Frame para Text + Botón
+                blob_frame = tk.Frame(scrollable_frame, bg=self.colors["bgcolor"])
+                blob_frame.grid(row=row, column=1, padx=20, pady=5, sticky="ew")
+
+                # Text widget
+                text_widget = tk.Text(blob_frame, width=40, height=3)
+                text_widget.pack(side=tk.LEFT)
+
+                # Botón de importar
+                import_btn = tk.Button(
+                    blob_frame,
+                    text="Importar",
+                    command=lambda tw=text_widget: import_blob_file(tw),
+                )
+                import_btn.pack(side=tk.LEFT, padx=5)
+
+                # Poblar con datos existentes si está en modo edición
+                if edit_mode and session_data:
+                    blob_value = session_data.get(field_name)
+                    if blob_value:
+                        try:
+                            # Intentar decodificar si es bytes
+                            if isinstance(blob_value, bytes):
+                                text_widget.insert("1.0", blob_value.decode("utf-8"))
+                            else:
+                                text_widget.insert("1.0", str(blob_value))
+                        except:
+                            text_widget.insert("1.0", "[Datos binarios]")
+
+                # Asignar a variable
+                if field_name == "userapi":
+                    blob_userapi = text_widget
+                elif field_name == "userpass":
+                    blob_userpass = text_widget
+                elif field_name == "private_key":
+                    blob_private_key = text_widget
+                elif field_name == "public_key":
+                    blob_public_key = text_widget
+
+                row += 1
+
+            # Frame de botones
+            btn_frame = tk.Frame(scrollable_frame, bg=self.colors["bgcolor"])
+            btn_frame.grid(row=row, column=0, columnspan=2, pady=20)
+
+            save_btn = tk.Button(
+                btn_frame, text="Guardar", width=15, command=save_session
+            )
+            save_btn.pack(side=tk.LEFT, padx=10)
+
+            cancel_btn = tk.Button(
+                btn_frame, text="Cancelar", width=15, command=cancel_edit
+            )
+            cancel_btn.pack(side=tk.LEFT, padx=10)
+
+            # Empaquetar canvas y scrollbar
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Crear ventana principal de gestión de sesiones
+        try:
+            # Ventana Toplevel
+            session_window = tk.Toplevel(self.root)
+            session_window.title("Setup - Inversionista")
+
+            # Cargar datos desde BD
+            sessions = BDsystem.select_all_sesion()
+            height = max(2, len(sessions) + 1)
+
+            # Posicionamiento (izquierda de la pantalla para dejar espacio al editor)
+            window_width = 650
+            window_height = min(550, 30 + height * 25)
+            x_position = 200
+            y_position = 100
+            session_window.geometry(
+                f"{window_width}x{window_height}+{x_position}+{y_position}"
+            )
+            session_window.config(bg=self.colors["bgcolor"])
+            session_window.resizable(True, True)
+
+            # Panel de control con botones
+            control_frame = ttk.Frame(
+                session_window, style="C.TFrame", padding=(10, 10)
+            )
+            control_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+            add_btn = tk.Button(
+                control_frame, text="Agregar", width=12, command=on_add_click
+            )
+            add_btn.pack(side=tk.LEFT, padx=5)
+
+            delete_btn = tk.Button(
+                control_frame, text="Eliminar", width=12, command=on_delete_click
+            )
+            delete_btn.pack(side=tk.LEFT, padx=5)
+
+            refresh_btn = tk.Button(
+                control_frame, text="Refrescar", width=12, command=refresh_sessions
+            )
+            refresh_btn.pack(side=tk.LEFT, padx=5)
+
+            # Frame para TreeView
+            tree_frame = ttk.Frame(session_window, style="C.TFrame")
+            tree_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+            # Definición de columnas (sin id, orcartera, xstrategy, userapi, userpass, private_key, public_key)
+            columns = [
+                "vehiculo",
+                "fesesion",
+                "iduser",
+                "idcuenta",
+                "fiscalYear",
+                "Pinvertir",
+            ]
+
+            fixed_columns = ["vehiculo", "fesesion"]
+
+            column_alignments = {
+                "vehiculo": {"width": 80, "anchor": "center"},
+                "fesesion": {"width": 140, "anchor": "center"},
+                "iduser": {"width": 80, "anchor": "center"},
+                "idcuenta": {"width": 80, "anchor": "center"},
+                "fiscalYear": {"width": 100, "anchor": "center"},
+                "Pinvertir": {"width": 90, "anchor": "e"},
+            }
+
+            # Crear CustomTreeview
+            tree = CustomTreeview(
+                master=tree_frame,
+                columns=columns,
+                fixed_columns=fixed_columns,
+                column_alignments=column_alignments,
+                height=height,
+                show_vscroll=False,
+                show_hscroll=False,
+                sort_columns=True,
+            )
+
+            # Vincular eventos
+            tree.tree_fixed.bind("<Double-1>", on_double_click)
+            tree.tree_scroll.bind("<Double-1>", on_double_click)
+
+            # Carga inicial
+            refresh_sessions()
+        except Exception as e:
+            print(f"[setup()]: {e}")
+            MyMessageBox(session_window).showerror(
+                "Error", f"Error al abrir gestor de sesiones: {str(e)}"
+            )
+
     def eexit(self):
 
         # DataHub.manager_after.after_cancel_all()

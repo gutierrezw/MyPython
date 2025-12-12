@@ -54,7 +54,7 @@ from dateutil import parser
 from dataclasses import dataclass
 from concurrent.futures import Future
 from pandas.errors import EmptyDataError
-from tkinter import filedialog, scrolledtext, mainloop
+from tkinter import filedialog, scrolledtext, mainloop, filedialog
 from yfinance.exceptions import YFRateLimitError
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest

@@ -335,6 +335,24 @@ def compute_valuations(ttm: dict, price: float):
     shares = ttm.get("Shares")
     revenues = ttm.get("Revenues")
 
+    # ✅ NUEVO: Métricas de deuda
+    short_term_debt = ttm.get("ShortTermDebt")
+    long_term_debt = ttm.get("LongTermDebt")
+    cash = ttm.get("CashAndEquivalents")
+    total_equity = ttm.get("TotalEquity")
+    total_assets = ttm.get("TotalAssets")
+
+    # Calcular deuda total y deuda neta
+    total_debt = None
+    if short_term_debt is not None or long_term_debt is not None:
+        total_debt = (short_term_debt or 0) + (long_term_debt or 0)
+
+    net_debt = None
+    if total_debt is not None and cash is not None:
+        net_debt = total_debt - cash
+    elif total_debt is not None:
+        net_debt = total_debt  # Si no hay cash, net debt = total debt
+
     reit_metrics = compute_reit_metrics(ttm)
     ffo = reit_metrics["FFO"]
     affo = reit_metrics["AFFO"]
@@ -363,6 +381,18 @@ def compute_valuations(ttm: dict, price: float):
     payout_ratio = (
         (dividends / net_income * 100) if (dividends and net_income) else None
     )
+
+    # ✅ NUEVO: Ratios de apalancamiento y deuda
+    debt_to_equity = (total_debt / total_equity * 100) if (total_debt and total_equity) else None
+    debt_to_assets = (total_debt / total_assets * 100) if (total_debt and total_assets) else None
+    net_debt_to_equity = (net_debt / total_equity * 100) if (net_debt and total_equity) else None
+
+    # Enterprise Value = Market Cap + Net Debt
+    market_cap = price * shares if (price and shares) else None
+    enterprise_value = (market_cap + net_debt) if (market_cap and net_debt is not None) else None
+
+    # EV/EBITDA (usando Operating CF como proxy de EBITDA si no tenemos Depreciation)
+    ev_to_ocf = (enterprise_value / ocf) if (enterprise_value and ocf) else None
 
     # ✅ Convertir NaN a None para JSON/DB
     def clean_value(v):
@@ -401,8 +431,22 @@ def compute_valuations(ttm: dict, price: float):
         "Dividend_Yield_Percent": clean_value(div_yield),
         "Payout_Ratio_Percent": clean_value(payout_ratio),
         # Balance Sheet
-        "Total_Assets": clean_value(ttm.get("TotalAssets")),
-        "Total_Equity": clean_value(ttm.get("TotalEquity")),
+        "Total_Assets": clean_value(total_assets),
+        "Total_Equity": clean_value(total_equity),
+        # ✅ NUEVO: Métricas de deuda
+        "Short_Term_Debt": clean_value(short_term_debt),
+        "Long_Term_Debt": clean_value(long_term_debt),
+        "Total_Debt": clean_value(total_debt),
+        "Cash_And_Equivalents": clean_value(cash),
+        "Net_Debt": clean_value(net_debt),
+        # ✅ NUEVO: Ratios de apalancamiento
+        "Debt_To_Equity_Percent": clean_value(debt_to_equity),
+        "Debt_To_Assets_Percent": clean_value(debt_to_assets),
+        "Net_Debt_To_Equity_Percent": clean_value(net_debt_to_equity),
+        # ✅ NUEVO: Enterprise Value
+        "Market_Cap": clean_value(market_cap),
+        "Enterprise_Value": clean_value(enterprise_value),
+        "EV_To_OCF": clean_value(ev_to_ocf),
     }
 
 
@@ -543,6 +587,21 @@ def run_valuation(file_list, ticker, price, company_name, company_type="domestic
             "balance_sheet": {
                 "total_assets": vals["Total_Assets"],
                 "total_equity": vals["Total_Equity"],
+                "short_term_debt": vals["Short_Term_Debt"],
+                "long_term_debt": vals["Long_Term_Debt"],
+                "total_debt": vals["Total_Debt"],
+                "cash_and_equivalents": vals["Cash_And_Equivalents"],
+                "net_debt": vals["Net_Debt"],
+            },
+            "leverage_ratios": {
+                "debt_to_equity": vals["Debt_To_Equity_Percent"],
+                "debt_to_assets": vals["Debt_To_Assets_Percent"],
+                "net_debt_to_equity": vals["Net_Debt_To_Equity_Percent"],
+            },
+            "enterprise_value": {
+                "market_cap": vals["Market_Cap"],
+                "enterprise_value": vals["Enterprise_Value"],
+                "ev_to_ocf": vals["EV_To_OCF"],
             },
         },
         "reit_metrics": reit_metrics,
