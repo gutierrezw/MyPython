@@ -25,11 +25,12 @@ from Modulos_Utilitarios import (
 class BDsystem:  # ----------------------------------------------------------------------------------------------------
     """
     clase para manejar accesos genericos a mysql."""
+
     DB_CONFIG = {
-    'user': 'root',
-    'password': 'Daga2004',
-    'host': 'localhost',
-    'database': 'bdinv'
+        "user": "root",
+        "password": "",
+        "host": "localhost",
+        "database": "bdinv",
     }
 
     def select_sesion(
@@ -172,8 +173,10 @@ class BDsystem:  # -------------------------------------------------------------
         try:
             conn = None
             conn = connect(
-                host=BDsystem.DB_CONFIG.get("host"), user=BDsystem.DB_CONFIG.get("user"), 
-                password=BDsystem.DB_CONFIG.get("password"), database=BDsystem.DB_CONFIG.get("database")
+                host=BDsystem.DB_CONFIG.get("host"),
+                user=BDsystem.DB_CONFIG.get("user"),
+                password=BDsystem.DB_CONFIG.get("password"),
+                database=BDsystem.DB_CONFIG.get("database"),
             )
             if display:
                 print("[Message]: connect a Mysql: " + tabla)
@@ -181,6 +184,126 @@ class BDsystem:  # -------------------------------------------------------------
             return conn
         except (Exception, EncodingWarning, connect.Error) as e:
             print("[MySql:: connect_dbase()] ", e)
+
+    @staticmethod
+    def select_all_sesion():
+        """Obtiene todos los registros de sesión ordenados por fecha ascendente"""
+        try:
+            conn = BDsystem.connect_dbase("select.all_sesion", False)
+            cursor = conn.cursor()
+            sql = "SELECT * FROM sesion ORDER BY fesesion ASC"
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+
+            sessions = []
+            for row in rows:
+                sessions.append(dict(zip(columns, row)))
+
+            cursor.close()
+            conn.close()
+            return sessions
+        except Exception as error:
+            print(f"[Mysql::select_all_sesion()]: {error}")
+            return []
+
+    @staticmethod
+    def insert_sesion(values):
+        """Inserta nuevo registro de sesión"""
+        try:
+            conn = BDsystem.connect_dbase("insert.sesion", False)
+            cursor = conn.cursor()
+
+            sql = """INSERT INTO sesion
+                     (vehiculo, fesesion, iduser, idcuenta, orcartera, fiscalYear,
+                      fefund, Pinvertir, xstrategy, userapi, userpass,
+                      private_key, public_key, web)
+                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+
+            data = (
+                values.get("vehiculo"),
+                values.get("fesesion"),
+                values.get("iduser"),
+                values.get("idcuenta"),
+                values.get("orcartera"),
+                values.get("fiscalYear"),
+                values.get("fefund"),
+                values.get("Pinvertir"),
+                values.get("xstrategy"),
+                values.get("userapi"),
+                values.get("userpass"),
+                values.get("private_key"),
+                values.get("public_key"),
+                values.get("web"),
+            )
+
+            cursor.execute(sql, data)
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return True
+        except Exception as error:
+            print(f"[Mysql::insert_sesion()]: {error}")
+            return False
+
+    @staticmethod
+    def update_sesion(session_id, vehiculo, values):
+        """Actualiza registro de sesión existente"""
+        try:
+            conn = BDsystem.connect_dbase("update.sesion", False)
+            cursor = conn.cursor()
+
+            sql = """UPDATE sesion SET
+                     fesesion=%s, iduser=%s, idcuenta=%s, orcartera=%s,
+                     fiscalYear=%s, fefund=%s, Pinvertir=%s, xstrategy=%s,
+                     userapi=%s, userpass=%s, private_key=%s, public_key=%s, web=%s
+                     WHERE id=%s AND vehiculo=%s"""
+
+            data = (
+                values.get("fesesion"),
+                values.get("iduser"),
+                values.get("idcuenta"),
+                values.get("orcartera"),
+                values.get("fiscalYear"),
+                values.get("fefund"),
+                values.get("Pinvertir"),
+                values.get("xstrategy"),
+                values.get("userapi"),
+                values.get("userpass"),
+                values.get("private_key"),
+                values.get("public_key"),
+                values.get("web"),
+                session_id,
+                vehiculo,
+            )
+
+            cursor.execute(sql, data)
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return True
+        except Exception as error:
+            print(f"[Mysql::update_sesion()]: {error}")
+            return False
+
+    @staticmethod
+    def delete_sesion(session_id, vehiculo):
+        """Elimina registro de sesión"""
+        try:
+            conn = BDsystem.connect_dbase("delete.sesion", False)
+            cursor = conn.cursor()
+
+            sql = "DELETE FROM sesion WHERE id=%s AND vehiculo=%s"
+            cursor.execute(sql, (session_id, vehiculo))
+            conn.commit()
+
+            rows_affected = cursor.rowcount
+            cursor.close()
+            conn.close()
+            return rows_affected > 0
+        except Exception as error:
+            print(f"[Mysql::delete_sesion()]: {error}")
+            return False
 
 
 class IPerformance(
@@ -377,11 +500,12 @@ class IPerformance(
             )
             cursor.execute(qry, tuple(valuesins))
         except (Exception, EncodingWarning, connect.Error) as error:
-            print(f"Mysql:: insert_diaria_performance()]: {error} {qry}={tuple(valuesins)}")
+            print(
+                f"Mysql:: insert_diaria_performance()]: {error} {qry}={tuple(valuesins)}"
+            )
         finally:
             conn.commit()
             cursor.close()
-
 
 
 class DiariaCNV(
@@ -1306,7 +1430,12 @@ class PlanInversion(
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: update_inversion({})]: {}".format(vehiculo, error))
 
-    def select_otros_activos(self, symbol=None, idSymbol=None, account=None, ):
+    def select_otros_activos(
+        self,
+        symbol=None,
+        idSymbol=None,
+        account=None,
+    ):
         """
         @param symbol:
         @param account:
@@ -1388,11 +1517,9 @@ class PlanInversion(
             print("[Mysql:: update_otros_activos()]: {}".format(error))
 
     # get info from en formato yfinance into otros_activos
-    def get_yf_CNV(self,
-        symbol: str, 
-        start: Optional[str] = None, 
-        end: Optional[str] = None
-    ):   
+    def get_yf_CNV(
+        self, symbol: str, start: Optional[str] = None, end: Optional[str] = None
+    ):
         """
         Simula la función yf.download, extrayendo datos de rendimiento y volumen
         calculado de la tabla 'diaria_cnv' de MySQL.
@@ -1403,13 +1530,13 @@ class PlanInversion(
             end (str, opcional): Fecha de fin para el filtro (YYYY-MM-DD).
 
         Returns:
-            pd.DataFrame: DataFrame con las columnas 'Close' y 'Volume', 
+            pd.DataFrame: DataFrame con las columnas 'Close' y 'Volume',
                         indexado por 'Date'.
         """
-        
+
         # obtiene idcrypto desde tabla otros_activos
         OtrActivos, found = self.select_otros_activos(symbol=symbol)
-   
+
         # 1. Construir la consulta SQL con los cálculos y el filtro principal
         sql_query = f"""
         SELECT
@@ -1424,7 +1551,7 @@ class PlanInversion(
         WHERE
             codCAFCI = '{OtrActivos[0]["idcrypto"]}'
         """
-        
+
         # 2. Añadir filtros de fecha si se proporcionan
         if start:
             sql_query += f" AND fecha >= '{start}'"
@@ -1433,13 +1560,13 @@ class PlanInversion(
             inicio = datetime.now() - timedelta(days=365)
             desde = inicio.strftime("%Y-%m-%d")
             sql_query += f" AND fecha >= '{desde}'"
-        
+
         if end:
             sql_query += f" AND fecha <= '{end}'"
         elif end is None:
             sql_query += f" AND fecha <= CURDATE()"
-            
-        sql_query += " ORDER BY fecha ASC" # Es buena práctica ordenar por fecha
+
+        sql_query += " ORDER BY fecha ASC"  # Es buena práctica ordenar por fecha
 
         # 3. Conexión y ejecución (Bloque robusto try...except)
         try:
@@ -1449,18 +1576,17 @@ class PlanInversion(
 
             # Usar pd.read_sql_query para ejecutar el query y obtener el DataFrame directamente
             df = pd.read_sql_query(sql_query, db_uri)
-            
+
             # 4. Formatear la salida (como un resultado de yfinance)
             if not df.empty:
-                df.set_index('Date', inplace=True)
+                df.set_index("Date", inplace=True)
                 df.index = pd.to_datetime(df.index)
 
             return df
 
-        except  (Exception, EncodingWarning, connect.Error) as e:
+        except (Exception, EncodingWarning, connect.Error) as e:
             print(f"get_yf_CNV(): {e}")
-            return pd.DataFrame() # Devolver DataFrame vacío en caso de error
-
+            return pd.DataFrame()  # Devolver DataFrame vacío en caso de error
 
     def insert_otros_activos(self, symbol=None, values=None):
         """
@@ -2040,8 +2166,6 @@ class RepositorioOportunidadesBuySell(
                 cursor.execute(qry % (account, idivisa, symbol))
                 sql = cursor.fetchall()
 
-
-
             elif accion == "cuenta":
                 qry = """SELECT a.* FROM (SELECT * FROM booktrading WHERE cuenta = '%s'  AND divisa = '%s') AS a 
                                         ORDER BY fechahora ASC, sec ASC;"""
@@ -2354,7 +2478,9 @@ class RepositorioOportunidadesBuySell(
             if inversion:
                 position = inversion[0]["position"] if inversion else 0
                 costo_avg = (
-                    inversion[0]["costobase"] * inversion[0]["factor_cambio"] / position if position > 0 else ubasico
+                    inversion[0]["costobase"] * inversion[0]["factor_cambio"] / position
+                    if position > 0
+                    else ubasico
                 )
 
             stock = ustock + values["cantidad"]
@@ -2416,7 +2542,7 @@ class RepositorioOportunidadesBuySell(
             cursor.execute(qry, tuple(valuesins))
             conn.commit()
             cursor.close()
-            
+
             time.sleep(0.4)
             # update basico "otros_activos" e indicador "activa", cuando sea una venta (cantidad <0)
             cvalues = {}

@@ -25,6 +25,15 @@ def generate_alerts(
     dividends = vals.get("Dividends_Total")
     net_income = vals.get("NetIncome_Total")
     ocf = vals.get("OperatingCF_Total")
+    revenues = vals.get("Revenues_Total")
+
+    # ✅ NUEVO: Detectar empresas de capital intensivo (petroleras, mineras, utilities)
+    # Estas empresas tienen OCF >> Net Income por alto D&A
+    is_capital_intensive = False
+    if ocf and net_income and revenues:
+        # Si OCF es significativamente mayor que Net Income (>1.5x), es capital intensivo
+        if ocf > net_income * 1.5 and net_income > 0:
+            is_capital_intensive = True
 
     # ============================================================
     # ALERTAS CRÍTICAS
@@ -90,17 +99,43 @@ def generate_alerts(
 
     # 3. Payout ratio > 100% (para empresas normales)
     if not is_reit:
-        payout = vals.get("Payout_Ratio_Percent")
-        if payout and payout > 100:
-            alerts["critical"].append(
-                {
-                    "type": "UNSUSTAINABLE_PAYOUT",
-                    "message": f"🚨 Payout ratio {payout:.1f}% - Dividendo NO sostenible",
-                    "severity": "CRITICAL",
-                    "value": payout,
-                    "recommendation": "Riesgo alto de recorte de dividendo",
-                }
-            )
+        # ✅ MEJORA: Para empresas de capital intensivo, usar OCF en lugar de Net Income
+        if is_capital_intensive and dividends and ocf and ocf > 0:
+            # Usar Operating Cash Flow para payout
+            payout_ocf = (dividends / ocf) * 100
+            if payout_ocf > 90:  # 90% de OCF es alto pero aceptable para petroleras
+                alerts["critical"].append(
+                    {
+                        "type": "UNSUSTAINABLE_PAYOUT",
+                        "message": f"🚨 Payout ratio {payout_ocf:.1f}% del OCF - Dividendo insostenible",
+                        "severity": "CRITICAL",
+                        "value": payout_ocf,
+                        "recommendation": "Riesgo alto de recorte de dividendo",
+                    }
+                )
+            elif payout_ocf > 70:  # Advertencia entre 70-90%
+                alerts["warnings"].append(
+                    {
+                        "type": "HIGH_PAYOUT_OCF",
+                        "message": f"⚠️ Payout alto: {payout_ocf:.1f}% del Operating Cash Flow",
+                        "severity": "WARNING",
+                        "value": payout_ocf,
+                        "recommendation": "Monitorear sostenibilidad del dividendo",
+                    }
+                )
+        else:
+            # Empresas normales: usar Net Income
+            payout = vals.get("Payout_Ratio_Percent")
+            if payout and payout > 100:
+                alerts["critical"].append(
+                    {
+                        "type": "UNSUSTAINABLE_PAYOUT",
+                        "message": f"🚨 Payout ratio {payout:.1f}% - Dividendo NO sostenible",
+                        "severity": "CRITICAL",
+                        "value": payout,
+                        "recommendation": "Riesgo alto de recorte de dividendo",
+                    }
+                )
 
     # 4. Dividendos decrecientes
     if dividend_analysis:

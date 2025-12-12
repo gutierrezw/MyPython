@@ -9,6 +9,15 @@ echo ------------------------------------------------------------
 echo Iniciando IGateway IBkrs
 echo ------------------------------------------------------------
 
+:: Cerrar procesos en puerto 6000
+echo Cerrando procesos en puerto 5501...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5501') do (
+    taskkill /PID %%a /F 2>nul
+)
+timeout /t 2 >nul
+echo Listo!
+echo ------------------------------------------------------------
+
 set CONFIG_PATH=C:\Users\InversionesWildaga\Documents\MyPython\IBGateway\root\
 set DIST_PATH=C:\Users\InversionesWildaga\Documents\MyPython\IBGateway\dist\
 set BUILD_PATH=C:\Users\InversionesWildaga\Documents\MyPython\IBGateway\build\
