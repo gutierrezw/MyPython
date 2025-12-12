@@ -640,8 +640,8 @@ class IBClient:  # -------------------------------------------------------------
         ----
         {srt} -- A full URL path.
         """
-        # otherwise build the URL   https://localhost:5000/v1/portal/  >daga2004
-        # otherwise build the URL   https://localhost:5000/v1/api/
+        # otherwise build the URL   https://localhost:5501/v1/portal/  >daga2004
+        # otherwise build the URL   https://localhost:5501/v1/api/
         return urllib.parse.unquote(
             urllib.parse.urljoin(self.ib_gateway_path, self.api_version)
             + r"portal/"
@@ -740,7 +740,7 @@ class IBClient:  # -------------------------------------------------------------
         # if it was a bad request print it out.  >daga2004
         elif (
             not response.ok
-            and url != "https://localhost:5000/v1/portal/iserver/account"
+            and url != "https://localhost:5501/v1/portal/iserver/account"
         ):
             logging.error(
                 msg=f"url: {response.url}, code: {status_code},  Message: {response.text}"

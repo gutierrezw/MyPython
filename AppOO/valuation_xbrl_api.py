@@ -492,7 +492,8 @@ def build_ttm(filings):
                 "us-gaap:DividendsCommonStockCash",
                 "us-gaap:PaymentsOfDividends",
                 "us-gaap:PaymentsOfDividendsCommonStock",
-                "ifrs-full:DividendsPaidClassifiedAsFinancingActivities",  # ✅ IFRS
+                "ifrs-full:DividendsPaidToEquityHoldersOfParentClassifiedAsFinancingActivities",  # ✅ IFRS (PBR, VALE)
+                "ifrs-full:DividendsPaidClassifiedAsFinancingActivities",  # ✅ IFRS (fallback)
                 "ifrs-full:DividendsRecognisedAsDistributionsToOwnersOfParent",  # ✅ IFRS (equity changes)
             ],
             prefer="duration",
@@ -541,6 +542,39 @@ def build_ttm(filings):
                 "us-gaap:StockholdersEquity",
                 "us-gaap:Equity",
                 "ifrs-full:Equity",  # ✅ IFRS
+            ],
+            prefer="instant",
+        ),
+        # Deuda de corto plazo (Current)
+        "ShortTermDebt": try_names(
+            [
+                "us-gaap:ShortTermBorrowings",
+                "us-gaap:DebtCurrent",
+                "us-gaap:LongTermDebtCurrent",
+                "ifrs-full:ShorttermBorrowings",  # ✅ IFRS
+                "ifrs-full:CurrentBorrowings",  # ✅ IFRS alternativo
+                "ifrs-full:CurrentPortionOfLongtermBorrowings",  # ✅ IFRS - porción corriente
+            ],
+            prefer="instant",
+        ),
+        # Deuda de largo plazo (Non-current)
+        "LongTermDebt": try_names(
+            [
+                "us-gaap:LongTermDebtNoncurrent",
+                "us-gaap:LongTermDebt",
+                "us-gaap:DebtNoncurrent",
+                "ifrs-full:LongtermBorrowings",  # ✅ IFRS
+                "ifrs-full:NoncurrentBorrowings",  # ✅ IFRS alternativo
+            ],
+            prefer="instant",
+        ),
+        # Cash and Cash Equivalents - para calcular Net Debt
+        "CashAndEquivalents": try_names(
+            [
+                "us-gaap:CashAndCashEquivalentsAtCarryingValue",
+                "us-gaap:Cash",
+                "us-gaap:CashCashEquivalentsAndShortTermInvestments",
+                "ifrs-full:CashAndCashEquivalents",  # ✅ IFRS
             ],
             prefer="instant",
         ),

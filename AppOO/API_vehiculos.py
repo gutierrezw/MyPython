@@ -25,6 +25,8 @@ from Modulos_python import (
 )
 from Modulos_Mysql import BDsystem
 
+# from Class_customer import DataHub
+
 
 # --- Binance Exchange ---------------------------------------------------------------------------------------------
 class BB:
@@ -667,8 +669,10 @@ class IB(IBClient):
 
         # Define URL Components
         ib_gateway_host = r"https://localhost"
-        ib_gateway_port = r"5000"
-        self.ib_gateway_path = ib_gateway_host + ":" + ib_gateway_port
+        ib_gateway_port = r"5501"
+        # self.ib_gateway_path = ib_gateway_host + ":" + ib_gateway_port
+
+        self.ib_gateway_path = f"{ib_gateway_host}:{ib_gateway_port}"
         self.backup_gateway_path = r"https://cdcdyn.interactivebrokers.com/portal.proxy"
         self.login_gateway_path = (
             self.ib_gateway_path + "/sso/Login?forwardTo=22&RL=1&ip2loc=on"
@@ -680,7 +684,7 @@ class IB(IBClient):
     # valida conexión al localHost
     def is_localhost(self):
         try:
-            ilog, url = False, "https://localhost:5000"
+            ilog, url = False, self.ib_gateway_path
             # response = requests.get(url, verify=True)
 
             auth = self.is_authenticated(True)
@@ -688,11 +692,11 @@ class IB(IBClient):
                 if auth["authenticated"] and auth["connected"]:
                     ilog = True
                 else:
-                    webbrowser.open("https://localhost:5000")
+                    webbrowser.open(self.ib_gateway_path)
                     time.sleep(20)
             else:
                 print(f"is_localhost(Stock): Error usuario no authenticated")
-                webbrowser.open("https://localhost:5000")
+                webbrowser.open(self.ib_gateway_path)
 
             return ilog
         except Exception as error:
@@ -1132,8 +1136,7 @@ class IB(IBClient):
         DESC: The number ID to place an order.
         TYPE: String
         """
-
-        base_url = "https://localhost:5000/v1/api/"
+        base_url = "https://localhost:5501/v1/api/"
         endpoint = r"iserver/reply/{}".format(replyid)
         reply_url = "".join([base_url, endpoint])
         json_body = {"confirmed": True}
@@ -1156,7 +1159,7 @@ class IB(IBClient):
         """
 
         # define request components
-        base_url = "https://localhost:5000/v1/api/"
+        base_url = "https://localhost:5501/v1/api/"
         endpoint = r"iserver/account/{}/order/{}".format(account_id, customer_order_id)
         req_type = "DELETE"
         reply_url = "".join([base_url, endpoint])

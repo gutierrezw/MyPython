@@ -289,6 +289,8 @@ class DataHub:
     Toleranciasell = 0.10
     MaxRoi = 0.09
     InicioInversior = date(2020, 7, 31)
+    ib_gateway_host = r"https://localhost"
+    ib_gateway_port = r"5501"
 
     # Accesos MySql ----------------------------------------------------------------------------------------------
     RepositorioOportunidades = RepositorioOportunidadesBuySell()
@@ -4829,7 +4831,7 @@ class CustomTreeview:
 
         # construye parte fixed
         tree_fixed = ttk.Treeview(
-            master, columns=self.fixed_columns, show=show, height=height, style=style
+            master, columns=self.fixed_columns, show=show, height=height
         )
         tree_fixed.heading("#0")
         tree_fixed.column("#0", width=0, minwidth=1)
@@ -4866,7 +4868,7 @@ class CustomTreeview:
             col for col in self.columns if col not in self.fixed_columns
         ]
         tree_scroll = ttk.Treeview(
-            master, columns=scrollable_columns, show=show, height=height, style=style
+            master, columns=scrollable_columns, show=show, height=height
         )
         tree_scroll.heading("#0")
         tree_scroll.column("#0", width=0, minwidth=1)
@@ -5144,7 +5146,7 @@ class MyMessageBox(tk.Toplevel):
     def showinfo(self, title, message):
 
         # agrega icono de mensaje ----------------------------------------------------------------------------------
-        imagen0, xlis = self.Bdsystem.select_objeto(codigo=18)
+        imagen0, xlis = BDsystem.select_objeto(codigo=18)
         imagen = Image.open(io.BytesIO(imagen0))
         imagen = imagen.resize((48, 48), Image.ADAPTIVE)
         imagen_tk = ImageTk.PhotoImage(imagen)
@@ -5190,7 +5192,7 @@ class MyMessageBox(tk.Toplevel):
         ask = "no"
 
         # agrega icono de mensaje ----------------------------------------------------------------------------------
-        imagen0, xlis = self.Bdsystem.select_objeto(codigo=19)
+        imagen0, xlis = BDsystem.select_objeto(codigo=19)
         imagen = Image.open(io.BytesIO(imagen0))
         imagen = imagen.resize((48, 48), Image.ADAPTIVE)
         imagen_tk = ImageTk.PhotoImage(imagen)
