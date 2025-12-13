@@ -10,7 +10,9 @@ def diaria_book_performance(account=None, vehiculo=None, proces=None):
         RepositorioOportunidades = RepositorioOportunidadesBuySell()
         update, ahora, book, ix = False, datetime.now(), [], []
 
-        # print(f'diaria_book_performance() {vehiculo} {proces['diaria_book_performance'].date()} < {ahora.date()}')
+        print(
+            f"diaria_book_performance() {vehiculo} {proces['diaria_book_performance'].date()} < {ahora.date()}"
+        )
         if proces["diaria_book_performance"].date() < ahora.date():
 
             # itera para recorrer booktrading  e insertar performance dia(s) anteriores
@@ -27,7 +29,7 @@ def diaria_book_performance(account=None, vehiculo=None, proces=None):
 
         return update
     except Exception as error:
-        print("[diaria_book_performance({})]: {}".format(vehiculo, error))
+        print(f"[diaria_book_performance({vehiculo}): {error})]")
 
 
 # organiza como la solicitud de datos para armar de performance del vehículo
@@ -53,10 +55,10 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
         ]
 
         # establece consulta SQL en función del vehículo
-        if vehiculo == 'BBVA.ARS':
+        if vehiculo == "BBVA.ARS":
             sql = Performa.select_performa_inversion(vehiculo=vehiculo)
 
-        elif vehiculo != 'BBVA.ARS':
+        elif vehiculo != "BBVA.ARS":
             sql = Performa.select_performa_inversion(account=account, vehiculo=vehiculo)
 
         # constryuye diccionario de datos a partir de sql
@@ -65,7 +67,7 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
         }
 
         # obtiene DataFrame para portafolios
-        if tipo in ('Stock', 'Crypto', 'BBVA.ARS'):
+        if tipo in ("Stock", "Crypto", "BBVA.ARS"):
             if sql:
                 datos = pd.DataFrame(d_datos, index=d_datos["Date"])
                 datos[index_ref] = (1 + datos["p_referencia"]).cumprod()
@@ -154,17 +156,17 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
             # controla factor de cambio en divisa
             factor = float(a_read[ix.index("factor_cambio")])
 
-            basic = float(a_read[ix.index("basico")] / factor) 
+            basic = float(a_read[ix.index("basico")] / factor)
             close = float(row["Close"] / factor)
 
             value = close * stock
             div = row["Dividends"] / factor * stock if "Dividends" in row else 0
 
             GyP = gyp / factor
-            
-            value = value 
-            costo = basic * stock 
-            nr_gyp, perf = .0, .0
+
+            value = value
+            costo = basic * stock
+            nr_gyp, perf = 0.0, 0.0
 
             # escribe porque hay stock o reportar gyp
             if (costo >= 0) or (GyP != 0):
@@ -193,12 +195,11 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                         nr_gyp,
                         fee,
                         div,
-                        factor
+                        factor,
                     ]
                 )
         except Exception as error:
             print(f"write_csv({vehiculo})]: {error}")
-
 
     def acumula_igual_date():
         nonlocal ebook, idatos, row, eof_book, read, a_read
