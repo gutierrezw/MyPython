@@ -191,7 +191,7 @@ class BDsystem:  # -------------------------------------------------------------
         try:
             conn = BDsystem.connect_dbase("select.all_sesion", False)
             cursor = conn.cursor()
-            sql = "SELECT * FROM sesion ORDER BY fesesion ASC"
+            sql = "SELECT * FROM sesion ORDER BY fiscalYear ASC"
             cursor.execute(sql)
             rows = cursor.fetchall()
             columns = [desc[0] for desc in cursor.description]
@@ -217,7 +217,7 @@ class BDsystem:  # -------------------------------------------------------------
             sql = """INSERT INTO sesion
                      (vehiculo, fesesion, iduser, idcuenta, orcartera, fiscalYear,
                       fefund, Pinvertir, xstrategy, userapi, userpass,
-                      private_key, public_key, web)
+                      private_key, public_key, port)
                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
 
             data = (
@@ -234,7 +234,7 @@ class BDsystem:  # -------------------------------------------------------------
                 values.get("userpass"),
                 values.get("private_key"),
                 values.get("public_key"),
-                values.get("web"),
+                values.get("port"),
             )
 
             cursor.execute(sql, data)
@@ -256,7 +256,7 @@ class BDsystem:  # -------------------------------------------------------------
             sql = """UPDATE sesion SET
                      fesesion=%s, iduser=%s, idcuenta=%s, orcartera=%s,
                      fiscalYear=%s, fefund=%s, Pinvertir=%s, xstrategy=%s,
-                     userapi=%s, userpass=%s, private_key=%s, public_key=%s, web=%s
+                     userapi=%s, userpass=%s, private_key=%s, public_key=%s, port=%s
                      WHERE id=%s AND vehiculo=%s"""
 
             data = (
@@ -272,7 +272,7 @@ class BDsystem:  # -------------------------------------------------------------
                 values.get("userpass"),
                 values.get("private_key"),
                 values.get("public_key"),
-                values.get("web"),
+                values.get("port"),
                 session_id,
                 vehiculo,
             )

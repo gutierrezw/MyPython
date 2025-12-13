@@ -2320,6 +2320,7 @@ class DashMain:
 
         self.sesion_crypto = None
         self.sesion_stock = None
+        self.sesion_FCI = None
         self.ibrks = "No"
         self.gestion = None
         self.fci = None
@@ -3501,13 +3502,11 @@ class DashMain:
                     # Solo incluir campos visibles (sin id, orcartera, xstrategy, userapi, userpass, private_key, public_key)
                     row_values = [
                         session.get("vehiculo", ""),
-                        fesesion_str,
+                        fiscalYear_str,
                         session.get("iduser", ""),
                         session.get("idcuenta", ""),
-                        fiscalYear_str,
-                        fefund_str,
+                        fesesion_str,
                         session.get("Pinvertir", 0),
-                        session.get("web", ""),
                     ]
 
                     tree.insert_row(values=row_values)
@@ -3629,7 +3628,7 @@ class DashMain:
                             if blob_public_key.get("1.0", tk.END).strip()
                             else None
                         ),
-                        "web": entry_web.get().strip(),
+                        "port": entry_port.get().strip(),
                     }
 
                     # Validación de campos requeridos
@@ -3675,6 +3674,24 @@ class DashMain:
                     except ValueError:
                         MyMessageBox(session_window).showerror(
                             "Error de Validación", "Pinvertir debe ser un número"
+                        )
+                        return
+
+                    # Convertir port a int
+                    try:
+                        values["port"] = int(values["port"]) if values["port"] else None
+                    except ValueError:
+                        MyMessageBox(session_window).showerror(
+                            "Error de Validación", "Port debe ser un número entero"
+                        )
+                        return
+
+                    # Validar rango de port
+                    if values["port"] is not None and (
+                        values["port"] < 1 or values["port"] > 65535
+                    ):
+                        MyMessageBox(session_window).showerror(
+                            "Error de Validación", "Port debe estar entre 1 y 65535"
                         )
                         return
 
@@ -3736,7 +3753,7 @@ class DashMain:
 
             # Crear ventana del editor
             editor_window = tk.Toplevel(session_window)
-            title = "Editar Sesión" if edit_mode else "Nueva Sesión"
+            title = "Editar Vehículo" if edit_mode else "Nueva Vehículo"
             editor_window.title(title)
 
             # Posicionar a la derecha de la ventana de sesiones
@@ -3775,17 +3792,25 @@ class DashMain:
                 (
                     "vehiculo",
                     "Vehículo (char 10):",
-                    "normal" if not edit_mode else "readonly",
+                    "disabled" if not edit_mode else "normal",
                 ),
                 ("fesesion", "Fecha Sesión (YYYY-MM-DD HH:MM:SS):", "normal"),
                 ("iduser", "ID Usuario (char 10):", "normal"),
                 ("idcuenta", "ID Cuenta (char 10):", "normal"),
                 ("orcartera", "Orden Cartera (char 50):", "normal"),
-                ("fiscalYear", "Año Fiscal (YYYY-MM-DD):", "normal"),
-                ("fefund", "Fecha Fundación (YYYY-MM-DD):", "normal"),
+                (
+                    "fiscalYear",
+                    "Año Fiscal (YYYY-MM-DD):",
+                    "disabled" if not edit_mode else "normal",
+                ),
+                (
+                    "fefund",
+                    "Fecha Fundación (YYYY-MM-DD):",
+                    "disabled" if not edit_mode else "normal",
+                ),
                 ("Pinvertir", "Monto a Invertir (int):", "normal"),
                 ("xstrategy", "Estrategia (char 60):", "normal"),
-                ("web", "Sitio Web (varchar 200):", "normal"),
+                ("port", "Puerto (int 1-65535):", "normal"),
             ]
 
             # Crear widgets de entrada
@@ -3798,7 +3823,7 @@ class DashMain:
             entry_fefund = None
             entry_Pinvertir = None
             entry_xstrategy = None
-            entry_web = None
+            entry_port = None
 
             for field_name, label_text, state in fields_config:
                 label = tk.Label(
@@ -3845,8 +3870,8 @@ class DashMain:
                     entry_Pinvertir = entry
                 elif field_name == "xstrategy":
                     entry_xstrategy = entry
-                elif field_name == "web":
-                    entry_web = entry
+                elif field_name == "port":
+                    entry_port = entry
 
                 row += 1
 
@@ -3879,7 +3904,7 @@ class DashMain:
                 blob_frame.grid(row=row, column=1, padx=20, pady=5, sticky="ew")
 
                 # Text widget
-                text_widget = tk.Text(blob_frame, width=40, height=3)
+                text_widget = tk.Text(blob_frame, width=30, height=3)
                 text_widget.pack(side=tk.LEFT)
 
                 # Botón de importar
@@ -3920,18 +3945,21 @@ class DashMain:
             btn_frame.grid(row=row, column=0, columnspan=2, pady=20)
 
             save_btn = tk.Button(
-                btn_frame, text="Guardar", width=15, command=save_session
+                btn_frame, text="Guardar", width=10, command=save_session
             )
             save_btn.pack(side=tk.LEFT, padx=10)
 
             cancel_btn = tk.Button(
-                btn_frame, text="Cancelar", width=15, command=cancel_edit
+                btn_frame, text="Cancel", width=10, command=cancel_edit
             )
             cancel_btn.pack(side=tk.LEFT, padx=10)
 
             # Empaquetar canvas y scrollbar
             canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        def eexit():
+            session_window.destroy()
 
         # Crear ventana principal de gestión de sesiones
         try:
@@ -3944,10 +3972,10 @@ class DashMain:
             height = max(2, len(sessions) + 1)
 
             # Posicionamiento (izquierda de la pantalla para dejar espacio al editor)
-            window_width = 650
+            window_width = 620
             window_height = min(550, 30 + height * 25)
-            x_position = 200
-            y_position = 100
+            x_position = 400
+            y_position = 110
             session_window.geometry(
                 f"{window_width}x{window_height}+{x_position}+{y_position}"
             )
@@ -3961,19 +3989,24 @@ class DashMain:
             control_frame.pack(side=tk.BOTTOM, fill=tk.X)
 
             add_btn = tk.Button(
-                control_frame, text="Agregar", width=12, command=on_add_click
+                control_frame, text="Agregar", width=10, command=on_add_click
             )
             add_btn.pack(side=tk.LEFT, padx=5)
 
             delete_btn = tk.Button(
-                control_frame, text="Eliminar", width=12, command=on_delete_click
+                control_frame, text="Eliminar", width=10, command=on_delete_click
             )
             delete_btn.pack(side=tk.LEFT, padx=5)
 
             refresh_btn = tk.Button(
-                control_frame, text="Refrescar", width=12, command=refresh_sessions
+                control_frame, text="Refrescar", width=10, command=refresh_sessions
             )
             refresh_btn.pack(side=tk.LEFT, padx=5)
+
+            cancel_btn = tk.Button(
+                control_frame, text="Cancel", width=10, command=eexit
+            )
+            cancel_btn.pack(side=tk.LEFT, padx=5)
 
             # Frame para TreeView
             tree_frame = ttk.Frame(session_window, style="C.TFrame")
@@ -3982,21 +4015,21 @@ class DashMain:
             # Definición de columnas (sin id, orcartera, xstrategy, userapi, userpass, private_key, public_key)
             columns = [
                 "vehiculo",
-                "fesesion",
+                "fiscalYear",
                 "iduser",
                 "idcuenta",
-                "fiscalYear",
+                "fesesion",
                 "Pinvertir",
             ]
 
-            fixed_columns = ["vehiculo", "fesesion"]
+            fixed_columns = ["vehiculo", "fiscalYear"]
 
             column_alignments = {
-                "vehiculo": {"width": 80, "anchor": "center"},
-                "fesesion": {"width": 140, "anchor": "center"},
-                "iduser": {"width": 80, "anchor": "center"},
-                "idcuenta": {"width": 80, "anchor": "center"},
-                "fiscalYear": {"width": 100, "anchor": "center"},
+                "vehiculo": {"width": 80, "anchor": "w"},
+                "fiscalYear": {"width": 80, "anchor": "w"},
+                "iduser": {"width": 80, "anchor": "w"},
+                "idcuenta": {"width": 80, "anchor": "w"},
+                "fesesion": {"width": 140, "anchor": "w"},
                 "Pinvertir": {"width": 90, "anchor": "e"},
             }
 
@@ -4024,6 +4057,7 @@ class DashMain:
                 "Error", f"Error al abrir gestor de sesiones: {str(e)}"
             )
 
+    # Cierra la aplicación de forma ordenada
     def eexit(self):
 
         # DataHub.manager_after.after_cancel_all()
@@ -4056,14 +4090,16 @@ class DashMain:
         self.sesion_crypto = self.PlanInversion.select_sesion(
             datetime.now(), accion="select", vehiculo="Crypto"
         )
-        self.start_crypto(account=self.sesion_crypto["idcuenta"], vehiculo="Crypto")
-        self.graficos_main()
+        if self.sesion_crypto:
+            self.start_crypto(account=self.sesion_crypto["idcuenta"], vehiculo="Crypto")
+            self.graficos_main()
 
         # define widget principales Stock-----------------------------------------------------------------
         self.sesion_stock = self.PlanInversion.select_sesion(
             datetime.now(), accion="select", vehiculo="Stock"
         )
-        self.start_stock(account=self.sesion_stock["idcuenta"], vehiculo="Stock")
+        if self.sesion_stock:
+            self.start_stock(account=self.sesion_stock["idcuenta"], vehiculo="Stock")
 
         # inicia otros modulos ---------------------------------------------------------------------------
         self.gestion = GestionInversion(
@@ -4071,6 +4107,10 @@ class DashMain:
         )
         self.gestion.pack()
 
+        # define widget principales FCI-------------------------------------------------------------------
+        self.sesion_FCI = self.PlanInversion.select_sesion(
+            datetime.now(), accion="select", vehiculo="SANT.ARS"
+        )
         self.fci = ArsFondosInversion(
             parent=self.root, master=self.win4, colores=self.colors
         )
