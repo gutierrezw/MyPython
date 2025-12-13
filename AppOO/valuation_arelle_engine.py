@@ -13,6 +13,7 @@ from Modulos_python import (
     requests,
     np,
     ZipFile,
+    yf,
 )
 from valuation_xbrl_api import load_filing, build_ttm, analyze_dividend_history
 from valuation_ddm import DividendDiscountModel
@@ -184,8 +185,9 @@ def build_file_list(BASE_DIR: Path, ticker: str, display_logs=False):
 
 def get_yf_data(ticker: str):
     """
-    Obtiene precio actual y nombre de la compañía desde Yahoo Finance.
-    Retorna: (price: float, company_name: str) o (None, None) si falla
+    Obtiene información desde Yahoo Finance.
+    Retorna: dict con price, company_name, sector
+    Si falla: retorna dict con valores None
     """
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0)"}
     urls = [
@@ -196,6 +198,7 @@ def get_yf_data(ticker: str):
 
     price = None
     company_name = None
+    sector = None
 
     # Intento 1: obtener desde /v8/finance/chart (más confiable para precio)
     for attempt in range(3):
@@ -233,7 +236,7 @@ def get_yf_data(ticker: str):
             break
 
     # Intento 2: Fallback a /v10/finance/quoteSummary si el anterior falló
-    if not price or not company_name:
+    if not price or not company_name or not sector:
         try:
             url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker}?modules=price,assetProfile"
             r = requests.get(url, headers=headers, timeout=10)
@@ -268,14 +271,21 @@ def get_yf_data(ticker: str):
                     except:
                         pass
 
+            # ✅ NUEVO: Extraer sector
+            if not sector:
+                try:
+                    asset_profile = data["quoteSummary"]["result"][0]["assetProfile"]
+                    if "sector" in asset_profile:
+                        sector = asset_profile["sector"]
+                except:
+                    pass
+
         except:
             pass
 
     # Intento 3: Fallback a yfinance como último recurso
-    if not price or not company_name:
+    if not price or not company_name or not sector:
         try:
-            import yfinance as yf
-
             tk = yf.Ticker(ticker)
             info = tk.info
 
@@ -287,10 +297,18 @@ def get_yf_data(ticker: str):
             elif not company_name and "shortName" in info:
                 company_name = info["shortName"]
 
+            # ✅ NUEVO: Extraer sector desde yfinance
+            if not sector and "sector" in info:
+                sector = info["sector"]
+
         except:
             pass
 
-    return price, company_name
+    return {
+        "price": price,
+        "company_name": company_name,
+        "sector": sector
+    }
 
 
 def compute_reit_metrics(ttm: dict):
@@ -383,13 +401,21 @@ def compute_valuations(ttm: dict, price: float):
     )
 
     # ✅ NUEVO: Ratios de apalancamiento y deuda
-    debt_to_equity = (total_debt / total_equity * 100) if (total_debt and total_equity) else None
-    debt_to_assets = (total_debt / total_assets * 100) if (total_debt and total_assets) else None
-    net_debt_to_equity = (net_debt / total_equity * 100) if (net_debt and total_equity) else None
+    debt_to_equity = (
+        (total_debt / total_equity * 100) if (total_debt and total_equity) else None
+    )
+    debt_to_assets = (
+        (total_debt / total_assets * 100) if (total_debt and total_assets) else None
+    )
+    net_debt_to_equity = (
+        (net_debt / total_equity * 100) if (net_debt and total_equity) else None
+    )
 
     # Enterprise Value = Market Cap + Net Debt
     market_cap = price * shares if (price and shares) else None
-    enterprise_value = (market_cap + net_debt) if (market_cap and net_debt is not None) else None
+    enterprise_value = (
+        (market_cap + net_debt) if (market_cap and net_debt is not None) else None
+    )
 
     # EV/EBITDA (usando Operating CF como proxy de EBITDA si no tenemos Depreciation)
     ev_to_ocf = (enterprise_value / ocf) if (enterprise_value and ocf) else None
@@ -557,12 +583,17 @@ def run_valuation(file_list, ticker, price, company_name, company_type="domestic
         alerts = generate_alerts(ttm, vals, reit_metrics, analyze_divideds)
         risk_assessment = get_overall_risk_level(alerts)
 
+    # ✅ Obtener sector desde Yahoo Finance
+    yf_data = get_yf_data(ticker)
+    sector = yf_data.get("sector")
+
     # ✅ ESTRUCTURA PARA DB
     return {
         "metadata": {
             "ticker": ticker,
             "company_name": company_name,
             "company_type": company_type,  # ✅ "domestic" o "foreign"
+            "sector": sector,  # ✅ NUEVO: Sector desde Yahoo Finance
             "is_reit": is_reit(ttm),
             "analysis_date": datetime.now().isoformat(),
             "price_date": datetime.now().date().isoformat(),
@@ -703,7 +734,9 @@ if __name__ == "__main__":
     BASE_DIR = Path(r"C:\Users\InversionesWildaga\Documents\MyPython\AppOO\EDGAR")
 
     ticker = input("💼 Ingrese el ticker: ").strip().upper()
-    price, company_name = get_yf_data(ticker)  # ✅ Desempaca tupla
+    yf_data = get_yf_data(ticker)  # ✅ Obtiene dict
+    price = yf_data.get("price")
+    company_name = yf_data.get("company_name")
 
     if not price:
         print("❌ No se pudo obtener el precio de Yahoo Finance")
