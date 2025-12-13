@@ -2,8 +2,7 @@
 # valuation_ddm.py
 # Dividend Discount Model para tu sistema
 # ================================================
-
-import numpy as np
+from Modulos_python import np
 
 
 class DividendDiscountModel:

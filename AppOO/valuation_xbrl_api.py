@@ -464,6 +464,7 @@ def build_ttm(filings):
             [
                 "us-gaap:NetCashProvidedByUsedInOperatingActivities",
                 "us-gaap:CashProvidedByUsedInOperatingActivities",
+                "us-gaap:NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",  # ✅ FMC usa continuing operations
                 "ifrs-full:CashFlowsFromUsedInOperatingActivities",  # ✅ IFRS estándar
             ],
             fallback=[
@@ -540,6 +541,7 @@ def build_ttm(filings):
         "TotalEquity": try_names(
             [
                 "us-gaap:StockholdersEquity",
+                "us-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",  # ✅ UPREIT (HASI)
                 "us-gaap:Equity",
                 "ifrs-full:Equity",  # ✅ IFRS
             ],
@@ -555,6 +557,11 @@ def build_ttm(filings):
                 "ifrs-full:CurrentBorrowings",  # ✅ IFRS alternativo
                 "ifrs-full:CurrentPortionOfLongtermBorrowings",  # ✅ IFRS - porción corriente
             ],
+            fallback=[
+                # ✅ VALE custom concepts (empresas brasileñas IFRS)
+                "vale:CurrentBorrowingsAndCurrentPortionOfNonCurrentBorrowingsGross",
+                "vale:LoansBorrowingsAndCurrent",
+            ],
             prefer="instant",
         ),
         # Deuda de largo plazo (Non-current)
@@ -565,6 +572,12 @@ def build_ttm(filings):
                 "us-gaap:DebtNoncurrent",
                 "ifrs-full:LongtermBorrowings",  # ✅ IFRS
                 "ifrs-full:NoncurrentBorrowings",  # ✅ IFRS alternativo
+            ],
+            fallback=[
+                # ✅ VALE custom concepts (empresas brasileñas IFRS)
+                "vale:LoansBorrowingsAndNonCurrent",
+                "vale:LongtermBorrowingsGross",
+                "vale:LongtermUnsecuredDebt",
             ],
             prefer="instant",
         ),
