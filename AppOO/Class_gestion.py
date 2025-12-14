@@ -288,24 +288,16 @@ class GestionInversion(tk.Frame):
         self.Perfoma = IPerformance()
 
         # información de sesión
-        self.stock_sesion = self.PlaInversion.select_sesion(
-            datetime.now(), accion="select", vehiculo="Stock"
-        )
+        self.stock_sesion = self.PlaInversion.get_sesion_by_vehiculo("Stock")
         self.stock_account = self.stock_sesion["idcuenta"]
 
-        self.crypto_sesion = self.PlaInversion.select_sesion(
-            datetime.now(), accion="select", vehiculo="Crypto"
-        )
+        self.crypto_sesion = self.PlaInversion.get_sesion_by_vehiculo("Crypto")
         self.crypto_account = self.crypto_sesion["idcuenta"]
 
-        self.sesion = self.PlaInversion.select_sesion(
-            datetime.now(), accion="select", vehiculo="BBVA.ARS"
-        )
+        self.sesion = self.PlaInversion.get_sesion_by_vehiculo("BBVA.ARS")
         self.bbva_account = self.sesion["idcuenta"]
 
-        self.sesion = self.PlaInversion.select_sesion(
-            datetime.now(), accion="select", vehiculo="SANT.ARS"
-        )
+        self.sesion = self.PlaInversion.get_sesion_by_vehiculo("SANT.ARS")
         self.sant_account = self.sesion["idcuenta"]
 
         self.widgets_extractos()
@@ -691,7 +683,7 @@ class GestionInversion(tk.Frame):
 
     # mantiene actualizada información del plan de inversión
     def widgets_plan(self):
-        self.datsess = self.PlaInversion.select_sesion("select")
+        self.datsess = self.PlaInversion.get_sesion_by_vehiculo("Stock")
         plan = self.PlaInversion.select_plan(self.datsess["idcuenta"])
         traz = self.PlaInversion.select_trazaplan(self.datsess["idcuenta"])
         vari = self.PlaInversion.select_variablesplan(self.datsess["idcuenta"])
@@ -979,9 +971,7 @@ class GestionInversion(tk.Frame):
 
         # información de sesión
         vehiculo = "Crypto"
-        sesion = self.PlaInversion.select_sesion(
-            datetime.now(), accion="select", vehiculo=vehiculo
-        )
+        sesion = self.PlaInversion.get_sesion_by_vehiculo(vehiculo)
         account = sesion["idcuenta"]
 
         if desde is not None:
@@ -1570,9 +1560,7 @@ class GestionInversion(tk.Frame):
         def check_performance_crypto(extracto=None):
             try:
                 log, vehiculo = False, "Crypto"
-                x_sesion = self.PlaInversion.select_sesion(
-                    datetime.now(), accion="select", vehiculo=vehiculo
-                )
+                x_sesion = self.PlaInversion.get_sesion_by_vehiculo(vehiculo)
                 (last_update, ix) = self.Perfoma.select_performa_inversion(
                     account=x_sesion["idcuenta"], vehiculo=vehiculo, accion="last"
                 )
@@ -1625,9 +1613,7 @@ class GestionInversion(tk.Frame):
 
         try:
             hoy = datetime.now()
-            sesion = self.PlaInversion.select_sesion(
-                hoy, accion="select", vehiculo="Stock"
-            )
+            sesion = self.PlaInversion.get_sesion_by_vehiculo("Stock")
             d_extract, ilog = cagar_archivo(
                 account=sesion["idcuenta"], titulo="Activity Statement", tipo="csv"
             )
