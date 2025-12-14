@@ -66,9 +66,7 @@ class ClassAgenteIA:
         self.positions = []
         self.NotFound = []
         self.PlanInversion = PlanInversion()
-        self.sesion = self.PlanInversion.select_sesion(
-            datetime.now(), accion="select", vehiculo=self.vehiculo
-        )
+        self.sesion = self.PlanInversion.get_sesion_by_vehiculo(self.vehiculo)
 
         # Asigna Nombre Logging
         self.logger = logging.getLogger("ClassAgenteIA")
@@ -230,9 +228,7 @@ class Telegram:
         self.simulation = True
 
         # Token / ID que te da BotFather - personal (número)
-        sesion = BDsystem.select_sesion(
-            datetime.now(), accion="select", vehiculo="Chatbot"
-        )
+        sesion = BDsystem.get_sesion_by_vehiculo("Chatbot")
         self.TOKEN = sesion["userapi"].decode("utf-8")
         self.CHAT_ID = int(sesion["iduser"])
 

@@ -33,7 +33,7 @@ class BB:
     def __init__(self, api_key=None, api_secret=None, idcuenta=None):
 
         # datos de session Crypto
-        sesion = BDsystem.select_sesion("select", vehiculo="Crypto")
+        sesion = BDsystem.get_sesion_by_vehiculo("Crypto")
 
         # RSA Keys
         self.API_KEY = sesion["userapi"].decode("utf-8")
@@ -156,7 +156,7 @@ class MySpot(Spot):
         )
 
         # obtienen ApiKey y ApiSecret de la sesión
-        self.sesion = BDsystem.select_sesion("select", vehiculo="Crypto")
+        self.sesion = BDsystem.get_sesion_by_vehiculo("Crypto")
         self.API_KEY = self.sesion["userapi"].decode("utf-8")
         self.private_key = self.sesion["userpass"]
 
@@ -654,7 +654,7 @@ class IB(IBClient):
             :rtype: object
         """
 
-        sesion = BDsystem.select_sesion("select", vehiculo="Stock")
+        sesion = BDsystem.get_sesion_by_vehiculo("Stock")
         self.account = sesion["idcuenta"]
         self.username = sesion["iduser"]
         self.client_portal_client = ClientPortal()
