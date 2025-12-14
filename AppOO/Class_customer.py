@@ -267,7 +267,7 @@ class DataHub:
     mrk_anterior = get_ultimo_dia_mercado(market="Stock")
     dia_anterior = get_ultimo_dia_mercado(market="Crypto")
     mrv_anterior = get_ultimo_dia_mercado(market="BBVA.ARS")
-    mrv_safeday = mrv_anterior + timedelta(days=1)  # BBVA.ARS cierra un dia después
+    mrv_safeday = mrv_anterior - timedelta(days=1)  # BBVA.ARS cierra un dia después
 
     wait_3m = now + timedelta(minutes=3)
     last_process = {
@@ -1577,9 +1577,7 @@ class TickerInfo(MyOrders):
         self.RepositorioOportunidades = RepositorioOportunidadesBuySell()
 
         # información de sesión y orden de cartera
-        self.sesion = self.PlanInversion.select_sesion(
-            datetime.now(), accion="select", vehiculo=self.vehiculo
-        )
+        self.sesion = self.PlanInversion.get_sesion_by_vehiculo(self.vehiculo)
         self.orden = json.loads(self.sesion["orcartera"])
 
     # desde tabla inicia la estructura positions
@@ -2429,9 +2427,7 @@ class WidgetVehiculo(TickerInfo):
                 bt5.place(y=15, x=825)
 
         # información de sesión
-        self.sesion = self.PlanInversion.select_sesion(
-            datetime.now(), accion="select", vehiculo=self.vehiculo
-        )
+        self.sesion = self.PlanInversion.get_sesion_by_vehiculo(self.vehiculo)
 
         # área de oportunidades y entrenamiento
         self.invertir = self.sesion["Pinvertir"]

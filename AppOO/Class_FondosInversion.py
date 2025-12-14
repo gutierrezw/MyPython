@@ -16,6 +16,8 @@ from Modulos_Mysql import RepositorioOportunidadesBuySell, DiariaCNV
 from Class_customer import WidgetVehiculo, DataHub
 from Modulos_Utilitarios import delete_file, buscar_ticker, define_FileCache, is_numeric
 from Modulos_Comunes import diaria_book_performance, proceso_update_performance
+from download_cnv_selenium import descargar_cnv_hoy
+
 
 class ArsFondosInversion(tk.Frame):
     def __init__(self, parent=None, master=None, colores=None):
@@ -40,16 +42,12 @@ class ArsFondosInversion(tk.Frame):
         self.RepositorioOportunidades = RepositorioOportunidadesBuySell()
         self.ClassCNV = DiariaCNV()
 
-        self.sesion = self.ClassCNV.select_sesion(
-            datetime.now(), accion="select", vehiculo="BBVA.ARS"
-        )
+        self.sesion = self.ClassCNV.get_sesion_by_vehiculo("BBVA.ARS")
         self.account_bbva = self.sesion["idcuenta"]
         self.orden = json.loads(self.sesion["orcartera"])
         self.vehiculo = "BBVA.ARS"
 
-        self.sesion = self.ClassCNV.select_sesion(
-            datetime.now(), accion="select", vehiculo="SANT.ARS"
-        )
+        self.sesion = self.ClassCNV.get_sesion_by_vehiculo("SANT.ARS")
         self.account_sant = self.sesion["idcuenta"]
         self.currency = {}
         self.counter = 1
@@ -85,7 +83,7 @@ class ArsFondosInversion(tk.Frame):
     def update_panel_fci(self):
         def change_a_ARS():
             nav, unpyl, dgyp, unprofit, costo, fecha = 0.0, 0.0, 0.0, 0.0, 0.0, None
-            
+
             # obtiene tasa de cambio USDT-ARS
             hoy = datetime.now()
             tasa_cambio = self.get_tasa_cambio_USDT(fiat="ARS", date=hoy.date())
@@ -125,7 +123,6 @@ class ArsFondosInversion(tk.Frame):
                 # self.update_precio_DataHubInfo(
                 #    symbol=symbol, conid=conid, precio=d_precio
                 # )
-
 
             per = costo / unprofit if unprofit > 0 else 0
             self.ars.set_header_panel(
@@ -262,19 +259,26 @@ class ArsFondosInversion(tk.Frame):
                     for keys in df_fci.itertuples():
                         try:
                             # valida existencia del fondo en cartera
-                            activo, found = self.RepositorioOportunidades.select_otros_activos(idSymbol=keys.Código_CAFCI)
-                            if not found :
-                               self.CNVDiaria.append({"idcrypto": keys.Código_CAFCI,
-                                                      "descripcion": keys.fondo,
-                                                      "base_asset": "ARS",
-                                                      "quote_asset": "USD"
-                                                      })
-                               continue
+                            activo, found = (
+                                self.RepositorioOportunidades.select_otros_activos(
+                                    idSymbol=keys.Código_CAFCI
+                                )
+                            )
+                            if not found:
+                                self.CNVDiaria.append(
+                                    {
+                                        "idcrypto": keys.Código_CAFCI,
+                                        "descripcion": keys.fondo,
+                                        "base_asset": "ARS",
+                                        "quote_asset": "USD",
+                                    }
+                                )
+                                continue
 
                             values = {}
                             symbol = keys.Código_CAFCI
                             fecha = datetime.strptime(keys.Fecha, "%d/%m/%y")
-                       
+
                             values.update({"fecha": fecha.date()})
                             values.update({"fondo": keys.fondo})
                             values.update({"moneda": keys.Moneda})
@@ -288,20 +292,21 @@ class ArsFondosInversion(tk.Frame):
                             values.update({"variacion60dias": keys.var_60d})
                             values.update({"variacion90dias": keys.var_90d})
                             values.update({"patrimonioActual": keys.Patrimonio_actual})
-                            values.update({"patrimonioAnterior": keys.Patrimonio_anterior})
+                            values.update(
+                                {"patrimonioAnterior": keys.Patrimonio_anterior}
+                            )
                             values.update({"marketShare": keys.Market_Share})
                             values.update({"sociedadDepositaria": keys.Soc_Depositaria})
                             values.update({"codigoCNV": keys.Codigo_CNV})
                             values.update({"codSociedadDep": keys.Código_SocDep})
                             values.update({"monedaFondo": keys.Código_Moneda})
 
-                            self.ClassCNV.insert(values=values, symbol=symbol)
+                            self.ClassCNV.insert_CNV(values=values, symbol=symbol)
                         except ValueError:
                             continue
 
                     # Almacena archivo CNV que no estan en otros_activos
                     # file_CNV = define_FileCache("CNV_FCI_missing_activos.json")
-
 
                 delete_file(ruta=diaria_CNV, display=False)
         except (EncodingWarning, Exception) as e:
@@ -527,7 +532,7 @@ class ArsFondosInversion(tk.Frame):
 
                 # obtiene precio de mercado
                 conid = activo[0]["idcrypto"]
-                cnv, ix, found = self.ClassCNV.select(symbol=conid)
+                cnv, ix, found = self.ClassCNV.select_CNV(symbol=conid)
 
                 # obtiene valor anterior de la posición
                 found, position = buscar_ticker(positions, ticket)
@@ -683,7 +688,6 @@ class ArsFondosInversion(tk.Frame):
 
                     else:
                         anterior = values[ix.index("preciotrans")]
-                      
 
                 return tasa if tasa > 0 else anterior
         except (EncodingWarning, Exception) as e:
@@ -722,8 +726,11 @@ class ArsFondosInversion(tk.Frame):
 
         for account in self.account_fci:
             t_wait, update = DataHub.last_process[self.vehiculo], False
+            print(
+                f"Schedule diaria_book_performance for {self.vehiculo} - {update} >> {t_wait}"
+            )
             update = diaria_book_performance(
-                    account=account, vehiculo=self.vehiculo, proces=t_wait
+                account=account, vehiculo=self.vehiculo, proces=t_wait
             )
 
             # si actualizó tabla diaria, calcula proxima fecha de update
@@ -731,25 +738,42 @@ class ArsFondosInversion(tk.Frame):
                 # agrega performance a la tabla
                 proceso_update_performance(account=account, vehiculo=self.vehiculo)
 
-        # eof() programa próxima ejecución
-        hoy = datetime.now().replace(hour=23, minute=0, second=0, microsecond=0)
-        wait = hoy + timedelta(days=2)
-        DataHub.last_process[self.vehiculo]["diaria_book_performance"] = wait
-        DataHub.last_process["graph_performace_portafolio"] = False
+                # eof() programa próxima ejecución
+                hoy = datetime.now().replace(hour=23, minute=0, second=0, microsecond=0)
+                wait = hoy + timedelta(days=2)
+                DataHub.last_process[self.vehiculo]["diaria_book_performance"] = wait
+                DataHub.last_process["graph_performace_portafolio"] = False
 
+    # descarga de
+    def downdload_CNV_diaria(self):
 
+        try:
+
+            last_process = self.ClassCNV.last_insert_CNV()
+            print(f"downdload_CNV_diaria() >> {self.vehiculo} >> {last_process}")
+
+            # descarga planilla diaria CNV
+            if isinstance(last_process, datetime):
+                descargar_cnv_hoy(fecha_str=last_process.strftime("%Y-%m-%d"))
+
+        except (EncodingWarning, Exception) as e:
+            print(f"downdload_CNV_diaria(): {e}")
 
     # vericica cada 90 segundos si hay nueva interfaz para cargar
     def run_loads(self):
         def run_schedule(task=None):
             while True:
+
+                # descarga planilla diaria CNV
+                self.downdload_CNV_diaria()
+
                 # valida si hay nueva interfaz
                 if self.chequea_new_loadFile():
                     self.load_diaria_CNV()
                     self.load_positions_FCI()
 
                     self.update_panel_fci()
-                
+
                     self.schedule_diaria_performace()
 
                 self.counter += 1

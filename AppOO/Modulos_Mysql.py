@@ -33,95 +33,142 @@ class BDsystem:  # -------------------------------------------------------------
         "database": "bdinv",
     }
 
-    def select_sesion(
-        fecha,
-        orden='{"RetS": "ASC"}',
-        accion=False,
-        invertir=0,
-        filtro=None,
-        vehiculo="Stock",
-    ) -> dict:
+    @staticmethod
+    def get_sesion_by_vehiculo(vehiculo: str) -> dict:
         """
-        @param fecha:
-        @param orden:
-        @param accion:
-        @param invertir:
-        @param filtro:
-        @param vehiculo:
-        @return:
-        """
+        Obtiene sesión por vehículo.
 
-        sql = "SELECT * FROM sesion  WHERE vehiculo='%s'"
+        Args:
+            vehiculo: Tipo de vehículo (Stock, Crypto, etc.)
+
+        Returns:
+            dict con todos los campos de la tabla sesion
+
+        Raises:
+            ValueError: Si no existe sesión para el vehículo
+        """
+        sql = "SELECT * FROM sesion WHERE vehiculo = %s"
         conn = BDsystem.connect_dbase("select.sesion", False)
+
         try:
             cursor = conn.cursor()
-            cursor.execute(sql % vehiculo)
+            cursor.execute(sql, (vehiculo,))
             qry = cursor.fetchone()
+
+            if not qry:
+                raise ValueError(f"No existe sesión para vehículo: {vehiculo}")
+
+            # Construir diccionario con nombres de columnas
             ix = [columna[0] for columna in cursor.description]
+            sesion = {}
+            for i, nombre_columna in enumerate(ix):
+                sesion[nombre_columna] = qry[i]
 
-            fesesion = qry[ix.index("fesesion")]
-            or_cartera = qry[ix.index("orcartera")]
-            pinvertir = qry[ix.index("Pinvertir")]
-            xstrategy = qry[ix.index("xstrategy")]
+            return sesion
 
-            sesion = dict.fromkeys(ix, 0)
-            sesion["fefund"] = qry[ix.index("fefund")]
+        except Exception as error:
+            print(f"[Mysql::get_sesion_by_vehiculo()]: {error}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
-            if accion == "update":
-                upd = """UPDATE sesion SET fesesion='%s', orcartera='%s' WHERE vehiculo='%s';"""
-                fesesion = fecha
-                conn = BDsystem.connect_dbase("Sesion.Update", False)
-                cursor = conn.cursor()
-                cursor.execute(upd % (fesesion, orden, vehiculo))
-                conn.commit()
+    @staticmethod
+    def update_sesion_fecha_orden(
+        vehiculo: str, fesesion: datetime, orcartera: str
+    ) -> bool:
+        """
+        Actualiza fesesion y orcartera de una sesión.
 
-                sesion["fectime"] = fesesion
-                sesion["fesesion"] = fesesion
-                sesion["orcartera"] = orden
-                sesion["Pinvertir"] = invertir
+        Args:
+            vehiculo: Tipo de vehículo (Stock, Crypto, etc.)
+            fesesion: Fecha de sesión
+            orcartera: Orden de cartera en formato JSON
 
-            if accion == "select":
-                sesion["fectime"] = fecha
-                sesion["fesesion"] = fesesion
-                sesion["orcartera"] = or_cartera
-                sesion["Pinvertir"] = pinvertir
-                sesion["xstrategy"] = xstrategy
+        Returns:
+            bool: True si actualización exitosa, False en caso contrario
+        """
+        sql = "UPDATE sesion SET fesesion=%s, orcartera=%s WHERE vehiculo=%s"
+        conn = BDsystem.connect_dbase("Sesion.Update", False)
 
-            if accion == "updateFun":
-                upd = """UPDATE sesion SET fechaFund='%s' WHERE vehiculo='%s';"""
-                sesion["fefund"] = fecha
-                conn = BDsystem.connect_dbase("Fe.fundamental.Update", False)
-                cursor = conn.cursor()
-                cursor.execute(upd % (fecha, vehiculo))
-                conn.commit()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, (fesesion, orcartera, vehiculo))
+            conn.commit()
+            return True
+        except Exception as error:
+            print(f"[Mysql::update_sesion_fecha_orden()]: {error}")
+            conn.rollback()
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
-            if accion == "updatexstrategy":
-                if filtro:
-                    upd = """UPDATE sesion SET xstrategy='%s' WHERE vehiculo='%s';"""
-                    sesion["xstrategy"] = filtro
-                    conn = BDsystem.connect_dbase("Strategy.Update", False)
-                    cursor = conn.cursor()
-                    cursor.execute(upd % (filtro, vehiculo))
-                    conn.commit()
+    @staticmethod
+    def update_sesion_fecha_fund(vehiculo: str, fecha_fund) -> bool:
+        """
+        Actualiza fechaFund de una sesión.
 
-        except (Exception, EncodingWarning, connect.Error) as error:
-            print("[Mysql:: select_sesion()]: {}".format(error))
+        Args:
+            vehiculo: Tipo de vehículo (Stock, Crypto, etc.)
+            fecha_fund: Fecha fundamental
 
-        cursor.close()
-        sesion["id"] = qry[ix.index("id")]
-        sesion["iduser"] = qry[ix.index("iduser")]
-        sesion["idcuenta"] = qry[ix.index("idcuenta")]
-        sesion["userapi"] = qry[ix.index("userapi")]
-        sesion["userpass"] = qry[ix.index("userpass")]
-        sesion["private_key"] = qry[ix.index("private_key")]
-        sesion["vehiculo"] = qry[ix.index("vehiculo")]
-        sesion["Pinvertir"] = qry[ix.index("Pinvertir")]
-        sesion["fiscalYear"] = qry[ix.index("fiscalYear")]
+        Returns:
+            bool: True si actualización exitosa, False en caso contrario
+        """
+        sql = "UPDATE sesion SET fefund=%s WHERE vehiculo=%s"
+        conn = BDsystem.connect_dbase("Fe.fundamental.Update", False)
 
-        return sesion
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, (fecha_fund, vehiculo))
+            conn.commit()
+            return True
+        except Exception as error:
+            print(f"[Mysql::update_sesion_fecha_fund()]: {error}")
+            conn.rollback()
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def update_sesion_strategy(vehiculo: str, xstrategy: str) -> bool:
+        """
+        Actualiza xstrategy de una sesión.
+
+        Args:
+            vehiculo: Tipo de vehículo (Stock, Crypto, etc.)
+            xstrategy: Estrategia a aplicar
+
+        Returns:
+            bool: True si actualización exitosa, False en caso contrario
+        """
+        sql = "UPDATE sesion SET xstrategy=%s WHERE vehiculo=%s"
+        conn = BDsystem.connect_dbase("Strategy.Update", False)
+
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, (xstrategy, vehiculo))
+            conn.commit()
+            return True
+        except Exception as error:
+            print(f"[Mysql::update_sesion_strategy()]: {error}")
+            conn.rollback()
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
     # cagar imagen desde sys_objetos
-
     def select_image(idd=None, size=(20, 20)):
         imagen0, xlis = BDsystem.select_objeto(codigo=idd)
         imagen = Image.open(io.BytesIO(imagen0))
@@ -521,34 +568,19 @@ class DiariaCNV(
         conn = BDsystem.connect_dbase(tabla, display=self.display)
         return conn
 
-    def select(self, symbol=None, fecha=None, accion="last"):
+    def select_CNV(self, symbol=None, fecha=None, accion="last"):
         """
         @param symbol: activo a consultar."""
-
-        def last_insert(ticket, date=None):
-
-            if date is None:
-                query = """SELECT max(fecha) FROM diaria_CNV WHERE codCAFCI='%s';"""
-                cursor.execute(query % ticket)
-            else:
-                query = """SELECT fecha FROM diaria_CNV WHERE codCAFCI='%s' and fecha='%s';"""
-                cursor.execute(query % (ticket, date))
-
-            last = cursor.fetchone()
-            u_fecha = "0001-01-01"
-            if last:
-                u_fecha = last[0].strftime("%Y-%m-%d")
-            return u_fecha
 
         try:
             conn = self._conectar(tabla="select.diaria_CNV")
             found, columns, sql = False, [], []
             cursor = conn.cursor()
             if fecha is not None:
-                last_fecha = last_insert(symbol, fecha)
+                last_fecha = self.last_insert_CNV(symbol, fecha)
 
             elif accion == "last":
-                last_fecha = last_insert(symbol)
+                last_fecha = self.last_insert_CNV(symbol)
 
             if symbol is not None:
                 qry = """SELECT * FROM diaria_CNV WHERE codCAFCI='%s' and fecha='%s';"""
@@ -556,12 +588,40 @@ class DiariaCNV(
                 sql = cursor.fetchone()
                 columns = [columna[0] for columna in cursor.description]
                 found = True if sql else False
-
-            return sql, columns, found
+                return sql, columns, found
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: select_diaria_CNV(): {}]".format(error))
 
-    def insert(self, values=None, symbol=None):
+    def last_insert_CNV(self, symbol=None, date=None):
+        """@param symbol:  activo a consultar
+        @param date: fecha a consultar
+        @return: última fecha insertada en diaria_CNV para el activo ticket."""
+
+        try:
+            conn = self._conectar(tabla="select.last_insert_CNV")
+            cursor = conn.cursor()
+
+            if date is None and symbol is not None:
+                query = """SELECT max(fecha) FROM diaria_CNV WHERE codCAFCI='%s';"""
+                cursor.execute(query % symbol)
+
+            elif date is None and symbol is None:
+                query = """SELECT max(fecha) FROM diaria_CNV;"""
+                cursor.execute(query)
+            else:
+                query = """SELECT fecha FROM diaria_CNV WHERE codCAFCI='%s' and fecha='%s';"""
+                cursor.execute(query % (symbol, date))
+
+            last = cursor.fetchone()
+            u_fecha = "0001-01-01"
+
+            if last:
+                u_fecha = last[0].strftime("%Y-%m-%d")
+            return u_fecha
+        except (Exception, EncodingWarning, connect.Error) as error:
+            print("[Mysql:: last_insert_CNV(): {}]".format(error))
+
+    def insert_CNV(self, values=None, symbol=None):
         """
         @param values:  lista de valores de campos a insertar
         @param symbol: ticket a consultar en diaria_CNV

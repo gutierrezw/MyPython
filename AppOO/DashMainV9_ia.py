@@ -4087,17 +4087,13 @@ class DashMain:
         DataHub.max_points = debug.max_points
 
         # define widget principales Crypto ---------------------------------------------------------------
-        self.sesion_crypto = self.PlanInversion.select_sesion(
-            datetime.now(), accion="select", vehiculo="Crypto"
-        )
+        self.sesion_crypto = self.PlanInversion.get_sesion_by_vehiculo("Crypto")
         if self.sesion_crypto:
             self.start_crypto(account=self.sesion_crypto["idcuenta"], vehiculo="Crypto")
             self.graficos_main()
 
         # define widget principales Stock-----------------------------------------------------------------
-        self.sesion_stock = self.PlanInversion.select_sesion(
-            datetime.now(), accion="select", vehiculo="Stock"
-        )
+        self.sesion_stock = self.PlanInversion.get_sesion_by_vehiculo("Stock")
         if self.sesion_stock:
             self.start_stock(account=self.sesion_stock["idcuenta"], vehiculo="Stock")
 
@@ -4108,9 +4104,7 @@ class DashMain:
         self.gestion.pack()
 
         # define widget principales FCI-------------------------------------------------------------------
-        self.sesion_FCI = self.PlanInversion.select_sesion(
-            datetime.now(), accion="select", vehiculo="SANT.ARS"
-        )
+        self.sesion_FCI = self.PlanInversion.get_sesion_by_vehiculo("SANT.ARS")
         self.fci = ArsFondosInversion(
             parent=self.root, master=self.win4, colores=self.colors
         )

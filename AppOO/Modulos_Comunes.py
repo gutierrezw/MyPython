@@ -10,9 +10,9 @@ def diaria_book_performance(account=None, vehiculo=None, proces=None):
         RepositorioOportunidades = RepositorioOportunidadesBuySell()
         update, ahora, book, ix = False, datetime.now(), [], []
 
-        print(
-            f"diaria_book_performance() {vehiculo} {proces['diaria_book_performance'].date()} < {ahora.date()}"
-        )
+        # print(
+        #     f"diaria_book_performance() {vehiculo} {proces['diaria_book_performance'].date()} < {ahora.date()}"
+        # )
         if proces["diaria_book_performance"].date() < ahora.date():
 
             # itera para recorrer booktrading  e insertar performance dia(s) anteriores
