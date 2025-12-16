@@ -724,11 +724,9 @@ class ArsFondosInversion(tk.Frame):
 
     def schedule_diaria_performace(self):
 
+        update = False
         for account in self.account_fci:
             t_wait, update = DataHub.last_process[self.vehiculo], False
-            print(
-                f"Schedule diaria_book_performance for {self.vehiculo} - {update} >> {t_wait}"
-            )
             update = diaria_book_performance(
                 account=account, vehiculo=self.vehiculo, proces=t_wait
             )
@@ -738,24 +736,24 @@ class ArsFondosInversion(tk.Frame):
                 # agrega performance a la tabla
                 proceso_update_performance(account=account, vehiculo=self.vehiculo)
 
-                # eof() programa próxima ejecución
-                hoy = datetime.now().replace(hour=23, minute=0, second=0, microsecond=0)
-                wait = hoy + timedelta(days=2)
-                DataHub.last_process[self.vehiculo]["diaria_book_performance"] = wait
-                DataHub.last_process["graph_performace_portafolio"] = False
+        if update:
+            # eof() programa próxima ejecución
+            hoy = datetime.now().replace(hour=23, minute=0, second=0, microsecond=0)
+            wait = hoy + timedelta(days=1)
+            DataHub.last_process[self.vehiculo]["diaria_book_performance"] = wait
+            DataHub.last_process["graph_performace_portafolio"] = False
 
     # descarga de
     def downdload_CNV_diaria(self):
-
         try:
 
             last_process = self.ClassCNV.last_insert_CNV()
-            print(f"downdload_CNV_diaria() >> {self.vehiculo} >> {last_process}")
+            prox_process = datetime.strptime(last_process, "%Y-%m-%d")
+            prox_process = prox_process + timedelta(days=1)
 
             # descarga planilla diaria CNV
-            if isinstance(last_process, datetime):
-                descargar_cnv_hoy(fecha_str=last_process.strftime("%Y-%m-%d"))
-
+            if prox_process.date() < datetime.now().date():
+                descargar_cnv_hoy(fecha_str=prox_process.strftime("%Y-%m-%d"))
         except (EncodingWarning, Exception) as e:
             print(f"downdload_CNV_diaria(): {e}")
 

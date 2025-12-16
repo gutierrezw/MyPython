@@ -628,7 +628,7 @@ class DiariaCNV(
         @return: agrega fila  en diaria_CNV."""
         try:
             conn = self._conectar(tabla="insert.diaria_CNV")
-            x, y, found = self.select(symbol=symbol, fecha=values["fecha"])
+            x, y, found = self.select_CNV(symbol=symbol, fecha=values["fecha"])
             if not found:
                 cursor = conn.cursor()
                 valuesins, qry = [], "INSERT INTO diaria_CNV ("
@@ -1685,8 +1685,12 @@ class PlanInversion(
 
                 qry = "INSERT INTO otros_activos ("
 
+                # equivalente CONV(substr(SHA2(ticket, 256),1,15), 16, 10) mysql
+                conidHex = hashlib.sha256(symbol.encode("utf-8")).hexdigest()
+                conid = int(conidHex[:15], 16)
+
                 values.update({"cuenta": "B0000001"})
-                values.update({"idcrypto": np.random.randint(1, 10000001)})
+                values.update({"idcrypto": conid})
                 values.update({"descripcion": name})
                 values.update({"base_asset": symbol.replace("USDT", "")})
                 values.update({"quote_asset": "USDT"})
