@@ -111,7 +111,8 @@ def obtener_documentos():
 def descargar_excel_selenium(uuid, id_doc, fecha_str, directorio, display_log=False):
     """Descarga el archivo usando Selenium (navegador automatizado)"""
 
-    print(f"  📥 {id_doc} ({fecha_str})...", end=" ", flush=True)
+    if display_log:
+        print(f"  📥 {id_doc} ({fecha_str})...", end=" ", flush=True)
 
     # Configurar Chrome
     chrome_options = Options()
@@ -295,7 +296,9 @@ def descargar_cnv_hoy(fecha_str):
     fecha_inmediata_superior = docs_validos[0]["fecha_dt"]
 
     # Obtener todos los documentos de esa fecha
-    docs_a_descargar = [d for d in docs_validos if d["fecha_dt"] == fecha_inmediata_superior]
+    docs_a_descargar = [
+        d for d in docs_validos if d["fecha_dt"] == fecha_inmediata_superior
+    ]
 
     # Si hay múltiples documentos, tomar el más reciente (último en aparecer en la lista)
     # La lista viene ordenada cronológicamente, el último es el más reciente
