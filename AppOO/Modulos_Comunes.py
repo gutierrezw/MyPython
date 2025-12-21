@@ -1,7 +1,7 @@
 from Class_DataFrame import get_yfinance
 from Modulos_Mysql import IPerformance, RepositorioOportunidadesBuySell
 from Modulos_Utilitarios import vehiculo_parm, convierte_ticket_crypto, define_FileCache
-from Modulos_python import datetime, pd, timedelta, os, csv
+from Modulos_python import datetime, pd, timedelta, os, csv, traceback
 
 
 # construye e inserta diaria para los assets del vehiculo
@@ -11,7 +11,7 @@ def diaria_book_performance(account=None, vehiculo=None, proces=None):
         update, ahora, book, ix = False, datetime.now(), [], []
 
         # print(
-        #     f"diaria_book_performance() {vehiculo} {proces['diaria_book_performance'].date()} < {ahora.date()}"
+        #    f"diaria_book_performance() {vehiculo} {proces['diaria_book_performance'].date()} < {ahora.date()}"
         # )
         if proces["diaria_book_performance"].date() < ahora.date():
 

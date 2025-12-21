@@ -11,6 +11,7 @@ from Modulos_python import (
     threading,
     datetime,
     timedelta,
+    traceback,
 )
 from Modulos_Mysql import RepositorioOportunidadesBuySell, DiariaCNV
 from Class_customer import WidgetVehiculo, DataHub
@@ -77,8 +78,9 @@ class ArsFondosInversion(tk.Frame):
             self.ars.update_panelVehiculo(orden=self.ars.orden)
 
             self.root.after(5000, lambda: self.widgets_FCI())
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print("widgets_FCI(): {}".format(e))
+            traceback.print_exc()
 
     def update_panel_fci(self):
         def change_a_ARS():
@@ -776,11 +778,12 @@ class ArsFondosInversion(tk.Frame):
                 # valida si hay nueva interfaz
                 if self.chequea_new_loadFile():
 
+                    # actualiza panel
                     account = self.load_positions_FCI()
-                    print(f"actualiza y crea diaria {account}")
                     self.update_panel_fci()
                     self.ars.update_panelVehiculo(orden=self.ars.orden)
 
+                    # actualiza diaria y performance
                     self.schedule_diaria_performace(account)
 
                 self.counter += 1

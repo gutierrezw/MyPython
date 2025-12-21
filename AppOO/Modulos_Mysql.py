@@ -1351,7 +1351,7 @@ class PlanInversion(
                 xlistvalues.append(keys["dgyp"])
 
                 # da baja si position == 0 or retorno < .001
-                Debaja = keys["position"] == 0 or (1 - keys["retorno"]) < 0.001
+                Debaja = keys["position"] <= 0 or (1 - keys["retorno"]) < 0.001
                 xlistvalues.append("N" if Debaja else "Y")
                 xlistvalues.append(keys["empresa"])
                 xlistvalues.append(keys["region"] if "region" in keys else "")
