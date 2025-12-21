@@ -1,6 +1,6 @@
 from Class_DataFrame import get_yfinance
 from Modulos_Mysql import IPerformance, RepositorioOportunidadesBuySell
-from Modulos_Utilitarios import vehiculo_parm, convierte_ticket_crypto
+from Modulos_Utilitarios import vehiculo_parm, convierte_ticket_crypto, define_FileCache
 from Modulos_python import datetime, pd, timedelta, os, csv
 
 
@@ -163,6 +163,7 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
             div = row["Dividends"] / factor * stock if "Dividends" in row else 0
 
             GyP = gyp / factor
+            fee = fee / factor
 
             value = value
             costo = basic * stock
@@ -223,7 +224,6 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
         nonlocal ebook, idatos, eof_datos, row, eof_book, read, a_read
 
         gyp, fee = 0.0, 0.0
-        #
         if a_read:
             write_csv(gyp, fee)
 
@@ -240,8 +240,8 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
         eof_book, read = [], []
 
         prefijo = "csv_datos_" if option == "inicio" else "csv_app_"
-        path = os.getcwd()
-        path += "\\tmp\\" + prefijo + vehiculo + ".csv"
+        path = define_FileCache(name=f"{prefijo}{vehiculo}.csv")
+
         with open(path, mode="w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(
@@ -269,6 +269,7 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
             hasta = datetime.now() - timedelta(days=1)
             f_hasta = hasta.date()
 
+            # por cada symbol itera sobre su historia desde f_hasta, siempre que datos no este vacio
             while eof_book is not None:
 
                 # por cada symbol itera sobre su historia desde f_hasta, siempre que datos no este vacio
