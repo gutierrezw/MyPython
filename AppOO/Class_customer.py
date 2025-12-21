@@ -1592,8 +1592,8 @@ class TickerInfo(MyOrders):
 
             for position in positions:
 
-                # filtra posiciones mayores a 5 $USD
-                if position["costobase"] > 5:
+                # filtra posiciones mayores a 5 $USD y cantidad > 0
+                if position["costobase"] > 5 and position["position"] > 0:
                     self.add_position(
                         position["ticket"],
                         position["useraccount"],
