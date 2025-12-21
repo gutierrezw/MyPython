@@ -315,14 +315,25 @@ def compute_reit_metrics(ttm: dict):
     """
     Calcula FFO y AFFO según fórmula NAREIT.
     ⚠️ Solo aplica a REITs - para empresas normales devuelve None
+
+    ✅ MEJORADO: Soporta Adjusted Earnings para REITs como HASI
+    que no reportan FFO tradicional
     """
     # ✅ Solo calcular para REITs
     if not is_reit(ttm):
         return {
             "FFO": None,
             "AFFO": None,
+            "AdjustedEarnings": None,
             "is_reit": False,
         }
+
+    # ✅ PRIORIDAD 1: Usar Adjusted Earnings si está disponible (HASI, otros)
+    adjusted_earnings = ttm.get("AdjustedEarnings")
+
+    # ✅ PRIORIDAD 2: Usar FFO nativo si está reportado
+    ffo_native = ttm.get("FFO")
+    affo_native = ttm.get("AFFO")
 
     net_income = ttm.get("NetIncome")
     depreciation = ttm.get("Depreciation") or 0
@@ -330,17 +341,35 @@ def compute_reit_metrics(ttm: dict):
     capex = ttm.get("CapEx") or 0
 
     ffo = None
-    if net_income is not None:
+    affo = None
+
+    # Si tiene Adjusted Earnings, usarlo como FFO
+    if adjusted_earnings is not None:
+        ffo = adjusted_earnings
+    # Si tiene FFO nativo reportado, usarlo
+    elif ffo_native is not None:
+        ffo = ffo_native
+    # ✅ MEJORADO: Si gains > 50% de net income, NO usar fórmula NAREIT
+    # (indica que la empresa no es REIT tradicional de propiedades)
+    elif net_income is not None and abs(gains_on_sales) > abs(net_income) * 0.50:
+        # Usar Net Income directamente como proxy de Adjusted Earnings
+        # Esto aplica a HASI y otros REITs de infraestructura
+        ffo = net_income
+    # Si no, calcular FFO según fórmula NAREIT estándar
+    elif net_income is not None:
         ffo = net_income + depreciation - gains_on_sales
 
-    affo = None
-    if ffo is not None and capex != 0:
+    # AFFO: usar nativo si existe, si no calcular
+    if affo_native is not None:
+        affo = affo_native
+    elif ffo is not None and capex != 0:
         maintenance_capex = abs(capex) * 0.20
         affo = ffo - maintenance_capex
 
     return {
         "FFO": ffo,
         "AFFO": affo,
+        "AdjustedEarnings": adjusted_earnings,
         "is_reit": True,
     }
 
@@ -396,19 +425,26 @@ def compute_valuations(ttm: dict, price: float):
     p_affo = price / affo_per_share if affo_per_share else None
 
     div_yield = (dividend_per_share / price * 100) if dividend_per_share else None
-    payout_ratio = (
-        (dividends / net_income * 100) if (dividends and net_income) else None
-    )
 
-    # ✅ NUEVO: Ratios de apalancamiento y deuda
+    # ✅ CORREGIDO: Payout ratio debe usar FFO para REITs, Net Income para empresas normales
+    is_reit_flag = reit_metrics["is_reit"]
+    if is_reit_flag and ffo:
+        # Para REITs: Payout ratio = Dividends / FFO
+        payout_ratio = (dividends / ffo * 100) if dividends else None
+    else:
+        # Para empresas normales: Payout ratio = Dividends / Net Income
+        payout_ratio = (dividends / net_income * 100) if (dividends and net_income) else None
+
+    # ✅ CORREGIDO: Ratios de apalancamiento (sin multiplicar por 100)
+    # Los ratios deben ser decimales (0.055 = 5.5%), no porcentajes (5.5)
     debt_to_equity = (
-        (total_debt / total_equity * 100) if (total_debt and total_equity) else None
+        (total_debt / total_equity) if (total_debt and total_equity) else None
     )
     debt_to_assets = (
-        (total_debt / total_assets * 100) if (total_debt and total_assets) else None
+        (total_debt / total_assets) if (total_debt and total_assets) else None
     )
     net_debt_to_equity = (
-        (net_debt / total_equity * 100) if (net_debt and total_equity) else None
+        (net_debt / total_equity) if (net_debt and total_equity) else None
     )
 
     # Enterprise Value = Market Cap + Net Debt
@@ -587,6 +623,19 @@ def run_valuation(file_list, ticker, price, company_name, company_type="domestic
     yf_data = get_yf_data(ticker)
     sector = yf_data.get("sector")
 
+    # ✅ Extraer metadata de fechas TTM
+    ttm_metadata = ttm.get("_metadata", {})
+    ttm_end_date = None
+    balance_sheet_date = None
+
+    # Obtener fecha TTM (del concepto más importante: NetIncome)
+    if ttm_metadata.get("NetIncome"):
+        ttm_end_date = ttm_metadata["NetIncome"].get("end_date")
+
+    # Obtener fecha de balance sheet (TotalAssets)
+    if ttm_metadata.get("TotalAssets"):
+        balance_sheet_date = ttm_metadata["TotalAssets"].get("date")
+
     # ✅ ESTRUCTURA PARA DB
     return {
         "metadata": {
@@ -598,6 +647,9 @@ def run_valuation(file_list, ticker, price, company_name, company_type="domestic
             "analysis_date": datetime.now().isoformat(),
             "price_date": datetime.now().date().isoformat(),
             "files_processed": [Path(p).name for p, _ in file_list],
+            # ✅ NUEVO: Fechas de los datos financieros
+            "ttm_end_date": ttm_end_date,  # Fecha del período TTM (ej: "2024-09-30")
+            "balance_sheet_date": balance_sheet_date,  # Fecha del balance sheet (snapshot)
         },
         "market_data": {
             "current_price": vals["Price"],

@@ -23,6 +23,7 @@ SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 # Formularios disponibles
 DOMESTIC_FORMS = ["10-K", "10-Q"]
 FOREIGN_FORMS = ["20-F"]  # Solo 20-F (anuales). 6-K son eventos, no financials.
+FOREIGN_DETECTION_FORMS = ["20-F"]  # Solo 20-F cuenta para detectar foreign filers
 
 
 # =====================================================
@@ -81,8 +82,12 @@ def download_filing_file(cik: str, accession: str, filename: str, save_dir: str)
 
 
 def is_foreign_filer(form_list: list[str]) -> bool:
-    """Detecta si una empresa presenta formularios extranjeros (20-F, 6-K)."""
-    return any(f in form_list for f in FOREIGN_FORMS)
+    """
+    Detecta si una empresa presenta formularios extranjeros (20-F).
+    ⚠️ Solo considera 20-F para detección - 6-K no cuenta porque
+    muchas empresas canadienses presentan 6-K pero no 20-F.
+    """
+    return any(f in form_list for f in FOREIGN_DETECTION_FORMS)
 
 
 # =====================================================
@@ -170,12 +175,21 @@ def download_filing(ticker=None, display=False):
         target_forms = FOREIGN_FORMS
         company_type = "foreign"
         if display:
-            print("🌍 Empresa extranjera detectada (formularios 20-F / 6-K).\n")
+            print("🌍 Empresa extranjera detectada (formularios 20-F).\n")
     else:
         target_forms = DOMESTIC_FORMS
         company_type = "domestic"
         if display:
             print("🏛️ Empresa doméstica detectada (formularios 10-K / 10-Q).\n")
+
+    # ✅ VALIDACIÓN: Verificar que hay formularios del tipo esperado
+    available_target_forms = [f for f in form_types if f in target_forms]
+    if not available_target_forms:
+        if display:
+            print(f"❌ No se encontraron formularios {'/'.join(target_forms)} para {ticker}.")
+            print(f"   La empresa podría no presentar reportes financieros ante la SEC.")
+            print(f"   Formularios disponibles: {set(form_types[:20])}\n")
+        return False
 
     # Crear directorios
     ticker_dir = os.path.join(BASE_DIR, f"{ticker}_EDGAR_Files")
@@ -193,9 +207,12 @@ def download_filing(ticker=None, display=False):
             categorized[form].append((date, acc, file))
 
     # Limitar cantidad
-    limits = {"10-K": 5, "10-Q": 3, "20-F": 3}
+    # ✅ AUMENTADO: 8 x 10-Q para asegurar TTM (necesita 4 trimestres consecutivos)
+    limits = {"10-K": 5, "10-Q": 8, "20-F": 3}
     for f in target_forms:
-        categorized[f] = sorted(categorized[f], reverse=True)[: limits.get(f, 3)]
+        # Usar el límite específico de cada forma, sin default
+        limit = limits.get(f, 5)  # Default 5 si no está en el dict
+        categorized[f] = sorted(categorized[f], reverse=True)[:limit]
 
     # Descargar
     downloaded_files = []

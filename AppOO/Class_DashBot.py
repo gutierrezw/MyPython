@@ -27,6 +27,7 @@ from Modulos_python import (
     asyncio,
     Bot,
     tk,
+    sys,
     scrolledtext,
     pd,
     EmptyDataError,
@@ -49,6 +50,9 @@ from Modulos_python import (
     Path,
     wraps,
 )
+
+sys.path.insert(0, "..")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "AppValuations"))
 from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion
 from valuation_edgar_downloader import BASE_DIR, download_filing
 from valuation_xbrl_api import get_zip_files
