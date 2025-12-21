@@ -78,7 +78,7 @@ class ArsFondosInversion(tk.Frame):
 
             self.root.after(5000, lambda: self.widgets_FCI())
         except (EncodingWarning, Exception) as e:
-            print("widgets_extractos(): {}".format(e))
+            print("widgets_FCI(): {}".format(e))
 
     def update_panel_fci(self):
         def change_a_ARS():
@@ -312,6 +312,116 @@ class ArsFondosInversion(tk.Frame):
         except (EncodingWarning, Exception) as e:
             print("load_diaria_CNV(): {}".format(e))
 
+    # define position en moneda base USD
+    def struct_positions_fci(self, ticket, positions, last):
+        try:
+            p = {}
+
+            # obtiene costo promedio
+            activo, found = self.RepositorioOportunidades.select_otros_activos(
+                symbol=ticket
+            )
+
+            # obtiene precio de mercado
+            conid = activo[0]["idcrypto"]
+            cnv, ix, found = self.ClassCNV.select_CNV(symbol=conid)
+
+            # obtiene valor anterior de la posición
+            found, position = buscar_ticker(positions, ticket)
+
+            p["exDividendDate"] = cnv[ix.index("fecha")]
+            p["factor_cambio"] = last[0]["factor_cambio"]
+            p["dividendYield"] = 0
+            p["estrategia"] = "P05"
+            p["dividendo"] = 0
+            p["costobase"] = (
+                (activo[0]["avgcost"] * last[0]["stock"] / last[0]["factor_cambio"])
+                if last[0]["factor_cambio"] > 0
+                else 0
+            )
+            p["objetivo"] = 0
+            p["position"] = last[0]["stock"]
+            p["mrkprice"] = (
+                (cnv[ix.index("valorActual")] / 1000 / last[0]["factor_cambio"])
+                if last[0]["factor_cambio"] > 0
+                else 0
+            )
+
+            p["mktvalue"] = p["mrkprice"] * last[0]["stock"]
+            p["retorno"] = (
+                (p["mktvalue"] - p["costobase"]) / p["costobase"]
+                if p["costobase"] > 0
+                else 0
+            )
+            p["empresa"] = activo[0]["descripcion"]
+            p["nivelIA"] = "02"
+            p["country"] = "Argentina"
+            p["region"] = "AS"
+            p["divisa"] = activo[0]["base_asset"]
+
+            p["sector"] = "Fondo Inversión"
+            p["ticket"] = ticket
+            p["deuda"] = 0
+            p["conid"] = str(activo[0]["idcrypto"])
+            p["peso"] = 0
+            p["open"] = (
+                (cnv[ix.index("valorAnterior")] / 1000 / last[0]["factor_cambio"])
+                if last[0]["factor_cambio"] > 0
+                else 0
+            )
+
+            p["unrealizedpnl"] = p["mktvalue"] - p["costobase"]
+            p["dgyp"] = p["mrkprice"] - p["open"]
+
+            return p
+        except (EncodingWarning, Exception) as error:
+            print("struct_positions_fci(): {}".format(error))
+
+    # update self.ars.positions
+    def update_FCI_en_positions(self):
+        try:
+            in_positions = self.RepositorioOportunidades.select_inversion(
+                tipoin=self.vehiculo, ticket="all"
+            )
+            iupdate = False
+
+            for account in self.account_fci:
+                positions = []
+                activo, found = self.RepositorioOportunidades.select_otros_activos(
+                    symbol="all", account=account
+                )
+
+                for keys in activo:
+                    symbol = keys["symbol"]
+                    last_trader, ix = self.RepositorioOportunidades.select_booktrading(
+                        accion="last",
+                        account=account,
+                        idivisa="ARS",
+                        symbol=symbol,
+                    )
+
+                    # valida que position sea mayor que el umbral
+                    if abs(last_trader[0]["stock"]) > 0.01:
+                        datos = self.struct_positions_fci(
+                            symbol, in_positions, last_trader
+                        )
+                        positions.append(datos)
+
+                # actualiza tabla de inversiones con última información de la API
+                if positions:
+                    self.RepositorioOportunidades.update_inversion(
+                        account=account, vehiculo=self.vehiculo, positions=positions
+                    )
+                    iupdate = True
+
+            # re-escribe self.position en moneda base para que se muestre en widget
+            out_positions = self.RepositorioOportunidades.select_inversion(
+                tipoin=self.vehiculo, ticket="all"
+            )
+            self.ars.positions = copy.deepcopy(out_positions)
+        except (EncodingWarning, Exception) as error:
+            print("update_FCI_en_positions(): {}".format(error))
+
     # carga en booktrading operaciones de FCI
     def load_positions_FCI(self):
         def fci_BBVA():
@@ -520,118 +630,6 @@ class ArsFondosInversion(tk.Frame):
             except (EncodingWarning, Exception) as error:
                 print("[fci_santander()]: {}".format(error))
 
-        # define position en moneda base USD
-        def struct_positions_fci(ticket, positions, last):
-            try:
-                p = {}
-
-                # obtiene costo promedio
-                activo, found = self.RepositorioOportunidades.select_otros_activos(
-                    symbol=ticket
-                )
-
-                # obtiene precio de mercado
-                conid = activo[0]["idcrypto"]
-                cnv, ix, found = self.ClassCNV.select_CNV(symbol=conid)
-
-                # obtiene valor anterior de la posición
-                found, position = buscar_ticker(positions, ticket)
-
-                p["exDividendDate"] = cnv[ix.index("fecha")]
-                p["factor_cambio"] = last[0]["factor_cambio"]
-                p["dividendYield"] = 0
-                p["estrategia"] = "P05"
-                p["dividendo"] = 0
-                p["costobase"] = (
-                    (activo[0]["avgcost"] * last[0]["stock"] / last[0]["factor_cambio"])
-                    if last[0]["factor_cambio"] > 0
-                    else 0
-                )
-                p["objetivo"] = 0
-                p["position"] = last[0]["stock"]
-                p["mrkprice"] = (
-                    (cnv[ix.index("valorActual")] / 1000 / last[0]["factor_cambio"])
-                    if last[0]["factor_cambio"] > 0
-                    else 0
-                )
-
-                p["mktvalue"] = p["mrkprice"] * last[0]["stock"]
-                p["retorno"] = (
-                    (p["mktvalue"] - p["costobase"]) / p["costobase"]
-                    if p["costobase"] > 0
-                    else 0
-                )
-                p["empresa"] = activo[0]["descripcion"]
-                p["nivelIA"] = "02"
-                p["country"] = "Argentina"
-                p["region"] = "AS"
-                p["divisa"] = activo[0]["base_asset"]
-
-                p["sector"] = "Fondo Inversión"
-                p["ticket"] = ticket
-                p["deuda"] = 0
-                p["conid"] = str(activo[0]["idcrypto"])
-                p["peso"] = 0
-                p["open"] = (
-                    (cnv[ix.index("valorAnterior")] / 1000 / last[0]["factor_cambio"])
-                    if last[0]["factor_cambio"] > 0
-                    else 0
-                )
-
-                p["unrealizedpnl"] = p["mktvalue"] - p["costobase"]
-                p["dgyp"] = p["mrkprice"] - p["open"]
-
-                return p
-            except (EncodingWarning, Exception) as error:
-                print("struct_positions_fci(): {}".format(error))
-
-        def update_FCI_en_positions():
-            try:
-                in_positions = self.RepositorioOportunidades.select_inversion(
-                    tipoin=self.vehiculo, ticket="all"
-                )
-                iupdate = False
-
-                for account in self.account_fci:
-                    positions = []
-                    activo, found = self.RepositorioOportunidades.select_otros_activos(
-                        symbol="all", account=account
-                    )
-
-                    for keys in activo:
-                        symbol = keys["symbol"]
-                        last_trader, ix = (
-                            self.RepositorioOportunidades.select_booktrading(
-                                accion="last",
-                                account=account,
-                                idivisa="ARS",
-                                symbol=symbol,
-                            )
-                        )
-
-                        # valida que position sea mayor que el umbral
-                        if abs(last_trader[0]["stock"]) > 0.01:
-                            datos = struct_positions_fci(
-                                symbol, in_positions, last_trader
-                            )
-                            positions.append(datos)
-
-                    # actualiza tabla de inversiones con última información de la API
-                    if positions:
-                        self.RepositorioOportunidades.update_inversion(
-                            account=account, vehiculo=self.vehiculo, positions=positions
-                        )
-                        iupdate = True
-
-                # re-escribe self.position en moneda base para que se muestre en widget
-                out_positions = self.RepositorioOportunidades.select_inversion(
-                    tipoin=self.vehiculo, ticket="all"
-                )
-                self.ars.positions = copy.deepcopy(out_positions)
-
-            except (EncodingWarning, Exception) as error:
-                print("update_FCI_en_positions(): {}".format(error))
-
         try:
             # carga información BBVA
             self.archivo = self.obtener_archivo_mas_reciente(
@@ -639,6 +637,8 @@ class ArsFondosInversion(tk.Frame):
             )
             if self.archivo is not None:
                 fci_BBVA()
+                self.update_FCI_en_positions()
+                return self.account_bbva
 
             # carga información santander
             self.archivo = self.obtener_archivo_mas_reciente(
@@ -646,8 +646,8 @@ class ArsFondosInversion(tk.Frame):
             )
             if self.archivo is not None:
                 fci_santander()
-
-            update_FCI_en_positions()
+                self.update_FCI_en_positions()
+                return self.account_sant
         except (EncodingWarning, Exception) as e:
             print("load_positions_FCI(): {}".format(e))
 
@@ -718,14 +718,22 @@ class ArsFondosInversion(tk.Frame):
             p_path=self.path, sufijo=self.aliasExcel.get("CNV")
         )
         if diaria is not None:
-            existe = True
+            # laod diaria, actualiza panel y no forza actualzaición de peformance
+            self.load_diaria_CNV()
+
+            # load new price in poistions and update panel()
+            self.update_FCI_en_positions()
+            self.update_panel_fci()
+            self.ars.update_panelVehiculo(orden=self.ars.orden)
+            existe = False
 
         return existe
 
-    def schedule_diaria_performace(self):
+    def schedule_diaria_performace(self, account):
 
         update = False
-        for account in self.account_fci:
+        if account:
+            # for account in self.account_fci:
             t_wait, update = DataHub.last_process[self.vehiculo], False
             update = diaria_book_performance(
                 account=account, vehiculo=self.vehiculo, proces=t_wait
@@ -736,12 +744,12 @@ class ArsFondosInversion(tk.Frame):
                 # agrega performance a la tabla
                 proceso_update_performance(account=account, vehiculo=self.vehiculo)
 
-        if update:
-            # eof() programa próxima ejecución
-            hoy = datetime.now().replace(hour=23, minute=0, second=0, microsecond=0)
-            wait = hoy + timedelta(days=1)
-            DataHub.last_process[self.vehiculo]["diaria_book_performance"] = wait
-            DataHub.last_process["graph_performace_portafolio"] = False
+        # if update:
+        #    # eof() programa próxima ejecución
+        #    hoy = datetime.now().replace(hour=23, minute=0, second=0, microsecond=0)
+        #    wait = hoy + timedelta(days=1)
+        #    DataHub.last_process[self.vehiculo]["diaria_book_performance"] = wait
+        #    DataHub.last_process["graph_performace_portafolio"] = False
 
     # descarga de
     def downdload_CNV_diaria(self):
@@ -767,12 +775,13 @@ class ArsFondosInversion(tk.Frame):
 
                 # valida si hay nueva interfaz
                 if self.chequea_new_loadFile():
-                    self.load_diaria_CNV()
-                    self.load_positions_FCI()
 
+                    account = self.load_positions_FCI()
+                    print(f"actualiza y crea diaria {account}")
                     self.update_panel_fci()
+                    self.ars.update_panelVehiculo(orden=self.ars.orden)
 
-                    self.schedule_diaria_performace()
+                    self.schedule_diaria_performace(account)
 
                 self.counter += 1
                 DataHub.update_self_procesos(
