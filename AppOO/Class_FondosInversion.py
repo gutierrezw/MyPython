@@ -79,8 +79,8 @@ class ArsFondosInversion(tk.Frame):
 
             self.root.after(5000, lambda: self.widgets_FCI())
         except Exception as e:
-            print("widgets_FCI(): {}".format(e))
-            traceback.print_exc()
+            msg = traceback.print_exc()
+            print("widgets_FCI(): {}".format(msg))
 
     def update_panel_fci(self):
         def change_a_ARS():
