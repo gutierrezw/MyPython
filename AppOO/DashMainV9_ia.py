@@ -60,6 +60,7 @@ from Modulos_python import (
     mpatches,
     ticker,
     filedialog,
+    traceback,
 )
 from Class_FondosInversion import ArsFondosInversion
 from Class_Screener import Screener
@@ -4134,13 +4135,19 @@ class system_status(tk.Frame):
 
         self.process = ttk.Frame(self.system, padding=(1, 10, 1, 1), style="C.TFrame")
         self.right = ttk.Frame(self.system, padding=(1, 10, 1, 1), style="C.TFrame")
-        self.bottom = ttk.Frame(self.system, padding=(1, 1, 1, 1), style="C.TFrame")
 
+        # Cambio: usar Notebook (tabs) en lugar de frames individuales
+        self.bottom = ttk.Notebook(self.system)
+
+        # Crear frames para cada tab
         self.datahub = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.cache = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
+        self.buysell = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
+        self.debugging = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
+
+        # Frames para la derecha
         self.figura = ttk.Frame(self.right, padding=(5, 1, 1, 5), style="C.TFrame")
         self.performa = ttk.Frame(self.right, padding=(1, 1, 1, 1), style="C.TFrame")
-        self.debugging = ttk.Frame(self.right, padding=(1, 1, 1, 1), style="C.TFrame")
         self.connect = ttk.Frame(self.right, padding=(1, 1, 1, 1), style="C.TFrame")
 
         # establece figura performance system
@@ -4152,15 +4159,18 @@ class system_status(tk.Frame):
         self.rv.get_tk_widget().pack()
 
         self.performa.pack(fill=tk.X)
-        self.debugging.pack(fill=tk.X)
         self.figura.pack(fill=tk.X)
         self.connect.pack(side=tk.RIGHT, fill=tk.BOTH)
 
+        # Agregar tabs al Notebook
+        self.bottom.add(self.datahub, text="DataHub")
+        self.bottom.add(self.cache, text="Cache")
+        self.bottom.add(self.buysell, text="Manager BuySell")
+        self.bottom.add(self.debugging, text="Debugging")
+
+        self.bottom.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True)
         self.right.pack(side=tk.RIGHT, fill=tk.BOTH)
         self.process.pack(side=tk.TOP, fill=tk.BOTH)
-        self.bottom.pack(side=tk.BOTTOM, fill=tk.BOTH)
-        self.datahub.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.cache.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self.process_system()
 
@@ -4382,6 +4392,7 @@ class system_status(tk.Frame):
             self.debugging_system()
             # self.monitor_realtime()
             self.monitor_cache()
+            self.manager_buysell_system()
             update_status()
         except (EncodingWarning, Exception) as e:
             print(f"process_system(): {e}")
@@ -4517,8 +4528,8 @@ class system_status(tk.Frame):
             lista.heading("#0", text="DataHub")
             detalle.heading("#0", text="Información del Activo")
 
-            lista.pack(side=tk.LEFT, pady=5)
-            detalle.pack(side=tk.LEFT, expand=True, fill=tk.BOTH, pady=5)
+            lista.pack(side=tk.LEFT, fill=tk.Y, pady=5, padx=(5, 2))
+            detalle.pack(side=tk.LEFT, expand=True, fill=tk.BOTH, pady=5, padx=(2, 5))
             detalle.tag_configure("colorTex", foreground="orange")
             detalle.tag_configure("colorGroup", foreground=DataHub.bgcolor)
             lista.bind("<<TreeviewSelect>>", on_item_selected)
@@ -4536,8 +4547,9 @@ class system_status(tk.Frame):
             root = lista.insert("", "end", text=f": {DataHub.info['TimeDataHub']}")
 
             update_datahub()
-        except (EncodingWarning, Exception) as e:
-            print("datahub_system(): {}".format(e))
+        except Exception as e:
+            msg = traceback.print_exc()
+            print("datahub_system(): {}".format(msg))
 
     # detalla uso de cache
     def monitor_cache(self):
@@ -4639,12 +4651,12 @@ class system_status(tk.Frame):
             tree.column("timestamp", width=15)
             tree.heading("key", text="Cache")
             tree.heading("timestamp", text="Registro")
-            tree.pack(fill=tk.BOTH, expand=True, pady=5)
+            tree.pack(fill=tk.BOTH, expand=True, pady=5, padx=(5, 5))
 
             # --- Scrollbars ---
             hsb = ttk.Scrollbar(tree, orient=tk.HORIZONTAL, command=tree.yview)
             tree.configure(xscroll=hsb.set)
-            hsb.pack(side=tk.BOTTOM, fill=tk.X)
+            hsb.pack(side=tk.BOTTOM, fill=tk.X, padx=(5, 5))
 
             # --- Botonera ---
             frame_btn = ttk.Frame(self.cache)
@@ -4671,12 +4683,11 @@ class system_status(tk.Frame):
 
             tree = ttk.Treeview(self.connect, height=10, style="TFrame")
             tree.heading("#0", text="Estados Connect")
-            tree.pack(fill="both")
+            tree.pack(side=tk.RIGHT, fill=tk.BOTH)
 
             api = {"Binance": True, "Ibrks": True, "Yfinance": True, "Finviz": True}
             for key, value in api.items():
                 tree.insert("", "end", text=f"{key}: {value}")
-
         except (EncodingWarning, Exception) as e:
             print("connect_api(): {}".format(e))
 
@@ -4685,13 +4696,13 @@ class system_status(tk.Frame):
         try:
 
             cols = ["Option"]
-            tree = ttk.Treeview(self.performa, columns=cols, height=8, style="TFrame")
-            tree.heading("#0", text="Debugging")
-            tree.heading("Option", text="Option")
+            tree = ttk.Treeview(self.debugging, columns=cols, height=15, style="TFrame")
+            tree.heading("#0", text="Logger")
+            tree.heading("Option", text="Level")
 
-            tree.column("#0", width=100, minwidth=100)
-            tree.column("Option", width=10, minwidth=10)
-            tree.pack(expand=True, fill="both", pady=10)
+            tree.column("#0", width=200, minwidth=100)
+            tree.column("Option", width=80, minwidth=80)
+            tree.pack(expand=True, fill="both", pady=5, padx=(5, 5))
 
             for key, handler in DataHub.logger.items():
                 tree.insert(
@@ -4700,9 +4711,259 @@ class system_status(tk.Frame):
                     text=f"{key}",
                     values=f"{logging.getLevelName(handler.level)}",
                 )
-
         except (EncodingWarning, Exception) as e:
             print("debugging_system(): {}".format(e))
+
+    # visualiza manager_buysell con lista-detalle
+    def manager_buysell_system(self):
+        """
+        Visualiza DataHub.manager_buysell con patrón lista-detalle.
+        - LISTA (izquierda): Keys de manager_buysell (dividends, sector, activos, region)
+        - DETALLE (derecha): Información completa y resumen del item seleccionado
+        - Evento: Doble click para ver detalle
+        """
+
+        def display_buysell_detail(key):
+            """Muestra detalle del item seleccionado en manager_buysell"""
+            try:
+                # Limpiar detalle
+                for item in detalle.get_children():
+                    detalle.delete(item)
+
+                # Obtener datos
+                data = DataHub.manager_buysell.get(key)
+
+                if data is None:
+                    detalle.insert(
+                        "", "end", text=f"⚠️ {key}: No disponible aún", tags=("warning",)
+                    )
+                    return
+
+                # Header con el nombre del item
+                detalle.insert(
+                    "", "end", text=f"📊 Item: {key.upper()}", tags=("header",)
+                )
+                detalle.insert("", "end", text="", tags=("spacer",))
+
+                # Información del tipo de objeto
+                tipo_data = type(data).__name__
+                detalle.insert(
+                    "", "end", text=f"Tipo de objeto: {tipo_data}", tags=("info",)
+                )
+
+                # Timestamp de actualización
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                detalle.insert(
+                    "", "end", text=f"Última consulta: {timestamp}", tags=("info",)
+                )
+                detalle.insert("", "end", text="", tags=("spacer",))
+
+                # Mostrar estructura completa del objeto
+                node_estructura = detalle.insert(
+                    "", "end", text="📂 Estructura Completa", tags=("section",)
+                )
+
+                # Si es un diccionario, mostrar sus claves y valores
+                if isinstance(data, dict):
+                    detalle.insert(
+                        "",
+                        "end",
+                        text=f"Total de claves: {len(data)}",
+                        tags=("summary",),
+                    )
+                    detalle.insert("", "end", text="", tags=("spacer",))
+
+                    for subkey, subvalue in data.items():
+                        if isinstance(subvalue, dict):
+                            # Crear nodo expandible para diccionarios anidados
+                            subnode = detalle.insert(
+                                node_estructura,
+                                "end",
+                                text=f"🔹 {subkey}",
+                                tags=("subkey",),
+                            )
+                            for k, v in subvalue.items():
+                                detalle.insert(
+                                    subnode, "end", text=f"  {k}: {v}", tags=("value",)
+                                )
+                        elif isinstance(subvalue, (list, tuple)):
+                            # Mostrar listas/tuplas
+                            subnode = detalle.insert(
+                                node_estructura,
+                                "end",
+                                text=f"🔹 {subkey} (lista con {len(subvalue)} elementos)",
+                                tags=("subkey",),
+                            )
+                            for idx, item in enumerate(
+                                subvalue[:10]
+                            ):  # Mostrar solo primeros 10
+                                detalle.insert(
+                                    subnode,
+                                    "end",
+                                    text=f"  [{idx}]: {item}",
+                                    tags=("value",),
+                                )
+                            if len(subvalue) > 10:
+                                detalle.insert(
+                                    subnode,
+                                    "end",
+                                    text=f"  ... y {len(subvalue) - 10} más",
+                                    tags=("value",),
+                                )
+                        elif isinstance(subvalue, pd.DataFrame):
+                            # Mostrar info de DataFrames
+                            df_info = f"DataFrame: {subvalue.shape[0]} filas × {subvalue.shape[1]} columnas"
+                            subnode = detalle.insert(
+                                node_estructura,
+                                "end",
+                                text=f"🔹 {subkey}",
+                                tags=("subkey",),
+                            )
+                            detalle.insert(
+                                subnode, "end", text=f"  {df_info}", tags=("value",)
+                            )
+                            detalle.insert(
+                                subnode,
+                                "end",
+                                text=f"  Columnas: {list(subvalue.columns)}",
+                                tags=("value",),
+                            )
+                        else:
+                            # Valores simples
+                            detalle.insert(
+                                node_estructura,
+                                "end",
+                                text=f"🔹 {subkey}: {subvalue}",
+                                tags=("value",),
+                            )
+
+                # Si es DataFrame directamente
+                elif isinstance(data, pd.DataFrame):
+                    detalle.insert(
+                        "", "end", text="📋 Resumen del DataFrame", tags=("section",)
+                    )
+                    detalle.insert(
+                        "", "end", text=f"Filas: {data.shape[0]}", tags=("summary",)
+                    )
+                    detalle.insert(
+                        "", "end", text=f"Columnas: {data.shape[1]}", tags=("summary",)
+                    )
+                    detalle.insert(
+                        "",
+                        "end",
+                        text=f"Columnas: {list(data.columns)}",
+                        tags=("summary",),
+                    )
+
+                    # Mostrar primeras filas
+                    detalle.insert("", "end", text="", tags=("spacer",))
+                    detalle.insert(
+                        "", "end", text="📊 Primeras 5 filas:", tags=("section",)
+                    )
+                    df_string = data.head().to_string()
+                    for line in df_string.split("\n"):
+                        detalle.insert("", "end", text=line, tags=("data",))
+
+                # Si es otro tipo de objeto
+                else:
+                    detalle.insert(
+                        node_estructura, "end", text=str(data)[:500], tags=("value",)
+                    )
+
+                # Expandir nodo principal
+                detalle.item(node_estructura, open=True)
+
+            except Exception as e:
+                detalle.insert(
+                    "", "end", text=f"❌ Error al mostrar detalle: {e}", tags=("error",)
+                )
+                print(f"[display_buysell_detail({key})]: {e}")
+
+        def on_double_click(event):
+            """Evento de doble click en la lista"""
+            selected = lista.selection()
+            if selected:
+                key = lista.item(selected[0], "text")
+                display_buysell_detail(key)
+
+        def update_buysell_list():
+            """Actualiza la lista de manager_buysell cada 30 segundos"""
+            try:
+                # Limpiar lista
+                for item in lista.get_children():
+                    lista.delete(item)
+
+                # Insertar keys de manager_buysell
+                if DataHub.manager_buysell:
+                    for key in sorted(DataHub.manager_buysell.keys()):
+                        lista.insert("", "end", text=key, tags=("item",))
+                else:
+                    lista.insert(
+                        "", "end", text="(Vacío - esperando datos)", tags=("empty",)
+                    )
+
+                # Programar siguiente actualización
+                self.system.after(30000, update_buysell_list)
+
+            except Exception as e:
+                print(f"[update_buysell_list()]: {e}")
+
+        try:
+            # Crear TreeViews para lista y detalle
+            lista = ttk.Treeview(self.buysell, style="TFrame")
+            detalle = ttk.Treeview(self.buysell, style="TFrame")
+
+            # Configurar headers
+            lista.heading("#0", text="Manager BuySell")
+            detalle.heading("#0", text="Información Detallada")
+
+            # Configurar anchos
+            lista.column("#0", width=180, minwidth=150)
+
+            # Pack widgets
+            lista.pack(side=tk.LEFT, fill=tk.BOTH, pady=5, padx=(5, 2))
+            detalle.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=5, padx=(2, 5))
+
+            # Configurar colores y estilos
+            detalle.tag_configure(
+                "header", foreground="cyan", font=("TkDefaultFont", 10, "bold")
+            )
+            detalle.tag_configure(
+                "section", foreground="yellow", font=("TkDefaultFont", 9, "bold")
+            )
+            detalle.tag_configure("info", foreground="lightgreen")
+            detalle.tag_configure("summary", foreground="orange")
+            detalle.tag_configure("subkey", foreground="lightblue")
+            detalle.tag_configure("value", foreground="white")
+            detalle.tag_configure("data", foreground="lightgray", font=("Courier", 8))
+            detalle.tag_configure("error", foreground="red")
+            detalle.tag_configure("warning", foreground="orange")
+            lista.tag_configure("item", foreground="lightgreen")
+            lista.tag_configure("empty", foreground="gray")
+
+            # Bind evento doble click
+            lista.bind("<Double-Button-1>", on_double_click)
+
+            # Scrollbars para detalle
+            hsb = ttk.Scrollbar(detalle, orient=tk.HORIZONTAL, command=detalle.xview)
+            detalle.configure(xscroll=hsb.set)
+            hsb.pack(side=tk.BOTTOM, fill=tk.X)
+
+            # Iniciar actualización de lista
+            update_buysell_list()
+
+            # Mostrar mensaje inicial en detalle
+            detalle.insert(
+                "",
+                "end",
+                text="👈 Haz doble click en un item de la izquierda",
+                tags=("info",),
+            )
+            detalle.insert(
+                "", "end", text="para ver su información detallada", tags=("info",)
+            )
+        except Exception as e:
+            print(f"manager_buysell_system(): {e}")
 
     # plot uso %CPU y %RAM
     def monitor_realtime(self):
