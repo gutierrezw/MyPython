@@ -2148,7 +2148,7 @@ class TickerInfo(MyOrders):
 
             # revisa update trader vehículos
             # self.trader_api_vehiculo()
-        except EncodingWarning as e:
+        except Exception as e:
             print("[schedule_operativo()]: {}".format(e))
 
         # programa las actualizaciones de API's cada minuto

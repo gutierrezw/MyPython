@@ -426,6 +426,55 @@ class ArsFondosInversion(tk.Frame):
 
     # carga en booktrading operaciones de FCI
     def load_positions_FCI(self):
+        def insert_values_in_booktrading(trader):
+            try:
+                asc_trader = sorted(
+                    trader,
+                    key=itemgetter(
+                        "cuenta",
+                        "symbol",
+                        "fechahora",
+                    ),
+                )
+
+                ebook = enumerate(asc_trader)
+                eof_book, values = next(ebook, (None, None))
+                keySymbol = None
+
+                while eof_book is not None:
+
+                    symbol = values["symbol"]
+                    if keySymbol != symbol:
+                        last_trader, ix = (
+                            self.RepositorioOportunidades.select_booktrading(
+                                accion="last",
+                                account=self.account_bbva,
+                                idivisa="ARS",
+                                symbol=symbol,
+                            )
+                        )
+                        last_date = (
+                            last_trader[0]["fechahora"]
+                            if last_trader
+                            else datetime(2000, 1, 1)
+                        )
+
+                        keySymbol = symbol
+
+                    # inserta trader mayores a last_trader
+                    if last_date < values["fechahora"]:
+                        values.pop("symbol")
+                        self.RepositorioOportunidades.insert_booktrading(
+                            values, symbol=symbol
+                        )
+
+                    eof_book, values = next(ebook, (None, None))
+
+                # elimina archivo procesado
+                delete_file(ruta=self.archivo, display=True)
+            except Exception as error:
+                print(f"[insert_values_in_booktrading()]: {error}")
+
         def fci_BBVA():
             try:
                 columns = {
@@ -489,40 +538,10 @@ class ArsFondosInversion(tk.Frame):
                             values.update({"symbol": activo[0]["symbol"]})
                             trader.append(values)
 
-                # valida e inserta booktrading
-                asc_trader = sorted(
-                    trader,
-                    key=itemgetter(
-                        "cuenta",
-                        "symbol",
-                        "fechahora",
-                    ),
-                )
-                for i, values in enumerate(asc_trader):
-
-                    symbol = values["symbol"]
-                    last_trader, ix = self.RepositorioOportunidades.select_booktrading(
-                        accion="last",
-                        account=self.account_bbva,
-                        idivisa="ARS",
-                        symbol=symbol,
-                    )
-                    last_date = (
-                        last_trader[0]["fechahora"]
-                        if last_trader
-                        else datetime(2000, 1, 1)
-                    )
-
-                    if last_date < values["fechahora"]:
-                        values.pop("symbol")
-                        self.RepositorioOportunidades.insert_booktrading(
-                            values, symbol=symbol
-                        )
-
-                # elimina archivo procesado
-                delete_file(ruta=self.archivo, display=True)
-            except (EncodingWarning, Exception) as error:
-                print("[fci_BBVA()]: {}".format(error))
+                # insert booktradin
+                insert_values_in_booktrading(trader)
+            except Exception as error:
+                print(f"[fci_BBVA()]: {error}")
 
         def fci_santander():
             try:
@@ -599,38 +618,9 @@ class ArsFondosInversion(tk.Frame):
                             trader.append(values)
 
                 # valida e inserta booktrading
-                asc_trader = sorted(
-                    trader,
-                    key=itemgetter(
-                        "cuenta",
-                        "symbol",
-                        "fechahora",
-                    ),
-                )
-                for i, values in enumerate(asc_trader):
-                    symbol = values["symbol"]
-                    last_trader, ix = self.RepositorioOportunidades.select_booktrading(
-                        accion="last",
-                        account=self.account_sant,
-                        idivisa="ARS",
-                        symbol=symbol,
-                    )
-                    last_date = (
-                        last_trader[0]["fechahora"]
-                        if last_trader
-                        else datetime(2000, 1, 1)
-                    )
-
-                    if last_date < values["fechahora"]:
-                        values.pop("symbol")
-                        self.RepositorioOportunidades.insert_booktrading(
-                            values, symbol=symbol
-                        )
-
-                # elimina archivo procesado
-                delete_file(ruta=self.archivo, display=False)
-            except (EncodingWarning, Exception) as error:
-                print("[fci_santander()]: {}".format(error))
+                insert_values_in_booktrading(trader)
+            except Exception as error:
+                print(f"[fci_santander()]: {error}")
 
         try:
             # carga información BBVA
@@ -651,7 +641,7 @@ class ArsFondosInversion(tk.Frame):
                 self.update_FCI_en_positions()
                 return self.account_sant
         except (EncodingWarning, Exception) as e:
-            print("load_positions_FCI(): {}".format(e))
+            print(f"load_positions_FCI(): {e}")
 
     # carga de booktrading los movimientos USDT
     def get_tasa_cambio_USDT(self, fiat="ARS", date=None):
