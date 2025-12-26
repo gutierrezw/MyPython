@@ -40,6 +40,7 @@ from Class_customer import (
     TickerInfo,
     MyOrders,
     WidgetVehiculo,
+    ProgressBar,
 )
 from Modulos_python import (
     tk,
@@ -2035,6 +2036,10 @@ class DashMain:
         self.it_crypto = 0
         self.it_stock = 0
 
+        # Sistema de cleanup para after() callbacks
+        self.after_ids = []
+        self.is_running = True
+
         # colores pantallas y gráficos
         self.bgcolor = DataHub.bgcolor
         self.cgcolor = DataHub.cgcolor
@@ -2135,20 +2140,32 @@ class DashMain:
         pn6.pack(pady=2, padx=2, side=tk.LEFT)
 
         # perfil de usuario y salida del sistema ---------------------------------------------------------------------
-        lpn = ttk.Frame(pn0, style="C.TFrame")
-        rpn = ttk.Frame(pn0, style="C.TFrame")
-        lpn.pack(side=tk.LEFT, fill=tk.X)
-        rpn.pack(side=tk.RIGHT, fill=tk.X)
+        topPn0 = ttk.Frame(pn0, style="C.TFrame")
+        botPn0 = ttk.Frame(pn0, style="C.TFrame")
+        lineLeft = ttk.Frame(topPn0, style="C.TFrame")
+        lineRight = ttk.Frame(topPn0, style="C.TFrame")
+        gypBottom = ttk.Frame(botPn0, style="C.TFrame")
+        InvBottom = ttk.Frame(botPn0, style="C.TFrame")
+
+        topPn0.pack(side=tk.TOP)
+        botPn0.pack(side=tk.BOTTOM)
+        lineLeft.pack(side=tk.LEFT, fill=tk.X)
+        lineRight.pack(side=tk.RIGHT, fill=tk.X)
+        gypBottom.pack(side=tk.TOP)
+        InvBottom.pack(side=tk.BOTTOM)
 
         # información usuario -----------------------------------------------------------------------------------------
         self.line = tk.Label(
-            lpn, text="Inversionista, ", font=("Arial", 14), bg=self.colors["bgcolor"]
+            lineLeft,
+            text="Inversionista, ",
+            font=("Arial", 14),
+            bg=self.colors["bgcolor"],
         )
         imagen_tk = BDsystem.select_image(idd=11, size=(32, 32))
 
         now = datetime.now()
         self.user = tk.Button(
-            lpn,
+            lineLeft,
             image=imagen_tk,
             bg=self.colors["bgcolor"],
             relief=tk.FLAT,
@@ -2163,7 +2180,7 @@ class DashMain:
         imagen_tk = BDsystem.select_image(idd=14, size=(32, 32))
 
         self.cart = tk.Button(
-            rpn,
+            lineRight,
             image=imagen_tk,
             bg=self.colors["bgcolor"],
             relief=tk.FLAT,
@@ -2172,11 +2189,11 @@ class DashMain:
         self.cart.imagen = imagen_tk
 
         # inserta espacios para alinear botones en la lineas
-        self.line = tk.Label(rpn, text=spaces(125), bg=self.colors["bgcolor"])
+        self.line = tk.Label(lineRight, text=spaces(125), bg=self.colors["bgcolor"])
         imagen_tk = BDsystem.select_image(idd=12, size=(32, 32))
 
         self.exit = tk.Button(
-            rpn,
+            lineRight,
             image=imagen_tk,
             bg=self.colors["bgcolor"],
             relief=tk.FLAT,
@@ -2186,6 +2203,30 @@ class DashMain:
         self.exit.pack(side=tk.RIGHT, fill=tk.X)
         self.cart.pack(side=tk.RIGHT, fill=tk.X)
         self.line.pack(side=tk.RIGHT, fill=tk.X)
+
+        # Progreso inversion gyp diarias ------------------------------------------------------------------------------
+        self.GypProgress = ProgressBar(
+            gypBottom,
+            # 1234567890123456789012345
+            label="Ganancias Diarias  ",
+            avance=0,
+            proyeccion=1_000,
+            width=200,
+            height=13,
+            bg_color=self.colors["bgcolor"],
+        )
+        self.InvProgress = ProgressBar(
+            InvBottom,
+            # 1234567890123456789012345
+            label="Total Inversión      ",
+            avance=0,
+            proyeccion=1_000_000,
+            width=200,
+            height=13,
+            bg_color=self.colors["bgcolor"],
+        )
+        self.GypProgress.pack(side=tk.LEFT, pady=10)
+        self.InvProgress.pack(side=tk.LEFT, pady=10)
 
         # áreas y figuras de gráficos principales --------------------------------------------------------------------
         self.rg0 = Figure(
@@ -2463,6 +2504,9 @@ class DashMain:
     # update widget del crypto
     def update_widget(self, vehiculo=None):
         try:
+            # Verificar si debemos continuar ejecutando
+            if not self.is_running:
+                return
 
             # información para widgetCrypto
             if vehiculo == "Crypto":
@@ -2491,7 +2535,12 @@ class DashMain:
                 # self.stock.schedule_order_remote()
 
             # actualiza cada 1/2'' segundos
-            self.root.after(500, lambda: self.update_widget(vehiculo=vehiculo))
+            # Verificar si debemos continuar ejecutando
+            if self.is_running:
+                after_id = self.root.after(
+                    500, lambda: self.update_widget(vehiculo=vehiculo)
+                )
+                self.after_ids.append(after_id)
             # DataHub.manager_after._safe(
             #    500, lambda: self.update_widget(vehiculo=vehiculo), name="update_widget"
             # )
@@ -3395,6 +3444,9 @@ class DashMain:
 
     # graficos windows main
     def graficos_main(self):
+        # Verificar si debemos continuar ejecutando
+        if not self.is_running:
+            return
 
         # inicia performace de  ultimos 6 meses
         self.setup_graph_income(tipo="3")
@@ -3456,7 +3508,10 @@ class DashMain:
         self.rv5.draw()
 
         # mantiene actualizado los graficos cada 20m o 1200.000ms
-        self.root.after(1200000, lambda: self.graficos_main())
+        # Verificar si debemos continuar ejecutando
+        if self.is_running:
+            after_id = self.root.after(1200000, lambda: self.graficos_main())
+            self.after_ids.append(after_id)
         # DataHub.manager_after._safe(1200000, self.graficos_main(), name="graficos_main")
 
     # Detener cada módulo de forma ordenada
@@ -4060,12 +4115,116 @@ class DashMain:
 
     # Cierra la aplicación de forma ordenada
     def eexit(self):
+        # Marcar como no ejecutando para detener nuevos callbacks
+        self.is_running = False
 
-        # DataHub.manager_after.after_cancel_all()
-        self.root.destroy()
+        # Cancelar todos los after() callbacks pendientes
+        for after_id in self.after_ids:
+            try:
+                self.root.after_cancel(after_id)
+            except:
+                pass
+
+        # Limpiar lista
+        self.after_ids.clear()
+
+        # Cancelar TODOS los callbacks pendientes de Tkinter (incluso los no rastreados)
+        try:
+            for after_info in self.root.tk.call("after", "info"):
+                try:
+                    self.root.after_cancel(after_info)
+                except:
+                    pass
+        except:
+            pass
+
+        # Cerrar figuras de matplotlib si existen
+        try:
+            import matplotlib.pyplot as plt
+
+            plt.close("all")
+        except:
+            pass
+
+        print("✅ DashMain: Recursos liberados correctamente")
 
         # cierra todos los threads & Job's pendientes
-        DataHub.manager_events.stop_all()
+        try:
+            DataHub.manager_events.stop_all()
+        except:
+            pass
+
+        # DataHub.manager_after.after_cancel_all()
+        # Destruir ventana de forma segura sin crear nuevos callbacks
+        try:
+            # Deshabilitar el protocolo de cierre para evitar loops
+            self.root.protocol("WM_DELETE_WINDOW", lambda: None)
+
+            # Ocultar ventana inmediatamente
+            self.root.withdraw()
+
+            # Update para procesar eventos pendientes
+            self.root.update_idletasks()
+
+            # Terminar mainloop
+            self.root.quit()
+
+        except Exception as e:
+            print(f"[eexit error]: {e}")
+
+        # Forzar salida limpia del programa
+        import sys
+
+        sys.exit(0)
+
+    # toma limites de barraProgress
+    def get_limite_inversion(self):
+        traz = self.PlanInversion.select_trazaplan(
+            idcuenta=self.sesion_stock["idcuenta"]
+        )
+        if traz:
+            for tkey in traz:
+                if tkey.get("status") == "Ejecucion":
+
+                    inversion = tkey["vision"]
+                    gypDiaria = int(inversion / 100)
+                    return inversion, gypDiaria
+
+    def actualizar_totales_inversiones(self):
+        """
+        Actualiza los labels de ganancia diaria y costo base con datos de la tabla inversiones.
+        Se ejecuta periódicamente cada 30 segundos.
+        """
+        try:
+            # Verificar si debemos continuar ejecutando
+            if not self.is_running:
+                return
+
+            # Obtener totales desde la base de datos
+            totales = self.RepositorioOportunidades.get_totales_inversiones()
+
+            # Formatear valores
+            ganancias_dia = totales["total_ganancia_dia"]
+            costo_base = totales["total_costo_base"]
+            limit_costoB, limit_gyp = self.get_limite_inversion()
+            low_limit_gyp = -2 * limit_gyp
+            high_limit_gyp = 2 * limit_gyp
+
+            # update progressos
+            self.GypProgress.update_values(low_limit_gyp, ganancias_dia, high_limit_gyp)
+            self.InvProgress.update_values(0, costo_base, limit_costoB)
+
+            # Programar siguiente actualización (cada 30 segundos)
+            if self.is_running:
+                after_id = self.root.after(30000, self.actualizar_totales_inversiones)
+                self.after_ids.append(after_id)
+
+        except Exception as e:
+            print(f"[actualizar_totales_inversiones()]: {e}")
+            # Intentar nuevamente en 30 segundos aunque haya error
+            if self.is_running:
+                after_id = self.root.after(30000, self.actualizar_totales_inversiones)
+                self.after_ids.append(after_id)
 
     # Inicia el dashboard
     def run(self):
@@ -4121,6 +4280,9 @@ class DashMain:
         # Start ayudante y agentes del sistema------------------------------------------------------------
         self.start_chatbot()
 
+        # Iniciar actualización de totales de inversiones
+        self.actualizar_totales_inversiones()
+
         self.root.mainloop()
 
 
@@ -4130,6 +4292,10 @@ class system_status(tk.Frame):
         self.system = master
         self.colors = colores
         self.itemsInfo = None
+
+        # Lista para rastrear todos los after() callbacks
+        self.after_ids = []
+        self.is_running = True  # Flag para controlar loops
 
         self.messagebox = MyMessageBox(self.system)
 
@@ -4172,7 +4338,44 @@ class system_status(tk.Frame):
         self.right.pack(side=tk.RIGHT, fill=tk.BOTH)
         self.process.pack(side=tk.TOP, fill=tk.BOTH)
 
+        # Bind cleanup al destruir la ventana
+        self.system.bind("<Destroy>", self._on_destroy)
+
         self.process_system()
+
+    def _on_destroy(self, event):
+        """Limpia recursos al cerrar la ventana"""
+        if event.widget == self.system:
+            self.cleanup()
+
+    def cleanup(self):
+        """Cancela todos los after() callbacks y detiene animaciones"""
+        try:
+            # Marcar como no ejecutando
+            self.is_running = False
+
+            # Cancelar todos los after() callbacks
+            for after_id in self.after_ids:
+                try:
+                    self.system.after_cancel(after_id)
+                except:
+                    pass
+
+            # Limpiar lista
+            self.after_ids.clear()
+
+            # Detener animación de monitor_realtime si existe
+            if hasattr(self, "monitor_animation") and self.monitor_animation:
+                try:
+                    self.monitor_animation.event_source.stop()
+                    self.monitor_animation = None
+                except:
+                    pass
+
+            print("✅ system_status: Recursos liberados correctamente")
+
+        except Exception as e:
+            print(f"[cleanup]: {e}")
 
     # detalla los procesos y schedule del system
     def process_system(self):
@@ -4282,6 +4485,10 @@ class system_status(tk.Frame):
 
         # update de treeview
         def update_status():
+            # Verificar si debemos continuar ejecutando
+            if not self.is_running:
+                return
+
             obtener_datos()
 
             # verifica si es tiempo de refrescar lista
@@ -4358,7 +4565,9 @@ class system_status(tk.Frame):
                             )
 
             reset_contador()
-            self.system.after(2000, update_status)
+            # Registrar el after_id para poder cancelarlo luego
+            after_id = self.system.after(2000, update_status)
+            self.after_ids.append(after_id)
             # DataHub.manager_after._safe(2000, update_status(), name="update_status")
 
         try:
@@ -4390,7 +4599,7 @@ class system_status(tk.Frame):
             self.datahub_system()
             self.connect_api()
             self.debugging_system()
-            # self.monitor_realtime()
+            self.monitor_realtime()  # Activado con optimizaciones (actualiza cada 10s)
             self.monitor_cache()
             self.manager_buysell_system()
             update_status()
@@ -4399,63 +4608,156 @@ class system_status(tk.Frame):
 
     # modulo principal para recorre Datahub()
     def datahub_system(self):
+        """
+        Visualiza DataHub.info con patrón lista-detalle mejorado.
+        - LISTA (izquierda): Símbolos disponibles en DataHub.info
+        - DETALLE (derecha): Información completa del símbolo seleccionado
+        - Evento: Doble click o selección simple para ver detalle
+        """
 
         # Selecciona y actualiza el detalle del primer elemento.
         def display_first_item():
-
             symbol = search_lista(first=True)
-            display_items_lista(symbol)
-            self.itemsInfo = symbol
+            if symbol:
+                display_items_lista(symbol)
+                self.itemsInfo = symbol
 
-        # display items del activo
+        # display items del activo con formato mejorado
         def display_items_lista(symbol):
+            """Muestra detalle del símbolo seleccionado en DataHub.info"""
+            try:
+                # Limpiar el treeview de detalles
+                for item in detalle.get_children():
+                    detalle.delete(item)
 
-            # Limpiar el treeview de detalles
-            for item in detalle.get_children():
-                detalle.delete(item)
+                # Verificar que el símbolo existe
+                if symbol not in DataHub.info:
+                    detalle.insert(
+                        "", "end", text=f"⚠️ {symbol}: No disponible", tags=("warning",)
+                    )
+                    return
 
-            # fija timestamp para el gryupo de datos
-            Shora = DataHub.info[symbol]["websocket"]["timestamp"]
-            detalle.insert(
-                "", "end", text=f"Update: {Shora} - {symbol}", tags=("colorTex",)
-            )
+                data = DataHub.info[symbol]
 
-            # Display detalle del activo
-            for key, value in DataHub.info[symbol].items():
-                if isinstance(value, dict):
-                    node = detalle.insert("", "end", text=key, tags=("colorGroup",))
-
-                    # detalle.item(node, open=True)
-                    for fields, valor in value.items():
-                        detalle.insert(
-                            node, "end", text=f"{fields}: {valor}", tags=("colorTex",)
-                        )
+                # Header con símbolo y timestamp
+                if "websocket" in data and "timestamp" in data["websocket"]:
+                    timestamp = data["websocket"]["timestamp"]
+                    detalle.insert(
+                        "", "end", text=f"📊 Symbol: {symbol.upper()}", tags=("header",)
+                    )
+                    detalle.insert(
+                        "", "end", text=f"⏰ Update: {timestamp}", tags=("info",)
+                    )
                 else:
-                    if isinstance(value, pd.DataFrame):
-                        df = {
-                            "DataFrames": {
-                                "Rows": value.shape[0],
-                                "Columns": value.columns,
-                            }
-                        }
-                        detalle.insert(
-                            "", "end", text=f"{key}: {df}", tags=("colorTex",)
+                    detalle.insert(
+                        "", "end", text=f"📊 Symbol: {symbol.upper()}", tags=("header",)
+                    )
+
+                detalle.insert("", "end", text="", tags=("spacer",))
+
+                # Display detalle del activo con estructura mejorada
+                for key, value in data.items():
+                    if isinstance(value, dict):
+                        # Crear nodo para diccionarios
+                        node = detalle.insert(
+                            "", "end", text=f"📂 {key}", tags=("section",)
                         )
+
+                        for fields, valor in value.items():
+                            # Formatear valores según tipo
+                            if isinstance(valor, float):
+                                valor_str = (
+                                    f"{valor:,.4f}"
+                                    if abs(valor) < 1000
+                                    else f"{valor:,.2f}"
+                                )
+                            elif isinstance(valor, (int, str)):
+                                valor_str = str(valor)
+                            else:
+                                valor_str = str(valor)
+
+                            detalle.insert(
+                                node,
+                                "end",
+                                text=f"  {fields}: {valor_str}",
+                                tags=("value",),
+                            )
+
+                        # Expandir nodos importantes
+                        if key in ["websocket", "market", "position"]:
+                            detalle.item(node, open=True)
+
+                    elif isinstance(value, pd.DataFrame):
+                        # Mostrar información de DataFrames
+                        node = detalle.insert(
+                            "", "end", text=f"📋 {key}", tags=("section",)
+                        )
+                        detalle.insert(
+                            node,
+                            "end",
+                            text=f"  Filas: {value.shape[0]}",
+                            tags=("summary",),
+                        )
+                        detalle.insert(
+                            node,
+                            "end",
+                            text=f"  Columnas: {value.shape[1]}",
+                            tags=("summary",),
+                        )
+                        detalle.insert(
+                            node,
+                            "end",
+                            text=f"  Nombres: {list(value.columns)[:5]}{'...' if len(value.columns) > 5 else ''}",
+                            tags=("summary",),
+                        )
+
                     else:
+                        # Valores simples
+                        if isinstance(value, float):
+                            value_str = (
+                                f"{value:,.4f}"
+                                if abs(value) < 1000
+                                else f"{value:,.2f}"
+                            )
+                        else:
+                            value_str = str(value)
                         detalle.insert(
-                            "", "end", text=f"{key}: {value}", tags=("colorTex",)
+                            "", "end", text=f"🔹 {key}: {value_str}", tags=("value",)
                         )
 
-        # Obtener el ítem seleccionado (la tupla de IDs de la selección)
-        def on_item_selected(event):
+            except Exception as e:
+                detalle.insert(
+                    "", "end", text=f"❌ Error al mostrar detalle: {e}", tags=("error",)
+                )
+                print(f"[display_items_lista({symbol})]: {e}")
 
+        # Obtener el ítem seleccionado con un solo click
+        def on_item_selected(event):
+            """Maneja selección simple en la lista"""
             selected_items = lista.selection()
             if selected_items:
                 selected_id = selected_items[0]
-
                 symbol = lista.item(selected_id, "text")
-                if symbol in DataHub.info:
-                    display_items_lista(symbol)
+
+                # Verificar que no sea un nodo padre
+                if symbol and not symbol.startswith(":"):
+                    if symbol in DataHub.info:
+                        display_items_lista(symbol)
+                        self.itemsInfo = symbol
+
+        # Doble click para expandir/contraer o mostrar detalle
+        def on_double_click(event):
+            """Maneja doble click en la lista"""
+            selected_items = lista.selection()
+            if selected_items:
+                selected_id = selected_items[0]
+                symbol = lista.item(selected_id, "text")
+
+                # Si no es un nodo padre, mostrar detalle
+                if symbol and not symbol.startswith(":"):
+                    if symbol in DataHub.info:
+                        display_items_lista(symbol)
+                        self.itemsInfo = symbol
 
         # busca activo en lista
         def search_lista(first=None, symbol=None):
@@ -4514,10 +4816,15 @@ class system_status(tk.Frame):
 
         # Itera  y update Treeview cada 3 seg
         def update_datahub():
+            # Verificar si debemos continuar ejecutando
+            if not self.is_running:
+                return
 
             lista.item(root, open=True)
             insert_lista(parent=root)
-            self.system.after(30000, update_datahub)
+            # Registrar el after_id para poder cancelarlo luego
+            after_id = self.system.after(30000, update_datahub)
+            self.after_ids.append(after_id)
             # DataHub.manager_after._safe(30000, update_datahub(), name="update_datahub")
 
         try:
@@ -4525,17 +4832,40 @@ class system_status(tk.Frame):
             lista = ttk.Treeview(self.datahub, style="TFrame")
             detalle = ttk.Treeview(self.datahub, style="TFrame")
 
-            lista.heading("#0", text="DataHub")
-            detalle.heading("#0", text="Información del Activo")
+            # Configurar headers
+            lista.heading("#0", text="DataHub - Símbolos")
+            detalle.heading("#0", text="Información Detallada del Activo")
 
-            lista.pack(side=tk.LEFT, fill=tk.Y, pady=5, padx=(5, 2))
+            # Configurar anchos
+            lista.column("#0", width=180, minwidth=150)
+
+            # Pack widgets
+            lista.pack(side=tk.LEFT, fill=tk.BOTH, pady=5, padx=(5, 2))
             detalle.pack(side=tk.LEFT, expand=True, fill=tk.BOTH, pady=5, padx=(2, 5))
+
+            # Configurar colores y estilos mejorados (consistente con manager_buysell)
+            detalle.tag_configure(
+                "header", foreground="cyan", font=("TkDefaultFont", 10, "bold")
+            )
+            detalle.tag_configure(
+                "section", foreground="yellow", font=("TkDefaultFont", 9, "bold")
+            )
+            detalle.tag_configure("info", foreground="lightgreen")
+            detalle.tag_configure("summary", foreground="orange")
+            detalle.tag_configure("value", foreground="white")
+            detalle.tag_configure("error", foreground="red")
+            detalle.tag_configure("warning", foreground="orange")
+
+            # Tags antiguos para compatibilidad
             detalle.tag_configure("colorTex", foreground="orange")
             detalle.tag_configure("colorGroup", foreground=DataHub.bgcolor)
+
+            # Bind eventos
             lista.bind("<<TreeviewSelect>>", on_item_selected)
+            lista.bind("<Double-Button-1>", on_double_click)
 
             # --- Scrollbars ---
-            hsb = ttk.Scrollbar(detalle, orient=tk.HORIZONTAL, command=detalle.yview)
+            hsb = ttk.Scrollbar(detalle, orient=tk.HORIZONTAL, command=detalle.xview)
             detalle.configure(xscroll=hsb.set)
             hsb.pack(side=tk.BOTTOM, fill=tk.X)
 
@@ -4546,150 +4876,834 @@ class system_status(tk.Frame):
 
             root = lista.insert("", "end", text=f": {DataHub.info['TimeDataHub']}")
 
+            # Mostrar mensaje inicial en detalle
+            detalle.insert(
+                "",
+                "end",
+                text="👈 Selecciona un símbolo de la izquierda",
+                tags=("info",),
+            )
+            detalle.insert(
+                "", "end", text="para ver su información detallada", tags=("info",)
+            )
+            detalle.insert("", "end", text="", tags=("spacer",))
+            detalle.insert(
+                "",
+                "end",
+                text="💡 Click simple o doble click para ver detalles",
+                tags=("summary",),
+            )
+
             update_datahub()
         except Exception as e:
-            msg = traceback.print_exc()
-            print("datahub_system(): {}".format(msg))
+            import traceback
+
+            traceback.print_exc()
+            print(f"datahub_system(): {e}")
 
     # detalla uso de cache
     def monitor_cache(self):
         """
-        Clase para monitorear el estado del sistema y visualizar el contenido del TTLCache.
-        Permite:
+        Visualiza CacheHut.cache con patrón lista-detalle mejorado.
+        - LISTA (izquierda): Claves del cache con información resumida
+        - DETALLE (derecha): Información completa del item en cache
+        - Evento: Doble click para ver detalle completo
+
+        Características:
             ✅ Ver claves actuales del cache
-            ✅ Refrescar el contenido
+            ✅ Información de tipo, tamaño y timestamp
+            ✅ Refrescar contenido automático
             ✅ Eliminar entradas manualmente
-            ✅ Ver los primeros registros de un DataFrame asociado
+            ✅ Ver detalles completos de DataFrames y otros objetos
         """
 
         #   FUNCIONALIDAD PRINCIPAL
-        def refresh_cache():
+        def refresh_cache_list():
             """Recarga la lista de claves desde el cache."""
-            for item in tree.get_children():
-                self.tree.delete(item)
+            try:
+                # Limpiar lista
+                for item in lista.get_children():
+                    lista.delete(item)
 
-            for k, v in CacheHut.cache.items():
-                tipo = type(v).__name__
-                tree.insert(
-                    "",
-                    tk.END,
-                    values=(str(k), datetime.now().strftime("%H:%M:%S")),
+                # Contador de elementos
+                total_items = 0
+
+                # Insertar items del cache
+                for k, v in CacheHut.cache.items():
+                    tipo = type(v).__name__
+
+                    # Calcular tamaño aproximado
+                    try:
+                        import sys
+
+                        size_bytes = sys.getsizeof(v)
+                        if size_bytes < 1024:
+                            size_str = f"{size_bytes}B"
+                        elif size_bytes < 1024 * 1024:
+                            size_str = f"{size_bytes/1024:.1f}KB"
+                        else:
+                            size_str = f"{size_bytes/(1024*1024):.1f}MB"
+                    except:
+                        size_str = "N/A"
+
+                    # Insertar en lista con icono según tipo
+                    if tipo == "DataFrame":
+                        icon = "📊"
+                    elif tipo in ["dict", "DotMap"]:
+                        icon = "📂"
+                    elif tipo in ["list", "tuple"]:
+                        icon = "📋"
+                    else:
+                        icon = "📦"
+
+                    lista.insert(
+                        "",
+                        tk.END,
+                        text=f"{icon} {k}",
+                        values=(tipo, size_str),
+                        tags=("item",),
+                    )
+                    total_items += 1
+
+                # Actualizar header con contador
+                lista.heading("#0", text=f"Cache Keys ({total_items} items)")
+
+                # Si no hay items
+                if total_items == 0:
+                    lista.insert(
+                        "", "end", text="(Vacío - sin datos en cache)", tags=("empty",)
+                    )
+
+            except Exception as e:
+                print(f"[refresh_cache_list()]: {e}")
+
+        def display_cache_detail(key):
+            """Muestra detalle completo del item seleccionado en cache"""
+            try:
+                # Limpiar detalle
+                for item in detalle.get_children():
+                    detalle.delete(item)
+
+                # Obtener datos del cache
+                data = CacheHut.cache.get(key)
+
+                if data is None:
+                    detalle.insert(
+                        "",
+                        "end",
+                        text=f"⚠️ {key}: No disponible o expirado",
+                        tags=("warning",),
+                    )
+                    return
+
+                # Header con el nombre de la clave
+                detalle.insert("", "end", text=f"🔑 Key: {key}", tags=("header",))
+                detalle.insert("", "end", text="", tags=("spacer",))
+
+                # Información del tipo de objeto
+                tipo_data = type(data).__name__
+                detalle.insert("", "end", text=f"📦 Tipo: {tipo_data}", tags=("info",))
+
+                # Tamaño del objeto
+                try:
+                    import sys
+
+                    size_bytes = sys.getsizeof(data)
+                    if size_bytes < 1024:
+                        size_str = f"{size_bytes} bytes"
+                    elif size_bytes < 1024 * 1024:
+                        size_str = f"{size_bytes/1024:.2f} KB"
+                    else:
+                        size_str = f"{size_bytes/(1024*1024):.2f} MB"
+                    detalle.insert(
+                        "", "end", text=f"💾 Tamaño: {size_str}", tags=("info",)
+                    )
+                except:
+                    pass
+
+                # Timestamp
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                detalle.insert(
+                    "", "end", text=f"⏰ Consultado: {timestamp}", tags=("info",)
                 )
+                detalle.insert("", "end", text="", tags=("spacer",))
+
+                # Mostrar contenido según el tipo
+                if isinstance(data, pd.DataFrame):
+                    # DataFrame
+                    detalle.insert(
+                        "", "end", text="📊 DataFrame - Resumen", tags=("section",)
+                    )
+                    detalle.insert(
+                        "", "end", text=f"  Filas: {data.shape[0]:,}", tags=("summary",)
+                    )
+                    detalle.insert(
+                        "",
+                        "end",
+                        text=f"  Columnas: {data.shape[1]}",
+                        tags=("summary",),
+                    )
+                    detalle.insert(
+                        "",
+                        "end",
+                        text=f"  Nombres: {list(data.columns)[:8]}",
+                        tags=("summary",),
+                    )
+                    if len(data.columns) > 8:
+                        detalle.insert(
+                            "",
+                            "end",
+                            text=f"  ... y {len(data.columns) - 8} más",
+                            tags=("summary",),
+                        )
+
+                    # Mostrar primeras filas
+                    detalle.insert("", "end", text="", tags=("spacer",))
+                    node = detalle.insert(
+                        "",
+                        "end",
+                        text="📋 Primeras 5 filas (haz doble click para ver completo)",
+                        tags=("section",),
+                    )
+                    df_string = data.head(5).to_string()
+                    for line in df_string.split("\n")[:15]:  # Limitar líneas
+                        detalle.insert(node, "end", text=line, tags=("data",))
+
+                elif isinstance(data, dict):
+                    # Diccionario
+                    detalle.insert(
+                        "", "end", text="📂 Diccionario - Contenido", tags=("section",)
+                    )
+                    detalle.insert(
+                        "",
+                        "end",
+                        text=f"  Total de claves: {len(data)}",
+                        tags=("summary",),
+                    )
+                    detalle.insert("", "end", text="", tags=("spacer",))
+
+                    node = detalle.insert(
+                        "", "end", text="🔹 Estructura", tags=("section",)
+                    )
+                    for idx, (k, v) in enumerate(data.items()):
+                        if idx >= 20:  # Limitar a 20 items
+                            detalle.insert(
+                                node,
+                                "end",
+                                text=f"  ... y {len(data) - 20} más",
+                                tags=("value",),
+                            )
+                            break
+                        v_str = str(v)[:100] + "..." if len(str(v)) > 100 else str(v)
+                        detalle.insert(
+                            node, "end", text=f"  {k}: {v_str}", tags=("value",)
+                        )
+
+                elif isinstance(data, (list, tuple)):
+                    # Lista o tupla
+                    detalle.insert(
+                        "", "end", text=f"📋 {tipo_data} - Contenido", tags=("section",)
+                    )
+                    detalle.insert(
+                        "",
+                        "end",
+                        text=f"  Total de elementos: {len(data)}",
+                        tags=("summary",),
+                    )
+                    detalle.insert("", "end", text="", tags=("spacer",))
+
+                    node = detalle.insert(
+                        "", "end", text="🔹 Elementos", tags=("section",)
+                    )
+                    for idx, item in enumerate(data):
+                        if idx >= 20:  # Limitar a 20 items
+                            detalle.insert(
+                                node,
+                                "end",
+                                text=f"  ... y {len(data) - 20} más",
+                                tags=("value",),
+                            )
+                            break
+                        item_str = (
+                            str(item)[:100] + "..."
+                            if len(str(item)) > 100
+                            else str(item)
+                        )
+                        detalle.insert(
+                            node, "end", text=f"  [{idx}]: {item_str}", tags=("value",)
+                        )
+
+                else:
+                    # Otros tipos
+                    detalle.insert("", "end", text="📦 Valor", tags=("section",))
+                    value_str = (
+                        str(data)[:500] + "..." if len(str(data)) > 500 else str(data)
+                    )
+                    detalle.insert("", "end", text=value_str, tags=("value",))
+
+            except Exception as e:
+                detalle.insert(
+                    "", "end", text=f"❌ Error al mostrar detalle: {e}", tags=("error",)
+                )
+                print(f"[display_cache_detail({key})]: {e}")
 
         def remove_selected_key():
             """Elimina la clave seleccionada del cache."""
-            item = tree.selection()
-            if not item:
+            selected = lista.selection()
+            if not selected:
                 self.messagebox.showinfo(
                     "Información", "Seleccione una clave para eliminar."
                 )
                 return
 
-            key = tree.item(item[0], "values")[0]
+            # Extraer key del texto (remover icono)
+            item_text = lista.item(selected[0], "text")
+            key = item_text.split(" ", 1)[1] if " " in item_text else item_text
+
             if key in CacheHut.cache:
                 del CacheHut.cache[key]
                 self.messagebox.showinfo(
                     "Cache", f"✅ Clave '{key}' eliminada del cache."
                 )
-                self.refresh_cache()
+                refresh_cache_list()
+                # Limpiar detalle
+                for item in detalle.get_children():
+                    detalle.delete(item)
+                detalle.insert(
+                    "",
+                    "end",
+                    text="👈 Selecciona un item de la izquierda",
+                    tags=("info",),
+                )
             else:
                 self.messagebox.showwarning(
                     "Cache", f"⚠️ Clave '{key}' no encontrada o ya expirada."
                 )
 
         #   EVENTOS DE INTERFAZ
-        def _on_double_click(event):
-            """Maneja doble clic sobre una clave: muestra el DataFrame si existe."""
-            item = tree.selection()
-            if not item:
+        def on_double_click(event):
+            """Maneja doble clic sobre una clave: muestra detalle completo."""
+            selected = lista.selection()
+            if not selected:
                 return
 
-            key = tree.item(item[0], "values")[0]
-            df = CacheHut.cache.get(key)
+            # Extraer key del texto (remover icono)
+            item_text = lista.item(selected[0], "text")
+            if item_text.startswith("("):  # Es el mensaje de vacío
+                return
 
-            if isinstance(df, pd.DataFrame):
-                self._show_dataframe(df, str(key))
-            else:
-                self.messagebox.showwarning(
-                    "Cache", f"La clave '{key}' no contiene un DataFrame."
-                )
+            key = item_text.split(" ", 1)[1] if " " in item_text else item_text
+            display_cache_detail(key)
 
-        #   VISUALIZACIÓN DE DATAFRAME
-        def _show_dataframe(df: pd.DataFrame, title="DataFrame"):
-            """Muestra un DataFrame en una nueva ventana."""
-            win = tk.Toplevel(self.root)
-            win.title(f"📊 Vista de Datos - {title}")
-            win.geometry("900x450")
+        def on_item_selected(event):
+            """Maneja selección simple en la lista"""
+            selected = lista.selection()
+            if selected:
+                item_text = lista.item(selected[0], "text")
+                if not item_text.startswith("("):  # No es mensaje de vacío
+                    key = item_text.split(" ", 1)[1] if " " in item_text else item_text
+                    display_cache_detail(key)
 
-            # Convertir a texto
-            text = tk.Text(win, wrap="none", font=("Consolas", 10))
-            text.pack(fill=tk.BOTH, expand=True)
+        def auto_refresh():
+            """Auto-actualiza la lista cada 30 segundos"""
+            # Verificar si debemos continuar ejecutando
+            if not self.is_running:
+                return
 
-            # Mostrar primeras filas
-            content = df.head(50).to_string()
-            text.insert("1.0", content)
-
-            # Scrollbars
-            yscroll = ttk.Scrollbar(win, orient="vertical", command=text.yview)
-            yscroll.pack(side="right", fill="y")
-            text.configure(yscrollcommand=yscroll.set)
-
-            ttk.Button(win, text="Cerrar", command=win.destroy).pack(
-                side="bottom", pady=5
-            )
+            refresh_cache_list()
+            # Registrar el after_id para poder cancelarlo luego
+            after_id = self.system.after(30000, auto_refresh)
+            self.after_ids.append(after_id)
 
         try:
+            # Crear TreeViews para lista y detalle
+            lista = ttk.Treeview(self.cache, columns=("tipo", "tamaño"), style="TFrame")
+            detalle = ttk.Treeview(self.cache, style="TFrame")
 
-            # --- Tabla de claves ---
-            tree = ttk.Treeview(
-                self.cache,
-                columns=("key", "timestamp"),
-                show="headings",
-                style="TFrame",
+            # Configurar headers y columnas de lista
+            lista.heading("#0", text="Cache Keys")
+            lista.heading("tipo", text="Tipo")
+            lista.heading("tamaño", text="Tamaño")
+
+            lista.column("#0", width=200, minwidth=150)
+            lista.column("tipo", width=100, minwidth=80)
+            lista.column("tamaño", width=80, minwidth=60)
+
+            # Configurar header de detalle
+            detalle.heading("#0", text="Información Detallada")
+
+            # Pack widgets
+            lista.pack(side=tk.LEFT, fill=tk.BOTH, pady=5, padx=(5, 2))
+            detalle.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=5, padx=(2, 5))
+
+            # Configurar colores y estilos (consistente con otros módulos)
+            detalle.tag_configure(
+                "header", foreground="cyan", font=("TkDefaultFont", 10, "bold")
             )
-            tree.column("key", width=50)
-            tree.column("timestamp", width=15)
-            tree.heading("key", text="Cache")
-            tree.heading("timestamp", text="Registro")
-            tree.pack(fill=tk.BOTH, expand=True, pady=5, padx=(5, 5))
+            detalle.tag_configure(
+                "section", foreground="yellow", font=("TkDefaultFont", 9, "bold")
+            )
+            detalle.tag_configure("info", foreground="lightgreen")
+            detalle.tag_configure("summary", foreground="orange")
+            detalle.tag_configure("value", foreground="white")
+            detalle.tag_configure("data", foreground="lightgray", font=("Courier", 8))
+            detalle.tag_configure("error", foreground="red")
+            detalle.tag_configure("warning", foreground="orange")
+
+            lista.tag_configure("item", foreground="lightgreen")
+            lista.tag_configure("empty", foreground="gray")
 
             # --- Scrollbars ---
-            hsb = ttk.Scrollbar(tree, orient=tk.HORIZONTAL, command=tree.yview)
-            tree.configure(xscroll=hsb.set)
-            hsb.pack(side=tk.BOTTOM, fill=tk.X, padx=(5, 5))
+            hsb = ttk.Scrollbar(detalle, orient=tk.HORIZONTAL, command=detalle.xview)
+            detalle.configure(xscroll=hsb.set)
+            hsb.pack(side=tk.BOTTOM, fill=tk.X)
 
             # --- Botonera ---
             frame_btn = ttk.Frame(self.cache)
-            frame_btn.pack(fill=tk.X, pady=5)
+            frame_btn.pack(fill=tk.X, pady=(0, 5), padx=5)
 
-            ttk.Button(frame_btn, text="🔄 Refrescar", command=refresh_cache).pack(
+            ttk.Button(frame_btn, text="🔄 Refrescar", command=refresh_cache_list).pack(
                 side=tk.LEFT, padx=5
             )
-            # ttk.Button(frame_btn, text="❌ Cerrar", command=cache.destroy).pack(
-            #    side=tk.RIGHT, padx=5
-            # )
+            ttk.Button(frame_btn, text="🗑️ Eliminar", command=remove_selected_key).pack(
+                side=tk.LEFT, padx=5
+            )
 
-            # --- Bind para doble clic ---
-            tree.bind("<Double-1>", _on_double_click)
+            # --- Bind eventos ---
+            lista.bind("<Double-Button-1>", on_double_click)
+            lista.bind("<<TreeviewSelect>>", on_item_selected)
 
-            # --- Carga inicial ---
-            refresh_cache()
-        except (EncodingWarning, Exception) as e:
+            # Mostrar mensaje inicial en detalle
+            detalle.insert(
+                "", "end", text="👈 Selecciona un item de la izquierda", tags=("info",)
+            )
+            detalle.insert(
+                "", "end", text="para ver su información detallada", tags=("info",)
+            )
+            detalle.insert("", "end", text="", tags=("spacer",))
+            detalle.insert(
+                "",
+                "end",
+                text="💡 Click simple o doble click para ver detalles",
+                tags=("summary",),
+            )
+
+            # --- Carga inicial y auto-refresh ---
+            refresh_cache_list()
+            auto_refresh()
+
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
             print(f"monitor_cache(): {e}")
 
     # detalla estados de conexiones
     def connect_api(self):
+        """
+        Visualiza estado de conexiones API en lista compacta.
+        - LISTA: APIs disponibles con estado e icono
+        - EVENTO: Doble click abre ventana con detalles completos
+
+        APIs monitoreadas:
+            ✅ Binance (WebSocket Streams & API Client)
+            ✅ Interactive Brokers (IBKR)
+            ✅ Yahoo Finance
+            ✅ Finviz
+        """
+
+        def get_api_status():
+            """Obtiene el estado actual de las APIs"""
+            apis = {}
+
+            try:
+                # Binance WebSocket Streams
+                try:
+                    binance_ws = (
+                        hasattr(DataHub, "WStreams") and DataHub.WStreams is not None
+                    )
+                    apis["Binance WebSocket"] = {
+                        "status": "🟢 Conectado" if binance_ws else "🔴 Desconectado",
+                        "type": "WebSocket Streams",
+                        "endpoint": "wss://stream.binance.com:9443",
+                        "connected": binance_ws,
+                        "description": "Streaming de precios en tiempo real",
+                    }
+                except:
+                    apis["Binance WebSocket"] = {
+                        "status": "⚪ No Disponible",
+                        "type": "WebSocket Streams",
+                        "endpoint": "N/A",
+                        "connected": False,
+                        "description": "Streaming de precios en tiempo real",
+                    }
+
+                # Binance API Client
+                try:
+                    binance_api = (
+                        hasattr(DataHub, "WsClient") and DataHub.WsClient is not None
+                    )
+                    apis["Binance API"] = {
+                        "status": "🟢 Conectado" if binance_api else "🔴 Desconectado",
+                        "type": "WebSocket API Client",
+                        "endpoint": "wss://ws-api.binance.com:443/ws-api/v3",
+                        "connected": binance_api,
+                        "description": "API de trading y consultas",
+                    }
+                except:
+                    apis["Binance API"] = {
+                        "status": "⚪ No Disponible",
+                        "type": "WebSocket API Client",
+                        "endpoint": "N/A",
+                        "connected": False,
+                        "description": "API de trading y consultas",
+                    }
+
+                # Yahoo Finance
+                try:
+                    yfinance = DataHub.SessionYfinance is not None
+                    apis["Yahoo Finance"] = {
+                        "status": "🟢 Activo" if yfinance else "🔴 Inactivo",
+                        "type": "HTTP REST API",
+                        "endpoint": "https://query1.finance.yahoo.com",
+                        "connected": yfinance,
+                        "description": "Datos de mercado y fundamentales",
+                    }
+                except:
+                    apis["Yahoo Finance"] = {
+                        "status": "⚪ No Disponible",
+                        "type": "HTTP REST API",
+                        "endpoint": "N/A",
+                        "connected": False,
+                        "description": "Datos de mercado y fundamentales",
+                    }
+
+                # Interactive Brokers
+                apis["Interactive Brokers"] = {
+                    "status": "🟡 Configurado",
+                    "type": "TWS API",
+                    "endpoint": "localhost:7497",
+                    "connected": True,  # Asumir configurado
+                    "description": "Trading y datos de mercado",
+                }
+
+                # Finviz
+                apis["Finviz"] = {
+                    "status": "🟢 Disponible",
+                    "type": "Web Scraping",
+                    "endpoint": "https://finviz.com",
+                    "connected": True,  # Siempre disponible si hay internet
+                    "description": "Análisis técnico y fundamentales",
+                }
+
+            except Exception as e:
+                print(f"[get_api_status()]: {e}")
+
+            return apis
+
+        def refresh_api_list():
+            """Actualiza la lista de APIs"""
+            try:
+                # Limpiar lista
+                for item in lista.get_children():
+                    lista.delete(item)
+
+                # Obtener estado de APIs
+                apis = get_api_status()
+
+                # Contador de conectadas
+                connected_count = sum(
+                    1 for api in apis.values() if api.get("connected")
+                )
+                total_count = len(apis)
+
+                # Insertar APIs en la lista con tres columnas
+                for name, info in apis.items():
+                    status = info["status"]
+                    api_type = info["type"]
+
+                    # Extraer solo el emoji de estado
+                    status_emoji = status.split()[0] if status else "⚪"
+
+                    lista.insert(
+                        "",
+                        tk.END,
+                        text=name,  # Nombre de API
+                        values=(api_type, status),  # Tipo y Estado completo
+                        tags=("item",),
+                    )
+
+                # Actualizar header con contador
+                lista.heading(
+                    "#0", text=f"API ({connected_count}/{total_count} activas)"
+                )
+
+            except Exception as e:
+                print(f"[refresh_api_list()]: {e}")
+
+        def show_api_detail_window(api_name):
+            """Abre ventana emergente con detalles de la API seleccionada"""
+            try:
+                # El nombre ya viene limpio (sin emoji)
+                clean_name = api_name
+
+                # Obtener información de la API
+                apis = get_api_status()
+                api_info = apis.get(clean_name)
+
+                if not api_info:
+                    self.messagebox.showwarning(
+                        "API Info", f"⚠️ {clean_name}: No encontrada"
+                    )
+                    return
+
+                # Crear ventana Toplevel
+                detail_window = tk.Toplevel(self.system)
+                detail_window.title(f"🌐 Información de API - {clean_name}")
+                detail_window.geometry("600x450")
+                detail_window.transient(self.system)  # Ventana modal relativa al padre
+
+                # Frame principal con scrollbar
+                main_frame = ttk.Frame(detail_window, padding=10)
+                main_frame.pack(fill=tk.BOTH, expand=True)
+
+                # Treeview para mostrar información
+                tree = ttk.Treeview(main_frame, style="TFrame")
+                tree.heading("#0", text=f"Detalles de {clean_name}")
+                tree.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+                # Configurar colores
+                tree.tag_configure(
+                    "header", foreground="cyan", font=("TkDefaultFont", 11, "bold")
+                )
+                tree.tag_configure(
+                    "section", foreground="yellow", font=("TkDefaultFont", 9, "bold")
+                )
+                tree.tag_configure("info", foreground="lightgreen")
+                tree.tag_configure("summary", foreground="orange")
+                tree.tag_configure("value", foreground="white")
+
+                # Scrollbar
+                vsb = ttk.Scrollbar(tree, orient=tk.VERTICAL, command=tree.yview)
+                tree.configure(yscroll=vsb.set)
+                vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+                # Header
+                tree.insert("", "end", text=f"🌐 API: {clean_name}", tags=("header",))
+                tree.insert("", "end", text="", tags=("spacer",))
+
+                # Información básica
+                tree.insert(
+                    "", "end", text=f"📊 Estado: {api_info['status']}", tags=("info",)
+                )
+                tree.insert(
+                    "", "end", text=f"🔧 Tipo: {api_info['type']}", tags=("info",)
+                )
+                tree.insert(
+                    "",
+                    "end",
+                    text=f"🔗 Endpoint: {api_info['endpoint']}",
+                    tags=("value",),
+                )
+                tree.insert(
+                    "",
+                    "end",
+                    text=f"📝 Descripción: {api_info['description']}",
+                    tags=("summary",),
+                )
+
+                # Timestamp
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                tree.insert(
+                    "", "end", text=f"⏰ Consultado: {timestamp}", tags=("info",)
+                )
+                tree.insert("", "end", text="", tags=("spacer",))
+
+                # Información adicional según API
+                node = tree.insert(
+                    "", "end", text="📋 Información Adicional", tags=("section",)
+                )
+
+                if "Binance" in clean_name:
+                    tree.insert(
+                        node,
+                        "end",
+                        text="  • Mercado: Cryptocurrencies",
+                        tags=("value",),
+                    )
+                    tree.insert(
+                        node, "end", text="  • Frecuencia: Tiempo real", tags=("value",)
+                    )
+                    tree.insert(
+                        node,
+                        "end",
+                        text="  • Límites: Sin límite en WebSocket",
+                        tags=("value",),
+                    )
+                    tree.insert(
+                        node,
+                        "end",
+                        text="  • Documentación: https://binance-docs.github.io",
+                        tags=("value",),
+                    )
+
+                elif "Yahoo Finance" in clean_name:
+                    tree.insert(
+                        node,
+                        "end",
+                        text="  • Mercado: Stocks, ETFs, Indices",
+                        tags=("value",),
+                    )
+                    tree.insert(
+                        node,
+                        "end",
+                        text="  • Frecuencia: 15 min delay (free)",
+                        tags=("value",),
+                    )
+                    tree.insert(
+                        node, "end", text="  • Límites: 2000 req/hora", tags=("value",)
+                    )
+                    tree.insert(
+                        node, "end", text="  • Cobertura: Global", tags=("value",)
+                    )
+
+                elif "Interactive Brokers" in clean_name:
+                    tree.insert(
+                        node,
+                        "end",
+                        text="  • Mercado: Global (Stocks, Forex, etc)",
+                        tags=("value",),
+                    )
+                    tree.insert(
+                        node, "end", text="  • Frecuencia: Tiempo real", tags=("value",)
+                    )
+                    tree.insert(
+                        node,
+                        "end",
+                        text="  • Requiere: TWS o IB Gateway activo",
+                        tags=("value",),
+                    )
+                    tree.insert(
+                        node,
+                        "end",
+                        text="  • Puerto: 7497 (TWS) / 4002 (Gateway)",
+                        tags=("value",),
+                    )
+
+                elif "Finviz" in clean_name:
+                    tree.insert(
+                        node, "end", text="  • Mercado: US Stocks", tags=("value",)
+                    )
+                    tree.insert(
+                        node,
+                        "end",
+                        text="  • Datos: Screener, Charts, News",
+                        tags=("value",),
+                    )
+                    tree.insert(
+                        node, "end", text="  • Método: Web Scraping", tags=("value",)
+                    )
+                    tree.insert(
+                        node,
+                        "end",
+                        text="  • Limitaciones: Requiere acceso web",
+                        tags=("value",),
+                    )
+
+                # Expandir nodo
+                tree.item(node, open=True)
+
+                # Botón cerrar
+                btn_frame = ttk.Frame(main_frame)
+                btn_frame.pack(fill=tk.X, pady=(5, 0))
+
+                ttk.Button(
+                    btn_frame, text="✖️ Cerrar", command=detail_window.destroy
+                ).pack(side=tk.RIGHT, padx=5)
+
+                # Centrar ventana
+                detail_window.update_idletasks()
+                x = (detail_window.winfo_screenwidth() // 2) - (600 // 2)
+                y = (detail_window.winfo_screenheight() // 2) - (450 // 2)
+                detail_window.geometry(f"600x450+{x}+{y}")
+
+            except Exception as e:
+                import traceback
+
+                traceback.print_exc()
+                print(f"[show_api_detail_window({api_name})]: {e}")
+                self.messagebox.showerror("Error", f"❌ Error al mostrar detalle: {e}")
+
+        def on_double_click(event):
+            """Maneja doble click para abrir ventana de detalle"""
+            selected = lista.selection()
+            if selected:
+                api_name = lista.item(selected[0], "text")
+                show_api_detail_window(api_name)
+
+        def auto_refresh():
+            """Auto-actualiza la lista cada 30 segundos"""
+            # Verificar si debemos continuar ejecutando
+            if not self.is_running:
+                return
+
+            refresh_api_list()
+            # Registrar el after_id para poder cancelarlo luego
+            after_id = self.system.after(30000, auto_refresh)
+            self.after_ids.append(after_id)
+
         try:
+            # Frame contenedor principal
+            main_frame = ttk.Frame(self.connect)
+            main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-            tree = ttk.Treeview(self.connect, height=10, style="TFrame")
-            tree.heading("#0", text="Estados Connect")
-            tree.pack(side=tk.RIGHT, fill=tk.BOTH)
+            # Label de instrucciones
+            info_frame = ttk.Frame(main_frame)
+            info_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
-            api = {"Binance": True, "Ibrks": True, "Yfinance": True, "Finviz": True}
-            for key, value in api.items():
-                tree.insert("", "end", text=f"{key}: {value}")
-        except (EncodingWarning, Exception) as e:
-            print("connect_api(): {}".format(e))
+            ttk.Label(
+                info_frame,
+                text="💡 Doble click en una API para ver detalles completos",
+                foreground="orange",
+                font=("TkDefaultFont", 8, "italic"),
+            ).pack(side=tk.LEFT)
+
+            # Crear TreeView solo para lista (más espacio)
+            lista = ttk.Treeview(
+                main_frame, columns=("tipo", "estado"), style="TFrame", height=12
+            )
+
+            # Configurar headers y columnas
+            lista.heading("#0", text="API")
+            lista.heading("tipo", text="Tipo de Conexión")
+            lista.heading("estado", text="Estado")
+
+            lista.column("#0", width=180, minwidth=150)
+            lista.column("tipo", width=150, minwidth=120)
+            lista.column("estado", width=120, minwidth=100)
+
+            # Pack lista con scrollbar
+            lista.pack(fill=tk.BOTH, expand=True)
+
+            # Configurar colores
+            lista.tag_configure("item", foreground="lightgreen")
+
+            # --- Scrollbars ---
+            vsb = ttk.Scrollbar(lista, orient=tk.VERTICAL, command=lista.yview)
+            lista.configure(yscroll=vsb.set)
+            vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+            # --- Bind evento doble click ---
+            lista.bind("<Double-Button-1>", on_double_click)
+
+            # --- Carga inicial y auto-refresh ---
+            refresh_api_list()
+            auto_refresh()
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            print(f"connect_api(): {e}")
 
     # detalla estados de conexiones
     def debugging_system(self):
@@ -4889,6 +5903,10 @@ class system_status(tk.Frame):
         def update_buysell_list():
             """Actualiza la lista de manager_buysell cada 30 segundos"""
             try:
+                # Verificar si debemos continuar ejecutando
+                if not self.is_running:
+                    return
+
                 # Limpiar lista
                 for item in lista.get_children():
                     lista.delete(item)
@@ -4902,8 +5920,9 @@ class system_status(tk.Frame):
                         "", "end", text="(Vacío - esperando datos)", tags=("empty",)
                     )
 
-                # Programar siguiente actualización
-                self.system.after(30000, update_buysell_list)
+                # Programar siguiente actualización y registrar el after_id
+                after_id = self.system.after(30000, update_buysell_list)
+                self.after_ids.append(after_id)
 
             except Exception as e:
                 print(f"[update_buysell_list()]: {e}")
@@ -5012,22 +6031,50 @@ class system_status(tk.Frame):
         self.fg.legend(loc="upper right", handles=p_legend, fontsize=6)
         self.fg.suptitle("Monitor de CPU y Memoria", fontsize="medium", color=ColorTt)
 
-        # toma series de datos desde DataHub
+        # toma series de datos desde DataHub - OPTIMIZADO
         def update(frame):
-            with DataHub.CpuLock:
-                x = list(range(len(DataHub.DCpu)))
-                line_cpu.set_data(x, DataHub.DCpu)
-                line_mem.set_data(x, DataHub.DMem)
-                self.ax.set_xlim(0, DataHub.max_points)
-            return line_cpu, line_mem
+            try:
+                # Verificar que los datos existen y tienen CpuLock
+                if not hasattr(DataHub, "CpuLock") or DataHub.CpuLock is None:
+                    return line_cpu, line_mem
+
+                # Verificar que hay datos
+                if not DataHub.DCpu or not DataHub.DMem:
+                    return line_cpu, line_mem
+
+                with DataHub.CpuLock:
+                    x = list(range(len(DataHub.DCpu)))
+                    line_cpu.set_data(x, DataHub.DCpu)
+                    line_mem.set_data(x, DataHub.DMem)
+
+                    # Actualizar límites solo si cambió el tamaño
+                    max_x = max(
+                        len(x), DataHub.max_points if DataHub.max_points > 0 else 60
+                    )
+                    self.ax.set_xlim(0, max_x)
+
+                return line_cpu, line_mem
+
+            except Exception as e:
+                # Silenciar errores para no interrumpir la animación
+                return line_cpu, line_mem
+
+        # OPTIMIZACIÓN: Intervalo más largo para reducir consumo de CPU
+        # Cambiado de interval * 3000 (3 segundos) a 10 segundos
+        interval_optimizado = 10000  # 10 segundos (antes era ~3 segundos)
 
         ani = animation.FuncAnimation(
             self.fg,
             update,
-            interval=DataHub.interval * 3000,
+            interval=interval_optimizado,  # Actualiza cada 10 segundos
             blit=True,
             cache_frame_data=False,
+            save_count=0,  # No guardar frames en caché (ahorro de memoria)
         )
+
+        # Guardar referencia para evitar que se recolecte por garbage collector
+        self.monitor_animation = ani
+
         self.rv.draw()
 
 

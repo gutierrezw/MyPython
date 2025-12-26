@@ -49,6 +49,7 @@ from Modulos_python import (
     timedelta,
     Path,
     wraps,
+    signal,
 )
 
 sys.path.insert(0, "..")
@@ -307,20 +308,29 @@ class Telegram:
     # Aquí podrías iniciar/parar Telegram ------------------------------------------------------------------------
     async def toggle_telegram(self):
         def polling_callbackTelegram():
-
             try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
+                # Usar run_polling que maneja todo el ciclo de vida
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
 
-            loop.run_until_complete(self.telegram_app.run_polling())
+                loop.run_until_complete(
+                    self.telegram_app.run_polling(
+                        allowed_updates=["message", "callback_query"],
+                        drop_pending_updates=True,
+                    )
+                )
+            except Exception as e:
+                print(f"polling_callbackTelegram() error: {e}")
+            finally:
+                try:
+                    loop.close()
+                except:
+                    pass
 
         try:
             # activa mensajería Telegram
             if not self.estadoTelegram:
                 self.estadoTelegram = True
-                self.bot = Bot(token=self.TOKEN)
 
                 # Build the async Application
                 self.telegram_app = ApplicationBuilder().token(self.TOKEN).build()
@@ -345,19 +355,26 @@ class Telegram:
                     CallbackQueryHandler(self.handle_callback)
                 )
 
-                # inicia hilo para polling de mensajes ---------------------------------------------------------------------------
-                task_name = f"polling_callbackTelegram(On)"
-                DataHub.procesos.append({"thread": {task_name: 1}})
-                DataHub.manager_events.register_thread(
-                    name=task_name,
-                    target=polling_callbackTelegram,
-                )
+                # Inicializar bot solo para enviar mensajes iniciales
+                await self.telegram_app.initialize()
+                self.bot = self.telegram_app.bot
 
                 # Send welcome message and previous opportunities
                 await self.send_Telegram(
                     f"🏁 Bot interno iniciado session: {datetime.now()}"
                 )
                 await self.handle_menu()
+
+                # Cerrar inicialización temporal para que run_polling lo maneje
+                await self.telegram_app.shutdown()
+
+                # inicia hilo para polling de mensajes
+                task_name = f"polling_callbackTelegram(On)"
+                DataHub.procesos.append({"thread": {task_name: 1}})
+                DataHub.manager_events.register_thread(
+                    name=task_name,
+                    target=polling_callbackTelegram,
+                )
 
                 print(f"Start: (toggle_telegram(On))")
         except (EncodingWarning, Exception) as e:
