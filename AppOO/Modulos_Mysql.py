@@ -1490,6 +1490,53 @@ class PlanInversion(
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: update_inversion({})]: {}".format(vehiculo, error))
 
+    def get_totales_inversiones(self):
+        """
+        Obtiene los totales consolidados de todas las inversiones activas.
+        @return: dict con total_costo_base, total_mercado, total_ganancia_dia, total_unrealized_pnl
+        """
+        try:
+            conn = self._conectar(tabla="select.inversion")
+            cursor = conn.cursor()
+
+            qry = """SELECT
+                        SUM(costobase) as total_costo_base,
+                        SUM(mrkprice * position) as total_mercado,
+                        SUM(dgyp) as total_ganancia_dia,
+                        SUM(unrealizedpnl) as total_unrealized_pnl
+                     FROM inversion
+                     WHERE iactiva = 'Y';"""
+
+            cursor.execute(qry)
+            result = cursor.fetchone()
+
+            cursor.close()
+            conn.close()
+
+            if result:
+                return {
+                    "total_costo_base": result[0] or 0.0,
+                    "total_mercado": result[1] or 0.0,
+                    "total_ganancia_dia": result[2] or 0.0,
+                    "total_unrealized_pnl": result[3] or 0.0,
+                }
+            else:
+                return {
+                    "total_costo_base": 0.0,
+                    "total_mercado": 0.0,
+                    "total_ganancia_dia": 0.0,
+                    "total_unrealized_pnl": 0.0,
+                }
+
+        except (Exception, EncodingWarning, connect.Error) as error:
+            print("[Mysql:: get_totales_inversiones()]: {}".format(error))
+            return {
+                "total_costo_base": 0.0,
+                "total_mercado": 0.0,
+                "total_ganancia_dia": 0.0,
+                "total_unrealized_pnl": 0.0,
+            }
+
     def select_otros_activos(
         self,
         symbol=None,

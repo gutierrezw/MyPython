@@ -9,6 +9,7 @@ import math
 
 import hmac
 import copy
+import signal
 import urllib
 import urllib3
 import hashlib
@@ -25,6 +26,7 @@ import functools
 import subprocess
 import warnings
 import traceback
+
 
 import ssl as ssl
 import sys as sys
