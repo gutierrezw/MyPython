@@ -2057,15 +2057,16 @@ def get_dividends(account=None, vehiculo=None):
                 div = market[0][ix.index("dividendRate")]
 
                 string = market[0][ix.index("monthDividendsPay")]
-                a_meses = meses if string is None else string.split(",")
+                a_meses = meses if string is None or string == "" else string.split(",")
 
-                # calcula la cantidad de pagos
-                distribuir = [s.strip() for s in a_meses]
+                # calcula la cantidad de pagos - filtrar cadenas vacías
+                distribuir = [s.strip() for s in a_meses if s.strip()]
                 rata = div / len(distribuir) if len(distribuir) > 0 else last
 
                 # asume pago de dividends son iguales
                 for i, mes in enumerate(distribuir):
-                    dividendos[meses.index(mes)] += rata * position["position"]
+                    if mes in meses:  # Validar que el mes existe en la lista
+                        dividendos[meses.index(mes)] += rata * position["position"]
 
         # construye dividends cobrados en 11 meses
         for read in extracto:
@@ -2083,6 +2084,7 @@ def get_dividends(account=None, vehiculo=None):
         return datos, d_dividends
     except Exception as error:
         print("get_dividends(): {}".format(error))
+        return None, None
 
 
 # Gráfica Diversificación vs. pago dividendos
@@ -2092,7 +2094,7 @@ def grupo_dividendo(fg: object, parm=None):
             account=parm["account"], vehiculo=parm["vehiculo"]
         )
         p_legend = []
-        if not datos.empty:
+        if datos is not None and not datos.empty:
             fg.clear()
             ax = fg.add_subplot()
             cchart = parm["cchart"]

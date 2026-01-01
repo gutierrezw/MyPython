@@ -339,12 +339,14 @@ class Screener(tk.Frame):
             volume = 0 if is_none(keys[ix.index('volume')]) else keys[ix.index('volume')]
             country = ' ' if is_none(keys[ix.index('country')]) else keys[ix.index('country')]
             sector = ' ' if is_none(keys[ix.index('sector')]) else keys[ix.index('sector')]
-           
+            shortName = ' ' if is_none(keys[ix.index('shortName')]) else keys[ix.index('shortName')]
+            categoriaActivo = ' ' if is_none(keys[ix.index('categoriaActivo')]) else keys[ix.index('categoriaActivo')]
+
             # xtag = "even" if i % 2 == 0 else "old"
             self.tree.insert("", tk.END,  values=(
                             '{:<10}'.format(keys[ix.index('symbol')]),
-                            '{:<20}'.format(keys[ix.index('shortName')]),
-                            '{:^5}'.format(keys[ix.index('categoriaActivo')]),
+                            '{:<20}'.format(shortName),
+                            '{:^5}'.format(categoriaActivo),
                             '{:<20}'.format(country),
                             '{:>10.2f}'.format(r_div),
                             '{:>10.2%}'.format(d_yield),
@@ -354,7 +356,7 @@ class Screener(tk.Frame):
                             '{:>8}'.format(mask_numero(volume)),
                             # '{:>7.2f}'.format(keys[ix.index('lastPrice')]),
                             '{:>7.2f}'.format(0),
-                            '{:%y-%b-%d}'.format(keys[ix.index('exDividendDate')])
+                            '{:%y-%b-%d}'.format(keys[ix.index('exDividendDate')]) if keys[ix.index('exDividendDate')] else '-'
             ))
             # ), tags=(xtag,))
             self.counter += 1

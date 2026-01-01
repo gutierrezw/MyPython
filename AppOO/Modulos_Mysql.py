@@ -905,16 +905,22 @@ class MarketScreen(
                     listvalues.append(value)
                 qry = qry + upd[i] + ", "
 
+            # Agregar categoriaActivo con valor por defecto 'N' si no está en los parámetros
+            if "categoriaActivo" not in upd:
+                listvalues.append("N")
+                qry = qry + "categoriaActivo, "
+
             listvalues.append(datetime.now())
             listvalues.append(symbol)
             valuesins = tuple(listvalues)
+            # Usar parametrización segura sin comillas - el driver maneja NULL correctamente
             qry += "timestamp, symbol) VALUES ({});".format(
-                ", ".join("'%s'" for _ in range(len(valuesins)))
+                ", ".join("%s" for _ in range(len(valuesins)))
             )
-            cursor.execute(qry % valuesins)
+            cursor.execute(qry, valuesins)  # Parametrización segura
             conn.commit()
         except (Exception, EncodingWarning, connect.Error) as error:
-            print("[Mysql::insert_market()]: {} {}".format(error, qry % valuesins))
+            print("[Mysql::insert_market()]: {}".format(error))
 
     def update(self, upd=None, val=None, symbol=None):
         """
@@ -940,13 +946,14 @@ class MarketScreen(
                 else:
                     listvalues.append(value)
 
-                qry = qry + upd[i] + "='%s',"
+                # Usar %s sin comillas - el driver de MySQL maneja el tipo correcto
+                qry = qry + upd[i] + "=%s,"
 
             listvalues.append(datetime.now())
             listvalues.append(symbol)
             valuesins = tuple(listvalues)
-            qry += "timestamp='%s' WHERE symbol ='%s';"
-            cursor.execute(qry % valuesins)
+            qry += "timestamp=%s WHERE symbol=%s;"
+            cursor.execute(qry, valuesins)  # Usar parametrización segura
             conn.commit()
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql::insert_market()]: {}".format(error))

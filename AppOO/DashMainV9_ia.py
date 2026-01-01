@@ -326,136 +326,165 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # actualiza estructura positions y luego treeview para el symbol en cuestión
                     ix = self.update_symbol_en_positions(struct)
 
-            except EncodingWarning as e:
+            except Exception as e:
                 print("[procesa_stock()]: {}".format(e))
 
         def decodifica_message_websocket(x_message):
+            """
+            Decodifica mensajes del websocket de Interactive Brokers y actualiza precios.
+
+            Args:
+                x_message: Mensaje JSON del websocket con datos de mercado
+
+            Returns:
+                tuple: (x_dato, x_conid, x_symbol) con información procesada
+            """
+            # Mapeo de campos lógicos a códigos IB API
+            FIELD_MAP = {
+                "last": "31",
+                "symbol": "55",
+                "change": "82",
+                "bid": "84",
+                "ask": "86",
+                "stock": "76",
+                "open": "7295",
+                "close": "7296",
+                "high": "70",
+                "low": "71",
+                "empresa": "7051",
+                "costobase": "7292_raw",
+                "categoria": "7281",
+                "dividendos": "7286",
+                "%dDividendos": "7287",
+                "ExDividendos": "7288",
+                "TTMDividemdos": "7672",
+                "NextDividendos": "7671",
+            }
+
+            # Campos numéricos que requieren conversión a float
+            NUMERIC_FIELDS = {
+                "last",
+                "change",
+                "bid",
+                "ask",
+                "open",
+                "close",
+                "high",
+                "low",
+                "costobase",
+                "stock",
+                "dividendos",
+                "%dDividendos",
+                "TTMDividemdos",
+                "NextDividendos",
+            }
+
+            # Campos de texto (sin conversión numérica)
+            STRING_FIELDS = {"symbol", "empresa", "ExDividendos"}
+
+            # Mapeo de campos IB a nombres internos para dividendos
+            DIVIDEND_FIELD_MAPPING = {
+                "dividendos": "dividendo",
+                "%dDividendos": "dividend_yield",
+                "ExDividendos": "ex_dividend_date",
+                "TTMDividemdos": "ttm_dividends",
+                "NextDividendos": "next_dividend",
+            }
+
+            def update_field(conid, field_name, api_code, convert_to_float=True):
+                """
+                Actualiza un campo en self.conid_inicio si existe en el mensaje.
+
+                Args:
+                    conid: Contract ID del activo
+                    field_name: Nombre del campo interno
+                    api_code: Código del campo en IB API
+                    convert_to_float: Si True, convierte a float (para campos numéricos)
+                """
+                if api_code not in x_message:
+                    return
+
+                value = x_message[api_code]
+
+                if convert_to_float:
+                    # Caso especial: dividend_yield viene como "6.6%" (string con %)
+                    if field_name == "dividend_yield" and isinstance(value, str):
+                        try:
+                            # Remover el % y convertir a float
+                            self.conid_inicio[conid][field_name] = float(
+                                value.rstrip("%")
+                            )
+                        except (ValueError, AttributeError):
+                            self.conid_inicio[conid][field_name] = 0.0
+                    elif is_numeric(value):
+                        self.conid_inicio[conid][field_name] = float(value)
+                else:
+                    self.conid_inicio[conid][field_name] = value
+
             try:
-                ix = {
-                    "last": "31",
-                    "symbol": "55",
-                    "change": "82",
-                    "bid": "84",
-                    "ask": "86",
-                    "stock": "76",
-                    "open": "7295",
-                    "close": "7296",
-                    "high": "70",
-                    "low": "71",
-                    "empresa": "7051",
-                    "costobase": "7292_raw",
-                }
-
                 x_conid, x_symbol, x_dato = None, None, {}
-                if "conidEx" in x_message.keys():
 
-                    x_conid = x_message["conidEx"]
-                    if x_conid not in self.conid_inicio.keys():
-                        self.conid_inicio.update(
-                            {
-                                x_conid: {
-                                    "symbol": None,
-                                    "empresa": None,
-                                    "last": 0.0,
-                                    "change": 0.0,
-                                    "open": 0.0,
-                                    "close": 0.0,
-                                    "bid": 0.0,
-                                    "ask": 0.0,
-                                    "costobase": 0.0,
-                                    "stock": 0.0,
-                                }
-                            }
-                        )
+                if "conidEx" not in x_message:
+                    return x_dato, x_conid, x_symbol
 
-                    if ix["empresa"] in x_message.keys():
-                        self.conid_inicio[x_conid].update(
-                            {"empresa": x_message[ix["empresa"]]}
-                        )
+                x_conid = x_message["conidEx"]
 
-                    if ix["symbol"] in x_message.keys():
-                        self.conid_inicio[x_conid].update(
-                            {"symbol": x_message[ix["symbol"]]}
-                        )
+                # Inicializar estructura de datos si no existe
+                if x_conid not in self.conid_inicio:
+                    self.conid_inicio[x_conid] = {
+                        "symbol": None,
+                        "empresa": None,
+                        "last": 0.0,
+                        "change": 0.0,
+                        "open": 0.0,
+                        "close": 0.0,
+                        "bid": 0.0,
+                        "ask": 0.0,
+                        "high": 0.0,
+                        "low": 0.0,
+                        "costobase": 0.0,
+                        "stock": 0.0,
+                        # Campos de dividendos de IB API
+                        "dividendo": 0.0,  # 7286: Dividendo actual
+                        "dividend_yield": 0.0,  # 7287: % Dividend yield
+                        "ex_dividend_date": None,  # 7288: Ex-dividend date
+                        "ttm_dividends": 0.0,  # 7672: TTM Dividends
+                        "next_dividend": 0.0,  # 7671: Next dividend amount
+                    }
 
-                    if ix["last"] in x_message.keys():
-                        if is_numeric(x_message[ix["last"]]):
-                            self.conid_inicio[x_conid].update(
-                                {"last": float(x_message[ix["last"]])}
-                            )
-
-                    if ix["change"] in x_message.keys():
-                        if is_numeric(x_message[ix["change"]]):
-                            self.conid_inicio[x_conid].update(
-                                {"change": float(x_message[ix["change"]])}
-                            )
-
-                    if ix["open"] in x_message.keys():
-                        if is_numeric(x_message[ix["open"]]):
-                            self.conid_inicio[x_conid].update(
-                                {"open": float(x_message[ix["open"]])}
-                            )
-
-                    if ix["close"] in x_message.keys():
-                        if is_numeric(x_message[ix["close"]]):
-                            self.conid_inicio[x_conid].update(
-                                {"close": float(x_message[ix["close"]])}
-                            )
-
-                    if ix["bid"] in x_message.keys():
-                        if is_numeric(x_message[ix["bid"]]):
-                            self.conid_inicio[x_conid].update(
-                                {"bid": float(x_message[ix["bid"]])}
-                            )
-
-                    if ix["ask"] in x_message.keys():
-                        if is_numeric(x_message[ix["ask"]]):
-                            self.conid_inicio[x_conid].update(
-                                {"ask": float(x_message[ix["ask"]])}
-                            )
-
-                    high = x_message.get(ix["high"], 0)
-                    if is_numeric(high):
-                        self.conid_inicio[x_conid].update({"high": float(high)})
-
-                    low = x_message.get(ix["low"], 0)
-                    if is_numeric(low):
-                        # fix: update 'low' with the correct low value instead of mistakenly using high
-                        self.conid_inicio[x_conid].update({"low": float(low)})
-
-                    if ix["costobase"] in x_message.keys():
-                        if is_numeric(x_message[ix["costobase"]]):
-                            self.conid_inicio[x_conid].update(
-                                {"costobase": float(x_message[ix["costobase"]])}
-                            )
-
-                    if ix["stock"] in x_message.keys():
-                        if is_numeric(x_message[ix["stock"]]):
-                            self.conid_inicio[x_conid].update(
-                                {"stock": float(x_message[ix["stock"]])}
-                            )
-
-                    timestamp = x_message["_updated"] / 1000  # Convertir a segundos
-                    Stimestamp = datetime.fromtimestamp(timestamp).strftime(
-                        "%Y-%m-%d %H:%M:%S"
+                # Procesar campos de texto
+                for field in STRING_FIELDS:
+                    internal_name = DIVIDEND_FIELD_MAPPING.get(field, field)
+                    update_field(
+                        x_conid, internal_name, FIELD_MAP[field], convert_to_float=False
                     )
 
-                    # copia dict para
-                    x_precio = self.conid_inicio[x_conid].copy()
-                    x_precio.update({"timestamp": Stimestamp})
-                    x_symbol = self.conid_inicio[x_conid]["symbol"]
+                # Procesar campos numéricos
+                for field in NUMERIC_FIELDS:
+                    internal_name = DIVIDEND_FIELD_MAPPING.get(field, field)
+                    update_field(
+                        x_conid, internal_name, FIELD_MAP[field], convert_to_float=True
+                    )
 
-                    x_dato.update({x_symbol: x_precio})
+                # Procesar timestamp
+                timestamp = x_message["_updated"] / 1000  # Convertir a segundos
+                timestamp_str = datetime.fromtimestamp(timestamp).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+
+                # Preparar datos de salida
+                x_precio = self.conid_inicio[x_conid].copy()
+                x_precio["timestamp"] = timestamp_str
+                x_symbol = self.conid_inicio[x_conid]["symbol"]
+
+                if x_symbol:
+                    x_dato[x_symbol] = x_precio
 
                 return x_dato, x_conid, x_symbol
-            except (
-                Exception,
-                ValueError,
-                Warning,
-                EncodingWarning,
-                SyntaxWarning,
-            ) as e:
-                print("[decodifica_message_websocket()]: {} {}".format(e, x_dato))
+
+            except Exception as e:
+                print(f"[decodifica_message_websocket()]: {e} {x_dato}")
+                return {}, None, None
 
         try:
             data = json.loads(message)
@@ -482,7 +511,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
             elif not data["topic"].startswith("prefijo"):
                 # print(f"data=={data}")
                 pass
-
         except Exception as error:
             print("[on_message_IBrks_websocket({})]: {}".format(self.vehiculo, error))
             time.sleep(1)
@@ -512,7 +540,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                 # rescribe el peso de la position
                 position["peso"] = position["costobase"] / self.update_peso_position()
-            except EncodingWarning as e:
+            except Exception as e:
                 print("[update_position({})]: {}".format(self.vehiculo, e))
 
         try:
@@ -1806,6 +1834,166 @@ class DatosVehivulo(TickerInfo, MyOrders):
             time.sleep(5)
 
     # actualiza stock en tabla market -- estrategia de dividendos para el portfolio
+    # Helper: obtiene conid desde symbol buscando en positions
+    def _get_conid_from_symbol(self, symbol):
+        """
+        Busca el conid correspondiente a un símbolo en self.positions.
+
+        Args:
+            symbol: Símbolo del activo (ej: "AAPL", "MSFT")
+
+        Returns:
+            conid si se encuentra, None si no existe
+        """
+        try:
+            for position in self.positions:
+                if position["ticket"] == symbol:
+                    return position["conid"]
+            return None
+        except Exception as e:
+            print(f"[_get_conid_from_symbol({symbol})]: {e}")
+            return None
+
+    # Helper: calcula meses de pago desde ex-dividend date
+    def _parse_ib_date(self, date_str):
+        """
+        Parsea fecha de IB en formato "Mar13'26" a datetime.
+
+        Args:
+            date_str: String con formato "MonDD'YY" (ej: "Mar13'26")
+
+        Returns:
+            datetime object o None si falla
+        """
+        try:
+            if not date_str or date_str == "":
+                return None
+
+            # Formato IB: "Mar13'26" -> Marzo 13, 2026
+            exdiv_date = datetime.strptime(date_str, "%b%d'%y")
+            return exdiv_date
+        except Exception as e:
+            print(f"[_parse_ib_date({date_str})]: {e}")
+            return None
+
+    def _calcular_meses_desde_ex_date(
+        self,
+        ex_dividend_date,
+        dividend_yield,
+        symbol=None,
+        dividendo_individual=0.0,
+        ttm_dividends=0.0,
+    ):
+        """
+        Calcula los meses de pago de dividendos usando MÉTODO HÍBRIDO:
+        1. Intenta obtener historial real de yfinance (más preciso)
+        2. Si falla, infiere frecuencia desde datos de IB
+
+        Args:
+            ex_dividend_date: Fecha ex-dividend (formato IB "Mar13'26" o datetime)
+            dividend_yield: Rendimiento del dividendo (para validar que paga)
+            symbol: Símbolo del activo (para consultar yfinance)
+            dividendo_individual: Dividendo por pago individual (campo 7286)
+            ttm_dividends: Total anualizado TTM (campo 7672)
+
+        Returns:
+            Lista de nombres de meses donde se paga dividendo
+        """
+        try:
+            # Si no hay dividend yield o es 0, no hay dividendos
+            if not dividend_yield or dividend_yield == 0:
+                return []
+
+            # Si no hay fecha ex-dividend, retornar vacío
+            if not ex_dividend_date:
+                return []
+
+            # Parsear la fecha según el tipo
+            if isinstance(ex_dividend_date, datetime):
+                exdiv_date = ex_dividend_date
+            elif isinstance(ex_dividend_date, str):
+                exdiv_date = self._parse_ib_date(ex_dividend_date)
+                if not exdiv_date:
+                    return []
+            else:
+                return []
+
+            # MÉTODO 1: Intentar obtener historial de yfinance (solo para meses, no valores)
+            if symbol:
+                try:
+                    import yfinance as yf
+
+                    ticket = yf.Ticker(symbol)
+                    hist = ticket.history(
+                        period="2y"
+                    )  # 2 años para tener suficiente historial
+
+                    if "Dividends" in hist.columns:
+                        # Filtrar solo pagos de dividendos del año pasado
+                        year = pd.Timestamp.now().year - 1
+                        m_div = hist[hist["Dividends"] != 0]
+                        anual = m_div[m_div.index.year == year]
+
+                        if not anual.empty:
+                            # Extraer meses únicos donde hubo pagos
+                            meses = list(anual.index.strftime("%B").unique())
+                            if meses:
+                                return meses
+                except Exception as e:
+                    # Si falla yfinance, continuar con método de inferencia
+                    pass
+
+            # MÉTODO 2: Inferir frecuencia desde datos de IB
+            mes_exdiv = exdiv_date.strftime("%B")
+
+            # Si tenemos TTM y dividendo individual, inferir frecuencia
+            if ttm_dividends > 0 and dividendo_individual > 0:
+                # Calcular cuántos pagos al año
+                pagos_por_año = round(ttm_dividends / dividendo_individual)
+
+                # Limitar a valores razonables (1, 2, 4, 12)
+                if pagos_por_año >= 12:
+                    # Pago mensual
+                    return [
+                        "January",
+                        "February",
+                        "March",
+                        "April",
+                        "May",
+                        "June",
+                        "July",
+                        "August",
+                        "September",
+                        "October",
+                        "November",
+                        "December",
+                    ]
+                elif pagos_por_año >= 4:
+                    # Pago trimestral - inferir desde mes ex-dividend
+                    mes_num = exdiv_date.month
+                    meses_trimestral = []
+                    for i in range(4):
+                        mes_idx = ((mes_num - 1 + i * 3) % 12) + 1
+                        meses_trimestral.append(
+                            datetime(2000, mes_idx, 1).strftime("%B")
+                        )
+                    return meses_trimestral
+                elif pagos_por_año >= 2:
+                    # Pago semestral
+                    mes_num = exdiv_date.month
+                    mes_idx2 = ((mes_num - 1 + 6) % 12) + 1
+                    return [mes_exdiv, datetime(2000, mes_idx2, 1).strftime("%B")]
+                else:
+                    # Pago anual
+                    return [mes_exdiv]
+
+            # FALLBACK: Si no tenemos suficiente info, retornar solo mes ex-dividend
+            return [mes_exdiv]
+
+        except Exception as e:
+            print(f"[_calcular_meses_desde_ex_date()]: {e}")
+            return []
+
     def dividends_en_market_stock(self, activos):
         # update tabla market
         def update_tabla_market(x_symbol, campo, value):
@@ -1866,6 +2054,10 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                         columnas, values = [], []
                         for keys, info in fields.items():
+                            # EXCLUIR categoriaActivo para no sobrescribir el valor existente
+                            if keys == "categoriaActivo":
+                                continue
+
                             if isinstance(info, (int, float)):
                                 columnas.append(keys)
                                 values.append(info)
@@ -2211,8 +2403,8 @@ class DashMain:
             label="Ganancias Diarias  ",
             avance=0,
             proyeccion=1_000,
-            width=200,
-            height=13,
+            width=130,
+            height=10,
             bg_color=self.colors["bgcolor"],
         )
         self.InvProgress = ProgressBar(
@@ -2221,12 +2413,12 @@ class DashMain:
             label="Total Inversión      ",
             avance=0,
             proyeccion=1_000_000,
-            width=200,
-            height=13,
+            width=130,
+            height=10,
             bg_color=self.colors["bgcolor"],
         )
-        self.GypProgress.pack(side=tk.LEFT, pady=10)
-        self.InvProgress.pack(side=tk.LEFT, pady=10)
+        self.GypProgress.pack(side=tk.LEFT, pady=5)
+        self.InvProgress.pack(side=tk.LEFT, pady=5)
 
         # áreas y figuras de gráficos principales --------------------------------------------------------------------
         self.rg0 = Figure(
@@ -2955,19 +3147,26 @@ class DashMain:
                     div = market[0][ix.index("dividendRate")]
                     string = market[0][ix.index("monthDividendsPay")]
                     fecha = market[0][ix.index("exDividendDate")]
-                    exdiv = fecha.strftime("%d-%b") if fecha.month == date else " "
+                    exdiv = (
+                        fecha.strftime("%d-%b")
+                        if fecha and fecha.month == date
+                        else " "
+                    )
                     avgcost = position["costobase"] / position["position"]
 
                     dividends = [0] * 12
-                    a_meses = meses if string is None else string.split(",")
+                    a_meses = (
+                        meses if string is None or string == "" else string.split(",")
+                    )
 
-                    # calcula la cantidad de pagos
-                    distribuir = [s.strip()[:3] for s in a_meses]
+                    # calcula la cantidad de pagos - filtrar cadenas vacías
+                    distribuir = [s.strip()[:3] for s in a_meses if s.strip()]
                     rata = div / len(distribuir) if len(distribuir) > 0 else last
 
                     # asume pago de dividends son iguales
                     for i, mes in enumerate(distribuir):
-                        dividends[meses.index(mes)] = rata * position["position"]
+                        if mes in meses:  # Validar que el mes existe en la lista
+                            dividends[meses.index(mes)] = rata * position["position"]
 
                     # recalculo de rendimiento en función avgcost
                     rend = div / avgcost if avgcost > 0 else 0
@@ -3003,18 +3202,25 @@ class DashMain:
                     div = market[0][ix.index("dividendRate")]
                     string = market[0][ix.index("monthDividendsPay")]
                     fecha = market[0][ix.index("exDividendDate")]
-                    exdiv = fecha.strftime("%d-%b") if fecha.month == date else " "
+                    exdiv = (
+                        fecha.strftime("%d-%b")
+                        if fecha and fecha.month == date
+                        else " "
+                    )
                     avgcost = position["costobase"] / position["position"]
 
-                    a_meses = meses if string is None else string.split(",")
+                    a_meses = (
+                        meses if string is None or string == "" else string.split(",")
+                    )
 
-                    # calcula la cantidad de pagos
-                    distribuir = [s.strip()[:3] for s in a_meses]
+                    # calcula la cantidad de pagos - filtrar cadenas vacías
+                    distribuir = [s.strip()[:3] for s in a_meses if s.strip()]
                     rata = div / len(distribuir) if len(distribuir) > 0 else last
 
                     # asume pago de dividends son iguales
                     for i, mes in enumerate(distribuir):
-                        dividends[meses.index(mes)] = rata * position["position"]
+                        if mes in meses:  # Validar que el mes existe en la lista
+                            dividends[meses.index(mes)] = rata * position["position"]
 
                     # recalculo de rendimiento en función avgcost
                     rend = div / avgcost if avgcost > 0 else 0
@@ -3052,18 +3258,25 @@ class DashMain:
                     div = market[0][ix.index("dividendRate")]
                     string = market[0][ix.index("monthDividendsPay")]
                     fecha = market[0][ix.index("exDividendDate")]
-                    exdiv = fecha.strftime("%d-%b") if fecha.month == date else " "
+                    exdiv = (
+                        fecha.strftime("%d-%b")
+                        if fecha and fecha.month == date
+                        else " "
+                    )
                     avgcost = position["costobase"] / position["position"]
 
-                    a_meses = meses if string is None else string.split(",")
+                    a_meses = (
+                        meses if string is None or string == "" else string.split(",")
+                    )
 
-                    # calcula la cantidad de pagos
-                    distribuir = [s.strip()[:3] for s in a_meses]
+                    # calcula la cantidad de pagos - filtrar cadenas vacías
+                    distribuir = [s.strip()[:3] for s in a_meses if s.strip()]
                     rata = div / len(distribuir) if len(distribuir) > 0 else last
 
                     # asume pago de dividends son iguales
                     for i, mes in enumerate(distribuir):
-                        dividends[meses.index(mes)] = rata * position["position"]
+                        if mes in meses:  # Validar que el mes existe en la lista
+                            dividends[meses.index(mes)] = rata * position["position"]
 
                     # recalculo de rendimiento en función avgcost
                     rend = div / avgcost if avgcost > 0 else 0
@@ -6061,7 +6274,7 @@ class system_status(tk.Frame):
 
         # OPTIMIZACIÓN: Intervalo más largo para reducir consumo de CPU
         # Cambiado de interval * 3000 (3 segundos) a 10 segundos
-        interval_optimizado = 10000  # 10 segundos (antes era ~3 segundos)
+        interval_optimizado = 15000  # 10 segundos (antes era ~3 segundos)
 
         ani = animation.FuncAnimation(
             self.fg,

@@ -1,5 +1,6 @@
 SELECT * FROM bdinv.otros_activos
-where cuenta = "B0000001";
+-- where cuenta = "B0000001"
+;
 
 SELECT symbol,  CONV(substr(SHA2(symbol, 256),1,15), 16, 10), SHA2(symbol, 256), SHA2(base_asset, 256)
 FROM bdinv.otros_activos
