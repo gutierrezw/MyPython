@@ -2129,6 +2129,7 @@ class TickerInfo(MyOrders):
             # update de dividends en tabla market aplica solo para Stock
             wait = DataHub.last_process["dividends_en_market_stock"]
             if wait < datetime.now():
+                # Versión con yfinance (para comparar con IB)
                 self.dividends_en_market_stock(activos)
                 DataHub.last_process["dividends_en_market_stock"] = (
                     datetime.now() + timedelta(minutes=5)
@@ -5032,7 +5033,7 @@ class MyWebsocket:
                         self.ws.send(
                             "smd+"
                             + conid
-                            + '+{"fields": ["31","55", "82", "7051","76", "7292", "7295", "7296"]}'
+                            + '+{"fields": ["31","55","70","71","76","82","84","86","7051","7292","7295","7296","7281","7286","7287","7288","7671","7672"]}'
                         )
 
                     print("subscribe_stocks({})".format(len(self.idsymbol)))
@@ -5339,31 +5340,31 @@ class ProgressBar(tk.Frame):
     def _create_widgets(self):
         """Crea los widgets internos del componente"""
 
-        # Frame para labels inferiores
+        # Obtener color de fondo del padre
         try:
             parent_bg = self.master.cget("bg")
         except:
             parent_bg = self.bg_color
 
-        info_left = tk.Frame(self, bg=parent_bg)
-        info_right = tk.Frame(self, bg=parent_bg)
-        info_left.pack(side=tk.LEFT)
-        info_right.pack(side=tk.RIGHT)
+        # Frame principal contenedor alineado a la izquierda
+        main_container = tk.Frame(self, bg=parent_bg)
+        main_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.W)
 
-        # label Canvas
-        self.label_cavas = tk.Label(
-            info_right,
-            text=self.label_text,
-            font=("Segoe UI", 10, "bold"),
-            bg=self.bg_color,
-            fg="#121414",
-            anchor=tk.W,
-        )
-        self.label_cavas.pack(side=tk.LEFT)
+        # Label en la parte superior
+        if self.label_text:
+            self.label_cavas = tk.Label(
+                main_container,
+                text=self.label_text,
+                font=("Segoe UI", 9),
+                bg=self.bg_color,
+                fg="#121414",
+                anchor=tk.W,
+            )
+            self.label_cavas.pack(side=tk.TOP, anchor=tk.W, padx=1, pady=(0, 2))
 
-        # Canvas para la barra de progreso con sombra
-        canvas_container = tk.Frame(info_right, bg=self.bg_cavas, bd=0)
-        canvas_container.pack(padx=5, pady=5)
+        # Canvas para la barra de progreso
+        canvas_container = tk.Frame(main_container, bg=self.bg_cavas, bd=0)
+        canvas_container.pack(side=tk.TOP, anchor=tk.W, padx=5, pady=(0, 5))
 
         self.canvas = tk.Canvas(
             canvas_container,
@@ -5373,10 +5374,11 @@ class ProgressBar(tk.Frame):
             highlightthickness=0,
             bd=0,
         )
-        self.canvas.pack(padx=2, pady=2)
+        self.canvas.pack(padx=2, pady=1)
 
-        info_frame = tk.Frame(info_right, bg=parent_bg)
-        info_frame.pack(fill=tk.X, padx=5, pady=(0, 0))
+        # Frame para labels inferiores (partida y proyección)
+        info_frame = tk.Frame(main_container, bg=self.bg_color)
+        info_frame.pack(side=tk.TOP, fill=tk.X, anchor=tk.W, padx=5, pady=(0, 0))
 
         # Labels para mostrar valores con mejor tipografía
         self.label_partida = tk.Label(
@@ -5428,7 +5430,9 @@ class ProgressBar(tk.Frame):
 
         # Calcular posiciones normalizadas (0 a 1)
         zero_position = (0 - min_val) / total_range if total_range > 0 else 0
-        avance_position = (self.avance - min_val) / total_range if total_range > 0 else 0
+        avance_position = (
+            (self.avance - min_val) / total_range if total_range > 0 else 0
+        )
 
         # Convertir a píxeles
         zero_pixel = int(self.width * zero_position)
@@ -5457,8 +5461,13 @@ class ProgressBar(tk.Frame):
         # Dibujar línea de cero si hay valores negativos
         if min_val < 0:
             self.canvas.create_line(
-                zero_pixel, 0, zero_pixel, self.height,
-                fill="#95A5A6", width=2, dash=(3, 3)
+                zero_pixel,
+                0,
+                zero_pixel,
+                self.height,
+                fill="#95A5A6",
+                width=2,
+                dash=(3, 3),
             )
 
         # Dibujar progreso con bordes redondeados
@@ -5509,7 +5518,9 @@ class ProgressBar(tk.Frame):
 
         # Dibujar marcador de inicio (partida) si es diferente de cero
         if self.partida != 0:
-            partida_position = (self.partida - min_val) / total_range if total_range > 0 else 0
+            partida_position = (
+                (self.partida - min_val) / total_range if total_range > 0 else 0
+            )
             partida_pos = int(partida_position * self.width)
             # Línea del marcador
             self.canvas.create_line(
@@ -5527,7 +5538,9 @@ class ProgressBar(tk.Frame):
             )
 
         # Dibujar marcador de objetivo (proyección)
-        proyeccion_position = (self.proyeccion - min_val) / total_range if total_range > 0 else 1
+        proyeccion_position = (
+            (self.proyeccion - min_val) / total_range if total_range > 0 else 1
+        )
         proyeccion_pos = int(proyeccion_position * self.width)
         arrow_size = min(12, self.height // 3)
         self.canvas.create_polygon(
@@ -5547,14 +5560,18 @@ class ProgressBar(tk.Frame):
         percent_text = f"{avance_text}"
 
         # Determinar posición del texto (en el centro de la barra de progreso)
-        text_x = (progress_start + progress_end) // 2 if progress_width > 20 else self.width // 2
+        text_x = (
+            (progress_start + progress_end) // 2
+            if progress_width > 20
+            else self.width // 2
+        )
 
         # Sombra del texto
         self.canvas.create_text(
             text_x + 1,
             self.height // 2 + 1,
             text=percent_text,
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", 8, "bold"),
             fill="#000000",
             anchor=tk.CENTER,
         )
@@ -5565,7 +5582,7 @@ class ProgressBar(tk.Frame):
             text_x,
             self.height // 2,
             text=percent_text,
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", 8, "bold"),
             fill=text_color,
             anchor=tk.CENTER,
         )
