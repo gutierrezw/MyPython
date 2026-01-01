@@ -21,7 +21,7 @@ from Modulos_python import (
 def is_null(s):
     """Valida si el parametro contingent valor Null o espacios"""
 
-    if s.isspace() or s == "":
+    if s is None or (isinstance(s, str) and (s.isspace() or s == "")):
         rc = True
     else:
         rc = False

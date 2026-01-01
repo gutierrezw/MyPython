@@ -55,31 +55,31 @@ class ProgressBar(tk.Frame):
     def _create_widgets(self):
         """Crea los widgets internos del componente"""
 
-        # Frame para labels inferiores
+        # Obtener color de fondo del padre
         try:
             parent_bg = self.master.cget("bg")
         except:
             parent_bg = "white"
 
-        info_left = tk.Frame(self, bg=parent_bg)
-        info_right = tk.Frame(self, bg=parent_bg)
-        info_left.pack(side=tk.LEFT)
-        info_right.pack(side=tk.RIGHT)
+        # Frame principal contenedor alineado a la izquierda
+        main_container = tk.Frame(self, bg=parent_bg)
+        main_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.W)
 
-        # label Canvas
-        self.label_cavas = tk.Label(
-            info_right,
-            text=self.label_text,
-            font=("Arial", 12),
-            bg=self.bg_color,
-            fg="#121414",
-            anchor=tk.W,
-        )
-        self.label_cavas.pack(side=tk.LEFT)
+        # Label en la parte superior
+        if self.label_text:
+            self.label_cavas = tk.Label(
+                main_container,
+                text=self.label_text,
+                font=("Arial", 10, "bold"),
+                bg=parent_bg,
+                fg="#121414",
+                anchor=tk.W,
+            )
+            self.label_cavas.pack(side=tk.TOP, anchor=tk.W, padx=5, pady=(0, 2))
 
-        # Canvas para la barra de progreso con sombra
-        canvas_container = tk.Frame(info_right, bg=self.bg_cavas, bd=0)
-        canvas_container.pack(padx=5, pady=5)
+        # Canvas para la barra de progreso
+        canvas_container = tk.Frame(main_container, bg=self.bg_cavas, bd=0)
+        canvas_container.pack(side=tk.TOP, anchor=tk.W, padx=5, pady=(0, 5))
 
         self.canvas = tk.Canvas(
             canvas_container,
@@ -91,15 +91,16 @@ class ProgressBar(tk.Frame):
         )
         self.canvas.pack(padx=2, pady=2)
 
-        info_frame = tk.Frame(info_right, bg=parent_bg)
-        info_frame.pack(fill=tk.X, padx=5, pady=(0, 0))
+        # Frame para labels inferiores (partida y proyección)
+        info_frame = tk.Frame(main_container, bg=parent_bg)
+        info_frame.pack(side=tk.TOP, fill=tk.X, anchor=tk.W, padx=5, pady=(0, 0))
 
         # Labels para mostrar valores con mejor tipografía
         self.label_partida = tk.Label(
             info_frame,
             text="$0",
             font=("Segoe UI", 8),
-            bg=self.bg_color,
+            bg=parent_bg,
             fg="#7F8C8D",
             anchor=tk.W,
         )
@@ -109,7 +110,7 @@ class ProgressBar(tk.Frame):
             info_frame,
             text="$0",
             font=("Segoe UI", 8),
-            bg=self.bg_color,
+            bg=parent_bg,
             fg="#7F8C8D",
             anchor=tk.E,
         )
