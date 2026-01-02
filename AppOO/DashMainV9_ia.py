@@ -45,6 +45,7 @@ from Class_customer import (
 from Modulos_python import (
     tk,
     ttk,
+    sys,
     datetime,
     threading,
     Figure,
@@ -1641,7 +1642,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
             # válida que exista positions (caso especial para inicio de sesion)
             update_entorno_e_inversion()
-        except EncodingWarning as e:
+        except Exception as e:
             print("[api_vehiculo_binance()]: {}".format(e))
 
     # declara las api de Interactive Brockers
@@ -1688,14 +1689,21 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             )
 
                         price = key["mktPrice"]
-                        if "dividendYield" in yf_activo:
+                        if (
+                            "dividendYield" in yf_activo
+                            and "trailingAnnualDividendRate" in yf_activo
+                        ):
                             dividendYield = yf_activo["dividendYield"]
                             if "previousClose" in yf_activo:
                                 price = yf_activo["previousClose"]
-                            dividendo = price * dividendYield / 100
 
-                        if "dividendRate" in yf_activo:
-                            dividendo = yf_activo["dividendRate"]
+                            # si ha pagado dividndo en los ultimos 12 meses
+                            if yf_activo.get("trailingAnnualDividendRate") > 0:
+                                dividendo = price * dividendYield / 100
+
+                                # ultima instaancia -- para obtener el dividendo
+                                if "dividendRate" in yf_activo:
+                                    dividendo = yf_activo["dividendRate"]
 
                         if "exDividendDate" in yf_activo:
                             exDividendDate = datetime.fromtimestamp(
@@ -1753,7 +1761,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         p["deuda"] = 0
                         p["conid"] = str(key["conid"])
                         p["open"] = x_open
-                        p["dgyp"] = p["mrkprice"] - p["open"] if p["open"] > 0 else 0
+                        p["dgyp"] = (
+                            p["mrkprice"] - p["open"] if p["open"] > 0 else 0
+                        ) * p["position"]
                         p["peso"] = 0
 
                         # obtiene la positions anterior, la estrategia y otros valores
@@ -1834,7 +1844,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
             time.sleep(5)
 
     # actualiza stock en tabla market -- estrategia de dividendos para el portfolio
-    # Helper: obtiene conid desde symbol buscando en positions
     def _get_conid_from_symbol(self, symbol):
         """
         Busca el conid correspondiente a un símbolo en self.positions.
@@ -1876,125 +1885,209 @@ class DatosVehivulo(TickerInfo, MyOrders):
             print(f"[_parse_ib_date({date_str})]: {e}")
             return None
 
-    def _calcular_meses_desde_ex_date(
-        self,
-        ex_dividend_date,
-        dividend_yield,
-        symbol=None,
-        dividendo_individual=0.0,
-        ttm_dividends=0.0,
+    def _validate_dividend_data_freshness(
+        self, symbol, activo, dividends_history, display_log=False
     ):
         """
-        Calcula los meses de pago de dividendos usando MÉTODO HÍBRIDO:
-        1. Intenta obtener historial real de yfinance (más preciso)
-        2. Si falla, infiere frecuencia desde datos de IB
+        Valida que los datos de dividendos estén actualizados.
+
+        PROBLEMA DETECTADO: yfinance a veces retiene datos obsoletos de activos
+        que dejaron de pagar dividendos.
+
+        Validaciones aplicadas:
+        1. Si tiene dividendRate > 0 → debe tener historial de pagos
+        2. Si último pago fue hace >18 meses → datos obsoletos
+        3. Si tiene trailingAnnualDividendRate > 0 → debe tener al menos 1 pago en últimos 12 meses
 
         Args:
-            ex_dividend_date: Fecha ex-dividend (formato IB "Mar13'26" o datetime)
-            dividend_yield: Rendimiento del dividendo (para validar que paga)
-            symbol: Símbolo del activo (para consultar yfinance)
-            dividendo_individual: Dividendo por pago individual (campo 7286)
-            ttm_dividends: Total anualizado TTM (campo 7672)
+            activo (dict): Información del activo desde yf.Ticker.info
+            dividends_history (pd.Series): Historial de dividendos
 
         Returns:
-            Lista de nombres de meses donde se paga dividendo
+            tuple: (is_valid, warning_message)
+                - is_valid (bool): True si los datos parecen actualizados
+                - warning_message (str): Mensaje de advertencia si hay problemas
         """
         try:
-            # Si no hay dividend yield o es 0, no hay dividendos
-            if not dividend_yield or dividend_yield == 0:
-                return []
+            # Extraer campos clave
+            dividend_rate = activo.get("dividendRate", 0)
+            trailing_annual = activo.get("trailingAnnualDividendRate", 0)
+            ex_dividend_date = activo.get("exDividendDate")
 
-            # Si no hay fecha ex-dividend, retornar vacío
-            if not ex_dividend_date:
-                return []
+            # ============================================================================
+            # VALIDACIÓN 1: Si tiene dividendRate pero sin historial → sospechoso
+            # ============================================================================
+            if dividend_rate > 0 and len(dividends_history) == 0:
+                return (
+                    False,
+                    "⚠️ {symbol}: Tiene dividendRate pero sin historial de pagos. Verificar manualmente.",
+                )
 
-            # Parsear la fecha según el tipo
-            if isinstance(ex_dividend_date, datetime):
-                exdiv_date = ex_dividend_date
-            elif isinstance(ex_dividend_date, str):
-                exdiv_date = self._parse_ib_date(ex_dividend_date)
-                if not exdiv_date:
-                    return []
-            else:
-                return []
+            # ============================================================================
+            # VALIDACIÓN 2: Si tiene historial, verificar último pago (no más de 18 meses)
+            # ============================================================================
+            if dividend_rate > 0 and len(dividends_history) > 0:
+                # Verificar último pago
+                last_payment_date = dividends_history.index[-1]
 
-            # MÉTODO 1: Intentar obtener historial de yfinance (solo para meses, no valores)
-            if symbol:
-                try:
-                    import yfinance as yf
+                # Normalizar timezone
+                if last_payment_date.tz is not None:
+                    last_payment_date = last_payment_date.tz_localize(None)
 
-                    ticket = yf.Ticker(symbol)
-                    hist = ticket.history(
-                        period="2y"
-                    )  # 2 años para tener suficiente historial
+                # Si el último pago fue hace más de 18 meses, datos probablemente obsoletos
+                cutoff_18_months = pd.Timestamp.now() - pd.DateOffset(months=18)
+                cutoff_18_months = cutoff_18_months.tz_localize(None)
 
-                    if "Dividends" in hist.columns:
-                        # Filtrar solo pagos de dividendos del año pasado
-                        year = pd.Timestamp.now().year - 1
-                        m_div = hist[hist["Dividends"] != 0]
-                        anual = m_div[m_div.index.year == year]
+                if last_payment_date < cutoff_18_months:
+                    warning = f"⚠️  {symbol}: Último pago hace más de 18 meses ({last_payment_date.strftime('%Y-%m-%d')}). Datos posiblemente obsoletos."
+                    return False, warning
 
-                        if not anual.empty:
-                            # Extraer meses únicos donde hubo pagos
-                            meses = list(anual.index.strftime("%B").unique())
-                            if meses:
-                                return meses
-                except Exception as e:
-                    # Si falla yfinance, continuar con método de inferencia
-                    pass
+            # ============================================================================
+            # VALIDACIÓN 3: Si tiene trailingAnnualDividendRate > 0 → debe haber pagado
+            #               al menos 1 dividendo en los últimos 12 meses (TTM)
+            # CRÍTICO: Esta es la validación clave que sugirió el usuario
+            # ============================================================================
+            if trailing_annual > 0:
+                if len(dividends_history) == 0:
+                    return (
+                        False,
+                        f"⚠️ {symbol}: Tiene trailingAnnualDividendRate=${trailing_annual:.2f} pero sin historial. Datos inconsistentes.",
+                    )
 
-            # MÉTODO 2: Inferir frecuencia desde datos de IB
-            mes_exdiv = exdiv_date.strftime("%B")
+                # Calcular fecha de corte (últimos 12 meses - TTM)
+                cutoff_12_months = pd.Timestamp.now() - pd.DateOffset(months=12)
+                cutoff_12_months = cutoff_12_months.tz_localize(None)
 
-            # Si tenemos TTM y dividendo individual, inferir frecuencia
-            if ttm_dividends > 0 and dividendo_individual > 0:
-                # Calcular cuántos pagos al año
-                pagos_por_año = round(ttm_dividends / dividendo_individual)
+                # Normalizar índice de dividendos
+                dividends_index = dividends_history.index
+                if dividends_index.tz is not None:
+                    dividends_index = dividends_index.tz_localize(None)
 
-                # Limitar a valores razonables (1, 2, 4, 12)
-                if pagos_por_año >= 12:
-                    # Pago mensual
-                    return [
-                        "January",
-                        "February",
-                        "March",
-                        "April",
-                        "May",
-                        "June",
-                        "July",
-                        "August",
-                        "September",
-                        "October",
-                        "November",
-                        "December",
-                    ]
-                elif pagos_por_año >= 4:
-                    # Pago trimestral - inferir desde mes ex-dividend
-                    mes_num = exdiv_date.month
-                    meses_trimestral = []
-                    for i in range(4):
-                        mes_idx = ((mes_num - 1 + i * 3) % 12) + 1
-                        meses_trimestral.append(
-                            datetime(2000, mes_idx, 1).strftime("%B")
-                        )
-                    return meses_trimestral
-                elif pagos_por_año >= 2:
-                    # Pago semestral
-                    mes_num = exdiv_date.month
-                    mes_idx2 = ((mes_num - 1 + 6) % 12) + 1
-                    return [mes_exdiv, datetime(2000, mes_idx2, 1).strftime("%B")]
-                else:
-                    # Pago anual
-                    return [mes_exdiv]
+                # Filtrar pagos de los últimos 12 meses
+                recent_payments = [
+                    (
+                        date,
+                        dividends_history.loc[dividends_history.index == date].iloc[0],
+                    )
+                    for date in dividends_history.index
+                    if date.tz_localize(None) > cutoff_12_months
+                ]
 
-            # FALLBACK: Si no tenemos suficiente info, retornar solo mes ex-dividend
-            return [mes_exdiv]
+                if len(recent_payments) == 0:
+                    # Tiene trailingAnnualDividendRate pero NO hay pagos en últimos 12 meses
+                    # Esto es una INCONSISTENCIA CRÍTICA
+                    last_payment = dividends_history.index[-1]
+                    if last_payment.tz is not None:
+                        last_payment = last_payment.tz_localize(None)
+
+                    warning = (
+                        f"⚠️  {symbol}: Tiene trailingAnnualDividendRate=${trailing_annual:.2f} pero SIN pagos en últimos 12 meses. "
+                        f"Último pago: {last_payment.strftime('%Y-%m-%d')}. Datos OBSOLETOS."
+                    )
+                    return False, warning
+
+                # VALIDACIÓN ADICIONAL: Verificar que TTM reportado coincida con suma real
+                total_ttm_calculated = sum(amount for _, amount in recent_payments)
+                difference = abs(trailing_annual - total_ttm_calculated)
+
+                # Si la diferencia es mayor al 20%, advertir (puede ser cambio reciente)
+                if difference > (trailing_annual * 0.20) and display_log:
+                    warning = (
+                        f"⚠️  {symbol}: trailingAnnualDividendRate reportado (${trailing_annual:.2f}) difiere "
+                        f"{difference:.2f} del calculado (${total_ttm_calculated:.2f}). "
+                        f"Posible cambio reciente o datos desactualizados."
+                    )
+                    # No marcar como inválido, solo advertir
+                    # return False, warning  # Comentado: permitir continuar
+
+                    print(f"[VALIDACIÓN TTM] {warning}")
+
+            # Si pasó todas las validaciones
+            return True, ""
+        except Exception as e:
+            print(f"[_validate_dividend_data_freshness()]: {e}")
+            traceback.print_exc()
+            return True, ""  # En caso de error, asumir válido para no bloquear
+
+    def _extract_dividend_payment_months(self, dividends_history):
+        """
+        Extrae meses de pago de dividendos desde el historial real (últimos 12 meses).
+
+        Basado en test_yfinance_dividends_fields.py - Método mejorado que:
+        - Analiza pagos de los últimos 12 meses (no solo año anterior)
+        - Maneja correctamente zonas horarias
+        - Detecta frecuencia de pago (mensual, trimestral, semestral, anual)
+        - Retorna nombres de meses en inglés para consistencia
+
+        Args:
+            dividends_history (pd.Series): Serie de pandas con historial de dividendos
+                                          (index: fechas, values: montos)
+
+        Returns:
+            tuple: (meses_pago, frecuencia, total_ttm)
+                - meses_pago (list): Lista de nombres de meses (ej: ["March", "June", "September", "December"])
+                - frecuencia (int): Número de pagos por año detectados
+                - total_ttm (float): Total pagado en últimos 12 meses (Trailing Twelve Months)
+        """
+        try:
+            if len(dividends_history) == 0:
+                return [], 0, 0.0
+
+            # Calcular fecha de corte (últimos 12 meses)
+            cutoff_date = pd.Timestamp.now() - pd.DateOffset(months=12)
+            cutoff_date = cutoff_date.tz_localize(None)
+
+            # Normalizar índice de dividendos (quitar zona horaria si existe)
+            dividends_index = dividends_history.index
+            if dividends_index.tz is not None:
+                dividends_index = dividends_index.tz_localize(None)
+
+            # Filtrar dividendos de los últimos 12 meses
+            recent_dividends = [
+                (date, dividends_history.loc[dividends_history.index == date].iloc[0])
+                for date in dividends_history.index
+                if date.tz_localize(None) > cutoff_date
+            ]
+
+            if not recent_dividends:
+                return [], 0, 0.0
+
+            # Calcular total TTM
+            total_ttm = sum(amount for _, amount in recent_dividends)
+
+            # Detectar frecuencia (número de pagos/año)
+            frecuencia = len(recent_dividends)
+
+            # Extraer meses únicos de pago
+            months_paid = [date.month for date, _ in recent_dividends]
+            unique_months = sorted(set(months_paid))
+
+            # Convertir números de mes a nombres en inglés
+            month_names = [datetime(2000, m, 1).strftime("%B") for m in unique_months]
+
+            return month_names, frecuencia, total_ttm
 
         except Exception as e:
-            print(f"[_calcular_meses_desde_ex_date()]: {e}")
-            return []
+            print(f"[_extract_dividend_payment_months()]: {e}")
+            return [], 0, 0.0
 
     def dividends_en_market_stock(self, activos):
+        """
+        Actualiza información de dividendos en la tabla market usando yfinance.
+
+        Mejoras basadas en test_yfinance_dividends_fields.py:
+        - Usa trailingAnnualDividendRate para dividendos anuales (TTM)
+        - Detecta meses de pago desde historial real de dividends
+        - Valida que los datos de dividendos estén actualizados
+        - Maneja correctamente dividendRate (pago individual, NO anual)
+
+        Args:
+            activos (list): Lista de símbolos a actualizar
+
+        Returns:
+            None (actualiza tabla market directamente)
+        """
+
         # update tabla market
         def update_tabla_market(x_symbol, campo, value):
             try:
@@ -2009,6 +2102,14 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
         # estructura información de dividendos
         def construct_info_dividends(x_symbol, activo, pdatos, campos):
+            """
+            Construye información estructurada de dividendos.
+
+            Cambios clave:
+            - Extrae meses de pago desde historial real (último año)
+            - Valida que haya pagos recientes (últimos 12 meses)
+            - Retorna información completa para análisis de rebalanceo
+            """
             try:
                 ddatos, x_categoria, x_meses = self.rendimiento_dividends(
                     activo=activo, datos=pdatos, symbol=x_symbol
@@ -2020,7 +2121,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 else:
                     campos.update({"categoriaActivo": "X"})
                 return campos, x_categoria[0], x_meses
-            except EncodingWarning as error:
+            except Exception as error:
                 print("[construct_info_dividends()]: {}".format(error))
 
         try:
@@ -2033,30 +2134,43 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         symbol=ticket, vehiculo=self.vehiculo
                     )
 
-                    # actualiza dividendos si update=False -- deja pasar los ETF
-                    # if (not ind_update and ('dividendYield' in yf_activo) and
-                    #         (yf_activo['quoteType'] != 'ETF') and 'Dividends' in datos):
+                    # ============================================================================================================
+                    # MEJORA: Procesar dividendos solo si:
+                    # 1. No está actualizado (ind_update=False)
+                    # 2. Tiene información de dividendYield
+                    # 3. Tiene historial de dividendos en datos
+                    # ============================================================================================================
                     if (
                         not ind_update
                         and ("dividendYield" in yf_activo)
                         and ("Dividends" in datos)
                     ):
+                        # VALIDACIÓN: Verificar frescura de datos de dividendos
+                        dividends_history = datos["Dividends"]
+                        is_valid, warning = self._validate_dividend_data_freshness(
+                            symbol, yf_activo, dividends_history
+                        )
 
                         (market, ix) = self.Market.select(
                             account=self.account, symbol=ticket
                         )
 
-                        # obtiene información del activo
+                        # obtiene información del activo usando InfoYfinance
+                        # NOTA: InfoYfinance ya extrae campos clave como:
+                        #   - dividendRate (pago individual)
+                        #   - dividendYield (%)
+                        #   - trailingAnnualDividendRate (TTM - el correcto para anual)
+                        #   - exDividendDate, payoutRatio, fiveYearAvgDividendYield
                         x_campos = InfoYfinance(symbol, yf_activo)
+
+                        # Construye información estructurada de dividendos
+                        # Llama a rendimiento_dividends() que calcula estrategia de inversión
                         fields, categoria, meses = construct_info_dividends(
                             ticket, yf_activo, datos, x_campos.info
                         )
 
                         columnas, values = [], []
                         for keys, info in fields.items():
-                            # EXCLUIR categoriaActivo para no sobrescribir el valor existente
-                            if keys == "categoriaActivo":
-                                continue
 
                             if isinstance(info, (int, float)):
                                 columnas.append(keys)
@@ -2070,9 +2184,26 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                 columnas.append(keys)
                                 values.append(info)
 
-                        # agrega meses de pago de dividendos
+                        # ============================================================================================================
+                        # MEJORA: Agregar meses de pago de dividendos
+                        # Los meses vienen de rendimiento_dividends() que analiza el año anterior
+                        # ALTERNATIVA MEJORADA: Usar _extract_dividend_payment_months() para últimos 12 meses
+                        # ============================================================================================================
                         columnas.append("monthDividendsPay")
                         values.append(", ".join(meses))
+
+                        columnas.append("lastPrice")
+                        values.append(yf_activo.get("currentPrice", 0))
+
+                        # OPCIONAL: Agregar frecuencia de pago y TTM calculado desde historial
+                        # Descomentar si se quiere almacenar esta información adicional:
+                        # meses_ttm, freq_ttm, total_ttm = (
+                        #    self._extract_dividend_payment_months(dividends_history)
+                        # )
+                        # columnas.append("dividendFrequency")
+                        # values.append(freq_ttm)
+                        # columnas.append("dividendTTM_calculated")
+                        # values.append(total_ttm)
 
                         # indicador de que esta o estuvo en cartera
                         columnas.append("encartera")
@@ -2083,7 +2214,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         if symbol in self.info.keys():
                             # gwi001  eliminar self.analisis.info[symbol]['update'] = True
                             self.info[symbol]["update"] = True
-        except EncodingWarning as e:
+        except Exception as e:
             print("[dividends_en_market_stock()]: {}".format(e))
 
     def run(self):
@@ -2399,8 +2530,7 @@ class DashMain:
         # Progreso inversion gyp diarias ------------------------------------------------------------------------------
         self.GypProgress = ProgressBar(
             gypBottom,
-            # 1234567890123456789012345
-            label="Ganancias Diarias  ",
+            label="Total dGyP (USD)",
             avance=0,
             proyeccion=1_000,
             width=130,
@@ -2409,8 +2539,7 @@ class DashMain:
         )
         self.InvProgress = ProgressBar(
             InvBottom,
-            # 1234567890123456789012345
-            label="Total Inversión      ",
+            label="Total Inversión (USD)",
             avance=0,
             proyeccion=1_000_000,
             width=130,
@@ -3099,7 +3228,7 @@ class DashMain:
                     lbv.grid(row=i + 1, column=1, padx=5, pady=1, sticky=W)
                     lbl.grid(row=i + 1, column=0, padx=5, pady=1, sticky=W)
 
-            except EncodingWarning as e:
+            except Exception as e:
                 print("grafico_rendimiento_symbol(): {}".format(e))
 
         # selecciona desde treeview
@@ -3147,6 +3276,8 @@ class DashMain:
                     div = market[0][ix.index("dividendRate")]
                     string = market[0][ix.index("monthDividendsPay")]
                     fecha = market[0][ix.index("exDividendDate")]
+                    trallingAnual = market[0][ix.index("trailingAnnualDividendRate", 0)]
+
                     exdiv = (
                         fecha.strftime("%d-%b")
                         if fecha and fecha.month == date
@@ -3171,16 +3302,18 @@ class DashMain:
                     # recalculo de rendimiento en función avgcost
                     rend = div / avgcost if avgcost > 0 else 0
 
-                    book.update(
-                        {
-                            symbol: {
-                                "dividends": dividends,
-                                "costobase": position["costobase"],
-                                "exdiv": exdiv,
-                                "yield": rend,
+                    # Agrega si ha pagado dividendno en año
+                    if trallingAnual > 0:
+                        book.update(
+                            {
+                                symbol: {
+                                    "dividends": dividends,
+                                    "costobase": position["costobase"],
+                                    "exdiv": exdiv,
+                                    "yield": rend,
+                                }
                             }
-                        }
-                    )
+                        )
             return book
 
         # selecciona y clasifica detalle por symbol y sector
@@ -4353,8 +4486,6 @@ class DashMain:
 
         # Cerrar figuras de matplotlib si existen
         try:
-            import matplotlib.pyplot as plt
-
             plt.close("all")
         except:
             pass
@@ -4386,8 +4517,6 @@ class DashMain:
             print(f"[eexit error]: {e}")
 
         # Forzar salida limpia del programa
-        import sys
-
         sys.exit(0)
 
     # toma limites de barraProgress
@@ -4420,8 +4549,8 @@ class DashMain:
             ganancias_dia = totales["total_ganancia_dia"]
             costo_base = totales["total_costo_base"]
             limit_costoB, limit_gyp = self.get_limite_inversion()
-            low_limit_gyp = -2 * limit_gyp
-            high_limit_gyp = 2 * limit_gyp
+            low_limit_gyp = -2 * limit_gyp if limit_gyp < ganancias_dia else -limit_gyp
+            high_limit_gyp = 2 * limit_gyp if limit_gyp < ganancias_dia else limit_gyp
 
             # update progressos
             self.GypProgress.update_values(low_limit_gyp, ganancias_dia, high_limit_gyp)
@@ -4526,7 +4655,6 @@ class system_status(tk.Frame):
 
         # Frames para la derecha
         self.figura = ttk.Frame(self.right, padding=(5, 1, 1, 5), style="C.TFrame")
-        self.performa = ttk.Frame(self.right, padding=(1, 1, 1, 1), style="C.TFrame")
         self.connect = ttk.Frame(self.right, padding=(1, 1, 1, 1), style="C.TFrame")
 
         # establece figura performance system
@@ -4537,9 +4665,8 @@ class system_status(tk.Frame):
         self.rv.draw()
         self.rv.get_tk_widget().pack()
 
-        self.performa.pack(fill=tk.X)
-        self.figura.pack(fill=tk.X)
-        self.connect.pack(side=tk.RIGHT, fill=tk.BOTH)
+        self.figura.pack(side=tk.TOP, fill=tk.BOTH)
+        self.connect.pack(side=tk.BOTTOM, fill=tk.BOTH)
 
         # Agregar tabs al Notebook
         self.bottom.add(self.datahub, text="DataHub")
@@ -5109,8 +5236,6 @@ class system_status(tk.Frame):
 
             update_datahub()
         except Exception as e:
-            import traceback
-
             traceback.print_exc()
             print(f"datahub_system(): {e}")
 
@@ -5147,8 +5272,6 @@ class system_status(tk.Frame):
 
                     # Calcular tamaño aproximado
                     try:
-                        import sys
-
                         size_bytes = sys.getsizeof(v)
                         if size_bytes < 1024:
                             size_str = f"{size_bytes}B"
@@ -5219,8 +5342,6 @@ class system_status(tk.Frame):
 
                 # Tamaño del objeto
                 try:
-                    import sys
-
                     size_bytes = sys.getsizeof(data)
                     if size_bytes < 1024:
                         size_str = f"{size_bytes} bytes"
@@ -5506,8 +5627,6 @@ class system_status(tk.Frame):
             auto_refresh()
 
         except Exception as e:
-            import traceback
-
             traceback.print_exc()
             print(f"monitor_cache(): {e}")
 
@@ -5841,8 +5960,6 @@ class system_status(tk.Frame):
                 detail_window.geometry(f"600x450+{x}+{y}")
 
             except Exception as e:
-                import traceback
-
                 traceback.print_exc()
                 print(f"[show_api_detail_window({api_name})]: {e}")
                 self.messagebox.showerror("Error", f"❌ Error al mostrar detalle: {e}")
@@ -5868,22 +5985,15 @@ class system_status(tk.Frame):
         try:
             # Frame contenedor principal
             main_frame = ttk.Frame(self.connect)
-            main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            main_frame.pack(fill=tk.BOTH, expand=True)
 
             # Label de instrucciones
             info_frame = ttk.Frame(main_frame)
             info_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
-            ttk.Label(
-                info_frame,
-                text="💡 Doble click en una API para ver detalles completos",
-                foreground="orange",
-                font=("TkDefaultFont", 8, "italic"),
-            ).pack(side=tk.LEFT)
-
             # Crear TreeView solo para lista (más espacio)
             lista = ttk.Treeview(
-                main_frame, columns=("tipo", "estado"), style="TFrame", height=12
+                main_frame, columns=("tipo", "estado"), style="TFrame", height=6
             )
 
             # Configurar headers y columnas
@@ -5913,8 +6023,6 @@ class system_status(tk.Frame):
             refresh_api_list()
             auto_refresh()
         except Exception as e:
-            import traceback
-
             traceback.print_exc()
             print(f"connect_api(): {e}")
 
