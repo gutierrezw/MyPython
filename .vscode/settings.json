@@ -11,7 +11,7 @@
     "editor.minimap.enabled": false,
     "code-runner.runInTerminal": true,
     "terminal.integrated.cwd": "C:\\Users\\InversionesWildaga\\Documents\\MyPython",
-    "python.defaultInterpreterPath": "C:/Users/InversionesWildaga/Documents/MyPython/.venv/Scripts/python.exe",
+    "python.defaultInterpreterPath": "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\.venv\\Scripts\\python.exe",
     "python.terminal.activateEnvironment": true,
     "[python]": {
         "diffEditor.ignoreTrimWhitespace": false,
@@ -37,5 +37,7 @@
     "python.envFile": "${workspaceFolder}/.env",
     "python.env": {
         "PYTHONPATH": "${workspaceFolder};${workspaceFolder}/AppOO"
-    }
+    },
+    "claudeCodeChat.permissions.yoloMode": false,
+    "claude.codeComposer.enabled": false,
 }
