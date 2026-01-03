@@ -4549,8 +4549,15 @@ class DashMain:
             ganancias_dia = totales["total_ganancia_dia"]
             costo_base = totales["total_costo_base"]
             limit_costoB, limit_gyp = self.get_limite_inversion()
-            low_limit_gyp = -2 * limit_gyp if limit_gyp < ganancias_dia else -limit_gyp
-            high_limit_gyp = 2 * limit_gyp if limit_gyp < ganancias_dia else limit_gyp
+
+            if ganancias_dia > 0:
+                _inf = 0
+            elif ganancias_dia <= 0:
+                _inf = -1
+            _mul = int(abs(limit_gyp) / ganancias_dia)
+
+            low_limit_gyp = (_inf * _mul) * limit_gyp
+            high_limit_gyp = _mul * limit_gyp
 
             # update progressos
             self.GypProgress.update_values(low_limit_gyp, ganancias_dia, high_limit_gyp)
@@ -4560,7 +4567,6 @@ class DashMain:
             if self.is_running:
                 after_id = self.root.after(30000, self.actualizar_totales_inversiones)
                 self.after_ids.append(after_id)
-
         except Exception as e:
             print(f"[actualizar_totales_inversiones()]: {e}")
             # Intentar nuevamente en 30 segundos aunque haya error
