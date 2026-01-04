@@ -238,7 +238,7 @@ class BDsystem:  # -------------------------------------------------------------
         try:
             conn = BDsystem.connect_dbase("select.all_sesion", False)
             cursor = conn.cursor()
-            sql = "SELECT * FROM sesion ORDER BY fiscalYear ASC"
+            sql = """SELECT * FROM sesion WHERE vehiculo != "DataHub"  ORDER BY Idcuenta_principal DESC, fiscalYear ASC"""
             cursor.execute(sql)
             rows = cursor.fetchall()
             columns = [desc[0] for desc in cursor.description]

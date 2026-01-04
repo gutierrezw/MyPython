@@ -27,10 +27,12 @@ from Modulos_python import (
     os,
     csv,
     ast,
+    json,
     date,
     logging,
     Future,
     textwrap,
+    traceback,
 )
 from Modulos_Utilitarios import (
     display_red_green,
@@ -139,14 +141,27 @@ class OrderManagerSync:
 
 # clase para contener datos compartidos en la aplicacion
 class DataHub:
-    # configuracion de colores
+    """
+    Clase global para variables de entorno y configuración del sistema.
+
+    Las variables configurables se cargan desde la base de datos (sesión DataHub).
+    Estructura organizada en 4 grupos:
+    1. Colores (bgcolor, cgcolor, cchart)
+    2. Monitor CPU/Memoria (display, max_points, interval, CpuLock)
+    3. Parámetros de Trading (MinProfit, Toleranciasell, MaxRoi, InicioInversior, ib_gateway_host, ib_gateway_port)
+    4. Estructuras runtime (no configurables - se inicializan en código)
+    """
+
+    # ========================================================================================================
+    # GRUPO 1: CONFIGURACIÓN DE COLORES (Cargable desde DB)
+    # ========================================================================================================
     bgcolor = "DarkCyan"
     cgcolor = "black"
     cchart = {
         "texto": "white",
         "titulo": "cyan",
-        "fondo": bgcolor,
-        "fondo_fig": cgcolor,
+        "fondo": "DarkCyan",
+        "fondo_fig": "black",
         "asx": "black",
         "asy": "black",
         "axsy": "grey",
@@ -180,7 +195,31 @@ class DataHub:
         "cchart": cchart,
     }
 
-    # estructura globales
+    # ========================================================================================================
+    # GRUPO 2: MONITOREO DE CPU Y MEMORIA (Cargable desde DB)
+    # ========================================================================================================
+    DCpu = []
+    DMem = []
+    display = None
+    max_points = 40
+    interval = 1
+    CpuLock = None
+
+    # ========================================================================================================
+    # GRUPO 3: PARÁMETROS DE TRADING (Cargable desde DB)
+    # ========================================================================================================
+    MinProfit = 80.0
+    Toleranciasell = 0.10
+    MaxRoi = 0.09
+    InicioInversior = date(2020, 7, 31)
+    ib_gateway_host = r"https://localhost"
+    ib_gateway_port = r"5501"
+
+    # ========================================================================================================
+    # GRUPO 4: ESTRUCTURAS RUNTIME (NO configurables - se inicializan en código)
+    # ========================================================================================================
+
+    # Sesiones y managers
     SessionYfinance = None
     QremoteOrder = {"Stock": OrderManagerSync(), "Crypto": OrderManagerSync()}
     manager_events = {}
@@ -193,15 +232,7 @@ class DataHub:
         "TimeDataHub": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
-    # monitoreo de CPU y MEMORY
-    DCpu = []
-    DMem = []
-    display = None
-    max_points = 0
-    interval = 1
-    CpuLock = None
-
-    # set para modelos IA
+    # Set para modelos IA
     JsonMSell = [
         "roi",
         "Nro_lotes",
@@ -262,7 +293,7 @@ class DataHub:
     max_mensajes = 5
     min_tiempo = 300
 
-    # calculas fechas de inicio para los procesos batch ---------------------------------------------------------
+    # Fechas y procesos batch
     now = datetime.now()
     mrk_anterior = get_ultimo_dia_mercado(market="Stock")
     dia_anterior = get_ultimo_dia_mercado(market="Crypto")
@@ -279,21 +310,103 @@ class DataHub:
     }
     ultimoTraderCrypto = None
 
-    # Lock's para sincronizacion de procesos
+    # Locks para sincronización de procesos
     lockCsvAi = threading.Lock()
     lockInfo = threading.Lock()
     SupervisedThread = []
 
-    # parametros --  que deben ir a la configuracion del sistema
-    MinProfit = 80.0
-    Toleranciasell = 0.10
-    MaxRoi = 0.09
-    InicioInversior = date(2020, 7, 31)
-    ib_gateway_host = r"https://localhost"
-    ib_gateway_port = r"5501"
-
-    # Accesos MySql ----------------------------------------------------------------------------------------------
+    # Accesos MySql
     RepositorioOportunidades = RepositorioOportunidadesBuySell()
+
+    # ========================================================================================================
+    # MÉTODOS DE INICIALIZACIÓN
+    # ========================================================================================================
+
+    @staticmethod
+    def load_from_database():
+        """
+        Carga las variables de entorno desde la sesión DataHub en la base de datos.
+
+        Grupos cargados:
+        1. Colores (bgcolor, cgcolor, cchart)
+        2. Monitor CPU/Memoria (display, max_points, interval, CpuLock)
+        3. Parámetros de Trading (MinProfit, Toleranciasell, MaxRoi, InicioInversior, ib_gateway_host, ib_gateway_port)
+
+        Returns:
+            bool: True si cargó exitosamente, False si hubo error
+        """
+        try:
+            # Obtener sesión DataHub
+            datahub_session = BDsystem.get_sesion_by_vehiculo(vehiculo="DataHub")
+
+            if not datahub_session or not datahub_session.get("userapi"):
+                print(
+                    "[DataHub.load_from_database] ADVERTENCIA: No se encontró configuración en DataHub"
+                )
+                return False
+
+            # Decodificar JSON desde BLOB
+            envs_config = json.loads(datahub_session["userapi"].decode("utf-8"))
+
+            # ====== GRUPO 1: COLORES ======
+            if "bgcolor" in envs_config:
+                DataHub.bgcolor = envs_config["bgcolor"]
+                DataHub.colors["bgcolor"] = envs_config["bgcolor"]
+
+            if "cgcolor" in envs_config:
+                DataHub.cgcolor = envs_config["cgcolor"]
+                DataHub.colors["cgcolor"] = envs_config["cgcolor"]
+
+            if "cchart" in envs_config:
+                DataHub.cchart.update(envs_config["cchart"])
+                # Actualizar fondo con bgcolor
+                DataHub.cchart["fondo"] = DataHub.bgcolor
+                DataHub.cchart["fondo_fig"] = DataHub.cgcolor
+                DataHub.colors["cchart"] = DataHub.cchart
+
+            # ====== GRUPO 2: MONITOR CPU/MEMORIA ======
+            if "display" in envs_config:
+                DataHub.display = envs_config["display"]
+
+            if "max_points" in envs_config:
+                DataHub.max_points = envs_config["max_points"]
+
+            if "interval" in envs_config:
+                DataHub.interval = envs_config["interval"]
+
+            if "CpuLock" in envs_config:
+                DataHub.CpuLock = envs_config["CpuLock"]
+
+            # ====== GRUPO 3: PARÁMETROS DE TRADING ======
+            if "MinProfit" in envs_config:
+                DataHub.MinProfit = float(envs_config["MinProfit"])
+
+            if "Toleranciasell" in envs_config:
+                DataHub.Toleranciasell = float(envs_config["Toleranciasell"])
+
+            if "MaxRoi" in envs_config:
+                DataHub.MaxRoi = float(envs_config["MaxRoi"])
+
+            if "InicioInversior" in envs_config:
+                # Convertir string a date
+                inicio_str = envs_config["InicioInversior"]
+                if isinstance(inicio_str, str):
+                    DataHub.InicioInversior = datetime.strptime(
+                        inicio_str, "%Y-%m-%d"
+                    ).date()
+
+            if "ib_gateway_host" in envs_config:
+                DataHub.ib_gateway_host = envs_config["ib_gateway_host"]
+
+            if "ib_gateway_port" in envs_config:
+                DataHub.ib_gateway_port = envs_config["ib_gateway_port"]
+
+            return True
+
+        except Exception as e:
+            print(f"[DataHub.load_from_database] ERROR: {e}")
+            traceback.print_exc()
+            return False
 
     # actualiza contador self.procesos
     def update_self_procesos(proces=None, tarea=None, itera=0):
