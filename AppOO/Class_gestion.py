@@ -115,18 +115,17 @@ class GestionInversion(tk.Frame):
         self.cv1.draw()
         self.cv1.get_tk_widget().pack(side=tk.TOP)
 
-        # definición de boton detalle extracto (stock, crypto)------------------------------------------------------
-        imagen_tk = BDsystem.select_image(idd=16, size=(24, 24))
-        self.extracto = tk.Button(
+        # definición de combobox para selección de extracto (reemplaza botón circular)------------------------
+        self.combo_extractos = ttk.Combobox(
             wr11,
-            image=imagen_tk,
-            text="Extracto Detallado",
-            bg=self.colors["bgcolor"],
-            relief=tk.FLAT,
-            command=self.lista_extractos,
+            values=list(self.type_extract.keys()),
+            state="readonly",
+            width=15,
+            style="TCombobox",
         )
-        self.extracto.imagen = imagen_tk
-        self.extracto.pack(side=tk.LEFT, fill=tk.X)
+        self.combo_extractos.set("Resumen")  # Valor inicial
+        self.combo_extractos.bind("<<ComboboxSelected>>", self.on_select_extracto)
+        self.combo_extractos.pack(side=tk.LEFT, fill=tk.X, padx=5)
 
         # definición de boton detalle traza plan -------------------------------------------------------------------
         imagen_tk = BDsystem.select_image(idd=17, size=(24, 24))
@@ -206,7 +205,6 @@ class GestionInversion(tk.Frame):
         )
 
         # texto Objetivo
-        # self.mpl[0][5] = tk.Text(wx11, height=5, width=42, font=("Segoe UI", 8), bg='firebrick4', fg='white')
         self.mpl[0][5] = tk.Text(
             wx11,
             height=5,
@@ -415,6 +413,13 @@ class GestionInversion(tk.Frame):
         try:
             self.widgets_plan()
             lista = list(self.type_extract.values())
+
+            # Sincronizar combobox con índice actual
+            current_index = self.indice % len(lista)
+            for nombre, valor in self.type_extract.items():
+                if valor == current_index:
+                    self.combo_extractos.set(nombre)
+                    break
 
             parm = {
                 "cchart": self.colors["cchart"],
@@ -670,6 +675,10 @@ class GestionInversion(tk.Frame):
             print("update_first_row_extract(): {}".format(error))
 
     def lista_extractos(self):
+        """
+        Método legacy para compatibilidad.
+        Ahora el comportamiento circular se maneja mediante el combobox.
+        """
         try:
             # elimina items
             for item in self.extract.get_children():
@@ -680,6 +689,31 @@ class GestionInversion(tk.Frame):
             self.widgets_extractos()
         except EncodingWarning as e:
             print("lista_extractos(): {}".format(e))
+
+    def on_select_extracto(self, event=None):
+        """
+        Maneja la selección de extracto desde el combobox.
+        Permite acceso directo a cualquier cuenta sin comportamiento circular.
+
+        Args:
+            event: Evento de selección del combobox
+        """
+        try:
+            # Obtener nombre seleccionado del combobox
+            selected = self.combo_extractos.get()
+
+            # Actualizar índice según la selección
+            if selected in self.type_extract:
+                self.indice = self.type_extract[selected]
+
+                # Limpiar items actuales
+                for item in self.extract.get_children():
+                    self.extract.delete(item)
+
+                # Actualizar vista con el extracto seleccionado
+                self.widgets_extractos()
+        except Exception as e:
+            print("on_select_extracto(): {}".format(e))
 
     # mantiene actualizada información del plan de inversión
     def widgets_plan(self):

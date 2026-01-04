@@ -63,6 +63,7 @@ from Modulos_python import (
     ticker,
     filedialog,
     traceback,
+    colormaps,
 )
 from Class_FondosInversion import ArsFondosInversion
 from Class_Screener import Screener
@@ -2492,7 +2493,7 @@ class DashMain:
             image=imagen_tk,
             bg=self.colors["bgcolor"],
             relief=tk.FLAT,
-            command=lambda: self.setup(),
+            command=lambda: self.setup_config(),
         )
         self.user.imagen = imagen_tk
 
@@ -3861,7 +3862,7 @@ class DashMain:
         # DataHub.manager_after._safe(1200000, self.graficos_main(), name="graficos_main")
 
     # Detener cada módulo de forma ordenada
-    def setup(self):
+    def setup_config(self):
         """
         Abre ventana de gestión de sesiones con operaciones CRUD.
         Crea ventana Toplevel posicionada para no solapar el notebook principal.
@@ -3901,10 +3902,16 @@ class DashMain:
                         else ""
                     )
 
+                    # Mostrar estrella si es cuenta principal
+                    idcuenta_principal_str = (
+                        "⭐" if session.get("Idcuenta_principal", False) else ""
+                    )
+
                     # Solo incluir campos visibles (sin id, orcartera, xstrategy, userapi, userpass, private_key, public_key)
                     row_values = [
                         session.get("vehiculo", ""),
                         fiscalYear_str,
+                        idcuenta_principal_str,
                         session.get("iduser", ""),
                         session.get("idcuenta", ""),
                         fesesion_str,
@@ -3987,6 +3994,545 @@ class DashMain:
                     "Error", f"Error al eliminar sesión: {str(e)}"
                 )
 
+        def on_envs_click():
+            """
+            Maneja botón Envs para editar variables de entorno de la sesión DataHub.
+
+            IMPORTANTE: Este botón NO depende de selección en el tree.
+            Siempre edita la sesión con vehiculo='DataHub'.
+            """
+            nonlocal session_window
+            try:
+                # Obtener sesión DataHub directamente (sin depender de selección en tree)
+                datahub_session = BDsystem.get_sesion_by_vehiculo(vehiculo="DataHub")
+
+                if datahub_session:
+                    # Abrir editor con la sesión DataHub
+                    open_envs_editor(datahub_session)
+                else:
+                    # Si no existe sesión DataHub, mostrar error
+                    MyMessageBox(session_window).showerror(
+                        "Error",
+                        "No se encontró la sesión 'DataHub' en la base de datos.\n"
+                        "Por favor, cree una sesión con vehículo='DataHub' primero.",
+                    )
+            except Exception as e:
+                print(f"[on_envs_click()]: {e}")
+                traceback.print_exc()
+                MyMessageBox(session_window).showerror(
+                    "Error", f"Error al abrir editor de variables de entorno: {str(e)}"
+                )
+
+        def open_envs_editor(session_data):
+            """
+            Abre ventana para editar variables de entorno de la sesión DataHub.
+            Carga configuración desde session.userapi (JSON) y la guarda actualizada.
+
+            Args:
+                session_data: dict con datos de la sesión
+            """
+
+            def save_envs():
+                """Guarda variables de entorno en userapi y actualiza DataHub"""
+                try:
+                    # Construir estructura cchart desde el diccionario de entradas
+                    cchart_data = {
+                        "texto": cchart_entries["texto"].get().strip(),
+                        "titulo": cchart_entries["titulo"].get().strip(),
+                        "fondo": entry_bgcolor.get().strip(),
+                        "fondo_fig": entry_cgcolor.get().strip(),
+                        "asx": cchart_entries["asx"].get().strip(),
+                        "asy": cchart_entries["asy"].get().strip(),
+                        "axsy": cchart_entries["axsy"].get().strip(),
+                        "axsx": cchart_entries["axsx"].get().strip(),
+                        "2eje": cchart_entries["2eje"].get().strip(),
+                        "plot0": cchart_entries["plot0"].get().strip(),
+                        "plot1": cchart_entries["plot1"].get().strip(),
+                        "plot11": cchart_entries["plot11"].get().strip(),
+                        "plot2": cchart_entries["plot2"].get().strip(),
+                        "plot21": cchart_entries["plot21"].get().strip(),
+                        "plot3": cchart_entries["plot3"].get().strip(),
+                        "plot31": cchart_entries["plot31"].get().strip(),
+                        "plot4": cchart_entries["plot4"].get().strip(),
+                        "plot41": cchart_entries["plot41"].get().strip(),
+                        "plot5": cchart_entries["plot5"].get().strip(),
+                        "plot6": cchart_entries["plot6"].get().strip(),
+                        "plot7": cchart_entries["plot7"].get().strip(),
+                        "plot8": cchart_entries["plot8"].get().strip(),
+                        "plot9": cchart_entries["plot9"].get().strip(),
+                    }
+
+                    # Construir estructura completa de configuración
+                    envs_config = {
+                        "bgcolor": entry_bgcolor.get().strip(),
+                        "cgcolor": entry_cgcolor.get().strip(),
+                        "cchart": cchart_data,
+                        "display": (
+                            entry_display.get().strip()
+                            if entry_display.get().strip()
+                            else None
+                        ),
+                        "max_points": (
+                            int(entry_max_points.get().strip())
+                            if entry_max_points.get().strip()
+                            else 40
+                        ),
+                        "interval": (
+                            int(entry_interval.get().strip())
+                            if entry_interval.get().strip()
+                            else 1
+                        ),
+                        "CpuLock": (
+                            entry_cpulock.get().strip()
+                            if entry_cpulock.get().strip()
+                            else None
+                        ),
+                        "MinProfit": (
+                            float(entry_minprofit.get().strip())
+                            if entry_minprofit.get().strip()
+                            else 80.0
+                        ),
+                        "Toleranciasell": (
+                            float(entry_toleranciasell.get().strip())
+                            if entry_toleranciasell.get().strip()
+                            else 0.10
+                        ),
+                        "MaxRoi": (
+                            float(entry_maxroi.get().strip())
+                            if entry_maxroi.get().strip()
+                            else 0.09
+                        ),
+                        "InicioInversior": entry_inicioinversior.get().strip(),
+                        "ib_gateway_host": entry_ib_gateway_host.get().strip(),
+                        "ib_gateway_port": entry_ib_gateway_port.get().strip(),
+                    }
+
+                    # Convertir a JSON
+                    userapi_json = json.dumps(envs_config, indent=2).encode("utf-8")
+
+                    # Preparar valores para actualización (solo userapi cambia)
+                    update_values = {
+                        "fesesion": session_data.get("fesesion"),
+                        "iduser": session_data.get("iduser"),
+                        "idcuenta": session_data.get("idcuenta"),
+                        "orcartera": session_data.get("orcartera"),
+                        "fiscalYear": session_data.get("fiscalYear"),
+                        "fefund": session_data.get("fefund"),
+                        "Pinvertir": session_data.get("Pinvertir"),
+                        "xstrategy": session_data.get("xstrategy"),
+                        "userapi": userapi_json,  # Actualizar solo userapi
+                        "userpass": session_data.get("userpass"),
+                        "private_key": session_data.get("private_key"),
+                        "public_key": session_data.get("public_key"),
+                        "port": session_data.get("port"),
+                    }
+
+                    # Actualizar registro en BD
+                    success = BDsystem.update_sesion(
+                        session_data["id"], session_data["vehiculo"], update_values
+                    )
+
+                    if success:
+                        # Actualizar DataHub si se editó la sesión "DataHub"
+                        vehiculo_editado = session_data.get("vehiculo", "")
+
+                        # Obtener sesión DataHub para actualizar variables globales
+                        try:
+                            datahub_session = BDsystem.get_sesion_by_vehiculo(
+                                vehiculo="DataHub"
+                            )
+
+                            # Si se editó la sesión DataHub o existe una sesión DataHub, actualizar
+                            if datahub_session and (
+                                vehiculo_editado == "DataHub"
+                                or datahub_session["id"] == session_data["id"]
+                            ):
+                                # Actualizar variables de DataHub en memoria
+                                DataHub.bgcolor = envs_config["bgcolor"]
+                                DataHub.cgcolor = envs_config["cgcolor"]
+                                DataHub.cchart = envs_config["cchart"]
+                                DataHub.display = envs_config["display"]
+                                DataHub.max_points = envs_config["max_points"]
+                                DataHub.interval = envs_config["interval"]
+                                DataHub.CpuLock = envs_config["CpuLock"]
+                                DataHub.MinProfit = envs_config["MinProfit"]
+                                DataHub.Toleranciasell = envs_config["Toleranciasell"]
+                                DataHub.MaxRoi = envs_config["MaxRoi"]
+
+                                # InicioInversior requiere conversión a date
+                                DataHub.InicioInversior = datetime.strptime(
+                                    envs_config["InicioInversior"], "%Y-%m-%d"
+                                ).date()
+                                DataHub.ib_gateway_host = envs_config["ib_gateway_host"]
+                                DataHub.ib_gateway_port = envs_config["ib_gateway_port"]
+
+                                # Actualizar colors dict
+                                DataHub.colors["bgcolor"] = envs_config["bgcolor"]
+                                DataHub.colors["cgcolor"] = envs_config["cgcolor"]
+                                DataHub.colors["cchart"] = envs_config["cchart"]
+                        except Exception as e:
+                            print(f"[save_envs - actualizar DataHub]: {e}")
+                            # Continuar aunque falle la actualización de DataHub
+
+                        MyMessageBox(envs_window).showinfo(
+                            "Éxito",
+                            "Variables de entorno actualizadas correctamente.\n"
+                            "Algunos cambios pueden requerir reiniciar la aplicación.",
+                        )
+                        envs_window.destroy()
+                    else:
+                        MyMessageBox(envs_window).showerror(
+                            "Error", "No se pudo actualizar la configuración"
+                        )
+
+                except ValueError as ve:
+                    MyMessageBox(envs_window).showerror(
+                        "Error de Validación",
+                        f"Por favor verifique que los valores numéricos sean correctos:\n{str(ve)}",
+                    )
+                except Exception as e:
+                    print(f"[save_envs()]: {e}")
+
+                    traceback.print_exc()
+                    MyMessageBox(envs_window).showerror(
+                        "Error", f"Error al guardar configuración: {str(e)}"
+                    )
+
+            def eexit():
+                """Cierra ventana de edición"""
+                envs_window.destroy()
+
+            # Crear ventana modal
+            envs_window = tk.Toplevel(session_window)
+            envs_window.title(
+                f"Variables de Entorno - {session_data.get('vehiculo', 'N/A')}"
+            )
+
+            # Posicionar a la derecha de la ventana de sesiones (igual que editor)
+            session_x = session_window.winfo_x()
+            session_y = session_window.winfo_y()
+            session_width = session_window.winfo_width()
+            envs_window.geometry(
+                f"700x700+{session_x + session_width + 10}+{session_y}"
+            )
+
+            envs_window.resizable(False, False)
+            envs_window.config(bg=self.colors["bgcolor"])
+            envs_window.transient(session_window)
+            envs_window.grab_set()
+            envs_window.focus()
+            envs_window.protocol("WM_DELETE_WINDOW", eexit)
+
+            # Cargar configuración desde userapi (de la sesión actual o DataHub)
+            try:
+                userapi_bytes = session_data.get("userapi")
+                if userapi_bytes:
+                    # La sesión actual tiene configuración
+                    envs_config = json.loads(userapi_bytes.decode("utf-8"))
+                else:
+                    # Si no hay configuración, cargar desde sesión DataHub
+                    datahub_session = BDsystem.get_sesion_by_vehiculo(
+                        vehiculo="DataHub"
+                    )
+                    if datahub_session and datahub_session.get("userapi"):
+                        envs_config = json.loads(
+                            datahub_session["userapi"].decode("utf-8")
+                        )
+                    else:
+                        # Error: DataHub debe existir y tener configuración
+                        MyMessageBox(session_window).showerror(
+                            "Error de Configuración",
+                            "No se encontró configuración de variables de entorno.\n\n"
+                            "La sesión 'DataHub' debe existir en la base de datos\n"
+                            "con el campo 'userapi' correctamente configurado.",
+                        )
+                        return
+            except Exception as e:
+                print(f"[open_envs_editor - carga config]: {e}")
+
+                traceback.print_exc()
+                envs_config = {}
+
+            # Crear canvas scrollable (igual que editor de sesiones)
+            canvas = tk.Canvas(envs_window, bg=self.colors["bgcolor"])
+            scrollbar = ttk.Scrollbar(
+                envs_window, orient="vertical", command=canvas.yview
+            )
+            scrollable_frame = tk.Frame(canvas, bg=self.colors["bgcolor"])
+
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
+            )
+
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+
+            # Campos del formulario - REORGANIZADO: 1) Trading, 2) Monitor, 3) Colores
+            row = 0
+
+            # ========== GRUPO 1: PARÁMETROS DE TRADING ==========
+            tk.Label(
+                scrollable_frame,
+                text="💰 Parámetros de Trading",
+                bg=self.colors["bgcolor"],
+                fg="yellow",
+                font=("Segoe UI", 10, "bold"),
+                anchor="w",
+            ).grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 5))
+            row += 1
+
+            # MinProfit
+            tk.Label(
+                scrollable_frame,
+                text="Min Profit:",
+                bg=self.colors["bgcolor"],
+                fg="white",
+                anchor="w",
+            ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
+            entry_minprofit = tk.Entry(scrollable_frame, width=50)
+            entry_minprofit.insert(0, str(envs_config.get("MinProfit", 80.0)))
+            entry_minprofit.grid(row=row, column=1, padx=10, pady=5)
+            row += 1
+
+            # Toleranciasell
+            tk.Label(
+                scrollable_frame,
+                text="Tolerancia Sell:",
+                bg=self.colors["bgcolor"],
+                fg="white",
+                anchor="w",
+            ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
+            entry_toleranciasell = tk.Entry(scrollable_frame, width=50)
+            entry_toleranciasell.insert(0, str(envs_config.get("Toleranciasell", 0.10)))
+            entry_toleranciasell.grid(row=row, column=1, padx=10, pady=5)
+            row += 1
+
+            # MaxRoi
+            tk.Label(
+                scrollable_frame,
+                text="Max ROI:",
+                bg=self.colors["bgcolor"],
+                fg="white",
+                anchor="w",
+            ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
+            entry_maxroi = tk.Entry(scrollable_frame, width=50)
+            entry_maxroi.insert(0, str(envs_config.get("MaxRoi", 0.09)))
+            entry_maxroi.grid(row=row, column=1, padx=10, pady=5)
+            row += 1
+
+            # InicioInversior
+            tk.Label(
+                scrollable_frame,
+                text="Inicio Inversión (YYYY-MM-DD):",
+                bg=self.colors["bgcolor"],
+                fg="white",
+                anchor="w",
+            ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
+            entry_inicioinversior = tk.Entry(scrollable_frame, width=50)
+            entry_inicioinversior.insert(
+                0, envs_config.get("InicioInversior", "2020-07-31")
+            )
+            entry_inicioinversior.grid(row=row, column=1, padx=10, pady=5)
+            row += 1
+
+            # ib_gateway_host
+            tk.Label(
+                scrollable_frame,
+                text="IB Gateway Host:",
+                bg=self.colors["bgcolor"],
+                fg="white",
+                anchor="w",
+            ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
+            entry_ib_gateway_host = tk.Entry(scrollable_frame, width=50)
+            entry_ib_gateway_host.insert(
+                0, envs_config.get("ib_gateway_host", "https://localhost")
+            )
+            entry_ib_gateway_host.grid(row=row, column=1, padx=10, pady=5)
+            row += 1
+
+            # ib_gateway_port
+            tk.Label(
+                scrollable_frame,
+                text="IB Gateway Port:",
+                bg=self.colors["bgcolor"],
+                fg="white",
+                anchor="w",
+            ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
+            entry_ib_gateway_port = tk.Entry(scrollable_frame, width=50)
+            entry_ib_gateway_port.insert(0, envs_config.get("ib_gateway_port", "5501"))
+            entry_ib_gateway_port.grid(row=row, column=1, padx=10, pady=5)
+            row += 1
+
+            # ========== GRUPO 2: MONITOREO CPU/MEMORIA ==========
+            tk.Label(
+                scrollable_frame,
+                text="💻 Monitoreo CPU/Memoria",
+                bg=self.colors["bgcolor"],
+                fg="yellow",
+                font=("Segoe UI", 10, "bold"),
+                anchor="w",
+            ).grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(15, 5))
+            row += 1
+
+            # display
+            tk.Label(
+                scrollable_frame,
+                text="Display:",
+                bg=self.colors["bgcolor"],
+                fg="white",
+                anchor="w",
+            ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
+            entry_display = tk.Entry(scrollable_frame, width=50)
+            entry_display.insert(0, envs_config.get("display", "") or "")
+            entry_display.grid(row=row, column=1, padx=10, pady=5)
+            row += 1
+
+            # max_points
+            tk.Label(
+                scrollable_frame,
+                text="Max Points:",
+                bg=self.colors["bgcolor"],
+                fg="white",
+                anchor="w",
+            ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
+            entry_max_points = tk.Entry(scrollable_frame, width=50)
+            entry_max_points.insert(0, str(envs_config.get("max_points", 40)))
+            entry_max_points.grid(row=row, column=1, padx=10, pady=5)
+            row += 1
+
+            # interval
+            tk.Label(
+                scrollable_frame,
+                text="Interval:",
+                bg=self.colors["bgcolor"],
+                fg="white",
+                anchor="w",
+            ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
+            entry_interval = tk.Entry(scrollable_frame, width=50)
+            entry_interval.insert(0, str(envs_config.get("interval", 1)))
+            entry_interval.grid(row=row, column=1, padx=10, pady=5)
+            row += 1
+
+            # CpuLock
+            tk.Label(
+                scrollable_frame,
+                text="CPU Lock:",
+                bg=self.colors["bgcolor"],
+                fg="white",
+                anchor="w",
+            ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
+            entry_cpulock = tk.Entry(scrollable_frame, width=50)
+            entry_cpulock.insert(0, envs_config.get("CpuLock", "") or "")
+            entry_cpulock.grid(row=row, column=1, padx=10, pady=5)
+            row += 1
+
+            # ========== GRUPO 3: COLORES ==========
+            tk.Label(
+                scrollable_frame,
+                text="🎨 Colores",
+                bg=self.colors["bgcolor"],
+                fg="yellow",
+                font=("Segoe UI", 10, "bold"),
+                anchor="w",
+            ).grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(15, 5))
+            row += 1
+
+            # bgcolor
+            tk.Label(
+                scrollable_frame,
+                text="Color de Fondo (bgcolor):",
+                bg=self.colors["bgcolor"],
+                fg="white",
+                anchor="w",
+            ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
+            entry_bgcolor = tk.Entry(scrollable_frame, width=50)
+            entry_bgcolor.insert(0, envs_config.get("bgcolor", "DarkCyan"))
+            entry_bgcolor.grid(row=row, column=1, padx=10, pady=5)
+            row += 1
+
+            # cgcolor
+            tk.Label(
+                scrollable_frame,
+                text="Color de Gráficos (cgcolor):",
+                bg=self.colors["bgcolor"],
+                fg="white",
+                anchor="w",
+            ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
+            entry_cgcolor = tk.Entry(scrollable_frame, width=50)
+            entry_cgcolor.insert(0, envs_config.get("cgcolor", "black"))
+            entry_cgcolor.grid(row=row, column=1, padx=10, pady=5)
+            row += 1
+
+            # Subsección: Colores de Gráficos (cchart)
+            tk.Label(
+                scrollable_frame,
+                text="  📊 Paleta de Gráficos (cchart):",
+                bg=self.colors["bgcolor"],
+                fg="cyan",
+                font=("Segoe UI", 9, "bold"),
+                anchor="w",
+            ).grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 5))
+            row += 1
+
+            cchart = envs_config.get("cchart", {})
+            cchart_fields = [
+                ("texto", "Texto"),
+                ("titulo", "Título"),
+                ("asx", "Eje X"),
+                ("asy", "Eje Y"),
+                ("axsy", "Grid Y"),
+                ("axsx", "Grid X"),
+                ("2eje", "Segundo Eje"),
+                ("plot0", "Plot 0"),
+                ("plot1", "Plot 1"),
+                ("plot11", "Plot 11"),
+                ("plot2", "Plot 2"),
+                ("plot21", "Plot 21"),
+                ("plot3", "Plot 3"),
+                ("plot31", "Plot 31"),
+                ("plot4", "Plot 4"),
+                ("plot41", "Plot 41"),
+                ("plot5", "Plot 5"),
+                ("plot6", "Plot 6"),
+                ("plot7", "Plot 7"),
+                ("plot8", "Plot 8"),
+                ("plot9", "Plot 9"),
+            ]
+
+            # Diccionario para almacenar referencias a entradas cchart
+            cchart_entries = {}
+            for field_key, field_label in cchart_fields:
+                tk.Label(
+                    scrollable_frame,
+                    text=f"    {field_label}:",
+                    bg=self.colors["bgcolor"],
+                    fg="white",
+                    anchor="w",
+                ).grid(row=row, column=0, sticky="w", padx=20, pady=2)
+
+                entry = tk.Entry(scrollable_frame, width=50)
+                entry.insert(0, cchart.get(field_key, "white"))
+                entry.grid(row=row, column=1, padx=10, pady=2)
+
+                # Guardar referencia en diccionario
+                cchart_entries[field_key] = entry
+                row += 1
+
+            # Frame de botones (igual que editor de sesiones)
+            btn_frame = tk.Frame(scrollable_frame, bg=self.colors["bgcolor"])
+            btn_frame.grid(row=row, column=0, columnspan=2, pady=20)
+
+            save_btn = tk.Button(btn_frame, text="Guardar", width=10, command=save_envs)
+            save_btn.pack(side=tk.LEFT, padx=10)
+
+            cancel_btn = tk.Button(btn_frame, text="Cancelar", width=10, command=eexit)
+            cancel_btn.pack(side=tk.LEFT, padx=10)
+
+            # Empaquetar canvas y scrollbar
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
         def open_session_editor(session_data, edit_mode):
             """
             Abre ventana Toplevel para editar/crear sesión
@@ -4007,6 +4553,7 @@ class DashMain:
                         "idcuenta": entry_idcuenta.get().strip(),
                         "orcartera": entry_orcartera.get().strip(),
                         "fiscalYear": entry_fiscalYear.get().strip(),
+                        "Idcuenta_principal": var_idcuenta_principal.get(),
                         "fefund": entry_fefund.get().strip(),
                         "Pinvertir": entry_Pinvertir.get().strip(),
                         "xstrategy": entry_xstrategy.get().strip(),
@@ -4203,7 +4750,7 @@ class DashMain:
                 (
                     "fiscalYear",
                     "Año Fiscal (YYYY-MM-DD):",
-                    "disabled" if not edit_mode else "normal",
+                    "disabled",
                 ),
                 (
                     "fefund",
@@ -4222,6 +4769,7 @@ class DashMain:
             entry_idcuenta = None
             entry_orcartera = None
             entry_fiscalYear = None
+            var_idcuenta_principal = None
             entry_fefund = None
             entry_Pinvertir = None
             entry_xstrategy = None
@@ -4237,7 +4785,8 @@ class DashMain:
                 )
                 label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
 
-                entry = tk.Entry(scrollable_frame, width=50, state=state)
+                # Crear Entry siempre en estado normal para permitir inserción de valores
+                entry = tk.Entry(scrollable_frame, width=50)
                 entry.grid(row=row, column=1, padx=10, pady=5)
 
                 # Poblar con datos existentes si está en modo edición
@@ -4253,6 +4802,12 @@ class DashMain:
                         else:
                             entry.insert(0, str(value))
 
+                # Aplicar estado disabled/readonly DESPUÉS de insertar valores
+                if state == "disabled":
+                    entry.config(state="disabled")
+                elif state == "readonly":
+                    entry.config(state="readonly")
+
                 # Asignar a variable
                 if field_name == "vehiculo":
                     entry_vehiculo = entry
@@ -4266,6 +4821,32 @@ class DashMain:
                     entry_orcartera = entry
                 elif field_name == "fiscalYear":
                     entry_fiscalYear = entry
+
+                    # Agregar campo Idcuenta_principal (booleano) justo después de fiscalYear
+                    row += 1
+                    label_principal = tk.Label(
+                        scrollable_frame,
+                        text="⭐ Cuenta Principal:",
+                        bg=self.colors["bgcolor"],
+                        fg="white",
+                        anchor="w",
+                    )
+                    label_principal.grid(row=row, column=0, sticky="w", padx=10, pady=5)
+
+                    var_idcuenta_principal = tk.BooleanVar(value=False)
+                    check_principal = tk.Checkbutton(
+                        scrollable_frame,
+                        variable=var_idcuenta_principal,
+                        state="disabled",  # Siempre deshabilitado
+                        bg=self.colors["bgcolor"],
+                    )
+                    check_principal.grid(row=row, column=1, sticky="w", padx=10, pady=5)
+
+                    # Poblar con datos existentes si está en modo edición
+                    if edit_mode and session_data:
+                        is_principal = session_data.get("Idcuenta_principal", False)
+                        var_idcuenta_principal.set(is_principal)
+
                 elif field_name == "fefund":
                     entry_fefund = entry
                 elif field_name == "Pinvertir":
@@ -4405,6 +4986,11 @@ class DashMain:
             )
             refresh_btn.pack(side=tk.LEFT, padx=5)
 
+            envs_btn = tk.Button(
+                control_frame, text="Envs", width=10, command=on_envs_click
+            )
+            envs_btn.pack(side=tk.LEFT, padx=5)
+
             cancel_btn = tk.Button(
                 control_frame, text="Cancel", width=10, command=eexit
             )
@@ -4418,17 +5004,19 @@ class DashMain:
             columns = [
                 "vehiculo",
                 "fiscalYear",
+                "⭐",
                 "iduser",
                 "idcuenta",
                 "fesesion",
                 "Pinvertir",
             ]
 
-            fixed_columns = ["vehiculo", "fiscalYear"]
+            fixed_columns = ["vehiculo", "fiscalYear", "⭐"]
 
             column_alignments = {
                 "vehiculo": {"width": 80, "anchor": "w"},
                 "fiscalYear": {"width": 80, "anchor": "w"},
+                "⭐": {"width": 30, "anchor": "c"},
                 "iduser": {"width": 80, "anchor": "w"},
                 "idcuenta": {"width": 80, "anchor": "w"},
                 "fesesion": {"width": 140, "anchor": "w"},
@@ -4576,6 +5164,8 @@ class DashMain:
 
     # Inicia el dashboard
     def run(self):
+        # Cargar variables de entorno desde base de datos (sesión DataHub) ------------------------------------------
+        DataHub.load_from_database()
 
         # inicializa logging y excepciones globales ------------------------------------------------------------------
         debug = Debugging(DisplayConsole=False, GlobalHub=DataHub)

@@ -2401,9 +2401,9 @@ def chart_margen_neto(fg=None, df=None, parm=None):
     min_val = resum["margenNT"].min()
     max_val = np.nan_to_num(max_val, nan=0.0, posinf=0.0, neginf=0.0)
     min_val = np.nan_to_num(min_val, nan=0.0, posinf=0.0, neginf=0.0)
-    yabs = max(abs(max_val), abs(min_val), 0.1)
+    # yabs = max(abs(max_val), abs(min_val), 0.1)
 
-    av.set(ylim=(-yabs * 1.20, yabs * 1.20))
+    # av.set(ylim=(-yabs * 1.20, yabs * 1.20))
     av.tick_params(axis="y", colors=cchart["plot0"])
 
     av.spines[["top", "bottom", "left"]].set_visible(False)
