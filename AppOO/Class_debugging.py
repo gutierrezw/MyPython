@@ -240,7 +240,7 @@ class Debugging:
         self.interval = 1
         self.cpu_data = []
         self.mem_data = []
-        self.max_points = 50
+        self.max_points = 40
         self.display = True
         self.lock = threading.Lock()
 
