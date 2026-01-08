@@ -13,7 +13,7 @@ from Modulos_python import (
     connect,
     Error,
     Optional,
-    create_engine,
+    traceback,
 )
 from Modulos_Utilitarios import (
     is_none,
@@ -34,7 +34,7 @@ class BDsystem:  # -------------------------------------------------------------
     }
 
     @staticmethod
-    def get_sesion_by_vehiculo(vehiculo: str) -> dict:
+    def get_sesion_by_vehiculo(vehiculo=None, principal=False) -> dict:
         """
         Obtiene sesión por vehículo.
 
@@ -47,12 +47,16 @@ class BDsystem:  # -------------------------------------------------------------
         Raises:
             ValueError: Si no existe sesión para el vehículo
         """
-        sql = "SELECT * FROM sesion WHERE vehiculo = %s"
         conn = BDsystem.connect_dbase("select.sesion", False)
-
         try:
             cursor = conn.cursor()
-            cursor.execute(sql, (vehiculo,))
+            if not principal:
+                sql = "SELECT * FROM sesion WHERE vehiculo = %s"
+                cursor.execute(sql, (vehiculo,))
+
+            elif principal:
+                sql = "SELECT * FROM sesion WHERE Idcuenta_principal=1"
+                cursor.execute(sql)
             qry = cursor.fetchone()
 
             if not qry:
@@ -65,7 +69,6 @@ class BDsystem:  # -------------------------------------------------------------
                 sesion[nombre_columna] = qry[i]
 
             return sesion
-
         except Exception as error:
             print(f"[Mysql::get_sesion_by_vehiculo()]: {error}")
             raise
@@ -1169,7 +1172,7 @@ class PlanInversion(
 
             else:
                 # if extract not in ('last', 'sum', 'fiscal', 'select*'):
-                qry = """SELECT * FROM extractos WHERE idcuenta='%s' AND extracto = '%s';"""
+                qry = """SELECT * FROM bdinv.extractos WHERE idcuenta='%s' AND extracto = '%s';"""
                 cursor.execute(qry % (account, extract))
                 sql = cursor.fetchone()
 
@@ -1177,13 +1180,17 @@ class PlanInversion(
                 columnas = [columna[0] for columna in cursor.description]
                 if extract in ("last", "sum", "fiscal"):
                     xlis.append(dict(zip(columnas, sql)))
-                else:
+
+                elif extract in ("select*", "sum*"):
                     for fila in sql:
                         x = dict(zip(columnas, fila))
                         xlis.append(x)
+                else:
+                    xlis.append(dict(zip(columnas, sql)))
+
             return xlis
-        except (Exception, EncodingWarning, connect.Error) as error:
-            print("[Mysql:: select_extracto()]: {}".format(error))
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: select_extracto()]: {e} {traceback.print_exc()}")
 
     def insert_extracto(self, account=None, values=None):
         """

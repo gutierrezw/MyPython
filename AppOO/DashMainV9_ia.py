@@ -2364,6 +2364,9 @@ class DashMain:
         self.after_ids = []
         self.is_running = True
 
+        # Control de instancia única para ventana de configuración
+        self.setup_window = None
+
         # colores pantallas y gráficos
         self.bgcolor = DataHub.bgcolor
         self.cgcolor = DataHub.cgcolor
@@ -2639,6 +2642,16 @@ class DashMain:
             command=lambda: self.setup_graph_income("12"),
         )
 
+        bt4 = tk.Button(
+            pn1,
+            text="3y",
+            width=2,
+            bg=self.bgcolor,
+            fg=self.cgcolor,
+            relief=tk.FLAT,
+            command=lambda: self.setup_graph_income("36"),
+        )
+
         gt3 = tk.Button(
             pn3,
             image=imagen_tk,
@@ -2670,6 +2683,7 @@ class DashMain:
         bt1.place(y=20, x=10)
         bt2.place(y=20, x=30)
         bt3.place(y=20, x=50)
+        bt4.place(y=20, x=70)
         gt3.place(y=10, x=10)
         gt4.place(y=10, x=10)
         gt5.place(y=10, x=10)
@@ -3866,7 +3880,15 @@ class DashMain:
         """
         Abre ventana de gestión de sesiones con operaciones CRUD.
         Crea ventana Toplevel posicionada para no solapar el notebook principal.
+        Implementa patrón Singleton: solo permite una instancia de la ventana.
         """
+        # Verificar si ya existe una ventana abierta
+        if self.setup_window is not None and self.setup_window.winfo_exists():
+            # Traer ventana existente al frente
+            self.setup_window.lift()
+            self.setup_window.focus_force()
+            return
+
         # Variable para almacenar referencia al tree y session_window
         tree = None
         session_window = None
@@ -4526,7 +4548,7 @@ class DashMain:
             save_btn = tk.Button(btn_frame, text="Guardar", width=10, command=save_envs)
             save_btn.pack(side=tk.LEFT, padx=10)
 
-            cancel_btn = tk.Button(btn_frame, text="Cancelar", width=10, command=eexit)
+            cancel_btn = tk.Button(btn_frame, text="Cancel", width=10, command=eexit)
             cancel_btn.pack(side=tk.LEFT, padx=10)
 
             # Empaquetar canvas y scrollbar
@@ -4554,6 +4576,7 @@ class DashMain:
                         "orcartera": entry_orcartera.get().strip(),
                         "fiscalYear": entry_fiscalYear.get().strip(),
                         "Idcuenta_principal": var_idcuenta_principal.get(),
+                        "load_csv": var_load_csv.get(),
                         "fefund": entry_fefund.get().strip(),
                         "Pinvertir": entry_Pinvertir.get().strip(),
                         "xstrategy": entry_xstrategy.get().strip(),
@@ -4770,6 +4793,7 @@ class DashMain:
             entry_orcartera = None
             entry_fiscalYear = None
             var_idcuenta_principal = None
+            var_load_csv = None
             entry_fefund = None
             entry_Pinvertir = None
             entry_xstrategy = None
@@ -4846,6 +4870,31 @@ class DashMain:
                     if edit_mode and session_data:
                         is_principal = session_data.get("Idcuenta_principal", False)
                         var_idcuenta_principal.set(is_principal)
+
+                    # Agregar campo load_csv (booleano editable) justo después de Idcuenta_principal
+                    row += 1
+                    label_load_csv = tk.Label(
+                        scrollable_frame,
+                        text="Load CSV:",
+                        bg=self.colors["bgcolor"],
+                        fg="white",
+                        anchor="w",
+                    )
+                    label_load_csv.grid(row=row, column=0, sticky="w", padx=10, pady=5)
+
+                    var_load_csv = tk.BooleanVar(value=False)
+                    check_load_csv = tk.Checkbutton(
+                        scrollable_frame,
+                        variable=var_load_csv,
+                        state="normal",  # Editable
+                        bg=self.colors["bgcolor"],
+                    )
+                    check_load_csv.grid(row=row, column=1, sticky="w", padx=10, pady=5)
+
+                    # Poblar con datos existentes si está en modo edición
+                    if edit_mode and session_data:
+                        load_csv_value = session_data.get("load_csv", False)
+                        var_load_csv.set(load_csv_value)
 
                 elif field_name == "fefund":
                     entry_fefund = entry
@@ -4942,13 +4991,21 @@ class DashMain:
             scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         def eexit():
+            """Cierra la ventana y limpia la referencia"""
             session_window.destroy()
+            self.setup_window = None
 
         # Crear ventana principal de gestión de sesiones
         try:
             # Ventana Toplevel
             session_window = tk.Toplevel(self.root)
             session_window.title("Setup - Inversionista")
+
+            # Guardar referencia para control de instancia única
+            self.setup_window = session_window
+
+            # Asegurar limpieza al cerrar con la X de la ventana
+            session_window.protocol("WM_DELETE_WINDOW", eexit)
 
             # Cargar datos desde BD
             sessions = BDsystem.select_all_sesion()
@@ -5142,7 +5199,11 @@ class DashMain:
                 _inf = 0
             elif ganancias_dia <= 0:
                 _inf = -1
-            _mul = int(abs(limit_gyp) / ganancias_dia)
+
+            if abs(ganancias_dia) < limit_gyp:
+                _mul = 1
+            elif abs(ganancias_dia) >= limit_gyp:
+                _mul = int(abs(ganancias_dia / limit_gyp))
 
             low_limit_gyp = (_inf * _mul) * limit_gyp
             high_limit_gyp = _mul * limit_gyp

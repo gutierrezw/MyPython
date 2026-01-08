@@ -1,5 +1,3 @@
-from shutil import which
-
 from Class_DataFrame import chart_margen_neto, chart_trazaplan, cagar_archivo
 from Modulos_Mysql import (
     PlanInversion,
@@ -18,8 +16,8 @@ from Modulos_python import (
     S,
     N,
     datetime,
-    messagebox,
     timedelta,
+    traceback,
 )
 from Class_customer import MyMessageBox, CustomTreeview, DataHub
 
@@ -33,8 +31,6 @@ class GestionInversion(tk.Frame):
         self.cgcolor = self.colors["cgcolor"]
         self.cchart = self.colors["cchart"]
         self.threads = []
-        self.year = "YE-JUL"
-        self.month = 7
         self.titulo = [
             "Depositos",
             "Retiros",
@@ -64,7 +60,6 @@ class GestionInversion(tk.Frame):
         self.dw = 1290
         self.dh = 700
         self.df = 1297
-        # self.messagebox = MyMessageBox(parent)
 
         # def de frame
         win0 = ttk.Frame(self.root, padding=(1, 1, 1, 1), style="C.TFrame")  # principal
@@ -152,6 +147,19 @@ class GestionInversion(tk.Frame):
         )
         self.load.imagen = imagen_tk
         self.load.pack(side=tk.LEFT, fill=tk.X)
+
+        # definición de boton detalle cierre de mes------------------------------------------------------------------
+        imagen_tk = BDsystem.select_image(idd=304, size=(24, 24))
+        self.cierre = tk.Button(
+            wr11,
+            image=imagen_tk,
+            text="Cierre Mes",
+            bg=self.colors["bgcolor"],
+            relief=tk.FLAT,
+            command=self.cierre_extractos,
+        )
+        self.cierre.imagen = imagen_tk
+        self.cierre.pack(side=tk.LEFT, fill=tk.X)
 
         # definición de boton detalle editar plan ------------------------------------------------------------------
         imagen_tk = BDsystem.select_image(idd=303, size=(24, 24))
@@ -285,19 +293,26 @@ class GestionInversion(tk.Frame):
         self.RepositorioOportunidades = RepositorioOportunidadesBuySell()
         self.Perfoma = IPerformance()
 
-        # información de sesión
-        self.stock_sesion = self.PlaInversion.get_sesion_by_vehiculo("Stock")
-        self.stock_account = self.stock_sesion["idcuenta"]
+        # información de sesión principal
+        lista = self.PlaInversion.select_all_sesion()
+        self.sesion = {}
+        self.d_extract = None
+        for sesion in lista:
 
-        self.crypto_sesion = self.PlaInversion.get_sesion_by_vehiculo("Crypto")
-        self.crypto_account = self.crypto_sesion["idcuenta"]
+            # rechaza los registros q no aplican como vehiculo de inversión
+            if sesion["Pinvertir"] is None and sesion["fefund"] is None:
+                continue
 
-        self.sesion = self.PlaInversion.get_sesion_by_vehiculo("BBVA.ARS")
-        self.bbva_account = self.sesion["idcuenta"]
+            # toma información clave fiscal Year
+            elif sesion["Idcuenta_principal"]:
+                self.fiscalYear = sesion["fiscalYear"]
+                self.year = "YE-" + self.fiscalYear.strftime("%b").upper()
+                self.month = int(self.fiscalYear.month)
 
-        self.sesion = self.PlaInversion.get_sesion_by_vehiculo("SANT.ARS")
-        self.sant_account = self.sesion["idcuenta"]
+            # crea diccionario de sesiones.
+            self.sesion.update({sesion["vehiculo"]: sesion})
 
+        # invoca widget princiapar de gistión
         self.widgets_extractos()
 
     # mantiene actualizada información de extractos
@@ -350,7 +365,7 @@ class GestionInversion(tk.Frame):
                             ),
                         )
                 return costo_base, nav_cierre
-            except EncodingWarning as e:
+            except Exception as e:
                 print("meses_extract(): {}".format(e))
 
         # Detalles de extracts por year  en stock -------------------------------------------------------------
@@ -462,7 +477,7 @@ class GestionInversion(tk.Frame):
             elif self.type_extract["Stock"] == lista[self.indice % len(lista)]:
                 self.load.config(state="normal")
                 datos, f_datos = self.extractos(
-                    account=self.stock_account, periodo=self.year
+                    account=self.sesion["Stock"]["idcuenta"], periodo=self.year
                 )
                 stock = self.extract.insert(
                     "",
@@ -493,7 +508,7 @@ class GestionInversion(tk.Frame):
             elif self.type_extract["Crypto"] == lista[self.indice % len(lista)]:
 
                 datos, f_datos = self.extractos(
-                    account=self.crypto_account, periodo=self.year
+                    account=self.sesion["Crypto"]["idcuenta"], periodo=self.year
                 )
                 crypto = self.extract.insert(
                     "",
@@ -524,7 +539,7 @@ class GestionInversion(tk.Frame):
             elif self.type_extract["BBVA.ARS"] == lista[self.indice % len(lista)]:
 
                 datos, f_datos = self.extractos(
-                    account=self.bbva_account, periodo=self.year
+                    account=self.sesion["BBVA.ARS"]["idcuenta"], periodo=self.year
                 )
                 FCI_bbva = self.extract.insert(
                     "",
@@ -555,7 +570,7 @@ class GestionInversion(tk.Frame):
             elif self.type_extract["SANT.ARS"] == lista[self.indice % len(lista)]:
 
                 datos, f_datos = self.extractos(
-                    account=self.sant_account, periodo=self.year
+                    account=self.sesion["SANT.ARS"]["idcuenta"], periodo=self.year
                 )
                 FCI_sant = self.extract.insert(
                     "",
@@ -587,7 +602,7 @@ class GestionInversion(tk.Frame):
             chart_margen_neto(fg=self.fg1, df=f_datos, parm=parm)
             self.cv1.draw()
 
-        except EncodingWarning as error:
+        except Exception as error:
             print("widgets_extractos(): {}".format(error))
 
     def update_first_row_extract(self, padre=None):
@@ -671,7 +686,7 @@ class GestionInversion(tk.Frame):
                     "{:10.1%}".format(margen_neto),
                 ),
             )
-        except EncodingWarning as error:
+        except Exception as error:
             print("update_first_row_extract(): {}".format(error))
 
     def lista_extractos(self):
@@ -687,7 +702,7 @@ class GestionInversion(tk.Frame):
             # incrementa indice de llamado a la lista
             self.indice += 1
             self.widgets_extractos()
-        except EncodingWarning as e:
+        except Exception as e:
             print("lista_extractos(): {}".format(e))
 
     def on_select_extracto(self, event=None):
@@ -943,7 +958,7 @@ class GestionInversion(tk.Frame):
                         personal.insert("", tk.END, values=values)
                         l += 1
 
-        except EncodingWarning as e:
+        except Exception as e:
             print("detalle_plan(): {}".format(e))
 
     # entrega Dataframe con información de extractos
@@ -998,7 +1013,7 @@ class GestionInversion(tk.Frame):
             f_datos["margenNT"] = f_datos["beneficiosNeto"] / f_datos["ingresos"]
 
             return datos, f_datos
-        except EncodingWarning as error:
+        except Exception as error:
             print("extractos(): {}".format(error))
 
     def construir_extracto_crypto(self, desde=None, hasta=None):
@@ -1348,106 +1363,109 @@ class GestionInversion(tk.Frame):
             costos = comisiones + perdidas + imargen + fee + tax
             beneficios = ingresos - costos
 
-        traza = self.PlaInversion.select_trazaplan(idcuenta=account, orden="ASC")
-        entrada = self.PlaInversion.select_extracto(extract="sum*")
-        extracto = sorted(entrada, key=lambda x: x["extracto"], reverse=False)
+        try:
+            traza = self.PlaInversion.select_trazaplan(idcuenta=account, orden="ASC")
+            entrada = self.PlaInversion.select_extracto(extract="sum*")
+            extracto = sorted(entrada, key=lambda x: x["extracto"], reverse=False)
 
-        ibook = enumerate(traza)
-        eof_ibook, i_traza = next(ibook, (None, None))
+            ibook = enumerate(traza)
+            eof_ibook, i_traza = next(ibook, (None, None))
 
-        sbook = enumerate(extracto)
-        eof_sbook, s_extracto = next(sbook, (None, None))
+            sbook = enumerate(extracto)
+            eof_sbook, s_extracto = next(sbook, (None, None))
 
-        # aparea traza y extracto para actualizar trazaplan ---------------------------------------------------------
-        while (eof_ibook is not None) and (eof_sbook is not None):
+            # aparea traza y extracto para actualizar trazaplan ---------------------------------------------------------
+            while (eof_ibook is not None) and (eof_sbook is not None):
 
-            acumulate_extracto()
+                acumulate_extracto()
 
-            # actualiza años anteriores --------------------------------
-            if i_traza["extracto"] == s_extracto["extracto"]:
+                # actualiza años anteriores --------------------------------
+                if i_traza["extracto"] == s_extracto["extracto"]:
 
-                efectividad = (s_extracto["costobase"] - i_traza["vision"]) / i_traza[
-                    "vision"
-                ]
-                rendimiento = beneficios / s_extracto["costobase"]
+                    efectividad = (
+                        s_extracto["costobase"] - i_traza["vision"]
+                    ) / i_traza["vision"]
+                    rendimiento = beneficios / s_extracto["costobase"]
 
-                values = {
-                    "tinversion": s_extracto["costobase"],
-                    "dividendo": dividendos,
-                    "ccapital": beneficios,
-                    "efectividad": efectividad,
-                    "trendimiento": rendimiento,
-                    "status": "Cumplido",
-                }
+                    values = {
+                        "tinversion": s_extracto["costobase"],
+                        "dividendo": dividendos,
+                        "ccapital": beneficios,
+                        "efectividad": efectividad,
+                        "trendimiento": rendimiento,
+                        "status": "Cumplido",
+                    }
 
-                crecimiento, dividendos, idevengo, perdidas, fee, costobase = (
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                )
-                comisiones, tax, ingresos, costos, beneficios, imargen = (
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                )
-                self.PlaInversion.update_trazaplan_inversion(
-                    idcuenta=account, meta=i_traza["meta"], values=values
-                )
+                    crecimiento, dividendos, idevengo, perdidas, fee, costobase = (
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                    )
+                    comisiones, tax, ingresos, costos, beneficios, imargen = (
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                    )
+                    self.PlaInversion.update_trazaplan_inversion(
+                        idcuenta=account, meta=i_traza["meta"], values=values
+                    )
 
-                # logica para comenzar proximo año fiscal
-                # validar en julio 2026
-                values = {
-                    "tinversion": s_extracto["costobase"],
-                    "dividendo": 0.0,
-                    "ccapital": 0.0,
-                    "efectividad": 0.0,
-                    "trendimiento": 0.0,
-                    "status": "Ejecucion",
-                }
-                proxima = i_traza["meta"] + 1
-                self.PlaInversion.update_trazaplan_inversion(
-                    idcuenta=account, meta=proxima, values=values
-                )
+                    # logica para comenzar proximo año fiscal
+                    # validar en julio 2026
+                    values = {
+                        "tinversion": s_extracto["costobase"],
+                        "dividendo": 0.0,
+                        "ccapital": 0.0,
+                        "efectividad": 0.0,
+                        "trendimiento": 0.0,
+                        "status": "Ejecucion",
+                    }
+                    proxima = i_traza["meta"] + 1
+                    self.PlaInversion.update_trazaplan_inversion(
+                        idcuenta=account, meta=proxima, values=values
+                    )
 
-                eof_ibook, i_traza = next(ibook, (None, None))
-                eof_sbook, s_extracto = next(sbook, (None, None))
-
-            else:
-                if i_traza["extracto"] < s_extracto["extracto"]:
                     eof_ibook, i_traza = next(ibook, (None, None))
-                else:
-                    costobase = s_extracto["costobase"]
                     eof_sbook, s_extracto = next(sbook, (None, None))
 
-        # actualiza último mes calculado ---------------------------------------------------------------------
-        if eof_sbook is None:
-            if i_traza["status"] == "Ejecucion":
+                else:
+                    if i_traza["extracto"] < s_extracto["extracto"]:
+                        eof_ibook, i_traza = next(ibook, (None, None))
+                    else:
+                        costobase = s_extracto["costobase"]
+                        eof_sbook, s_extracto = next(sbook, (None, None))
 
-                beneficios = ingresos - costos
-                efectividad = (costobase - i_traza["vision"]) / i_traza["vision"]
-                rendimiento = beneficios / costobase
-                values = {
-                    "tinversion": costobase,
-                    "dividendo": dividendos,
-                    "ccapital": beneficios,
-                    "efectividad": efectividad,
-                    "trendimiento": rendimiento,
-                }
-                self.PlaInversion.update_trazaplan_inversion(
-                    idcuenta=account, meta=i_traza["meta"], values=values
-                )
+            # actualiza último mes calculado ---------------------------------------------------------------------
+            if eof_sbook is None:
+                if i_traza["status"] == "Ejecucion":
 
-                # actualiza vision financiera actual sobre tabla plan
-                campos = {"Financiera": costobase}
-                self.PlaInversion.update_plan_inversion(
-                    idcuenta=account, vision="actual", values=campos
-                )
+                    beneficios = ingresos - costos
+                    efectividad = (costobase - i_traza["vision"]) / i_traza["vision"]
+                    rendimiento = beneficios / costobase
+                    values = {
+                        "tinversion": costobase,
+                        "dividendo": dividendos,
+                        "ccapital": beneficios,
+                        "efectividad": efectividad,
+                        "trendimiento": rendimiento,
+                    }
+                    self.PlaInversion.update_trazaplan_inversion(
+                        idcuenta=account, meta=i_traza["meta"], values=values
+                    )
+
+                    # actualiza vision financiera actual sobre tabla plan
+                    campos = {"Financiera": costobase}
+                    self.PlaInversion.update_plan_inversion(
+                        idcuenta=account, vision="actual", values=campos
+                    )
+        except Exception as e:
+            print(f"update_plan(): {e} {traceback.print_exc()}")
 
     def edit_plan(self):
         # controla salida de window_estrategia()
@@ -1468,8 +1486,7 @@ class GestionInversion(tk.Frame):
                     or estilo_vida < 1000
                     or contribucion < 1000
                 ):
-                    # self.messagebox.showerror("Error", "Todos los valores deben ser enteros de al menos 1000.")
-                    messagebox.showerror(
+                    MyMessageBox(self.root).showerror(
                         "Error", "Todos los valores deben ser enteros de al menos 1000."
                     )
                     return
@@ -1481,14 +1498,15 @@ class GestionInversion(tk.Frame):
                 }
 
                 self.PlaInversion.update_plan_inversion(
-                    idcuenta=self.stock_account, vision="deseada", values=campos
+                    idcuenta=self.sesion["Stock"]["idcuenta"],
+                    vision="deseada",
+                    values=campos,
                 )
                 eexit()
                 self.widgets_plan()
 
             except ValueError:
-                # self.messagebox.showerror("Error", "Todos los valores deben ser números enteros válidos.")
-                messagebox.showerror(
+                MyMessageBox.showerror(
                     "Error", "Todos los valores deben ser números enteros válidos."
                 )
 
@@ -1557,23 +1575,108 @@ class GestionInversion(tk.Frame):
 
             ct1.grid(row=3, column=3, padx=10, pady=10)
             ct2.grid(row=3, column=4, padx=10, pady=10)
-
         except ValueError:
             raise ValueError(
                 "Error: {}".format("los valores deben ser números enteros.")
             )
 
+    # asegura que esté completo performance crypto para crear extracto
+    def check_performance_vehiculo(self, vehiculo=None, account=None, extracto=None):
+        try:
+            log = False
+            (last_update, ix) = self.Perfoma.select_performa_inversion(
+                account=account, vehiculo=vehiculo, accion="last"
+            )
+
+            if last_update:
+                f_hasta = last_update[ix.index("fechaclose")]
+                if extracto <= f_hasta:
+                    log = True
+
+            return log
+        except Exception as e:
+            print(f"check_performance_vehiculo(): {e}")
+
     # agregar desde boton extractos
     def add_csv(self):
-        def insert_new_extracto():
-            try:
-                # extracto de stock -------------------------------------------------------------------------------
+        try:
+            hoy = datetime.now()
+            dias = hoy.day
+            last = hoy - timedelta(days=dias)
+            sesion = self.PlaInversion.get_sesion_by_vehiculo(principal=True)
+
+            d_extract, ilog = cagar_archivo(
+                account=sesion["idcuenta"], titulo="Activity Statement", tipo="csv"
+            )
+
+            if not ilog:
+                return
+
+            # get last date extract
+            lastExtracto = self.PlaInversion.select_extracto(
+                account=sesion["idcuenta"],
+                extract=d_extract["extracto"].strftime("%Y-%m-%d"),
+            )
+
+            # valida que no haya sido Extracto cargado mes anterior
+            if lastExtracto:
+
+                # para no procesar extracto mas de una vez
+                if lastExtracto[0]["extracto"] <= d_extract["extracto"].date():
+                    idcuenta = lastExtracto[0]["idcuenta"]
+                    extracto = lastExtracto[0]["extracto"]
+
+                    msj = f"No se puede cargar dos veces CSV extracto {idcuenta} para el mes [{extracto.strftime("%b-%Y")}], intente nuevamente."
+                    MyMessageBox(self.root).showwarning("Advertencia", msj)
+                    return
+
+                # para asegurar que el extracto load no exceda la today()
+                if d_extract["extracto"].date() > hoy.date():
+                    msj = f"No se puede cargar extracto {idcuenta} mayor a la fecha [{d_extract["extracto"].strftime("%b-%Y")}], intente nuevamente."
+                    MyMessageBox(self.root).showwarning("Advertencia", msj)
+                    return
+
+            # chequea carga de extracto Stock -----------------------------------------------------------------------
+            if ilog:
                 self.PlaInversion.insert_extracto(
                     account=sesion["idcuenta"], values=d_extract
                 )
+                self.d_extract = d_extract
 
+                # actualiza panel gestion
+                self.widgets_extractos()
+        except Exception as e:
+            print(f"add_csv(): {e} {traceback.print_exc()}")
+
+    def get_date_extrato(self):
+        sesion = self.PlaInversion.get_sesion_by_vehiculo(principal=True)
+
+        # get last date extract
+        lastExtracto = self.PlaInversion.select_extracto(
+            account=sesion["idcuenta"], extract="last"
+        )
+
+        hoy = datetime.now()
+        dias = hoy.day
+        last = hoy - timedelta(days=dias)
+
+        # Convierte Extrado a "%Y-%m-%d 00:00:00"
+        lastDate = datetime.combine(lastExtracto[0]["extracto"], datetime.min.time())
+        lastExtracto[0]["extracto"] = lastDate
+
+        # Extracto cargado mes anterior
+        if lastExtracto[0]["extracto"].date() == last.date():
+            return lastExtracto[0], True
+
+        # Extracto NO cargado mes anterior
+        if lastExtracto[0]["extracto"].date() < last.date():
+            return lastExtracto[0], False
+
+    def cierre_extractos(self):
+        def insert_new_extracto():
+            try:
                 # extracto crypto ---------------------------------------------------------------------------------
-                now = d_extract["extracto"]
+                now = self.d_extract["extracto"]
                 inicio = now - timedelta(days=90)
                 f_desde = inicio.strftime("%Y-%m-%d")
                 f_hasta = now.strftime("%Y-%m-%d")
@@ -1581,96 +1684,128 @@ class GestionInversion(tk.Frame):
 
                 # extracto BBVA y santander-------------------------------------------------------------------------
                 self.construir_extracto_fci(
-                    account=self.bbva_account, desde=f_desde, hasta=f_hasta
+                    account=self.sesion["BBVA.ARS"]["idcuenta"],
+                    desde=f_desde,
+                    hasta=f_hasta,
                 )
                 self.construir_extracto_fci(
-                    account=self.sant_account, desde=f_desde, hasta=f_hasta
+                    account=self.sesion["SANT.ARS"]["idcuenta"],
+                    desde=f_desde,
+                    hasta=f_hasta,
                 )
 
-            except EncodingWarning as e:
+            except Exception as e:
                 print("insert_new_extracto(): {}".format(e))
 
-        # asegura que esté completo performance crypto para crear extracto
-        def check_performance_crypto(extracto=None):
-            try:
-                log, vehiculo = False, "Crypto"
-                x_sesion = self.PlaInversion.get_sesion_by_vehiculo(vehiculo)
-                (last_update, ix) = self.Perfoma.select_performa_inversion(
-                    account=x_sesion["idcuenta"], vehiculo=vehiculo, accion="last"
-                )
+            # Proceso mensuales y fin de año fiscal
 
-                if last_update:
-                    f_hasta = last_update[ix.index("fechaclose")]
-                    print("check_performance_crypto==", extracto, f_hasta)
-
-                    if extracto <= f_hasta:
-                        log = True
-
-                return log
-            except EncodingWarning as e:
-                print("check_performance_crypto(): {}".format(e))
-
-        # Proceso mensuales y fin de año fiscal
         def procesa_extractos():
-            nonlocal msj
             try:
+                # asegura tomar datos de sesion principal
+                sesion = self.PlaInversion.get_sesion_by_vehiculo(principal=True)
                 a_extracto = self.PlaInversion.select_extracto(
                     account=sesion["idcuenta"], extract="last"
                 )
-                if a_extracto[0]["extracto"] < d_extract["extracto"].date():
+
+                if a_extracto[0]["extracto"] == self.d_extract["extracto"].date():
 
                     # inserta extracto Stock y Crypto ---------------------
                     insert_new_extracto()
 
                     # actualiza tabla de plan cuando cierra el año fiscal ---------------------------------------------
-                    if d_extract["extracto"].month == sesion["fiscalYear"].month:
+                    if self.d_extract["extracto"].month == sesion["fiscalYear"].month:
                         self.update_plan(
                             account=sesion["idcuenta"], condicion="Cumplido"
                         )
                     else:
                         self.update_plan(account=sesion["idcuenta"], condicion=None)
 
-                    # self.messagebox.showinfo("Add", "Successfully load Extracto.csv")
-                    messagebox.showinfo("Add", "Successfully load Extracto.csv")
-
-                    self.widgets_extractos()
-                else:
-                    msj = (
-                        "No puede agregar nuevamente el Extracto ["
-                        + d_extract["extracto"].strftime("%b-%Y")
-                        + "], existe en el sistema"
+                    MyMessageBox(self.root).showwarning(
+                        "Add", "Cargados exitosamente los Extracto"
                     )
-                    # self.messagebox.showinfo("Error", msj)
-                    messagebox.showinfo("Error", msj)
-            except EncodingWarning.Exception as e:
-                print(f"procesa_extractos(): {e}")
+
+                else:
+                    idcuenta = a_extracto[0]["idcuenta"]
+                    extracto = self.d_extract["extracto"].strftime("%b-%Y")
+                    msj = f"No puede agregar nuevamente el Extracto {idcuenta} [{extracto}], existe en el sistema"
+                    MyMessageBox(self.root).showwarning("Advertencia", msj)
+            except Exception as e:
+                print(f"procesa_extractos(): {e} {traceback.print_exc()}")
+
+        def valida_all_load_csv():
+            try:
+                hoy = datetime.now()
+                dias = hoy.day
+                last = hoy - timedelta(days=dias)
+
+                for vehiculo, sesion in self.sesion.items():
+                    classActivo = "BBVA.ARS" if vehiculo.endswith(".ARS") else vehiculo
+
+                    # chequea si extrato fue cargado
+                    if sesion["load_csv"]:
+                        a_extracto = self.PlaInversion.select_extracto(
+                            account=sesion["idcuenta"], extract="last"
+                        )
+                        if a_extracto[0]["extracto"] != last.date():
+                            msj = (
+                                f"Debe realizar load CSV de extracto para {classActivo} al ["
+                                + f"{last.date()}], intente mas tarde"
+                            )
+                            MyMessageBox(self.root).showwarning("Advertencia", msj)
+                            return False
+
+                return True
+            except Exception as e:
+                print(f"valida_all_load_csv(): {e} {traceback.print_exc()}")
 
         try:
-            hoy = datetime.now()
-            sesion = self.PlaInversion.get_sesion_by_vehiculo("Stock")
-            d_extract, ilog = cagar_archivo(
-                account=sesion["idcuenta"], titulo="Activity Statement", tipo="csv"
-            )
 
-            # chequea carga de extracto Stock
-            if ilog:
+            # obtiene y valida last extract
+            self.d_extract, logLastExtract = self.get_date_extrato()
 
-                # valida existencia de performance de Crypto al cierre de mes
-                clog = check_performance_crypto(extracto=d_extract["extracto"].date())
+            # valida que se hayan cargados los archivos CSV
+            if not valida_all_load_csv():
+                return
 
-                # si ambos Ok, procede con la carga de extractos
-                if clog:
-                    procesa_extractos()
-                else:
-                    msj = (
-                        "No se ha completado performance Crypto al ["
-                        + d_extract["extracto"].strftime("%b-%Y")
-                        + "], intente mas tarde"
-                    )
-                    # self.messagebox.showinfo("Error", msj)
-                    messagebox.showinfo("Error", msj)
-        except EncodingWarning.Exception as error:
-            print(f"add_csv(): {error}")
+            if not logLastExtract:
+                idcuenta = self.d_extract["idcuenta"]
+                msj = f"No se ha cargado CSV extracto {idcuenta} del mes anterior, intente mas tarde"
+                MyMessageBox(self.root).showwarning("Advertencia", msj)
+                return
+
+            check = []
+            # valida existencia de performance de vehiculos al cierre de mes
+            for vehiculo, sesion in self.sesion.items():
+                classActivo = "BBVA.ARS" if vehiculo.endswith(".ARS") else vehiculo
+
+                clog = self.check_performance_vehiculo(
+                    vehiculo=classActivo,
+                    account=self.sesion[vehiculo]["idcuenta"],
+                    extracto=self.d_extract["extracto"].date(),
+                )
+                check.append({vehiculo: clog})
+
+            # si ambos Ok, procede con la carga de extractos
+            all_true = all(val for d in check for val in d.values())
+            if all_true:
+                procesa_extractos()
+
+                # actualiza panel gestion
+                self.widgets_extractos()
+
+            # emite mensajes
+            elif not all_true:
+                for vehiculo in check:
+                    ok = list(vehiculo.values())[0]
+                    if not ok:
+                        keys = list(vehiculo.keys())[0]
+                        msj = (
+                            f"No se ha completado cierre para {keys} al ["
+                            + f"{self.d_extract["extracto"].strftime("%b-%Y")}], intente mas tarde"
+                        )
+                        MyMessageBox(self.root).showwarning("Advertencia", msj)
+        except Exception as error:
+            print(f"cierre_extractos(): {traceback.print_exc()}")
 
 
 if __name__ == "__main__":
