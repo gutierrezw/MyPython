@@ -560,7 +560,7 @@ def cagar_archivo(account=None, titulo=None, tipo="csv"):
         else:
             return extracto, ilog
     except Exception as error:
-        print("[Error::  cagar_archivo()]: {}".format(error))
+        print(f"[cagar_archivo()] Error: {error}")
         return {}, None
 
 
@@ -1754,8 +1754,10 @@ def Agente_income_Manager(fg: object, parm=None):
         ax.set_xticks(xlabel, clave)
         if dlabl["periodo"] == 3:
             xsti = [xlabel[0], xlabel[1], xlabel[-1]]
-        else:
+        elif dlabl["periodo"] in (6, 12):
             xsti = [xlabel[0], xlabel[1], xlabel[2], xlabel[-1]]
+        else:
+            xsti = [xlabel[0], xlabel[2], xlabel[-1]]
 
         ax.set_xticks(xsti)
         ax.set(xlim=[xlabel[0], xlabel[-1]])
