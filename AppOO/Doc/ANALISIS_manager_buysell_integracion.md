@@ -1,7 +1,7 @@
 # Sistema de Rebalanceo de Cartera - DataHub.manager_buysell
 
 **Fecha:** 2025-12-29
-**Autor:** Claude Code
+**Autor:** 
 **Propósito:** Especificación del sistema de recomendaciones de compra para balancear cartera
 
 ---
