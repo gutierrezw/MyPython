@@ -53,7 +53,7 @@ from Modulos_python import (
 )
 
 sys.path.insert(0, "..")
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "AppValuations"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "AppValuations"))
 from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion
 from valuation_edgar_downloader import BASE_DIR, download_filing
 from valuation_xbrl_api import get_zip_files
