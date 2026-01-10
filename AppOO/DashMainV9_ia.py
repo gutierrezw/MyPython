@@ -124,7 +124,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
             func=self.schedule_order_remote,
         )
 
-    # Actualiza el diccionario DataHub.info[symbol] con el precio recibido
+    """ Actualiza el diccionario DataHub.info[symbol] con el precio recibido"""
+
     def update_precio_DataHubInfo(self, symbol=None, conid=None, precio=None):
         with DataHub.lockInfo:
             if symbol in self.info.keys():
@@ -150,7 +151,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         }
                     )
 
-    # temporal para unificar parametros de entrada
+    """ temporal para unificar parametros de entrada"""
+
     def on_message_binance_websocket(self, _, message):
         # captura de evento de precio
         def procesa_stream_crypto(x_message):
@@ -285,7 +287,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
             print("[on_message_binance_websocket()]: {}".format(error))
             time.sleep(1)
 
-    # reemplaza  on_message_websocket() de websocket
+    """ reemplaza  on_message_websocket() de websocket"""
+
     def on_message_IBrks_websocket(self, message):
         def procesa_stock(d_precio=None):
             try:
@@ -517,7 +520,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
             print("[on_message_IBrks_websocket({})]: {}".format(self.vehiculo, error))
             time.sleep(1)
 
-    # actualiza self.positions
+    """ actualiza self.positions"""
+
     def update_symbol_en_positions(self, struct):
         def update_position():
             try:
@@ -561,7 +565,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
         except Exception as e:
             print("[update_symbol_en_positions({})]: {}".format(self.vehiculo, e))
 
-    # calcula peso de symbols dentro de positions
+    """ calcula peso de symbols dentro de positions"""
+
     def update_peso_position(self):
         try:
             inversion = sum(position["costobase"] for position in self.positions)
@@ -569,7 +574,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
         except Exception as e:
             print("[update_peso_position({})]: {}".format(self.vehiculo, e))
 
-    # mantiene self.position igual a la tabla inversionesError
+    """ mantiene self.position igual a la tabla inversionesError"""
+
     def update_self_positions(self, in_positions=None):
         try:
             ibook = enumerate(in_positions)
@@ -597,7 +603,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
         except Exception as e:
             print("[update_positions({})]: {}".format(self.vehiculo, e))
 
-    # almacena en ts_yfinance_symbol information de buy y sell
+    """ almacena en ts_yfinance_symbol information de buy y sell"""
+
     def ts_oportunidades_symbol(self, symbol, datos=None):
         try:
             d_buy, d_sell, d_dividends = {}, {}, {}
@@ -613,12 +620,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                     elif "dividends" in datos.keys():
                         self.info[symbol]["dividends"] = datos["dividends"]
-
-            # else:
-            #    if self.vehiculo == "Crypto":
-            #        key = list(datos.keys())
-            #        if len(key) > 0:
-            #            self.info.update({symbol: {key[0]: datos[key[0]]}})
 
             # siempre return ultima info()
             if symbol in self.info.keys():
@@ -637,7 +638,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
         except Exception as e:
             print("[ts_oportunidades_symbol()]: {}".format(e))
 
-    # recorre positions para actualizar info() con las oportunidades de sell
+    """ recorre positions para actualizar info() con las oportunidades de sell"""
+
     def oportunidades_sell(self):
         def obtiene_lotes(symbol=None):
             nonlocal datos
@@ -690,7 +692,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
         except Exception as e:
             print("[oportunidades_sell()]: {}".format(e))
 
-    # recorre positions para actualizar oportunidades buy general
+    """ recorre positions para actualizar oportunidades buy general"""
+
     def oportunidades_buy(self):
         try:
             invertir = self.sesion["Pinvertir"]
@@ -719,78 +722,23 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     ) * stockNew
                     gainInversion = (gypProyect - gypInicial) / invertir
 
-                    datos = {}
-                    if (
-                        (gypPrecio < -0.001)
-                        and (gainInversion < 100)
-                        and (position["dividendo"] == 0)
-                    ):
-                        datos = {
-                            "buy": {
-                                "ganancia precio": gypPrecio,
-                                "ganancia inversión": gainInversion,
-                                "cantidad buy": stock,
-                                "last": position["mrkprice"],
-                                "avgcost": avgCost,
-                                "cantidad post": stockNew,
-                                "avgCost post": precioNew,
-                                "retorno post": gypProyect,
-                                "objetivo": position["objetivo"],
-                                "pre dividendos": position["dividendo"],
-                                "post dividendos": dividendo * stockNew,
-                                "pre costobase": position["costobase"],
-                                "post costobase": precioNew * stockNew,
-                            }
-                        }
-
-                    # actualiza en diccionario self.info()
-                    (d_buy, d_sell) = self.ts_oportunidades_symbol(symbol, datos)
-        except Exception as e:
-            print("[oportunidades_buy()]: {}".format(e))
-
-    # recorre positions para actualizar info() oportunidades dividends
-    def oportunidades_dividends(self):
-        try:
-            invertir = self.sesion["Pinvertir"]
-            for position in self.positions:
-                symbol = position["ticket"]
-
-                if (
-                    position["mrkprice"] > 0.000001
-                    and invertir > 0
-                    and position["position"] > 0
-                ):
-                    stock = int(invertir / position["mrkprice"])
-                    stockNew = stock + position["position"]
-                    avgCost = position["costobase"] / position["position"]
-                    dividendo = position["dividendo"] / position["position"]
-                    gypInicial = (
-                        position["objetivo"] - avgCost + dividendo
-                    ) * position["position"]
-                    precioNew = (
-                        position["costobase"] + stock * position["mrkprice"] + 0.4
-                    ) / stockNew
-
-                    gypPrecio = (precioNew - avgCost) / avgCost if avgCost > 0 else 0
-                    gypProyect = (
-                        position["objetivo"] - precioNew + dividendo
-                    ) * stockNew
-                    gainInversion = (gypProyect - gypInicial) / invertir
-
-                    datos = {}
-                    # if (gypPrecio < -0.001) and (position['dividendo'] > 0):
-                    if position["dividendo"] > 0:
-
-                        tasa_efectiva = (
-                            position["dividendo"] / position["costobase"]
-                            if position["costobase"] > 0
-                            else 0
-                        )
+                    # ajusta calculo de la tasa nominal
+                    if self.vehiculo == "Stock":
                         tasa_nominal = position["dividendYield"] / 100
-                        ex_dividends = position["exDividendDate"].strftime("%d-%b'%y")
+                    else:
+                        tasa_nominal = position["dividendo"] / position["costobase"]
 
+                    ex_dividends = position["exDividendDate"].strftime("%d-%b'%y")
+
+                    datos = {}
+                    if (gypPrecio < self.sesion["gypPrecio"]) and (
+                        gainInversion < self.sesion["gainInversion"]
+                    ):
+                        BuyDividends = (
+                            "buy" if position["dividendo"] == 0 else "dividends"
+                        )
                         datos = {
-                            "dividends": {
+                            BuyDividends: {
                                 "ganancia precio": gypPrecio,
                                 "ganancia inversión": gainInversion,
                                 "cantidad buy": stock,
@@ -801,7 +749,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                 "retorno post": gypProyect,
                                 "objetivo": position["objetivo"],
                                 "dividendYield": tasa_nominal,
-                                "YieldEfectiva": tasa_efectiva,
                                 "exDividendDate": ex_dividends,
                                 "pre dividendos": position["dividendo"],
                                 "post dividendos": dividendo * stockNew,
@@ -813,9 +760,10 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # actualiza en diccionario self.info()
                     (d_buy, d_dividend) = self.ts_oportunidades_symbol(symbol, datos)
         except Exception as e:
-            print("[oportunidades_dividends()]: {}".format(e))
+            print("[oportunidades_buy()]: {}".format(e))
 
-    # captura operaciones compra y ventas de activos
+    """ captura operaciones compra y ventas de activos"""
+
     def trader_api_vehiculo(self):
         # obtiene trader para las Cryptos
         def trader_binance():
@@ -1263,7 +1211,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
         except (Exception, EnvironmentError, ExceptionGroup) as e:
             print(f"trader_api_vehiculo({self.vehiculo}): {e}")
 
-    # declara las api para binance
+    """ declara las api para binance"""
+
     def api_vehiculo_binance(self):
         def update_inversion_crypto(api=None, in_positions=None) -> list:
             try:
@@ -1778,7 +1727,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
             print(f"conector_api_vehiclo({self.vehiculo}): {error}")
             time.sleep(5)
 
-    # actualiza stock en tabla market -- estrategia de dividendos para el portfolio
+    """ actualiza stock en tabla market -- estrategia de dividendos para el portfolio"""
+
     def _get_conid_from_symbol(self, symbol):
         """
         Busca el conid correspondiente a un símbolo en self.positions.
@@ -1798,7 +1748,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
             print(f"[_get_conid_from_symbol({symbol})]: {e}")
             return None
 
-    # Helper: calcula meses de pago desde ex-dividend date
+    """ Helper: calcula meses de pago desde ex-dividend date"""
+
     def _parse_ib_date(self, date_str):
         """
         Parsea fecha de IB en formato "Mar13'26" a datetime.
@@ -2645,8 +2596,10 @@ class DashMain:
 
         # DashMain.manager_after = MangerAfterEvents(AppRoot=self.root, logger="root")
 
-    # cambia estilo notebook -----------------------------------------------------------------------------------------
+    """ cambia estilo notebook ----------------------------------------------------------------------------------------"""
+
     def on_tab_changed(self, event):
+
         selected = event.widget.index("current")
         for i in range(self.root_note.index("end")):
             if i == selected:
@@ -2654,7 +2607,8 @@ class DashMain:
             else:
                 self.root_note.tab(i, style="TNotebook.Tab")  # estilo por defecto
 
-    # contendor para iniciar widget cryptos
+    """ contendor para iniciar widget cryptos"""
+
     def start_crypto(self, account=None, vehiculo=None):
         def update_pane_crypto():
             nav, unpyl, dgyp, unprofit, costo = 0.0, 0.0, 0.0, 0.0, 0.0
@@ -2706,7 +2660,8 @@ class DashMain:
         except Exception as e:
             print(f"start_cryptos({e})")
 
-    # contendor para iniciar widget de stock
+    """ contendor para iniciar widget de stock"""
+
     def start_stock(self, account=None, vehiculo=None):
         def update_pane_stock():
             nav, unpyl, dgyp, unprofit, costo = 0.0, 0.0, 0.0, 0.0, 0.0
@@ -2762,7 +2717,8 @@ class DashMain:
         except Exception as e:
             print("start_stock(): {}".format(e))
 
-    # chatbot y/o asistente ------------------------------------------------------------------------------------------
+    """ chatbot y/o asistente ------------------------------------------------------------------------------------------"""
+
     def start_chatbot(self):
         try:
             self.chatbot = AsistenteChatbot(
@@ -2771,7 +2727,8 @@ class DashMain:
         except Exception as e:
             print("start_chatbot(): {}".format(e))
 
-    # update widget del crypto
+    """ update widget del crypto"""
+
     def update_widget(self, vehiculo=None):
         try:
             # Verificar si debemos continuar ejecutando
@@ -3126,7 +3083,8 @@ class DashMain:
         except EncodingWarning as e:
             print("car_ordenes_activas(): {}".format(e))
 
-    # despliega ventana con detalle para el gráfico
+    """ despliega ventana con detalle para el gráfico"""
+
     def detalle_graph(self, tipo=None):
 
         # controla salida de window_estrategia()
@@ -3724,7 +3682,8 @@ class DashMain:
         except EncodingWarning as e:
             print("detalle_graph(): {}".format(e))
 
-    # performace de  ultimos n meses
+    """ performace de  ultimos n meses"""
+
     def setup_graph_income(self, tipo=None):
 
         parm = {
@@ -3737,7 +3696,8 @@ class DashMain:
         Agente_income_Manager(fg=self.rg0, parm=parm)
         self.rv0.draw()
 
-    # graficos windows main
+    """ graficos windows main"""
+
     def graficos_main(self):
         # Verificar si debemos continuar ejecutando
         if not self.is_running:
@@ -3809,7 +3769,8 @@ class DashMain:
             self.after_ids.append(after_id)
         # DataHub.manager_after._safe(1200000, self.graficos_main(), name="graficos_main")
 
-    # Detener cada módulo de forma ordenada
+    """ Detener cada módulo de forma ordenada"""
+
     def setup_config(self):
         """
         Abre ventana de gestión de sesiones con operaciones CRUD.
@@ -3872,6 +3833,8 @@ class DashMain:
                         session.get("idcuenta", ""),
                         fesesion_str,
                         session.get("Pinvertir", 0),
+                        session.get("gypPrecio", 0.0),
+                        session.get("gainInversion", 0.0),
                     ]
 
                     tree.insert_row(values=row_values)
@@ -4513,6 +4476,8 @@ class DashMain:
                         "load_csv": var_load_csv.get(),
                         "fefund": entry_fefund.get().strip(),
                         "Pinvertir": entry_Pinvertir.get().strip(),
+                        "gypPrecio": entry_gypPrecio.get().strip(),
+                        "gainInversion": entry_gainInversion.get().strip(),
                         "xstrategy": entry_xstrategy.get().strip(),
                         "userapi": (
                             blob_userapi.get("1.0", tk.END).strip().encode("utf-8")
@@ -4583,6 +4548,32 @@ class DashMain:
                         )
                         return
 
+                    # Convertir gypPrecio a float
+                    try:
+                        values["gypPrecio"] = (
+                            float(values["gypPrecio"]) if values["gypPrecio"] else 0.0
+                        )
+                    except ValueError:
+                        MyMessageBox(session_window).showerror(
+                            "Error de Validación",
+                            "Gyp Precio debe ser un número decimal",
+                        )
+                        return
+
+                    # Convertir gainInversion a float
+                    try:
+                        values["gainInversion"] = (
+                            float(values["gainInversion"])
+                            if values["gainInversion"]
+                            else 0.0
+                        )
+                    except ValueError:
+                        MyMessageBox(session_window).showerror(
+                            "Error de Validación",
+                            "Gain Inversión debe ser un número decimal",
+                        )
+                        return
+
                     # Convertir port a int
                     try:
                         values["port"] = int(values["port"]) if values["port"] else None
@@ -4625,7 +4616,6 @@ class DashMain:
                         refresh_sessions()
                     else:
                         MyMessageBox(session_window).showerror("Error", msg)
-
                 except Exception as e:
                     print(f"[save_session()]: {e}")
                     MyMessageBox(session_window).showerror(
@@ -4715,6 +4705,8 @@ class DashMain:
                     "disabled" if not edit_mode else "normal",
                 ),
                 ("Pinvertir", "Monto a Invertir (int):", "normal"),
+                ("gypPrecio", "Gyp Precio (float):", "normal"),
+                ("gainInversion", "Gain Inversión (float):", "normal"),
                 ("xstrategy", "Estrategia (char 60):", "normal"),
                 ("port", "Puerto (int 1-65535):", "normal"),
             ]
@@ -4730,6 +4722,8 @@ class DashMain:
             var_load_csv = None
             entry_fefund = None
             entry_Pinvertir = None
+            entry_gypPrecio = None
+            entry_gainInversion = None
             entry_xstrategy = None
             entry_port = None
 
@@ -4834,6 +4828,10 @@ class DashMain:
                     entry_fefund = entry
                 elif field_name == "Pinvertir":
                     entry_Pinvertir = entry
+                elif field_name == "gypPrecio":
+                    entry_gypPrecio = entry
+                elif field_name == "gainInversion":
+                    entry_gainInversion = entry
                 elif field_name == "xstrategy":
                     entry_xstrategy = entry
                 elif field_name == "port":
@@ -4946,9 +4944,9 @@ class DashMain:
             height = max(2, len(sessions) + 1)
 
             # Posicionamiento (izquierda de la pantalla para dejar espacio al editor)
-            window_width = 620
+            window_width = 850
             window_height = min(550, 30 + height * 25)
-            x_position = 400
+            x_position = 300
             y_position = 110
             session_window.geometry(
                 f"{window_width}x{window_height}+{x_position}+{y_position}"
@@ -5000,6 +4998,8 @@ class DashMain:
                 "idcuenta",
                 "fesesion",
                 "Pinvertir",
+                "gypPrecio",
+                "gainInversion",
             ]
 
             fixed_columns = ["vehiculo", "fiscalYear", "⭐"]
@@ -5012,6 +5012,8 @@ class DashMain:
                 "idcuenta": {"width": 80, "anchor": "w"},
                 "fesesion": {"width": 140, "anchor": "w"},
                 "Pinvertir": {"width": 90, "anchor": "e"},
+                "gypPrecio": {"width": 90, "anchor": "e"},
+                "gainInversion": {"width": 100, "anchor": "e"},
             }
 
             # Crear CustomTreeview
@@ -5038,7 +5040,8 @@ class DashMain:
                 "Error", f"Error al abrir gestor de sesiones: {str(e)}"
             )
 
-    # Cierra la aplicación de forma ordenada
+    """ Cierra la aplicación de forma ordenada"""
+
     def eexit(self):
         # Marcar como no ejecutando para detener nuevos callbacks
         self.is_running = False
@@ -5098,7 +5101,8 @@ class DashMain:
         # Forzar salida limpia del programa
         sys.exit(0)
 
-    # toma limites de barraProgress
+    """ toma limites de barraProgress"""
+
     def get_limite_inversion(self):
         traz = self.PlanInversion.select_trazaplan(
             idcuenta=self.sesion_stock["idcuenta"]
@@ -5157,7 +5161,8 @@ class DashMain:
                 after_id = self.root.after(30000, self.actualizar_totales_inversiones)
                 self.after_ids.append(after_id)
 
-    # Inicia el dashboard
+    """ Inicia el dashboard"""
+
     def run(self):
         # Cargar variables de entorno desde base de datos (sesión DataHub) ------------------------------------------
         DataHub.load_from_database()
