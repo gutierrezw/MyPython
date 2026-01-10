@@ -476,7 +476,7 @@ class DataHub:
                         ]
                     )
 
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print(f"write_file(): {e}")
 
         # detalla lotes ganadores -- gwi001
@@ -530,7 +530,7 @@ class DataHub:
 
                         anterior = sell["profit"]
                         write_file(accion="detalle", struct=struct)
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print(f"procesa_sell(): {e}")
 
         try:
@@ -545,7 +545,7 @@ class DataHub:
 
                     # recorre info()
                     procesa_sell(s_sell)
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"csv_OptionSales_write(): {e}")
 
     # recorre DataHub.info() para mostrar lo disponible para la sell
@@ -591,7 +591,7 @@ class DataHub:
             s_sell = sorted(a_sell, key=lambda x: x["profit"], reverse=True)
 
             return s_sell
-        except EncodingWarning as e:
+        except Exception as e:
             print("[get_info_symbols_gain()]: {}".format(e))
 
     # recorre booktrading() para mostrar lotes  del symbol
@@ -743,7 +743,7 @@ class DataHub:
                 elif opcion == "ambos":
                     return lotesGainLost(book, ix, last)
 
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"get_lotesGainLost: {e}")
 
     # optimiza venta de lotes para la gain de capital
@@ -879,7 +879,7 @@ class DataHub:
                     eof_book, read = next(ebook, (None, None))
 
             return pre_sell
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"maximiza_sell_lotes(): {e}")
 
 
@@ -978,7 +978,7 @@ class MyOrders:
                             values=values, symbol=symbol
                         )
                 return response, enviada, values
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print(f"place_OrderStock(): {e}")
 
         # place order Crypto
@@ -1019,7 +1019,7 @@ class MyOrders:
                         )
 
                 return response, enviada, values
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print(f"place_OrderCrypto(): {e}")
 
         try:
@@ -1048,7 +1048,7 @@ class MyOrders:
                 )
             )
             return values
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"put_completa_orden(): {e}")
             return {}
 
@@ -1203,7 +1203,7 @@ class MyOrders:
 
                     bt3.grid(row=0, column=0, sticky=W, padx=3, pady=10)
                     bt4.grid(row=0, column=1, sticky=W, padx=3, pady=10)
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print(f"submit_stock(): {e}")
 
         def submit_crypto():
@@ -1262,7 +1262,7 @@ class MyOrders:
 
                 bt3.grid(row=0, column=0, sticky=W, padx=3, pady=10)
                 bt4.grid(row=0, column=1, sticky=W, padx=3, pady=10)
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print("[submit_crypto()]: {}".format(e))
 
         try:
@@ -1289,7 +1289,7 @@ class MyOrders:
             # Not simulate and exit windows
             elif not self.simulation:
                 completa_orden(symbol, orden, submit={})
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"submit_orden({self.vehiculo}): {e}")
 
     # parámetros para quantity, typeOrder y TimeInForce
@@ -1637,7 +1637,7 @@ class MyOrders:
                     self.vehiculo, self.symbol, idd, tip, prc, opt, tim, qty
                 )
                 self.submit_orden(self.symbol, orden, option)
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"valida_orden_vehiculo({self.vehiculo})]: {e}")
 
     # obtiene puntualmente la cantidad free de un symbol
@@ -1651,7 +1651,7 @@ class MyOrders:
 
             return cantidad
 
-        except EncodingWarning as e:
+        except Exception as e:
             print("[stock_free_operar()]: {}")
 
 
@@ -1737,7 +1737,7 @@ class TickerInfo(MyOrders):
                         position["region"],
                         position["country"],
                     )
-        except EncodingWarning as e:
+        except Exception as e:
             print("[carga_inversion_en_positions()]: {}".format(e))
 
     # construye y adiciona las posiciones del vehiculo
@@ -1804,7 +1804,7 @@ class TickerInfo(MyOrders):
                 "country": country,
             }
             self.positions.append(position)
-        except EncodingWarning as e:
+        except Exception as e:
             print("[add_position()]: {}".format(e))
 
     # datos yfinance y otros para los activos de portafolio compartido entre clases
@@ -1820,7 +1820,7 @@ class TickerInfo(MyOrders):
                     response = self.BClient.get_exchange_info(symbol=symbol)
                     if response:
                         info_lotsize = response.get(symbol, {})
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print("[ts_yfinance_symbol.get_datos()]: {}".format(e), symbol)
 
             return indicadores, info_lotsize
@@ -2208,7 +2208,7 @@ class TickerInfo(MyOrders):
                                     )
 
                     return SWallet
-        except EncodingWarning as e:
+        except Exception as e:
             print("[crypto_wallet_free()]: {}")
 
     # rescata de wallet EARN la cantidad indicada
@@ -2230,7 +2230,7 @@ class TickerInfo(MyOrders):
 
                         self.messagebox.showinfo(title="Alerta", message=message)
             return
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"crypto_earn_rescate(): {e}")
 
     # lista los activos del vehículo, si es Stock devuelve los keys de assets
@@ -2302,7 +2302,7 @@ class TickerInfo(MyOrders):
 
                     # libera recursos y entrega response
                     DataHub.QremoteOrder._complete(future, resp)
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"schedule_order_remote(): {e}")
 
     # trades del vehículo y procede con update booktrading e inversión
@@ -2335,7 +2335,7 @@ class TickerInfo(MyOrders):
             DataHub.update_self_procesos(
                 proces="running", tarea=task, itera=self.schDiario_itera
             )
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print("[schedule_diario()]: {}".format(e))
 
     # programa las actualizaciones de API's cada minuto
@@ -2391,7 +2391,7 @@ class TickerInfo(MyOrders):
             DataHub.update_self_procesos(
                 proces="running", tarea=task, itera=self.schTrader_itera
             )
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print("[schedule_operativo()]: {}".format(e))
 
     # recorre booktrading o positions para ubicar que vender o que comprar
@@ -2399,7 +2399,6 @@ class TickerInfo(MyOrders):
         try:
             self.oportunidades_sell()
             self.oportunidades_buy()
-            self.oportunidades_dividends()
 
             # exporta oportunadades al agente IA
             DataHub.csv_OptionSales_write(account=self.account)
@@ -2655,9 +2654,9 @@ class WidgetVehiculo(TickerInfo):
         self.invertir = self.sesion["Pinvertir"]
         self.precio = 0.1
         self.texto = [
-            "$ {:>11.0f}_en_ganancias_mediante_la_venta_de_{:>6.0f}_lotes_fiscales",
-            "Reducción de precio para {:>3.0f} activos, mediante la compra de ${}",
-            "Incrementar dividendos en {:>5.0f} activos mediante compra de ${}",
+            "$ {:>11.0f},_en_ganancias_por_ ventas_de_{:>6.0f}_lotes_fiscales",
+            "Sobre_{:>3.0f}_activos,_para_acumular_al_invertir_${}",
+            "Agregar_{:>5.0f},_nuevos_activos_invertiendo_${}",
         ]
 
         # obtiene posible ganancia y lotes implicados
@@ -2680,23 +2679,22 @@ class WidgetVehiculo(TickerInfo):
         )
         self.op2 = tk.Button(
             wi41,
-            text=self.texto[2].format(30, 300),
+            text=self.texto[1].format(30, 300),
             width=24,
-            bg="green",
+            bg="OrangeRed",
             fg="white",
             wraplength=170,
             justify="left",
-            command=lambda: self.oportunidad_mejorar_dividends(),
+            command=lambda: self.oportunidad_mejorar_buyDividends(),
         )
         self.op3 = tk.Button(
             wi41,
-            text=self.texto[1].format(0, 300),
+            text=self.texto[2].format(0, 300),
             width=24,
             bg="orange",
             fg="white",
             wraplength=170,
             justify="left",
-            command=lambda: self.oportunidad_mejorar_acumular(),
         )
 
         self.op1.grid(row=1, column=0, padx=15, pady=7)
@@ -2816,7 +2814,7 @@ class WidgetVehiculo(TickerInfo):
                 treeviews.append(tree)
 
             return treeviews
-        except EncodingWarning as e:
+        except Exception as e:
             print("[create_treeviews()]: {}".format(e))
 
     # Sincronizar el scroll vertical entre los dos Treeviews
@@ -2840,7 +2838,7 @@ class WidgetVehiculo(TickerInfo):
                     self.window_estrategia()
                 else:
                     print("[aun no ha cargado self.info()]:", symbol)
-        except EncodingWarning as e:
+        except Exception as e:
             print("[on_treeview_select()]: {}".format(e))
 
     # Función para obtener columnas self.m_tree sincronizadamente
@@ -2859,7 +2857,7 @@ class WidgetVehiculo(TickerInfo):
             tmp.append(como)
             self.orden = tmp.copy()
 
-        except EncodingWarning as e:
+        except Exception as e:
             print("[on_heading_click()]: {}".format(e))
 
     # Función para ordenar por columnas self.m_tree sincronizadamente
@@ -2877,7 +2875,7 @@ class WidgetVehiculo(TickerInfo):
                     tree.item(items_id[index], values=(data_string[idx],), tags=(sty,))
 
             return positions
-        except EncodingWarning as e:
+        except Exception as e:
             print("[on_sort_treeview()]: {}".format(e))
 
     @staticmethod
@@ -2898,7 +2896,7 @@ class WidgetVehiculo(TickerInfo):
                     tree.yview_scroll(-1 * (event.delta // 120), "units")
             return "break"  # Evita que el evento se propague a otros widgets
 
-        except EncodingWarning as e:
+        except Exception as e:
             print("[on_mouse_wheel()]: {}".format(e))
 
     # set valores del panel
@@ -2935,7 +2933,7 @@ class WidgetVehiculo(TickerInfo):
                 self.resumen[" Conexión   :"] = Sesion
 
             return
-        except (Exception, EncodingWarning) as e:
+        except Exception as e:
             print("[set_header_panel()]: {}".format(e))
 
     # escribe información en cabecera del panel
@@ -2988,24 +2986,24 @@ class WidgetVehiculo(TickerInfo):
             (total, cantidad) = self.total_gain("sell")
             message.append(self.texto[0].format(total, cantidad).strip())
 
-            estado: str = "normal" if total > 0 else "disabled"
+            estado: str = "normal" if cantidad > 0 else "disabled"
             self.op1.config(text=message[0].replace("_", " "), state=estado)
+
+            # rescribe valores de oportunidades buy/dividends
+            (total, cantidad) = self.total_gain("buy/dividends")
+            message.append(self.texto[1].format(cantidad, self.invertir).strip())
+
+            estado = "normal" if cantidad > 0 else "disabled"
+            self.op2.config(text=message[1].replace("_", " "), state=estado)
 
             # rescribe valores de oportunidades buy
             (total, cantidad) = self.total_gain("buy")
-            state = "normal" if cantidad > 0 else "disabled"
-            self.op3.config(
-                text=self.texto[1].format(cantidad, self.invertir), state=estado
-            )
+            message.append(self.texto[2].format(cantidad, self.invertir).strip())
 
-            # rescribe valores de oportunidades dividends
-            (total, cantidad) = self.total_gain("dividends")
-            state = "normal" if cantidad > 0 else "disabled"
-            self.op2.config(
-                text=self.texto[2].format(cantidad, self.invertir), state=estado
-            )
+            estado = "normal" if cantidad > 0 else "disabled"
+            self.op3.config(text=message[2].replace("_", " "), state=estado)
 
-        except (Exception, EncodingWarning) as e:
+        except Exception as e:
             print("[header_panel()]: {}".format(e))
 
     # totaliza y coloca información del header
@@ -3106,7 +3104,7 @@ class WidgetVehiculo(TickerInfo):
                     )
 
             return datos
-        except EncodingWarning as e:
+        except Exception as e:
             print("[header_total_positions({})]: {}".format(self.vehiculo, e))
 
     @staticmethod
@@ -3142,7 +3140,7 @@ class WidgetVehiculo(TickerInfo):
                     "{:>10.2f}".format(data[10]),
                 ]
             return datos
-        except EncodingWarning as e:
+        except Exception as e:
             print("[display_format()]: {}".format(e))
 
     # colorea lineas a display en positions
@@ -3171,7 +3169,7 @@ class WidgetVehiculo(TickerInfo):
                         style = "odd_green" if row[idx] >= 0 else "odd_red"
 
             return style
-        except EncodingWarning as e:
+        except Exception as e:
             print("[create_styles()]: {}".format(e))
 
     @staticmethod
@@ -3197,7 +3195,7 @@ class WidgetVehiculo(TickerInfo):
             ]
 
             return data
-        except EncodingWarning as e:
+        except Exception as e:
             print("[struct_datos()]: {}".format(e))
 
     # inicia información positions
@@ -3233,7 +3231,7 @@ class WidgetVehiculo(TickerInfo):
                             tags=(sty,),
                         )
 
-        except EncodingWarning as e:
+        except Exception as e:
             print("[inicio_widget_treeview()]: {}".format(e))
 
     # mantiene actualizada información positions en self_treeview (panel)
@@ -3252,7 +3250,7 @@ class WidgetVehiculo(TickerInfo):
                     sty = self.create_styles(i, idx, data, "rows")
                     data_string = self.display_format(tipo="rows", data=data)
                     tree.item(child, values=(data_string[idx],), tags=(sty,))
-            except EncodingWarning as e:
+            except Exception as e:
                 print("[update_items_dash()]: {}".format(e))
 
         try:
@@ -3265,7 +3263,7 @@ class WidgetVehiculo(TickerInfo):
                     update_items_dash()
                     break
                 i += 1
-        except EncodingWarning as error:
+        except Exception as error:
             print("[update_widget_treeview()]: {}".format(error))
 
     def update_panelVehiculo(self, orden=None):
@@ -3274,7 +3272,7 @@ class WidgetVehiculo(TickerInfo):
             for position in positions:
                 symbol = position["ticket"]
                 self.update_widget_treeview(symbol=symbol, position=position)
-        except EncodingWarning as error:
+        except Exception as error:
             print("[update_panelVehiculo()]: {}".format(error))
 
     # obtiene lotes fiscales
@@ -3314,7 +3312,7 @@ class WidgetVehiculo(TickerInfo):
                 self.gchar["booktrading"] = frame_book.copy()
 
             return ResumLotes, a_gain, a_lost
-        except (EncodingWarning, Exception) as error:
+        except (Exception, Exception) as error:
             print(f"get_lotes_fiscales(): {error}")
 
     # despliega ventanas de estrategia y analisis de activo
@@ -3406,7 +3404,7 @@ class WidgetVehiculo(TickerInfo):
                 }
                 self.graph_performace_portafolio(fg=fg3, data=ddatos, parm=parm)
                 cv3.draw()
-            except (EncodingWarning, Exception) as error:
+            except Exception as error:
                 print("[window_analisis()]: {}".format(error))
 
         # encapsula llamado chart_symbol()
@@ -3425,7 +3423,7 @@ class WidgetVehiculo(TickerInfo):
 
                 chart_symbol(fg=fg, datos=pdatos, keys=self.gchar)
                 cv.draw()
-            except EncodingWarning as error:
+            except Exception as error:
                 print("[chart_setup()]: {}".format(error))
 
         # lista lotes fiscales (compras y book)
@@ -3463,7 +3461,7 @@ class WidgetVehiculo(TickerInfo):
                                 "",
                             ),
                         )
-                except (EncodingWarning, Exception) as er:
+                except Exception as er:
                     print("[update_totales_lotes()]: {}".format(er))
 
             # Función para sincronizar el desplazamiento horizontal de ambos Treeview
@@ -3542,7 +3540,7 @@ class WidgetVehiculo(TickerInfo):
                     hscroll.pack(side=tk.BOTTOM, fill=tk.X)
 
                     return x_tree, x_heard
-                except (EncodingWarning, Exception) as er:
+                except Exception as er:
                     print("[treeview_lotes()]: {}".format(er))
 
             try:
@@ -3652,7 +3650,7 @@ class WidgetVehiculo(TickerInfo):
                     )
 
                 update_totales_lotes()
-            except (EncodingWarning, Exception) as error:
+            except Exception as error:
                 print("[list_fiscales()]: {}".format(error))
 
         try:
@@ -3836,7 +3834,7 @@ class WidgetVehiculo(TickerInfo):
             # más graficos de analisis cuando se parte del portafolio
             if analisis:
                 window_analisis()
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"[window_estrategia()]: {e}")
 
     # módulo principal para realizar BUY/SELL
@@ -3892,7 +3890,7 @@ class WidgetVehiculo(TickerInfo):
 
     # totaliza las oportunidades de gain capital
     def total_gain(self, tipo):
-        total, cantidad = 0.0, 0
+        total, cantidad = 0, 0
         try:
             for key, value in self.info.items():
 
@@ -3903,20 +3901,19 @@ class WidgetVehiculo(TickerInfo):
                             total += value["sell"]["profit"]
                             cantidad += value["sell"]["cantidad lotes"]
 
-                # recupera proyección de ganancias que este self.info[*]['buy']
-                if "buy" in value and tipo == "buy":
-                    if "ganancia precio" in value["buy"]:
-                        if value["buy"]["ganancia precio"] != 0:
-                            cantidad += 1
-
-                # recupera proyección de ganancias que este self.info[*]['Dividends']
-                if "dividends" in value and tipo == "dividends":
-                    if "ganancia precio" in value["dividends"]:
-                        if value["dividends"]["ganancia precio"] != 0:
-                            cantidad += 1
+                # recupera proyección de ganancias que este self.info[*]['buy/dividends']
+                elif tipo == "buy/dividends":
+                    if "buy" in value:
+                        if "ganancia precio" in value["buy"]:
+                            if value["buy"]["ganancia precio"] != 0:
+                                cantidad += 1
+                    elif "dividends" in value:
+                        if "ganancia precio" in value["dividends"]:
+                            if value["dividends"]["ganancia precio"] != 0:
+                                cantidad += 1
 
             return total, cantidad
-        except EncodingWarning as e:
+        except Exception as e:
             print("[total_gain()]: {}".format(e))
 
     # TopWindow() para ts_oportunidades_symbol y sus posibles ventas de lotes fiscales
@@ -4017,7 +4014,7 @@ class WidgetVehiculo(TickerInfo):
                 symbol = tree.item(parent, "text")
                 self.symbol = symbol.strip()
                 self.window_estrategia(analisis=False)
-            except EncodingWarning as e:
+            except Exception as e:
                 print("seleccionar_item(): {}".format(e))
 
         try:
@@ -4094,11 +4091,11 @@ class WidgetVehiculo(TickerInfo):
             tree.pack(fill=tk.X, anchor=tk.E)
 
             update_windows()
-        except EncodingWarning as e:
+        except Exception as e:
             print("[oportunidad_gain_capital()]: {}".format(e))
 
     # TopWindow() para ts_oportunidades_symbol y sus posibles compra de lotes fiscales
-    def oportunidad_mejorar_acumular(self):
+    def oportunidad_mejorar_buyDividends(self):
         # controla salida de window_estrategia()
         def eexit():
             ons.destroy()
@@ -4111,120 +4108,7 @@ class WidgetVehiculo(TickerInfo):
                 symbol = tree.item(parent, "text")
                 self.symbol = symbol.strip()
                 self.window_estrategia(analisis=False)
-            except EncodingWarning as e:
-                print("seleccionar_item(): {}".format(e))
-
-        # recorre self.info() para mostrar lo disponible para la compra
-        def update_windows():
-
-            tree.delete_row()
-
-            for key, value in self.info.items():
-                if "buy" in value:
-                    if "ganancia precio" in value["buy"]:
-                        row = [
-                            key,
-                            "{:>10.2f}".format(value["buy"]["ganancia inversión"]),
-                            "{:>10.3%}".format(value["buy"]["ganancia precio"]),
-                            "{:>10.5f}".format(value["buy"]["last"]),
-                            "{:>10.5f}".format(value["buy"]["avgcost"]),
-                            "{:>10.5f}".format(value["buy"]["objetivo"]),
-                            "{:>10.5f}".format(value["buy"]["cantidad buy"]),
-                            "{:>10.5f}".format(value["buy"]["avgCost post"]),
-                            "{:>10.2f}".format(value["buy"]["retorno post"]),
-                            "{:>10.2f}".format(value["buy"]["pre dividendos"]),
-                            "{:>10.2f}".format(value["buy"]["post dividendos"]),
-                            "{:>10.2f}".format(value["buy"]["pre costobase"]),
-                            "{:>10.2f}".format(value["buy"]["post costobase"]),
-                        ]
-
-                        # inserta registros en treeview
-                        tree.insert_row(values=row)
-
-            ons.after(1000, update_windows)
-
-        try:
-            ons = tk.Toplevel()
-            title = "Acumular Capital"
-            dimension = "%dx%d+%d+%d" % (1270, 220, 0, 775)
-            ons.geometry(dimension)
-            ons.resizable(False, False)
-            ons.attributes("-toolwindow", 1)
-            ons.focus()
-            ons.title(title)
-            ons.config(bg=self.bgcolor)
-            ons.protocol("WM_DELETE_WINDOW", eexit)
-
-            win1 = ttk.Frame(ons, padding=(1, 1, 1, 1), style="C.TFrame")
-            win2 = ttk.Frame(ons, padding=(1, 1, 1, 1), style="C.TFrame")
-            win1.pack(side=tk.LEFT)
-            win2.pack(side=tk.LEFT)
-
-            # coloca acciones sobre ventana ------------------------------------------------------------------------
-            ct1 = tk.Button(
-                win2,
-                text="Cancel",
-                width=8,
-                bg="gray",
-                fg="white",
-                command=lambda: eexit(),
-            )
-
-            ct1.pack(side=tk.TOP, padx=30, pady=10)
-
-            # Definir las columnas, columnas fijas y alineaciones
-            alignments = {
-                "Symbol": {"width": 70, "anchor": "w"},
-                "Gain_inversión": {"width": 90, "anchor": "e"},
-                "Gain_Precio": {"width": 80, "anchor": "e"},
-                "Last_Price": {"width": 80, "anchor": "e"},
-                "AvgCost": {"width": 80, "anchor": "e"},
-                "Objetivo": {"width": 80, "anchor": "e"},
-                "Stock_Buy": {"width": 80, "anchor": "e"},
-                "Post_AvgCost": {"width": 90, "anchor": "e"},
-                "Retorno": {"width": 80, "anchor": "e"},
-                "Pre_Dividendos": {"width": 90, "anchor": "e"},
-                "Post_Dividendos": {"width": 100, "anchor": "e"},
-                "Pre_Costobase": {"width": 90, "anchor": "e"},
-                "Post_Costobase": {"width": 100, "anchor": "e"},
-            }
-            # columns = [key.replace('_', ' ') for key in alignments.keys()]
-            columns = list(alignments.keys())
-            fixed_columns = columns[0:1]
-
-            # Crear instancia de la clase con columnas fijas, scroll y alineación
-            tree = CustomTreeview(
-                master=win1,
-                columns=columns,
-                fixed_columns=fixed_columns,
-                sort_columns=True,
-                fixed_row=False,
-                show_vscroll=True,
-                show_hscroll=False,
-                height=9,
-                column_alignments=alignments,
-                style="TFrame",
-            )
-            update_windows()
-
-        except EncodingWarning as e:
-            print("[oportunidad_mejorar_acumular()]: {}".format(e))
-
-    # TopWindow() para ts_oportunidades_symbol y sus posibles compra de lotes fiscales
-    def oportunidad_mejorar_dividends(self):
-        # controla salida de window_estrategia()
-        def eexit():
-            ons.destroy()
-
-        # selecciona  symbol a sell
-        def seleccionar_item(event):
-            try:
-                selected_item = tree.focus()
-                parent = tree.parent(selected_item)
-                symbol = tree.item(parent, "text")
-                self.symbol = symbol.strip()
-                self.window_estrategia(analisis=False)
-            except EncodingWarning as e:
+            except Exception as e:
                 print("seleccionar_item(): {}".format(e))
 
         # recorre self.info() para mostrar lo disponible para la compra
@@ -4233,33 +4117,38 @@ class WidgetVehiculo(TickerInfo):
             tree.delete_row()
 
             # inserta registros en treeview
+            Newheight = 0
             for key, value in self.info.items():
-                if "dividends" in value:
-                    if "ganancia precio" in value["dividends"]:
+                tipo = "dividends" if "dividends" in value else "buy"
+                if tipo in value:
+                    if "ganancia precio" in value[tipo]:
                         row = [
                             key,
-                            "{:>10.3%}".format(value["dividends"]["ganancia precio"]),
-                            "{:>10.5f}".format(value["dividends"]["last"]),
-                            "{:>10.2f}".format(value["dividends"]["avgcost"]),
-                            "{:>10.5f}".format(value["dividends"]["objetivo"]),
-                            "{:>10.5f}".format(value["dividends"]["cantidad buy"]),
-                            "{:>10}".format(value["dividends"]["exDividendDate"]),
-                            "{:>10.2%}".format(value["dividends"]["dividendYield"]),
-                            "{:>10.2%}".format(value["dividends"]["YieldEfectiva"]),
-                            "{:>10.2f}".format(value["dividends"]["pre dividendos"]),
-                            "{:>10.2f}".format(value["dividends"]["post dividendos"]),
-                            "{:>10.2f}".format(value["dividends"]["pre costobase"]),
-                            "{:>10.2f}".format(value["dividends"]["post costobase"]),
+                            "{:>10.3%}".format(value[tipo]["ganancia precio"]),
+                            "{:>10.5f}".format(value[tipo]["last"]),
+                            "{:>10.2f}".format(value[tipo]["avgcost"]),
+                            "{:>10.5f}".format(value[tipo]["objetivo"]),
+                            "{:>10.5f}".format(value[tipo]["cantidad buy"]),
+                            "{:>10}".format(value[tipo]["exDividendDate"]),
+                            "{:>10.3%}".format(value[tipo]["dividendYield"]),
+                            "{:>10.2f}".format(value[tipo]["pre dividendos"]),
+                            "{:>10.2f}".format(value[tipo]["post dividendos"]),
+                            "{:>10.2f}".format(value[tipo]["pre costobase"]),
+                            "{:>10.2f}".format(value[tipo]["post costobase"]),
                         ]
+                        Newheight += 1
 
                         # inserta registros en treeview
                         tree.insert_row(values=row)
+
+                # ajusta altura del treeview
+                tree.config(height=9 if Newheight >= 9 else Newheight)
 
             ons.after(1000, update_windows)
 
         try:
             ons = tk.Toplevel()
-            title = "Acumular Dividendos"
+            title = "Acumular Stock/Dividendos"
             dimension = "%dx%d+%d+%d" % (1270, 220, 0, 775)
             ons.geometry(dimension)
             ons.resizable(False, False)
@@ -4296,7 +4185,6 @@ class WidgetVehiculo(TickerInfo):
                 "Stock_Buy": {"width": 90, "anchor": "e"},
                 "ExDividends": {"width": 80, "anchor": "e"},
                 "Tasa_Nominal": {"width": 80, "anchor": "e"},
-                "Tasa_Efectiva": {"width": 80, "anchor": "e"},
                 "Pre_Dividendos": {"width": 90, "anchor": "e"},
                 "Post_Dividendos": {"width": 100, "anchor": "e"},
                 "Pre_Costobase": {"width": 90, "anchor": "e"},
@@ -4312,7 +4200,7 @@ class WidgetVehiculo(TickerInfo):
                 fixed_columns=fixed_columns,
                 sort_columns=True,
                 fixed_row=False,
-                show_vscroll=True,
+                show_vscroll=False,
                 show_hscroll=False,
                 height=9,
                 column_alignments=alignments,
@@ -4320,8 +4208,8 @@ class WidgetVehiculo(TickerInfo):
             )
             update_windows()
 
-        except EncodingWarning as e:
-            print("[oportunidad_mejorar_dividends()]: {}".format(e))
+        except Exception as e:
+            print(f"[oportunidad_mejorar_buyDividends()]: {e} {traceback.print_exc()}")
 
     def setup_graph_performace(self, tipo=None):
 
@@ -4455,7 +4343,7 @@ class WidgetVehiculo(TickerInfo):
             ax.set_xlim([xmin - 0.05 * rng, xmax + 0.05 * rng])
             ax.set_xticks(ticks)
 
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"graph_ROI_vehiculo()]: {e}")
 
     # activos ganadores y perdedores
@@ -4522,7 +4410,7 @@ class WidgetVehiculo(TickerInfo):
             )
             # self.graph[1][1].tight_layout()
 
-        except EncodingWarning as e:
+        except Exception as e:
             print("[graphgraph_gain_loss()]: {}".format(e))
 
     # titulo Performance (acumulativo)
@@ -4993,6 +4881,7 @@ class CustomTreeview:
 
         # Configurar los heading treeviews para el detalle
         if (show_fixed_row == "tree") or (not show_headings):
+            self.config(show="tree")
             self.tree_fixed.configure(show="tree")
             self.tree_scroll.configure(show="tree")
 
@@ -5176,6 +5065,15 @@ class CustomTreeview:
 
         for item_id in self.tree_scroll.get_children():
             self.tree_scroll.delete(item_id)
+
+    def config(self, show=None, height=None):
+        if show is not None:
+            self.tree_fixed.configure(show=show)
+            self.tree_scroll.configure(show=show)
+
+        if height is not None:
+            self.tree_fixed.configure(height=height)
+            self.tree_scroll.configure(height=height)
 
 
 # class para el manejo de datos de mercado
