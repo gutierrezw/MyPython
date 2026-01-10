@@ -226,7 +226,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         proces="widget", tarea=socket, itera=self.WStreams.counter
                     )
 
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print("procesa_stream_crypto(): {}".format(e))
 
         # ubica y almacenar en lista de órdenes: trasladado a get_orders_binance()
@@ -266,7 +266,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     tarea="schedule_WebsocketBinanceApiClient(Crypto)",
                     itera=self.WsClient.counter,
                 )
-            except EncodingWarning as e:
+            except Exception as e:
                 print("procesa_orders_crypto(): {}".format(e))
 
         try:
@@ -281,7 +281,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
             # elif 'id' in data.keys():
             #         if data["id"] == "allOrders_5494febb":
             #            procesa_orders_crypto(data)
-        except json.JSONDecodeError or EncodingWarning as error:
+        except json.JSONDecodeError or Exception as error:
             print("[on_message_binance_websocket()]: {}".format(error))
             time.sleep(1)
 
@@ -558,7 +558,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     update_position()
                     break
             return ix
-        except EncodingWarning as e:
+        except Exception as e:
             print("[update_symbol_en_positions({})]: {}".format(self.vehiculo, e))
 
     # calcula peso de symbols dentro de positions
@@ -566,7 +566,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
         try:
             inversion = sum(position["costobase"] for position in self.positions)
             return inversion
-        except EncodingWarning as e:
+        except Exception as e:
             print("[update_peso_position({})]: {}".format(self.vehiculo, e))
 
     # mantiene self.position igual a la tabla inversionesError
@@ -594,7 +594,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         # elimina position
                         self.positions.pop(eof_sbook)
                         eof_sbook, position = next(sbook, (None, None))
-        except EncodingWarning as e:
+        except Exception as e:
             print("[update_positions({})]: {}".format(self.vehiculo, e))
 
     # almacena en ts_yfinance_symbol information de buy y sell
@@ -614,11 +614,11 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     elif "dividends" in datos.keys():
                         self.info[symbol]["dividends"] = datos["dividends"]
 
-            else:
-                if self.vehiculo == "Crypto":
-                    key = list(datos.keys())
-                    if len(key) > 0:
-                        self.info.update({symbol: {key[0]: datos[key[0]]}})
+            # else:
+            #    if self.vehiculo == "Crypto":
+            #        key = list(datos.keys())
+            #        if len(key) > 0:
+            #            self.info.update({symbol: {key[0]: datos[key[0]]}})
 
             # siempre return ultima info()
             if symbol in self.info.keys():
@@ -634,7 +634,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     return d_buy, d_dividends
 
             return d_buy, d_sell
-        except EncodingWarning as e:
+        except Exception as e:
             print("[ts_oportunidades_symbol()]: {}".format(e))
 
     # recorre positions para actualizar info() con las oportunidades de sell
@@ -745,7 +745,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                     # actualiza en diccionario self.info()
                     (d_buy, d_sell) = self.ts_oportunidades_symbol(symbol, datos)
-        except EncodingWarning as e:
+        except Exception as e:
             print("[oportunidades_buy()]: {}".format(e))
 
     # recorre positions para actualizar info() oportunidades dividends
@@ -812,73 +812,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                     # actualiza en diccionario self.info()
                     (d_buy, d_dividend) = self.ts_oportunidades_symbol(symbol, datos)
-        except EncodingWarning as e:
-            print("[oportunidades_dividends()]: {}".format(e))
-
-    # recorre positions para actualizar info() oportunidades por sector y dividends
-    def oportunidades_sector(self):
-        try:
-            invertir = self.sesion["Pinvertir"]
-            orden = [{"Sector": "sector"}, "DES"]
-            cartera = sort_positions(self.positions, orden)
-
-            for position in cartera:
-                symbol = position["ticket"]
-
-                if (
-                    position["mrkprice"] > 0.000001
-                    and invertir > 0
-                    and position["position"] > 0
-                ):
-                    stock = int(invertir / position["mrkprice"])
-                    stockNew = stock + position["position"]
-                    avgCost = position["costobase"] / position["position"]
-                    dividendo = position["dividendo"] / position["position"]
-                    gypInicial = (
-                        position["objetivo"] - avgCost + dividendo
-                    ) * position["position"]
-                    precioNew = (
-                        position["costobase"] + stock * position["mrkprice"] + 0.4
-                    ) / stockNew
-
-                    gypPrecio = (precioNew - avgCost) / avgCost if avgCost > 0 else 0
-                    gypProyect = (
-                        position["objetivo"] - precioNew + dividendo
-                    ) * stockNew
-                    gainInversion = (gypProyect - gypInicial) / invertir
-
-                    datos = {}
-                    # if (gypPrecio < -0.001) and (position['dividendo'] > 0):
-                    if position["dividendo"] > 0:
-
-                        tasa_efectiva = position["dividendo"] / position["costobase"]
-                        tasa_nominal = position["dividendYield"] / 100
-                        ex_dividends = position["exDividendDate"].strftime("%d-%b'%y")
-
-                        datos = {
-                            "sector": {
-                                "ganancia precio": gypPrecio,
-                                "ganancia inversión": gainInversion,
-                                "cantidad buy": stock,
-                                "last": position["mrkprice"],
-                                "avgcost": avgCost,
-                                "cantidad post": stockNew,
-                                "avgCost post": precioNew,
-                                "retorno post": gypProyect,
-                                "objetivo": position["objetivo"],
-                                "dividendYield": tasa_nominal,
-                                "YieldEfectiva": tasa_efectiva,
-                                "exDividendDate": ex_dividends,
-                                "pre dividendos": position["dividendo"],
-                                "post dividendos": dividendo * stockNew,
-                                "pre costobase": position["costobase"],
-                                "post costobase": precioNew * stockNew,
-                            }
-                        }
-
-                    # actualiza en diccionario self.info()
-                    (d_buy, d_dividend) = self.ts_oportunidades_symbol(symbol, datos)
-        except EncodingWarning as e:
+        except Exception as e:
             print("[oportunidades_dividends()]: {}".format(e))
 
     # captura operaciones compra y ventas de activos
@@ -995,7 +929,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # Almacena ultima fecha en session que exploro API get_my_trades()
                     if efecha > DataHub.ultimoTraderCrypto:
                         DataHub.ultimoTraderCrypto = hoy + timedelta(days=-1)
-            except (EncodingWarning, Exception) as error:
+            except Exception as error:
                 print("[trader_binance()]: {}".format(error))
 
         # obtiene orders para las Cryptos
@@ -1024,7 +958,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         orders.append(lista)
 
                     self.orders.update({"Crypto": orders})
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print(f"get_orders_binance(): {e}")
 
         # cargas ultimas compras de USDT
@@ -1086,7 +1020,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             )
 
                     return asc_trader
-                except EncodingWarning as error:
+                except Exception as error:
                     print(f"get_trader_insert_fiat(): {e}")
 
             try:
@@ -1100,7 +1034,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 )
                 if response:
                     x_trader = get_trader_insert_fiat(trama=response)
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print(f"trade_USDT_diario(): {e}")
 
         # obtiene orders para las Stock
@@ -1202,7 +1136,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                         keys[ix.index("id_order")],
                                     )
                     return False, clientOrderId, id_order
-                except EncodingWarning as e:
+                except Exception as e:
                     print("ubica_confirm(): {}".format(e))
 
             try:
@@ -1249,7 +1183,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                     # almacena orders activas
                     self.orders.update({"Stock": orders})
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print("[get_orders_binance()]: {}".format(e))
 
         # obtiene trader para las acciones
@@ -1314,7 +1248,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             self.RepositorioOportunidades.insert_booktrading(
                                 values=registro, symbol=simbolo
                             )
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print(f"trader_iteractive(): {e}")
 
         try:
@@ -1476,7 +1410,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             eof_pbook, position = next(pbook, (None, None))
 
                 return x_positions
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print("update_inversion_crypto(): {}".format(e))
 
         # obtiene activos de wallet spot y margin
@@ -1540,7 +1474,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                     }
                                 }
                             )
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print("get_balance_spot_earn(): {}".format(e))
 
         # Agrega position a dict: assets los productos fexible
@@ -1801,7 +1735,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         self.activos.append(p["conid"])
                         x_positions.append(p)
                 return x_positions
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print("update_inversion_stock(): {}".format(e))
 
         try:
@@ -1840,7 +1774,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
             elif self.vehiculo == "Stock":
                 self.api_vehiculo_iteractive()
-        except (EncodingWarning, Exception) as error:
+        except Exception as error:
             print(f"conector_api_vehiclo({self.vehiculo}): {error}")
             time.sleep(5)
 
@@ -2098,7 +2032,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     self.Market.insert(upd=campo, val=value, symbol=x_symbol)
                 else:
                     self.Market.update(upd=campo, val=value, symbol=x_symbol)
-            except EncodingWarning as error:
+            except Exception as error:
                 print("[update_tabla_market()]: {}".format(error))
 
         # estructura información de dividendos
@@ -2270,7 +2204,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                 # Start de Websocket Client (orders, trader) ------------------------------------------------------
                 TSocket, iteraClient = 360, 1
-            except EncodingWarning as e:
+            except Exception as e:
                 print(f"run_cryptos(): {e}")
 
         def run_stock():
@@ -2296,7 +2230,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         )
                         self.WsStock.websocket_loop(limit=limit)
 
-                except (EncodingWarning, Exception) as e:
+                except Exception as e:
                     print(f"websocket_stream() error: {e}")
 
             try:
@@ -2329,7 +2263,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     raise ValueError(
                         "run_stock()]: {}".format("No hay conección con IBKR's")
                     )
-            except (EncodingWarning, Exception) as error:
+            except Exception as error:
                 print("[run_stock]: {}".format(error))
 
         try:
@@ -2340,7 +2274,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
             # instancia para vehiculo Stock
             if self.vehiculo == "Stock":
                 run_stock()
-        except EncodingWarning as e:
+        except Exception as e:
             print("run_vehiculo({}): {}".format(self.vehiculo, e))
 
 
@@ -2769,7 +2703,7 @@ class DashMain:
 
                 self.crypto.inicio_widget_treeview(self.crypto.positions)
                 self.crypto.run_graficos()
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"start_cryptos({e})")
 
     # contendor para iniciar widget de stock
@@ -2825,7 +2759,7 @@ class DashMain:
 
                 self.stock.inicio_widget_treeview(self.stock.positions)
                 self.stock.run_graficos()
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print("start_stock(): {}".format(e))
 
     # chatbot y/o asistente ------------------------------------------------------------------------------------------
@@ -2834,7 +2768,7 @@ class DashMain:
             self.chatbot = AsistenteChatbot(
                 root=self.root,
             )
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print("start_chatbot(): {}".format(e))
 
     # update widget del crypto
@@ -2881,7 +2815,7 @@ class DashMain:
             #    500, lambda: self.update_widget(vehiculo=vehiculo), name="update_widget"
             # )
 
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print("update_widget({}}): {}".format(vehiculo, e))
 
     def car_ordenes_activas(self):
@@ -2911,7 +2845,7 @@ class DashMain:
 
                 tree.tag_configure("green", background="green", foreground="white")
                 tree.tag_configure("red", background="red", foreground="white")
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print("treeview_ordenes(): {}".format(e))
 
         # sincroniza scroll de treeview orders
@@ -5311,19 +5245,16 @@ class system_status(tk.Frame):
         self.debugging = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
 
         # Frames para la derecha
-        self.figura = ttk.Frame(self.right, padding=(5, 1, 1, 5), style="C.TFrame")
         self.connect = ttk.Frame(self.right, padding=(1, 1, 1, 1), style="C.TFrame")
 
         # establece figura performance system
-        self.fg = Figure(figsize=(3.8, 1.7), dpi=110, layout="tight")
+        self.fg = Figure(figsize=(4.2, 1.5), dpi=110, layout="tight")
         self.rv = FigureCanvasTkAgg(self.fg, master=self.right)
         self.fg.set_facecolor("DodgerBlue")
 
         self.rv.draw()
         self.rv.get_tk_widget().pack()
-
-        self.figura.pack(side=tk.TOP, fill=tk.BOTH)
-        self.connect.pack(side=tk.BOTTOM, fill=tk.BOTH)
+        self.connect.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
         # Agregar tabs al Notebook
         self.bottom.add(self.datahub, text="DataHub")
@@ -5448,7 +5379,7 @@ class system_status(tk.Frame):
                         )
 
                 return procesos
-            except (EncodingWarning, Exception) as e:
+            except Exception as e:
                 print(f"obtener_datos(): {e}")
 
         def buscar_item_treeview(keys=None, iid=None, sobre="text"):
@@ -5571,13 +5502,13 @@ class system_status(tk.Frame):
             # Configurar el Treeview
             cols = ["Tarea", "Parámetros"]
             tree = ttk.Treeview(self.process, columns=cols, height=18, style="TFrame")
-            for i, fields in enumerate(cols):
-                if i == 0:
-                    tree.heading("#0", text="Id - proceso")
-                    tree.column("#0", width=60, minwidth=60)
+            tree.heading("#0", text="Id - proceso")
+            tree.column("#0", width=60, minwidth=60)
 
-                tree.heading(fields, text=fields)
-                tree.column(fields, width=80, minwidth=80)
+            tree.heading("Tarea", text="Tarea")
+            tree.column("Tarea", width=120, minwidth=120)
+            tree.heading("Parámetros", text="Parámetros")
+            tree.column("Parámetros", width=40, minwidth=40)
             tree.pack(fill="both")
 
             Widget = tree.insert("", "end", text="Widget", values=("", ""))
@@ -5596,11 +5527,13 @@ class system_status(tk.Frame):
             self.datahub_system()
             self.connect_api()
             self.debugging_system()
-            self.monitor_realtime()  # Activado con optimizaciones (actualiza cada 10s)
+
+            # bloqueado hasta que mejore consumo CPU
+            # self.monitor_realtime()  # Activado con optimizaciones (actualiza cada 10s)
             self.monitor_cache()
             self.manager_buysell_system()
             update_status()
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"process_system(): {e}")
 
     # modulo principal para recorre Datahub()
@@ -6649,9 +6582,7 @@ class system_status(tk.Frame):
             info_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
             # Crear TreeView solo para lista (más espacio)
-            lista = ttk.Treeview(
-                main_frame, columns=("tipo", "estado"), style="TFrame", height=6
-            )
+            lista = ttk.Treeview(main_frame, columns=("tipo", "estado"), style="TFrame")
 
             # Configurar headers y columnas
             lista.heading("#0", text="API")
@@ -6669,9 +6600,9 @@ class system_status(tk.Frame):
             lista.tag_configure("item", foreground="lightgreen")
 
             # --- Scrollbars ---
-            vsb = ttk.Scrollbar(lista, orient=tk.VERTICAL, command=lista.yview)
-            lista.configure(yscroll=vsb.set)
-            vsb.pack(side=tk.RIGHT, fill=tk.Y)
+            # vsb = ttk.Scrollbar(lista, orient=tk.VERTICAL, command=lista.yview)
+            # lista.configure(yscroll=vsb.set)
+            # vsb.pack(side=tk.RIGHT, fill=tk.Y)
 
             # --- Bind evento doble click ---
             lista.bind("<Double-Button-1>", on_double_click)
@@ -6703,7 +6634,7 @@ class system_status(tk.Frame):
                     text=f"{key}",
                     values=f"{logging.getLevelName(handler.level)}",
                 )
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print("debugging_system(): {}".format(e))
 
     # visualiza manager_buysell con lista-detalle
