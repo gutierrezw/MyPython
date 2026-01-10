@@ -2658,8 +2658,6 @@ class WidgetVehiculo(TickerInfo):
             "$ {:>11.0f}_en_ganancias_mediante_la_venta_de_{:>6.0f}_lotes_fiscales",
             "Reducción de precio para {:>3.0f} activos, mediante la compra de ${}",
             "Incrementar dividendos en {:>5.0f} activos mediante compra de ${}",
-            "Diversificar en activos de otros sector en minimo  mediante compra de {:>5.0f}$",
-            "{:>5.0f} en inversión Nuevos activos en descuento resumen los puntos anteriores",
         ]
 
         # obtiene posible ganancia y lotes implicados
@@ -2700,31 +2698,10 @@ class WidgetVehiculo(TickerInfo):
             justify="left",
             command=lambda: self.oportunidad_mejorar_acumular(),
         )
-        self.op4 = tk.Button(
-            wi41,
-            text=self.texto[3].format(300),
-            width=24,
-            bg="red",
-            fg="white",
-            wraplength=170,
-            justify="left",
-        )
-        self.op5 = tk.Button(
-            wi41,
-            text=self.texto[4].format(500),
-            width=24,
-            bg="cyan",
-            fg="black",
-            wraplength=170,
-            justify="left",
-        )
 
         self.op1.grid(row=1, column=0, padx=15, pady=7)
         self.op2.grid(row=2, column=0, padx=15, pady=7)
         self.op3.grid(row=1, column=1, padx=15, pady=7)
-        self.op4.grid(row=2, column=1, padx=15, pady=7)
-        self.op5.grid(row=3, column=0, padx=15, pady=7)
-
         self.op0.grid(row=0, column=0, pady=0, columnspan=3)
 
         # crear treeview ----------------------------------------------------------------------------------------------
@@ -3028,7 +3005,6 @@ class WidgetVehiculo(TickerInfo):
                 text=self.texto[2].format(cantidad, self.invertir), state=estado
             )
 
-            self.op4.config(state="disabled")
         except (Exception, EncodingWarning) as e:
             print("[header_panel()]: {}".format(e))
 
