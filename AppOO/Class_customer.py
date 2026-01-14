@@ -67,6 +67,7 @@ from Modulos_Mysql import (
     MarketScreen,
     BDsystem,
 )
+from AppValuations.rebalance_engine import RebalanceEngine
 from API_vehiculos import BB, IB, WebsocketBinanceStreams, WebsocketBinanceApiClient
 
 
@@ -208,7 +209,7 @@ class DataHub:
     # ========================================================================================================
     # GRUPO 3: PARÁMETROS DE TRADING (Cargable desde DB)
     # ========================================================================================================
-    MinProfit = 80.0
+    MinProfit = 50.0
     Toleranciasell = 0.10
     MaxRoi = 0.09
     InicioInversior = date(2020, 7, 31)
@@ -1885,8 +1886,9 @@ class TickerInfo(MyOrders):
                     )  # True: si contiene dividends update = False
 
                 return activos, datos, update
-        except EncodingWarning as e:
+        except Exception as e:
             print("[ts_yfinance_symbol()]: {}".format(e), symbol)
+            return {}, pd.DataFrame(), False
 
     # define estrategia por dividendos
     def rendimiento_dividends(
@@ -2398,6 +2400,10 @@ class TickerInfo(MyOrders):
     def schedule_oportunidades(self):
         try:
             self.oportunidades_sell()
+
+            # Ejecutar motor de rebalanceo
+            self.ejecutar_rebalanceo()
+
             self.oportunidades_buy()
 
             # exporta oportunadades al agente IA
@@ -2416,6 +2422,88 @@ class TickerInfo(MyOrders):
             )
         except schedule.ScheduleError as e:
             print("[schedule_oportunidades()]: {}".format(e))
+
+    def ejecutar_rebalanceo(self):
+        """
+        Ejecuta el motor de rebalanceo y almacena resultados en DataHub.
+        Genera ranking de activos priorizados y asignaciones de presupuesto.
+
+        Solo se ejecuta si manager_buysell ya está poblado por graficos_main().
+        """
+        try:
+            # Validar que manager_buysell esté disponible
+            if not hasattr(DataHub, 'manager_buysell') or not DataHub.manager_buysell:
+                return
+
+            # Validar que las dimensiones tengan datos antes de ejecutar
+            dimensiones_requeridas = ["dividends", "sector", "activos", "region"]
+            dimensiones_validas = []
+
+            for dim in dimensiones_requeridas:
+                data = DataHub.manager_buysell.get(dim)
+                if data and isinstance(data, dict):
+                    # Verificar que tenga la estructura mínima necesaria
+                    # Usar 'in' en lugar de boolean OR para evitar ambiguedad con DataFrames
+                    if "data" in data or "total_valor_market" in data:
+                        dimensiones_validas.append(dim)
+
+            # Si no hay ninguna dimensión válida, no ejecutar
+            if not dimensiones_validas:
+                return
+
+            # Inicializar motor pasando el vehículo de esta instancia
+            engine = RebalanceEngine(DataHub, vehiculo=self.vehiculo)
+
+            # Ejecutar ranking
+            ranking = engine.rank()
+
+            # Generar asignaciones de presupuesto
+            asignaciones = engine.budget_allocator(min_ticket=100.0)
+
+            # Almacenar resultados en DataHub para visualización
+            if not hasattr(DataHub, 'rebalanceo'):
+                DataHub.rebalanceo = {}
+
+            # Verificar si hay cambios respecto a la ejecución anterior
+            datos_previos = DataHub.rebalanceo.get(self.vehiculo)
+            hay_cambios = True
+
+            if datos_previos:
+                # Comparar si hay cambios significativos
+                gaps_previos = datos_previos.get("gaps", {})
+                asignaciones_previas = datos_previos.get("asignaciones", [])
+
+                # Considerar que hay cambio si gaps o número de asignaciones cambió
+                if (gaps_previos == engine.gaps and
+                    len(asignaciones_previas) == len(asignaciones)):
+                    hay_cambios = False
+
+            DataHub.rebalanceo[self.vehiculo] = {
+                "timestamp": datetime.now(),
+                "vehiculo": self.vehiculo,
+                "gaps": engine.gaps,
+                "normalized_gaps": engine.normalized_gaps,
+                "dimension_priority": engine.dimension_priority,
+                "ranking": ranking[:10],  # Top 10
+                "asignaciones": asignaciones,
+                "total_sugerido": sum(a["monto_sugerido"] for a in asignaciones)
+            }
+
+            # Solo imprimir cuando hay cambios
+            if hay_cambios:
+                candidatos_con_score = sum(1 for c in ranking if c['score'] > 0)
+                if candidatos_con_score > 0:
+                    print(f"🔍 [{self.vehiculo}] Gaps: {engine.gaps}", flush=True)
+                    print(f"🔍 [{self.vehiculo}] Candidatos con score > 0: {candidatos_con_score}", flush=True)
+                    print(f"🔍 [{self.vehiculo}] Top 3: {[(c['symbol'], round(c['score'], 4)) for c in ranking[:3]]}", flush=True)
+
+                if asignaciones:
+                    print(f"✅ [{self.vehiculo}] Rebalanceo: {len(asignaciones)} asignaciones generadas", flush=True)
+
+        except Exception as e:
+            print(f"[ejecutar_rebalanceo()]: {e}")
+            import traceback
+            traceback.print_exc()
 
     # invoca price websocket y suscribe symbols
     def schedule_WebsocketBinanceStream(self, limit=90, log=True):
