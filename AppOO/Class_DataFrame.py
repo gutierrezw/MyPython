@@ -1508,7 +1508,7 @@ def grupo_activos(fg: object, parm=None, strategy=None):
     ax.set_facecolor(cchart["fondo"])
     ax.set_box_aspect(parm["aspect"])
 
-    data, dividends = {}, {}
+    data, dividends, ValueMarket = {}, {}, 0
 
     #  Construction de dict() para grafico
     for keys, activos in strategy.items():
@@ -1527,6 +1527,7 @@ def grupo_activos(fg: object, parm=None, strategy=None):
     }
     x = np.arange(len(keys))
     mean = np.mean([data[categoria][1] for categoria in keys])
+    ValueMarket = np.sum([data[categoria][1] for categoria in keys])
     smean = f" μ = {mean:.0f}$"
 
     p_legend, bar_objects, width, multiplier = [], [], 0.40, 0
@@ -1571,7 +1572,12 @@ def grupo_activos(fg: object, parm=None, strategy=None):
     )
     ax.axhline(mean, linewidth=0.6, ls="--", color=cchart["texto"])
 
-    return {"data": data, "activos": keys, "media": mean}
+    return {
+        "data": data,
+        "activos": keys,
+        "media": mean,
+        "total_valor_market": ValueMarket,
+    }
 
 
 # Gráfica Diversificación vs. region
@@ -1579,10 +1585,18 @@ def grupo_region(fg: object, strategy=None, parm=None):
 
     def get_region_portafolio(strategy):
 
-        d_country, NoCountry = (
+        d_country, NoCountry, ValueMarket = (
             {},
             0.0,
+            0.0,
         )
+
+        # obtiene Valor Market total
+        for keys, activos in strategy.items():
+            for activo in activos:
+                ValueMarket += float(activo["costobase"]) + activo["unrealizedpnl"]
+
+        # calcula total por country
         for keys, activos in strategy.items():
 
             for activo in activos:
@@ -1608,8 +1622,12 @@ def grupo_region(fg: object, strategy=None, parm=None):
                     d_country[key_sec]["Valor Market"] += (
                         float(activo["costobase"]) + activo["unrealizedpnl"]
                     )
+            # agerga peso de cada pais
+            d_country[key_sec]["Peso"] = (
+                d_country[key_sec]["Valor Market"] / ValueMarket
+            )
 
-        return d_country
+        return d_country, ValueMarket
 
     cchart = parm["cchart"]
     fg.clear()
@@ -1617,7 +1635,7 @@ def grupo_region(fg: object, strategy=None, parm=None):
     ax.set_facecolor(cchart["fondo"])
     ax.set_box_aspect(parm["aspect"])
 
-    data = get_region_portafolio(strategy)
+    data, Valuemarket = get_region_portafolio(strategy)
 
     keys = list(data.keys())
     x = np.arange(len(keys))
@@ -1671,7 +1689,12 @@ def grupo_region(fg: object, strategy=None, parm=None):
     ax.set_xticks(x, keys)
     ax.yaxis.set_major_formatter(currency)
     ax.tick_params(axis="y", colors=cchart["asx"])
-    return {"data": data, "country": keys, "media": mean}
+    return {
+        "data": data,
+        "country": keys,
+        "media": mean,
+        "total_valor_market": Valuemarket,
+    }
 
 
 # permite trazar el desempeño ultimos 6 meses de las inversiones globales
@@ -1804,10 +1827,11 @@ def grupo_sector(fig: object, positions=None, parm=None):
         if p_positions is None:
             p_positions = PInversion.select_inversion(tipoin="Stock", ticket="all")
 
-        d_sector, total = {}, 0
+        d_sector, total, ValueMarket = {}, 0, 0
         for pkeys in p_positions:
             key_sec = pkeys["sector"]
-            total += float(pkeys["costobase"])
+            total += pkeys["costobase"]
+            ValueMarket += pkeys["costobase"] + pkeys["unrealizedpnl"]
 
             # por defecto los activos no encontrados entra en "Consumer Cyclical"
             if not sectores(busca=key_sec):
@@ -1828,7 +1852,7 @@ def grupo_sector(fig: object, positions=None, parm=None):
             "Peso": [x / total for x in inversion],
         }
 
-        return s_sector
+        return s_sector, ValueMarket
 
     def char_performance_sector(fg: object, pdatos=None, dlabl=None, asset=None):
 
@@ -1957,7 +1981,7 @@ def grupo_sector(fig: object, positions=None, parm=None):
         fg_performance = Performance()
         sector = fg_performance.screener_view(group="Sector")
 
-        d_positions = get_sector_portafolio(positions)
+        d_positions, ValueMarket = get_sector_portafolio(positions)
         p_sector = pd.DataFrame(d_positions)
 
         # agrega información de bonos a los sectores
@@ -1976,7 +2000,12 @@ def grupo_sector(fig: object, positions=None, parm=None):
         )
         char_performance_sector(fig, pdatos=datos, dlabl=parm)
 
-        return {"data": datos, "summary": d_positions, "media": datos["Peso"].mean()}
+        return {
+            "data": datos,
+            "summary": d_positions,
+            "media": datos["Peso"].mean(),
+            "total_valor_market": ValueMarket,
+        }
     except HTTPError as e:
         if "403" in str(e):
             print(
@@ -1991,7 +2020,6 @@ def grupo_sector(fig: object, positions=None, parm=None):
         else:
             # Cualquier otro error HTTP
             print(f"grupo_sector():🔴 ERROR FINVIZ: Fallo HTTP inesperado: {e}")
-
     except Exception as e_general:
         # Captura cualquier otro error no relacionado con la red
         print(f"grupo_sector():🔴 ERROR GENERAL en grupo_sector: {e_general}")
@@ -2048,10 +2076,13 @@ def get_dividends(account=None, vehiculo=None):
 
         positions = PInversion.select_inversion(tipoin=vehiculo, ticket="all")
         extracto = PInversion.select_extracto(extract="sum*")
+        ValueMarket = 0
 
         # construye proyección de dividends
         for position in positions:
             symbol = convierte_ticket_crypto(position["ticket"])
+            ValueMarket += position["costobase"] + position["unrealizedpnl"]
+
             (market, ix) = Market.select(account=account, symbol=symbol)
             if market:
 
@@ -2080,10 +2111,13 @@ def get_dividends(account=None, vehiculo=None):
         # deja en cero el mas recenete hasta que cierre el extracto
         cobrados[0] = 0
 
-        d_dividends = {"dividendos": dividendos, "cobrados": cobrados}
+        d_dividends = {
+            "dividendos": dividendos,
+            "cobrados": cobrados,
+        }
 
         datos = pd.DataFrame(d_dividends, index=meses)
-        return datos, d_dividends
+        return datos, d_dividends, ValueMarket
     except Exception as error:
         print("get_dividends(): {}".format(error))
         return None, None
@@ -2092,7 +2126,7 @@ def get_dividends(account=None, vehiculo=None):
 # Gráfica Diversificación vs. pago dividendos
 def grupo_dividendo(fg: object, parm=None):
     try:
-        datos, struct = get_dividends(
+        datos, struct, ValueMarket = get_dividends(
             account=parm["account"], vehiculo=parm["vehiculo"]
         )
         p_legend = []
@@ -2149,7 +2183,12 @@ def grupo_dividendo(fg: object, parm=None):
                 x[6], mean * 1.2, media, fontsize=6, ha="center", color=cchart["texto"]
             )
 
-            return {"datos": datos, "struct": struct, "media": mean}
+            return {
+                "datos": datos,
+                "struct": struct,
+                "media": mean,
+                "total_valor_market": ValueMarket,
+            }
     except Exception as error:
         print("grupo_dividendo(): {}".format(error))
 
