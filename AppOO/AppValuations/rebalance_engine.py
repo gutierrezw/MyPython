@@ -865,7 +865,16 @@ class RebalanceEngine(MetodoEngine):
         # =========================
         # Score final
         # =========================
-        score_final = score_estructural * (1 + impacto_valor_norm) * valuation_factor
+        # Si hay gaps estructurales, usar scoring completo
+        if score_estructural > 0:
+            score_final = score_estructural * (1 + impacto_valor_norm) * valuation_factor
+        else:
+            # Sin gaps estructurales, solo valoración (score bajo para no dominar)
+            # Solo recomendar si está cheap (valuation_factor > 1.0)
+            if valuation_factor > 1.0:
+                score_final = 0.05 * valuation_factor  # Score base bajo * valoración
+            else:
+                score_final = 0.0
 
         return score_final, impacto
 
