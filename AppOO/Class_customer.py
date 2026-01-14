@@ -2490,8 +2490,7 @@ class TickerInfo(MyOrders):
             }
 
             # Solo imprimir cuando hay cambios
-            if hay_cambios and asignaciones:
-                print(f"✅ [{self.vehiculo}] Rebalanceo: {len(asignaciones)} asignaciones generadas", flush=True)
+            # Mensaje eliminado para reducir ruido en consola
 
         except Exception as e:
             print(f"[ejecutar_rebalanceo()]: {e}")
