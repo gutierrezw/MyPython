@@ -1,0 +1,72 @@
+# Configuración de Ruff para el proyecto
+# https://docs.astral.sh/ruff/
+
+# Configuración general
+line-length = 120
+target-version = "py310"
+indent-width = 4
+
+# Reglas a activar
+[lint]
+select = [
+    # === IMPORTS (OBLIGATORIO) ===
+    "I",      # isort - ordenamiento de imports
+    "F401",   # unused imports - imports no usados
+
+    # === ERRORES COMUNES ===
+    "E",      # pycodestyle errors
+    "F",      # pyflakes - errores básicos
+    "W",      # pycodestyle warnings
+
+    # === VARIABLES NO USADAS ===
+    "F841",   # variable local no usada
+
+    # === BUENAS PRÁCTICAS ===
+    "B",      # bugbear - detecta bugs comunes
+    "UP",     # pyupgrade - modernizar sintaxis Python
+    "SIM",    # simplificaciones de código
+    "RUF",    # reglas específicas de ruff
+]
+
+# Reglas a ignorar (excepciones justificadas)
+ignore = [
+    "E501",   # line too long (manejado por line-length)
+]
+
+# Reglas específicas de imports
+[lint.isort]
+force-single-line = false
+lines-after-imports = 2
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "first-party",
+    "local-folder"
+]
+known-first-party = [
+    "Class_customer",
+    "Class_DataFrame",
+    "Class_gestion",
+    "Modulos_Mysql",
+    "AppValuations"
+]
+
+# Archivos a excluir
+extend-exclude = [
+    "__pycache__",
+    ".git",
+    "venv",
+    "env",
+    ".venv",
+    "*.egg-info",
+    "build",
+    "dist",
+]
+
+# Excepciones por archivo
+[lint.per-file-ignores]
+# Permitir imports no usados en __init__.py
+"__init__.py" = ["F401"]
+# Permitir prints en scripts principales
+"DashMainV9_ia.py" = ["T20"]

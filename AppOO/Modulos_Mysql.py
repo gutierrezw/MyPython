@@ -79,6 +79,51 @@ class BDsystem:  # -------------------------------------------------------------
                 conn.close()
 
     @staticmethod
+    def get_vehiculo_by_ticket(ticket: str) -> Optional[dict]:
+        """
+        Obtiene información del vehículo y presupuesto dado un ticket (símbolo).
+
+        Args:
+            ticket: Símbolo del activo (ej: 'AAPL', 'BTC-USD')
+
+        Returns:
+            dict con keys: ticket, vehiculo, Pinvertir
+            None si no se encuentra el ticket
+
+        Example:
+            >>> BDsystem.get_vehiculo_by_ticket('AAPL')
+            {'ticket': 'AAPL', 'vehiculo': 'Stock', 'Pinvertir': 10000.0}
+        """
+        conn = BDsystem.connect_dbase("select.vehiculo_by_ticket", False)
+        try:
+            cursor = conn.cursor()
+            sql = """
+                SELECT a.ticket, b.vehiculo, b.Pinvertir
+                FROM bdinv.inversion a, bdinv.sesion b
+                WHERE a.ticket = %s
+                AND b.vehiculo = a.tipoinv
+            """
+            cursor.execute(sql, (ticket,))
+            result = cursor.fetchone()
+
+            if not result:
+                return None
+
+            return {
+                'ticket': result[0],
+                'vehiculo': result[1],
+                'Pinvertir': result[2]
+            }
+        except Exception as error:
+            print(f"[Mysql::get_vehiculo_by_ticket()]: {error}")
+            return None
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    @staticmethod
     def update_sesion_fecha_orden(
         vehiculo: str, fesesion: datetime, orcartera: str
     ) -> bool:
