@@ -5241,7 +5241,7 @@ class system_status(tk.Frame):
         self.right = ttk.Frame(self.system, padding=(1, 10, 1, 1), style="C.TFrame")
 
         # Cambio: usar Notebook (tabs) en lugar de frames individuales
-        self.bottom = ttk.Notebook(self.system)
+        self.bottom = ttk.Notebook(self.system, style="C.TNotebook")
 
         # Crear frames para cada tab
         self.datahub = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
