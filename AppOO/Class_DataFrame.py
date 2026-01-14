@@ -1572,9 +1572,18 @@ def grupo_activos(fg: object, parm=None, strategy=None):
     )
     ax.axhline(mean, linewidth=0.6, ls="--", color=cchart["texto"])
 
+    # Construir summary con formato compatible para rebalanceo
+    total_inversion = sum(data[categoria][0] for categoria in keys)
+    summary = {
+        "Name": keys,
+        "Inversion": [data[categoria][0] for categoria in keys],
+        "Peso": [data[categoria][0] / total_inversion if total_inversion > 0 else 0 for categoria in keys],
+    }
+
     return {
         "data": data,
-        "activos": keys,
+        "summary": summary,
+        "activos": keys,  # mantener para compatibilidad
         "media": mean,
         "total_valor_market": ValueMarket,
     }
@@ -1689,9 +1698,19 @@ def grupo_region(fg: object, strategy=None, parm=None):
     ax.set_xticks(x, keys)
     ax.yaxis.set_major_formatter(currency)
     ax.tick_params(axis="y", colors=cchart["asx"])
+
+    # Construir summary con formato compatible para rebalanceo
+    total_inversion = sum(data[country]["Capital"] for country in keys)
+    summary = {
+        "Name": keys,
+        "Inversion": [data[country]["Capital"] for country in keys],
+        "Peso": [data[country]["Capital"] / total_inversion if total_inversion > 0 else 0 for country in keys],
+    }
+
     return {
         "data": data,
-        "country": keys,
+        "summary": summary,
+        "country": keys,  # mantener para compatibilidad
         "media": mean,
         "total_valor_market": Valuemarket,
     }

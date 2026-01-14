@@ -6961,9 +6961,14 @@ class system_status(tk.Frame):
                     # Iterar sobre todos los vehículos en DataHub.rebalanceo
                     for vehiculo, datos in DataHub.rebalanceo.items():
                         timestamp = datos.get("timestamp", "N/A")
+                        # Formatear timestamp si es datetime
+                        if timestamp != "N/A" and hasattr(timestamp, 'strftime'):
+                            timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                        else:
+                            timestamp_str = str(timestamp)
 
                         lista.insert("", "end", text=f"📋 {vehiculo}", values=("", ""), tags=("header",))
-                        lista.insert("", "end", text=f"Actualizado: {timestamp}", values=("", ""), tags=("info",))
+                        lista.insert("", "end", text=f"🕐 {timestamp_str}", values=("", ""), tags=("info",))
 
                         asignaciones = datos.get("asignaciones", [])
 
