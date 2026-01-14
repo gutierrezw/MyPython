@@ -511,7 +511,7 @@ class RebalanceEngine(MetodoEngine):
         Devuelve las dimensiones aplicables según el vehículo.
 
         Reglas:
-        - Crypto: solo dividendos
+        - Crypto: dividendos, tipos, regiones (no sectores)
         - Stock/Otros: dividendos, sectores, tipos, regiones
         """
         dimensiones = {
@@ -522,10 +522,11 @@ class RebalanceEngine(MetodoEngine):
         }
 
         if self.vehiculo == "Crypto":
-            # Para crypto solo aplica dividendos
+            # Para crypto no aplican sectores industriales
+            # pero sí tipos de activos y regiones
             dimensiones["sectores"] = False
-            dimensiones["tipos"] = False
-            dimensiones["regiones"] = False
+            dimensiones["tipos"] = True
+            dimensiones["regiones"] = True
 
         return dimensiones
 

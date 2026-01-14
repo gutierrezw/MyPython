@@ -2490,15 +2490,8 @@ class TickerInfo(MyOrders):
             }
 
             # Solo imprimir cuando hay cambios
-            if hay_cambios:
-                candidatos_con_score = sum(1 for c in ranking if c['score'] > 0)
-                if candidatos_con_score > 0:
-                    print(f"🔍 [{self.vehiculo}] Gaps: {engine.gaps}", flush=True)
-                    print(f"🔍 [{self.vehiculo}] Candidatos con score > 0: {candidatos_con_score}", flush=True)
-                    print(f"🔍 [{self.vehiculo}] Top 3: {[(c['symbol'], round(c['score'], 4)) for c in ranking[:3]]}", flush=True)
-
-                if asignaciones:
-                    print(f"✅ [{self.vehiculo}] Rebalanceo: {len(asignaciones)} asignaciones generadas", flush=True)
+            if hay_cambios and asignaciones:
+                print(f"✅ [{self.vehiculo}] Rebalanceo: {len(asignaciones)} asignaciones generadas", flush=True)
 
         except Exception as e:
             print(f"[ejecutar_rebalanceo()]: {e}")
