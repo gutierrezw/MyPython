@@ -1,6 +1,30 @@
 # Configuración de Ruff para el proyecto
 # https://docs.astral.sh/ruff/
 
+# ============================================================================
+# CONVENCIONES DE CÓDIGO DEL PROYECTO (no verificables por Ruff)
+# ============================================================================
+# 1. FUNCIONES INTERNAS (nested functions):
+#    - Deben definirse SIEMPRE al inicio del método/función padre
+#    - Nunca definir funciones a mitad del código
+#    - Ejemplo correcto:
+#      def metodo_principal(self):
+#          def helper_uno():     # <- Al inicio
+#              pass
+#          def helper_dos():     # <- Al inicio
+#              pass
+#
+#          # Código principal aquí
+#          resultado = helper_uno()
+#          ...
+#
+# 2. ORDEN DENTRO DE CLASES:
+#    - __init__ primero
+#    - Métodos públicos
+#    - Métodos privados (_metodo)
+#    - Métodos estáticos/de clase al final
+# ============================================================================
+
 # Configuración general
 line-length = 120
 target-version = "py310"

@@ -50,6 +50,7 @@ from Modulos_python import (
     Path,
     wraps,
     signal,
+    traceback,
 )
 
 sys.path.insert(0, "..")
@@ -171,7 +172,7 @@ class ClassAgenteIA:
 
                 # oportunidades con fitros IA
                 elif self.activaIA:
-                    await self.evaluar_oportunidades_con_IA(df_sell, umbral=0.65)
+                    await self.evaluar_oportunidades_con_IA(df_sell)
         except (EncodingWarning, Exception) as e:
             print(f"Agente_ManagerSell(): {e}")
 
@@ -377,8 +378,9 @@ class Telegram:
                 )
 
                 print(f"Start: (toggle_telegram(On))")
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"toggle_telegram(): {e}")
+            traceback.print_exc()
 
     def _activar_telegram(self):
         self.exec_modulo_async(self.toggle_telegram())
@@ -1009,7 +1011,13 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             print(f"evaluar_oportunidades(): {e}")
 
     # Obtener oportunidades desde modelo IA
-    async def evaluar_oportunidades_con_IA(self, df_sell, umbral=0.65):
+    async def evaluar_oportunidades_con_IA(self, df_sell, umbral_venta=0.65, umbral_observacion=0.35):
+        """
+        Sistema de dos umbrales:
+        - confianza >= umbral_venta (0.65): Enviar a Telegram para vender
+        - umbral_observacion <= confianza < umbral_venta (0.35-0.65): En observación
+        - confianza < umbral_observacion (0.35): Ignorar
+        """
         # selecciona de df_sell las fila  aprobadas
         def get_sell_aprobadas(df_en=None, df_ap=None, umbral=None):
 
@@ -1018,6 +1026,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 for _, apro in df_ap.iterrows():
                     if row["hash_id"] == apro["hash_id"]:
 
+                        # print(f"confianza { apro["confianza"]} >= {umbral:} >> {apro}")
                         if apro["confianza"] >= umbral:
                             df_ou = pd.concat(
                                 [df_ou, pd.DataFrame([row])], ignore_index=True
@@ -1029,9 +1038,27 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                             break
             return df_ou
 
+        def get_sell_observacion(df_en=None, df_ap=None, umbral_min=0.35, umbral_max=0.65):
+            """Retorna oportunidades en zona de observación (0.35 - 0.65)"""
+            df_obs = pd.DataFrame()
+            for _, row in df_en.iterrows():
+                for _, apro in df_ap.iterrows():
+                    if row["hash_id"] == apro["hash_id"]:
+                        conf = apro["confianza"]
+                        if umbral_min <= conf < umbral_max:
+                            row_copy = row.copy()
+                            row_copy["confianza"] = conf
+                            row_copy["estado_ia"] = "observacion"
+                            df_obs = pd.concat([df_obs, pd.DataFrame([row_copy])], ignore_index=True)
+                            break
+            return df_obs
+
         try:
             # modelo para presentar Oportunidades
             self.IAsell.load_modelo(self.modelo_name)
+            if self.IAsell.modelo is None:
+                print(f"evaluar_oportunidades_con_IA(): Modelo no cargado")
+                return
 
             # agreca columna hash_id, para luego aparear
             df_sell.insert(0, "hash_id", " ")
@@ -1053,11 +1080,25 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             # Aplicar predicción IA
             df = self.IAsell.aplanar_datos_tecnicos(df_in)
-            resultado = self.IAsell.predecir_modelo(df)
+            if df is None or df.empty:
+                print(f"evaluar_oportunidades_con_IA(): df aplanado vacío")
+                return
 
-            # take the sales approved by the AI model.
+            resultado = self.IAsell.predecir_modelo(df)
+            if resultado is None or resultado.empty:
+                print(f"evaluar_oportunidades_con_IA(): resultado predicción vacío")
+                return
+
+            # Sistema de dos umbrales:
+            # 1. Aprobadas para venta (confianza >= 0.65)
             aprobadas = get_sell_aprobadas(
-                df_en=df_sell, df_ap=resultado, umbral=umbral
+                df_en=df_sell, df_ap=resultado, umbral=umbral_venta
+            )
+
+            # 2. En observación (0.35 <= confianza < 0.65)
+            observacion = get_sell_observacion(
+                df_en=df_sell, df_ap=resultado,
+                umbral_min=umbral_observacion, umbral_max=umbral_venta
             )
 
             # recorre aprobadas para actualzzar en Oportunidades
@@ -1065,62 +1106,132 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 await self.oportunity_handler(row=row, origen="ia")
         except (EncodingWarning, Exception) as e:
             print(f"evaluar_oportunidades_con_IA(): {e}")
+            import traceback
+            traceback.print_exc()
 
             # Filtrar por confianza mínima
             # aprobadas = resultado[resultado["confianza"] >= umbral].copy()
 
     # obtenen muestra para entrenamiento del modelo de sell
-    def obtener_dataframe_entrenamiento_IA(self):
+    def obtener_dataframe_entrenamiento_IA(self, tipo="sell", return_stats=False):
         """
-        Extrae las oportunidades con acción tomada (aprobada o rechazada)
-        y devuelve un DataFrame con todos los campos necesarios para entrenamiento IA.
+        Extrae las oportunidades con decisión tomada y devuelve un DataFrame
+        con todos los campos necesarios para entrenamiento IA.
+
+        Criterio de filtrado:
+        - Solo oportunidades con recomendado = 1 (aprobada) o -1 (rechazada)
+        - Excluye automáticamente pendientes (recomendado = 0 o NULL)
+        - Independiente del estado (ejecutada, rechazada, no repetir, etc.)
+        - El campo 'recomendado' es el indicador definitivo de decisión humana
+
+        Args:
+            tipo: Tipo de oportunidad ("sell" o "buy")
+            return_stats: Si True, retorna (df, errores_parseo)
+
+        Returns:
+            DataFrame con datos de entrenamiento, o (DataFrame, dict) si return_stats=True
         """
         try:
-            oportunidades, ix = self.RepositorioOportunidades.obtener_por_tipo(
-                tipo="sell"
-            )
-            registros = []
-            for op in oportunidades:
+            # Obtener todas las oportunidades del tipo (sin filtro de estado)
+            # Filtraremos solo por recomendado in [1, -1] que es el indicador real de decisión
+            oportunidades, ix = self.RepositorioOportunidades.obtener_por_tipo(tipo=tipo)
 
-                # saltar pendientes  los no recomendados
-                if op[ix.index("recomendado")] not in [1, -1]:
+            registros = []
+            errores_parseo = {
+                "sin_decision": 0,
+                "json_invalido": 0,
+                "detalle_no_dict": 0,
+                "indicadores_no_dict": 0,
+                "otros": 0
+            }
+
+            for op in oportunidades:
+                try:
+                    # Filtro único: verificar decisión tomada (recomendado = 1 o -1)
+                    # Esto excluye automáticamente pendientes (recomendado = 0 o NULL)
+                    if op[ix.index("recomendado")] not in [1, -1]:
+                        errores_parseo["sin_decision"] += 1
+                        continue
+
+                    # Parsear json_detalle (maneja doble/triple codificación)
+                    json_detalle_raw = op[ix.index("json_detalle")]
+                    try:
+                        if isinstance(json_detalle_raw, str):
+                            detalle = json.loads(json_detalle_raw)
+                            if isinstance(detalle, str):
+                                detalle = json.loads(detalle)
+                        else:
+                            detalle = json_detalle_raw
+                    except json.JSONDecodeError:
+                        errores_parseo["json_invalido"] += 1
+                        continue
+
+                    if not isinstance(detalle, dict):
+                        errores_parseo["detalle_no_dict"] += 1
+                        continue
+
+                    # Parsear indicadores (puede ser string con triple codificación)
+                    indicadores_raw = detalle.get("indicadores", {})
+                    if isinstance(indicadores_raw, str):
+                        try:
+                            indicadores = json.loads(indicadores_raw)
+                        except json.JSONDecodeError:
+                            errores_parseo["indicadores_no_dict"] += 1
+                            continue
+                    else:
+                        indicadores = indicadores_raw
+
+                    if not isinstance(indicadores, dict):
+                        errores_parseo["indicadores_no_dict"] += 1
+                        continue
+
+                    # Extraer datos de indicadores diarios (preferencia)
+                    indicadores_diaria = indicadores.get("diaria", {}) if isinstance(indicadores.get("diaria"), dict) else {}
+
+                    # Extraer EMAs largos y cortos
+                    emas_largos = indicadores_diaria.get("ema(20,50,100,200)", {}) if isinstance(indicadores_diaria.get("ema(20,50,100,200)"), dict) else {}
+                    emas_cortos = indicadores_diaria.get("ema(09,21,055,144)", {}) if isinstance(indicadores_diaria.get("ema(09,21,055,144)"), dict) else {}
+                    fibo = indicadores_diaria.get("retroceso_fibonacci", {}) if isinstance(indicadores_diaria.get("retroceso_fibonacci"), dict) else {}
+
+                    # Nombres con sufijo _d para compatibilidad con cargar_datos() en Class_IA_modelos
+                    fila = {
+                        "symbol": op[ix.index("symbol")],
+                        "recomendado": op[ix.index("recomendado")],
+                        "profit": detalle.get("profit"),
+                        "roi": detalle.get("roi"),
+                        # Indicadores diarios con sufijo _d
+                        "rsi_d": indicadores_diaria.get("rsi"),
+                        "macd_d": indicadores_diaria.get("macd"),
+                        "Close_d": indicadores_diaria.get("precio_calculo"),
+                        "EMA020_d": emas_largos.get("EMA020"),
+                        "EMA050_d": emas_largos.get("EMA050"),
+                        "EMA100_d": emas_largos.get("EMA100"),
+                        "EMA200_d": emas_largos.get("EMA200"),
+                        "EMA009_d": emas_cortos.get("EMA009"),
+                        "EMA021_d": emas_cortos.get("EMA021"),
+                        "EMA055_d": emas_cortos.get("EMA055"),
+                        "EMA144_d": emas_cortos.get("EMA144"),
+                        "fibo_longico_d": fibo.get("longico"),
+                        # NOTA: fibo_alcista y fibo_bajista son dicts con niveles (23.6%, 38.2%, etc.)
+                        # Por ahora los omitimos para evitar error "float() argument must be a string or real number, not 'dict'"
+                    }
+                    registros.append(fila)
+
+                except (EncodingWarning, Exception) as e:
+                    errores_parseo["otros"] += 1
                     continue
 
-                detalle = json.loads(op[ix.index("json_detalle")])
-                indicadores = detalle.get("indicadores", {})
-
-                fila = {
-                    "symbol": op[ix.index("symbol")],
-                    "recomendado": op[ix.index("recomendado")],
-                    "profit": detalle.get("profit"),
-                    "roi": detalle.get("roi"),
-                    "rsi": indicadores.get("rsi"),
-                    "macd": indicadores.get("macd"),
-                    "Close": indicadores.get("precio_calculo"),
-                    "EMA020": indicadores.get("ema(20,50,100,200)", {}).get("EMA020"),
-                    "EMA050": indicadores.get("ema(20,50,100,200)", {}).get("EMA050"),
-                    "EMA100": indicadores.get("ema(20,50,100,200)", {}).get("EMA100"),
-                    "EMA200": indicadores.get("ema(20,50,100,200)", {}).get("EMA200"),
-                    "EMA009": indicadores.get("ema(09,21,055,144)", {}).get("EMA009"),
-                    "EMA021": indicadores.get("ema(09,21,055,144)", {}).get("EMA021"),
-                    "EMA055": indicadores.get("ema(09,21,055,144)", {}).get("EMA055"),
-                    "EMA144": indicadores.get("ema(09,21,055,144)", {}).get("EMA144"),
-                    "fibo_longico": indicadores.get("retroceso_fibonacci", {}).get(
-                        "longico"
-                    ),
-                    "fibo_alcista": indicadores.get("retroceso_fibonacci", {}).get(
-                        "tendencia alcista"
-                    ),
-                    "fibo_bajista": indicadores.get("retroceso_fibonacci", {}).get(
-                        "tendencia_bajista"
-                    ),
-                }
-                registros.append(fila)
-
             df = pd.DataFrame(registros)
+
+            if return_stats:
+                return df, errores_parseo
             return df
+
         except (EncodingWarning, Exception) as e:
             print(f"obtener_dataframe_entrenamiento_IA(): {e}")
+            if return_stats:
+                return pd.DataFrame(), {"error_general": str(e)}
+            return pd.DataFrame()
 
     # Consultar y enviar por Telegram un resumen de órdenes ejecutadas.
     async def list_orders_exec(self, chat_id=None, limit=25):
