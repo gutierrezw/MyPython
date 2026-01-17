@@ -770,14 +770,21 @@ class RebalanceEngine(MetodoEngine):
         """
         Calcula el score de un activo en función de:
         - gaps normalizados (rebalanceo estructural)
-        - metadata del activo
+        - metadata del activo (flexible con dimensiones incompletas)
         - ajuste opcional por valoración (no determinante)
+
+        MEJORA: Maneja activos con metadata incompleta dando crédito proporcional
+        por las dimensiones que SÍ mejoran, sin penalizar las que faltan.
         """
         score_estructural = 0.0
         impacto = {}
 
         meta = candidate.get("metadata", {})
         symbol = candidate["symbol"]
+
+        # Rastrear dimensiones evaluables vs dimensiones aplicables
+        dimensiones_evaluadas = 0
+        dimensiones_aplicables = 0
 
         # =========================
         # Dividendos
@@ -786,6 +793,9 @@ class RebalanceEngine(MetodoEngine):
         tipo = candidate["tipo"]
         necesita_div = self._dividendos_necesitado(symbol)
 
+        # Siempre es evaluable (todos los activos tienen tipo buy/dividends)
+        dimensiones_evaluadas += 1
+
         if (
             gap_div > 0
             and tipo == "dividends"
@@ -793,6 +803,7 @@ class RebalanceEngine(MetodoEngine):
         ):
             impacto["dividendos"] = gap_div
             score_estructural += gap_div
+            dimensiones_aplicables += 1
 
             gap_valor_div = self._gap_valor_dividendos()
         else:
@@ -805,9 +816,16 @@ class RebalanceEngine(MetodoEngine):
         gap_sec = self.normalized_gaps.get("sectores", 0.0)
         sector = meta.get("sector")
 
-        if gap_sec > 0 and self._sector_necesitado(sector):
-            impacto["sectores"] = gap_sec
-            score_estructural += gap_sec
+        # Solo evaluable si tiene metadata de sector
+        if sector is not None:
+            dimensiones_evaluadas += 1
+
+            if gap_sec > 0 and self._sector_necesitado(sector):
+                impacto["sectores"] = gap_sec
+                score_estructural += gap_sec
+                dimensiones_aplicables += 1
+            else:
+                impacto["sectores"] = 0.0
         else:
             impacto["sectores"] = 0.0
 
@@ -817,9 +835,16 @@ class RebalanceEngine(MetodoEngine):
         gap_tipo = self.normalized_gaps.get("tipos", 0.0)
         asset_type = meta.get("asset_type")
 
-        if gap_tipo > 0 and self._tipo_necesitado(asset_type):
-            impacto["tipos"] = gap_tipo
-            score_estructural += gap_tipo
+        # Solo evaluable si tiene metadata de asset_type
+        if asset_type is not None:
+            dimensiones_evaluadas += 1
+
+            if gap_tipo > 0 and self._tipo_necesitado(asset_type):
+                impacto["tipos"] = gap_tipo
+                score_estructural += gap_tipo
+                dimensiones_aplicables += 1
+            else:
+                impacto["tipos"] = 0.0
         else:
             impacto["tipos"] = 0.0
 
@@ -829,11 +854,22 @@ class RebalanceEngine(MetodoEngine):
         gap_reg = self.normalized_gaps.get("regiones", 0.0)
         region = meta.get("region")
 
-        if gap_reg > 0 and self._region_necesitada(region):
-            impacto["regiones"] = gap_reg
-            score_estructural += gap_reg
+        # Solo evaluable si tiene metadata de region
+        if region is not None:
+            dimensiones_evaluadas += 1
+
+            if gap_reg > 0 and self._region_necesitada(region):
+                impacto["regiones"] = gap_reg
+                score_estructural += gap_reg
+                dimensiones_aplicables += 1
+            else:
+                impacto["regiones"] = 0.0
         else:
             impacto["regiones"] = 0.0
+
+        # Guardar info de cobertura de dimensiones
+        impacto["dimensiones_evaluadas"] = dimensiones_evaluadas
+        impacto["dimensiones_aplicables"] = dimensiones_aplicables
 
         # =========================
         # Ajuste por valoración (opcional)
@@ -865,33 +901,101 @@ class RebalanceEngine(MetodoEngine):
         # =========================
         # Score final
         # =========================
+        # DEBUG: Imprimir valores clave para diagnóstico
+        # print(f"🔍 [DEBUG {symbol}] score_estructural={score_estructural:.4f}, valuation_factor={valuation_factor:.2f}, dim_eval={dimensiones_evaluadas}, dim_aplic={dimensiones_aplicables}", flush=True)
+
         # Si hay gaps estructurales, usar scoring completo
         if score_estructural > 0:
+            # Scoring base por gaps estructurales
             score_final = score_estructural * (1 + impacto_valor_norm) * valuation_factor
+
+            # MEJORA: Bonificación por cobertura de dimensiones
+            # Si el activo tiene metadata incompleta pero mejora dimensiones evaluables,
+            # bonificar proporcionalmente
+            if dimensiones_evaluadas > 0:
+                cobertura_ratio = dimensiones_aplicables / dimensiones_evaluadas
+                # Bonificar hasta +20% si mejora todas las dimensiones evaluables
+                cobertura_bonus = 1.0 + (0.2 * cobertura_ratio)
+                score_final *= cobertura_bonus
+
+            # print(f"✅ [DEBUG {symbol}] SCORE ESTRUCTURAL → score_final={score_final:.4f}", flush=True)
+
         else:
-            # Sin gaps estructurales, solo valoración (score bajo para no dominar)
-            # Solo recomendar si está cheap (valuation_factor > 1.0)
+            # Sin gaps estructurales, scoring por oportunidad de valoración
+            # Priorizar activos con mejor precio relativo
             if valuation_factor > 1.0:
-                score_final = 0.05 * valuation_factor  # Score base bajo * valoración
+                # Score base por valoración
+                score_base = 0.05 * valuation_factor
+
+                # Bonificación adicional si tiene metadata (ayuda a diversificar)
+                metadata_count = sum([
+                    1 for v in [meta.get("sector"), meta.get("region"), meta.get("asset_type")]
+                    if v is not None
+                ])
+                # +10% por cada dimensión con metadata (max +30%)
+                metadata_bonus = 1.0 + (0.1 * metadata_count)
+
+                score_final = score_base * metadata_bonus
+                # print(f"💰 [DEBUG {symbol}] SCORE VALORACIÓN → score_final={score_final:.4f} (metadata_count={metadata_count})", flush=True)
             else:
                 score_final = 0.0
+                # print(f"❌ [DEBUG {symbol}] SIN SCORE (valuation_factor={valuation_factor:.2f} no > 1.0)", flush=True)
 
         return score_final, impacto
 
     def _valuation_factor(self, candidate: Dict) -> float:
         """
         Devuelve un factor multiplicativo según la valoración.
-        No decide el rebalanceo, solo ajusta prioridad.
+        Prioriza:
+        1. Label de valuation (cheap/expensive/neutral)
+        2. Precio actual vs precio promedio (gypPrecio)
+
+        Retorna > 1.0 si es oportunidad, < 1.0 si está caro, 1.0 neutral
         """
+        symbol = candidate.get("symbol", "???")
         block = candidate.get("block", {})
         valuation = block.get("valuation", {})
 
+        # 1. Prioridad a label de valuation
         label = valuation.get("label", "neutral")
 
         if label == "cheap":
+            # print(f"  💎 [{symbol}] valuation label='cheap' → factor=1.2", flush=True)
             return 1.2
         if label == "expensive":
+            # print(f"  💸 [{symbol}] valuation label='expensive' → factor=0.8", flush=True)
             return 0.8
+
+        # 2. Fallback: usar precio promedio (gypPrecio)
+        # Si está por debajo del promedio (negativo), es oportunidad
+        try:
+            avgcost = block.get("avgcost", 0)
+            last_price = block.get("mrkprice", 0)
+
+            # DEBUG: Ver qué campos tiene el block
+            # if avgcost == 0 and last_price == 0:
+            #     print(f"  🔍 [{symbol}] block keys: {list(block.keys())[:10]}", flush=True)
+
+            if avgcost > 0 and last_price > 0:
+                gyp_precio = (last_price - avgcost) / avgcost
+
+                # Si está más de 10% debajo del promedio -> oportunidad
+                if gyp_precio < -0.10:
+                    # print(f"  📉 [{symbol}] gypPrecio={gyp_precio:.2%} (< -10%) → factor=1.15", flush=True)
+                    return 1.15
+                # Si está más de 10% arriba del promedio → caro
+                elif gyp_precio > 0.10:
+                    # print(f"  📈 [{symbol}] gypPrecio={gyp_precio:.2%} (> +10%) → factor=0.85", flush=True)
+                    return 0.85
+                else:
+                    # print(f"  ➖ [{symbol}] gypPrecio={gyp_precio:.2%} (neutral) → factor=1.0", flush=True)
+                    pass
+            # else:
+            #     print(f"  ⚠️  [{symbol}] avgcost={avgcost}, last_price={last_price} → sin datos para gypPrecio", flush=True)
+        except (TypeError, ValueError, ZeroDivisionError) as e:
+            # print(f"  ⚠️  [{symbol}] Error calculando gypPrecio: {e}", flush=True)
+            pass
+
         return 1.0
 
     def budget_allocator(self, min_ticket: float = 100.0) -> List[Dict]:
