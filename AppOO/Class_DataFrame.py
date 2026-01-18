@@ -1618,6 +1618,9 @@ def grupo_region(fg: object, strategy=None, parm=None):
                 elif key_sec == "US":
                     key_sec = "United States"
 
+                elif key_sec == "Digital":
+                    key_sec = "Crypto"
+
                 # acumula por key_sec
                 if key_sec not in list(d_country.keys()):
                     d_country[key_sec] = {

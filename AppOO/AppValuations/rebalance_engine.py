@@ -1,24 +1,11 @@
 # =========================
 # Standard library
 # =========================
-# import sys
-# import os
-import math
-from typing import Dict, Tuple, Optional, List
-
-# sys.path.insert(0, "..")
+from Modulos_python import (
+    math, Dict, 
+Tuple, Optional, List,
+)
 from Modulos_Mysql import BDsystem, MarketScreen
-
-# =========================
-# Third-party libraries
-# =========================
-# (por ahora ninguna, se agregan acá cuando haga falta)
-
-# =========================
-# Project imports
-# =========================
-# from app.config import REBALANCE_CONFIG
-# from app.utils.math import normalize
 
 
 # =========================
@@ -247,28 +234,60 @@ class MetodoEngine:
         """
         Devuelve pesos por tipo de activo junto con
         gap porcentual y gap monetario.
+
+        Calcula directamente desde DataHub.info filtrando por vehículo,
+        replicando la lógica de grupo_activos() pero específica por vehículo.
         """
-        tipo_data = self.datahub.manager_buysell.get("activos")
-        if not tipo_data:
+        # Calcular pesos desde DataHub.info filtrado por vehículo
+        tipos_data = {}  # {asset_type: {"capital": X, "valor_market": Y}}
+        total_valor_market = 0.0
+
+        for symbol, data in self.info.items():
+            if symbol == "TimeDataHub":
+                continue
+
+            if not isinstance(data, dict):
+                continue
+
+            # Filtrar solo activos del vehículo actual
+            vehiculo_activo = data.get("vehiculo")
+            if vehiculo_activo != self.vehiculo:
+                continue
+
+            # Obtener asset_type del activo
+            asset_type = data.get("asset_type")
+            if not asset_type:
+                continue
+
+            # Calcular valores
+            costobase = data.get("costobase", 0) or 0
+            unrealizedpnl = data.get("unrealizedpnl", 0) or 0
+            valor_market = costobase + unrealizedpnl
+
+            # Solo considerar activos con posición activa
+            if costobase < self.min_costobase:
+                continue
+
+            # Acumular por tipo
+            if asset_type not in tipos_data:
+                tipos_data[asset_type] = {"capital": 0.0, "valor_market": 0.0}
+
+            tipos_data[asset_type]["capital"] += costobase
+            tipos_data[asset_type]["valor_market"] += valor_market
+            total_valor_market += valor_market
+
+        if not tipos_data or total_valor_market <= 0:
             return {}
 
-        # summary está directamente en tipo_data, no en data
-        summary = tipo_data.get("summary", {})
-        names = summary.get("Name", [])
-        pesos = summary.get("Peso", [])
-
-        total_valor = tipo_data.get("total_valor_market", 0.0)
-        if not names or not pesos or total_valor <= 0:
-            return {}
-
-        n = len(names)
+        # Calcular pesos y gaps
+        n = len(tipos_data)
         objetivo = 1 / n if n > 0 else 0.0
 
         resultado = {}
-
-        for tipo, peso in zip(names, pesos):
+        for tipo, valores in tipos_data.items():
+            peso = valores["capital"] / total_valor_market if total_valor_market > 0 else 0
             gap_pct = objetivo - peso
-            gap_valor = gap_pct * total_valor
+            gap_valor = gap_pct * total_valor_market
 
             resultado[tipo] = {
                 "peso": peso,
@@ -312,28 +331,70 @@ class MetodoEngine:
         """
         Devuelve pesos por región junto con
         gap porcentual y gap monetario.
+
+        Calcula directamente desde DataHub.info filtrando por vehículo,
+        replicando la lógica de grupo_region() pero específica por vehículo.
         """
-        region_data = self.datahub.manager_buysell.get("region")
-        if not region_data:
+        # Calcular pesos desde DataHub.info filtrado por vehículo
+        regiones_data = {}  # {region: {"capital": X, "valor_market": Y}}
+        total_valor_market = 0.0
+
+        for symbol, data in self.info.items():
+            if symbol == "TimeDataHub":
+                continue
+
+            if not isinstance(data, dict):
+                continue
+
+            # Filtrar solo activos del vehículo actual
+            vehiculo_activo = data.get("vehiculo")
+            if vehiculo_activo != self.vehiculo:
+                continue
+
+            # Obtener region del activo y normalizarla
+            region = data.get("region")
+
+            # Normalizar región (misma lógica que grupo_region)
+            if not region or region in ("null", "None", ""):
+                region = "NotCountry"
+            elif region == "US":
+                region = "United States"
+            elif region == "Digital":
+                region = "Crypto"
+
+            # Para vehículo Crypto, forzar región="Crypto"
+            if self.vehiculo == "Crypto":
+                region = "Crypto"
+
+            # Calcular valores
+            costobase = data.get("costobase", 0) or 0
+            unrealizedpnl = data.get("unrealizedpnl", 0) or 0
+            valor_market = costobase + unrealizedpnl
+
+            # Solo considerar activos con posición activa
+            if costobase < self.min_costobase:
+                continue
+
+            # Acumular por región
+            if region not in regiones_data:
+                regiones_data[region] = {"capital": 0.0, "valor_market": 0.0}
+
+            regiones_data[region]["capital"] += costobase
+            regiones_data[region]["valor_market"] += valor_market
+            total_valor_market += valor_market
+
+        if not regiones_data or total_valor_market <= 0:
             return {}
 
-        # summary está directamente en region_data, no en data
-        summary = region_data.get("summary", {})
-        names = summary.get("Name", [])
-        pesos = summary.get("Peso", [])
-
-        total_valor = region_data.get("total_valor_market", 0.0)
-        if not names or not pesos or total_valor <= 0:
-            return {}
-
-        n = len(names)
+        # Calcular pesos y gaps
+        n = len(regiones_data)
         objetivo = 1 / n if n > 0 else 0.0
 
         resultado = {}
-
-        for region, peso in zip(names, pesos):
+        for region, valores in regiones_data.items():
+            peso = valores["capital"] / total_valor_market if total_valor_market > 0 else 0
             gap_pct = objetivo - peso
-            gap_valor = gap_pct * total_valor
+            gap_valor = gap_pct * total_valor_market
 
             resultado[region] = {
                 "peso": peso,
@@ -484,6 +545,9 @@ class RebalanceEngine(MetodoEngine):
         self.vehiculo = vehiculo if vehiculo else self._detect_vehiculo()
         self.dimensiones_activas = self._get_dimensiones_por_vehiculo()
 
+        # Obtener min_costobase desde sesion.gainInversion para el vehículo
+        self.min_costobase = self._get_min_costobase()
+
         # Validar estructura de DataHub
         self._validate_datahub()
 
@@ -505,6 +569,19 @@ class RebalanceEngine(MetodoEngine):
                 return vehiculo
 
         return None
+
+    def _get_min_costobase(self) -> float:
+        """
+        Obtiene el umbral mínimo de costobase desde sesion.gainInversion.
+        Retorna 10.0 como valor por defecto si no se encuentra.
+        """
+        try:
+            sesion = BDsystem.get_sesion_by_vehiculo(vehiculo=self.vehiculo)
+            if sesion:
+                return float(sesion.get("gainInversion", 10.0) or 10.0)
+        except Exception:
+            pass
+        return 10.0
 
     def _get_dimensiones_por_vehiculo(self) -> Dict[str, bool]:
         """
@@ -607,12 +684,19 @@ class RebalanceEngine(MetodoEngine):
             if vehiculo_activo != self.vehiculo:
                 continue
 
+            # FILTRO: solo activos con posición activa (costobase > min_costobase)
+            costobase = data.get("costobase", 0) or 0
+            if costobase < self.min_costobase:
+                continue
+
+            metadata = self._extract_metadata(data)
+ 
             self.candidates.append(
                 {
                     "symbol": symbol,
                     "tipo": tipo,
                     "block": block,
-                    "metadata": self._extract_metadata(data),
+                    "metadata": metadata,
                     "score": 0.0,
                     "impacto": {},
                 }
@@ -624,12 +708,66 @@ class RebalanceEngine(MetodoEngine):
     # FASE 5 — SCORING
     # =========================
     def score_candidates(self) -> List[Dict]:
-        for candidate in self.candidates:
-            score, impacto = self._score_candidate(candidate)
-            candidate["score"] = score
-            candidate["impacto"] = impacto
+        # Para Crypto: usar heurística de equilibrio por costobase
+        if self.vehiculo == "Crypto":
+            self._score_candidates_crypto()
+        else:
+            for candidate in self.candidates:
+                score, impacto = self._score_candidate(candidate)
+                candidate["score"] = score
+                candidate["impacto"] = impacto
 
         return self.candidates
+
+    def _score_candidates_crypto(self):
+        """
+        Scoring específico para Crypto basado en equilibrio de costobase.
+        Mayor score = menor costobase (necesita más inversión para equilibrar).
+        """
+        if not self.candidates:
+            return
+
+        # Obtener costobases de todos los candidatos
+        costobases = []
+        for candidate in self.candidates:
+            symbol = candidate["symbol"]
+            data = self.info.get(symbol, {})
+            costobase = data.get("costobase", 0) or 0
+            candidate["_costobase"] = costobase
+            costobases.append(costobase)
+
+        if not costobases:
+            return
+
+        # Calcular promedio y total
+        promedio = sum(costobases) / len(costobases)
+        total = sum(costobases)
+        max_costobase = max(costobases) if costobases else 1
+
+        # Asignar score: mayor score a menor costobase
+        for candidate in self.candidates:
+            costobase = candidate.get("_costobase", 0)
+
+            # Gap: cuánto le falta para llegar al promedio
+            gap_valor = max(promedio - costobase, 0)
+
+            # Score normalizado (0-1): qué tan por debajo del promedio está
+            if max_costobase > 0:
+                # Invertir: menor costobase = mayor score
+                score = (max_costobase - costobase) / max_costobase
+            else:
+                score = 0
+
+            candidate["score"] = score
+            candidate["impacto"] = {
+                "costobase": costobase,
+                "promedio": promedio,
+                "gap_valor_total": gap_valor,
+                "gap_valor_norm": score,
+            }
+
+            # Limpiar campo temporal
+            del candidate["_costobase"]
 
     # =========================
     # FASE 6 — RANKING FINAL
@@ -649,9 +787,20 @@ class RebalanceEngine(MetodoEngine):
     # Helpers
     # =========================
     def _extract_metadata(self, info_symbol: Dict) -> Dict:
+        # Normalizar región para consistencia con grupo_region()
+        region = info_symbol.get("region")
+
+        # Para vehículo Crypto, forzar región="Crypto" para coincidir con gráficos
+        if self.vehiculo == "Crypto":
+            region = "Crypto"
+        elif region == "US":
+            region = "United States"
+        elif region == "Digital":
+            region = "Crypto"
+
         return {
             "sector": info_symbol.get("sector"),
-            "region": info_symbol.get("region"),
+            "region": region,
             "asset_type": info_symbol.get("asset_type"),
         }
 
@@ -902,8 +1051,7 @@ class RebalanceEngine(MetodoEngine):
         # Score final
         # =========================
         # DEBUG: Imprimir valores clave para diagnóstico
-        # print(f"🔍 [DEBUG {symbol}] score_estructural={score_estructural:.4f}, valuation_factor={valuation_factor:.2f}, dim_eval={dimensiones_evaluadas}, dim_aplic={dimensiones_aplicables}", flush=True)
-
+    
         # Si hay gaps estructurales, usar scoring completo
         if score_estructural > 0:
             # Scoring base por gaps estructurales
@@ -936,10 +1084,8 @@ class RebalanceEngine(MetodoEngine):
                 metadata_bonus = 1.0 + (0.1 * metadata_count)
 
                 score_final = score_base * metadata_bonus
-                # print(f"💰 [DEBUG {symbol}] SCORE VALORACIÓN → score_final={score_final:.4f} (metadata_count={metadata_count})", flush=True)
             else:
                 score_final = 0.0
-                # print(f"❌ [DEBUG {symbol}] SIN SCORE (valuation_factor={valuation_factor:.2f} no > 1.0)", flush=True)
 
         return score_final, impacto
 
@@ -972,26 +1118,17 @@ class RebalanceEngine(MetodoEngine):
             avgcost = block.get("avgcost", 0)
             last_price = block.get("mrkprice", 0)
 
-            # DEBUG: Ver qué campos tiene el block
-            # if avgcost == 0 and last_price == 0:
-            #     print(f"  🔍 [{symbol}] block keys: {list(block.keys())[:10]}", flush=True)
-
             if avgcost > 0 and last_price > 0:
                 gyp_precio = (last_price - avgcost) / avgcost
 
                 # Si está más de 10% debajo del promedio -> oportunidad
                 if gyp_precio < -0.10:
-                    # print(f"  📉 [{symbol}] gypPrecio={gyp_precio:.2%} (< -10%) → factor=1.15", flush=True)
                     return 1.15
                 # Si está más de 10% arriba del promedio → caro
                 elif gyp_precio > 0.10:
-                    # print(f"  📈 [{symbol}] gypPrecio={gyp_precio:.2%} (> +10%) → factor=0.85", flush=True)
                     return 0.85
                 else:
-                    # print(f"  ➖ [{symbol}] gypPrecio={gyp_precio:.2%} (neutral) → factor=1.0", flush=True)
                     pass
-            # else:
-            #     print(f"  ⚠️  [{symbol}] avgcost={avgcost}, last_price={last_price} → sin datos para gypPrecio", flush=True)
         except (TypeError, ValueError, ZeroDivisionError) as e:
             # print(f"  ⚠️  [{symbol}] Error calculando gypPrecio: {e}", flush=True)
             pass
@@ -1004,6 +1141,7 @@ class RebalanceEngine(MetodoEngine):
         el Pinvertir del vehículo asociado.
         """
         ranking = self.ranking or self.rank()
+
         if not ranking:
             return []
 
@@ -1025,6 +1163,7 @@ class RebalanceEngine(MetodoEngine):
             if pinvertir < min_ticket:
                 continue
 
+            # gwi
             gap_valor = candidate.get("impacto", {}).get("gap_valor_total", 0.0)
             if gap_valor <= 0:
                 continue
