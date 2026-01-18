@@ -1752,6 +1752,20 @@ class system_status(tk.Frame):
             except Exception as e:
                 print(f"display_rebalanceo_detail(): {e}")
 
+        def get_dims_activas(impacto):
+            """Retorna string con dimensiones que contribuyeron al score (valor > 0)"""
+            dims = []
+            # Abreviaturas: D=dividendos, S=sectores, T=tipos, R=regiones
+            if impacto.get("dividendos", 0) > 0:
+                dims.append("D")
+            if impacto.get("sectores", 0) > 0:
+                dims.append("S")
+            if impacto.get("tipos", 0) > 0:
+                dims.append("T")
+            if impacto.get("regiones", 0) > 0:
+                dims.append("R")
+            return " ".join(dims) if dims else "-"
+
         def update_rebalanceo_list():
             """Actualiza la lista del ranking cada 30 segundos"""
             try:
@@ -1761,54 +1775,127 @@ class system_status(tk.Frame):
                 lista.delete(*lista.get_children())
 
                 if not hasattr(DataHub, 'rebalanceo') or not DataHub.rebalanceo:
-                    lista.insert("", "end", text="⏳ Esperando ejecución...", values=("", ""))
+                    lista.insert("", "end", text="⏳ Esperando...", values=("", "", ""))
                 else:
                     # Iterar sobre todos los vehículos en DataHub.rebalanceo
                     for vehiculo, datos in DataHub.rebalanceo.items():
                         timestamp = datos.get("timestamp", "N/A")
                         # Formatear timestamp si es datetime
                         if timestamp != "N/A" and hasattr(timestamp, 'strftime'):
-                            timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                            timestamp_str = timestamp.strftime("%H:%M:%S")
                         else:
                             timestamp_str = str(timestamp)
 
-                        lista.insert("", "end", text=f"📋 {vehiculo}", values=("", ""), tags=("header",))
-                        lista.insert("", "end", text=f"🕐 {timestamp_str}", values=("", ""), tags=("info",))
+                        lista.insert("", "end", text=f"{vehiculo}", values=(timestamp_str, "", ""), tags=("header",))
 
                         asignaciones = datos.get("asignaciones", [])
+                        ranking = datos.get("ranking", [])
 
-                        if not asignaciones:
-                            lista.insert("", "end", text="  Sin recomendaciones", values=("", ""), tags=("info",))
-                        else:
+                        # Usar asignaciones si existen, sino usar ranking con score > 0
+                        if asignaciones:
                             for idx, item in enumerate(asignaciones):
+                                impacto = item.get("impacto", {})
+                                dims_str = get_dims_activas(impacto)
+
+                                # Filtra activos con sugrido  == 0
+                                if item['monto_sugerido'] == 0:
+                                    continue
+
                                 lista.insert(
                                     "",
                                     "end",
                                     text=f"  {item['symbol']}",
-                                    values=(f"{item['score']:.4f}", f"${item['monto_sugerido']:,.0f}"),
+                                    values=(f"{item['score']:.4f}", dims_str, f"${item['monto_sugerido']:,.0f}"),
                                     tags=("item",)
                                 )
+                        elif ranking:
+                            # Mostrar ranking directamente (para Crypto u otros sin asignaciones)
+                            for item in ranking:
+                                score = item.get("score", 0)
+                                if score > 0:
+                                    impacto = item.get("impacto", {})
+                                    # Para Crypto mostrar gap_valor_total como monto sugerido
+                                    monto = impacto.get("gap_valor_total", 0)
 
-                        lista.insert("", "end", text="", values=("", ""))
+                                    # Filtra activos con sugrido  == 0
+                                    if monto == 0:
+                                        continue
+
+                                    lista.insert(
+                                        "",
+                                        "end",
+                                        text=f"  {item['symbol']}",
+                                        values=(f"{score:.4f}", "", f"${monto:,.0f}"),
+                                        tags=("item",)
+                                    )
+                        else:
+                            lista.insert("", "end", text="  Sin recom.", values=("", "", ""), tags=("info",))
+
+                        lista.insert("", "end", text="", values=("", "", ""))
 
                 # Actualizar también el panel de gaps
                 show_gap_summary()
 
                 after_id = self.system.after(30000, update_rebalanceo_list)
                 self.after_ids.append(after_id)
-
             except Exception as e:
                 print(f"update_rebalanceo_list(): {e}")
 
-        try:
-            lista = ttk.Treeview(self.rebalanceo, columns=("score", "monto"), height=12, show="tree headings", style="TFrame")
-            lista.column("#0", width=150, anchor="w")
-            lista.column("score", width=80, anchor="center")
-            lista.column("monto", width=100, anchor="e")
+        def show_gap_summary():
+            """Muestra resumen de gaps de todos los vehículos"""
+            try:
+                for item in detalle.get_children():
+                    detalle.delete(item)
 
-            lista.heading("#0", text="Ranking Rebalanceo")
+                if not hasattr(DataHub, 'rebalanceo') or not DataHub.rebalanceo:
+                    detalle.insert("", "end", text="⏳ Esperando primera ejecución", tags=("info",))
+                    return
+
+                detalle.insert("", "end", text="📊 Estado del Portfolio", tags=("header",))
+                detalle.insert("", "end", text="", tags=("spacer",))
+
+                # Iterar sobre todos los vehículos
+                for vehiculo, datos in DataHub.rebalanceo.items():
+                    detalle.insert("", "end", text=f"🚗 {vehiculo}", tags=("section",))
+
+                    gaps = datos.get("gaps", {})
+                    if gaps:
+                        for dim, valor in gaps.items():
+                            color = "value" if valor > 0 else "info"
+                            detalle.insert("", "end", text=f"  {dim}: {valor:.4f}", tags=(color,))
+                    else:
+                        detalle.insert("", "end", text="  Sin gaps", tags=("info",))
+
+                    ranking = datos.get("ranking", [])
+                    candidatos_con_score = sum(1 for c in ranking if c.get('score', 0) > 0)
+
+                    detalle.insert("", "end", text=f"  Evaluados: {len(ranking)}, Score>0: {candidatos_con_score}", tags=("info",))
+                    detalle.insert("", "end", text="", tags=("spacer",))
+
+                detalle.insert("", "end", text="💡 Doble click en un activo para ver detalle", tags=("info",))
+            except Exception as e:
+                print(f"show_gap_summary(): {e}")
+
+        def on_double_click(event):
+            item = lista.selection()
+            if item:
+                valores = lista.item(item[0])
+                texto = valores["text"]
+                if texto.startswith("#"):
+                    index = int(texto.split()[0][1:]) - 1
+                    display_rebalanceo_detail(index)
+
+        try:
+            lista = ttk.Treeview(self.rebalanceo, columns=("score", "dims", "monto"), height=12, show="tree headings", style="TFrame")
+            lista.column("#0", width=120, anchor="w")
+            lista.column("score", width=80, anchor="center")
+            lista.column("dims", width=100, anchor="w")
+            lista.column("monto", width=120, anchor="e")
+
+            lista.heading("#0", text="Ranking")
             lista.heading("score", text="Score")
-            lista.heading("monto", text="Monto $")
+            lista.heading("dims", text="Dimensiones")
+            lista.heading("monto", text="Monto Sugerido $")
 
             lista.tag_configure("header", background="black", foreground="lime")
             lista.tag_configure("info", foreground="white")
@@ -1828,56 +1915,10 @@ class system_status(tk.Frame):
             lista.pack(side=tk.LEFT, fill=tk.BOTH, expand=False)
             detalle.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-            def on_double_click(event):
-                item = lista.selection()
-                if item:
-                    valores = lista.item(item[0])
-                    texto = valores["text"]
-                    if texto.startswith("#"):
-                        index = int(texto.split()[0][1:]) - 1
-                        display_rebalanceo_detail(index)
-
             lista.bind("<Double-1>", on_double_click)
-
-            def show_gap_summary():
-                """Muestra resumen de gaps de todos los vehículos"""
-                try:
-                    for item in detalle.get_children():
-                        detalle.delete(item)
-
-                    if not hasattr(DataHub, 'rebalanceo') or not DataHub.rebalanceo:
-                        detalle.insert("", "end", text="⏳ Esperando primera ejecución", tags=("info",))
-                        return
-
-                    detalle.insert("", "end", text="📊 Estado del Portfolio", tags=("header",))
-                    detalle.insert("", "end", text="", tags=("spacer",))
-
-                    # Iterar sobre todos los vehículos
-                    for vehiculo, datos in DataHub.rebalanceo.items():
-                        detalle.insert("", "end", text=f"🚗 {vehiculo}", tags=("section",))
-
-                        gaps = datos.get("gaps", {})
-                        if gaps:
-                            for dim, valor in gaps.items():
-                                color = "value" if valor > 0 else "info"
-                                detalle.insert("", "end", text=f"  {dim}: {valor:.4f}", tags=(color,))
-                        else:
-                            detalle.insert("", "end", text="  Sin gaps", tags=("info",))
-
-                        ranking = datos.get("ranking", [])
-                        candidatos_con_score = sum(1 for c in ranking if c.get('score', 0) > 0)
-
-                        detalle.insert("", "end", text=f"  Evaluados: {len(ranking)}, Score>0: {candidatos_con_score}", tags=("info",))
-                        detalle.insert("", "end", text="", tags=("spacer",))
-
-                    detalle.insert("", "end", text="💡 Doble click en un activo para ver detalle", tags=("info",))
-
-                except Exception as e:
-                    print(f"show_gap_summary(): {e}")
 
             update_rebalanceo_list()
             show_gap_summary()
-
         except Exception as e:
             print(f"rebalanceo_system(): {e}")
 

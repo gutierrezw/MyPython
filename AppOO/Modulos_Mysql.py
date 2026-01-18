@@ -820,6 +820,9 @@ class EstrategiaInversion(
             if accion == "Select":
                 qry = "SELECT objetivo FROM inversion  WHERE ticket ='%s';" % ticket
 
+            if accion == "vehiculo":
+                qry = "SELECT * FROM estrategia WHERE vehiculo = '%s';" % ivehiculo
+
             cursor.execute(qry)
             sql = cursor.fetchall()
             columnas = [columna[0] for columna in cursor.description]
@@ -839,7 +842,7 @@ class EstrategiaInversion(
                     for fila in sql:
                         xlis.append(fila[0] + " - " + fila[1])
 
-                if accion == "Select":
+                if accion in  ("Select", "vehiculo"):
                     for fila in sql:
                         x = dict(zip(columnas, fila))
                         xlis.append(x)

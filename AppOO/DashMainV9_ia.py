@@ -91,6 +91,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
         # Accesos MySql ---------------------------------------------------------------------------------------------------------
         self.Market = MarketScreen()
         self.RepositorioOportunidades = RepositorioOportunidadesBuySell()
+        self.Estrategia = EstrategiaInversion()
 
         # Programa la tarea comunes todos los vehiculos -------------------------------------------------------------------------
         RemoteOrder = f"schedule_order_remote({self.vehiculo})"
@@ -642,6 +643,27 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
     """ recorre positions para actualizar info() con las oportunidades de sell"""
 
+    def _get_estrategia_descripcion(self, codigo_estrategia):
+        """Convierte código de estrategia (P01, P02, P03, C01, etc.) a su descripción para el rebalanceo."""
+        if not codigo_estrategia:
+            return None
+
+        # Obtener mapeo código→descripción si no está cacheado
+        if not hasattr(self, '_estrategia_map') or not self._estrategia_map:
+            self._estrategia_map = {}
+            # Cargar estrategias de todos los vehículos relevantes
+            for vehiculo in ["Balance", "Crypto"]:
+                result = self.Estrategia.select(accion="vehiculo", ivehiculo=vehiculo)
+                if result:
+                    for row in result:
+                        codigo = row.get("estrategia")
+                        descripcion = row.get("descripcion")
+                        if codigo and descripcion:
+                            self._estrategia_map[codigo] = descripcion
+
+        # Retornar descripción si existe, sino el código original
+        return self._estrategia_map.get(codigo_estrategia, codigo_estrategia)
+
     def oportunidades_sell(self):
         def obtiene_lotes(symbol=None):
             nonlocal datos
@@ -689,6 +711,14 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 symbol = position["ticket"]
                 datos = obtiene_lotes(symbol=symbol)
 
+                # actualiza metadata del activo para el rebalanceo
+                if symbol in self.info:
+                    self.info[symbol]["sector"] = position.get("sector")
+                    self.info[symbol]["region"] = position.get("region")
+                    self.info[symbol]["costobase"] = position.get("costobase", 0)
+                    # Convertir código de estrategia a descripción para que coincida con grupo_activos()
+                    self.info[symbol]["asset_type"] = self._get_estrategia_descripcion(position.get("estrategia"))
+
                 # actualiza en diccionario self.info()
                 (d_buy, d_sell) = self.ts_oportunidades_symbol(symbol, datos)
         except Exception as e:
@@ -710,7 +740,12 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     stock = int(invertir / position["mrkprice"])
                     stockNew = stock + position["position"]
                     avgCost = position["costobase"] / position["position"]
-                    dividendo = position["dividendo"] / position["position"]
+
+                    # Solo usar dividendo si dividendYield > 0 (activo paga dividendos actualmente)
+                    if position["dividendYield"] > 0 and position["dividendo"] > 0:
+                        dividendo = position["dividendo"] / position["position"]
+                    else:
+                        dividendo = 0
                     gypInicial = (
                         position["objetivo"] - avgCost + dividendo
                     ) * position["position"]
@@ -736,8 +771,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     if (gypPrecio < self.sesion["gypPrecio"]) and (
                         gainInversion < self.sesion["gainInversion"]
                     ):
+                        # Clasificar como "dividends" solo si dividendYield > 0
                         BuyDividends = (
-                            "buy" if position["dividendo"] == 0 else "dividends"
+                            "buy" if position["dividendYield"] <= 0 else "dividends"
                         )
                         datos = {
                             BuyDividends: {
@@ -752,12 +788,20 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                 "objetivo": position["objetivo"],
                                 "dividendYield": tasa_nominal,
                                 "exDividendDate": ex_dividends,
-                                "pre dividendos": position["dividendo"],
+                                "pre dividendos": position["dividendo"] if position["dividendYield"] > 0 else 0,
                                 "post dividendos": dividendo * stockNew,
                                 "pre costobase": position["costobase"],
                                 "post costobase": precioNew * stockNew,
                             }
                         }
+
+                    # actualiza metadata del activo para el rebalanceo
+                    if symbol in self.info:
+                        self.info[symbol]["sector"] = position.get("sector")
+                        self.info[symbol]["region"] = position.get("region")
+                        self.info[symbol]["costobase"] = position.get("costobase", 0)
+                        # Convertir código de estrategia a descripción para que coincida con grupo_activos()
+                        self.info[symbol]["asset_type"] = self._get_estrategia_descripcion(position.get("estrategia"))
 
                     # actualiza en diccionario self.info()
                     (d_buy, d_dividend) = self.ts_oportunidades_symbol(symbol, datos)
@@ -1284,10 +1328,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             position["costobase"] / self.update_peso_position()
                         )
 
-                        position["region"], position["country"] = (
-                            "Global",
-                            "Digital",
-                        )
+                        position["region"], position["country"] = "Crypto", "Crypto"
                         if "region" in yf_activo:
                             position["region"] = yf_activo["region"]
                         if "country" in yf_activo:
@@ -1348,11 +1389,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             # rescribe el peso de la position
                             p["peso"] = p["costobase"] / self.update_peso_position()
 
-                            p["region"], p["country"] = "Global", "Digital"
-                            if "region" in yf_activo:
-                                p["region"] = yf_activo["region"]
-                            if "country" in yf_activo:
-                                p["country"] = yf_activo["country"]
+                            p["region"], p["country"] = "Crypto", "Crypto"
 
                             x_positions.append(p)
 
@@ -1590,6 +1627,10 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                 # ultima instaancia -- para obtener el dividendo
                                 if "dividendRate" in yf_activo:
                                     dividendo = yf_activo["dividendRate"]
+                            else:
+                                # Si no ha pagado dividendos en últimos 12 meses, resetear ambos valores
+                                dividendo = 0.0
+                                dividendYield = 0.0
 
                         if "exDividendDate" in yf_activo:
                             exDividendDate = datetime.fromtimestamp(
@@ -3277,6 +3318,8 @@ class DashMain:
                     div = market[0][ix.index("dividendRate")]
                     string = market[0][ix.index("monthDividendsPay")]
                     fecha = market[0][ix.index("exDividendDate")]
+                    trallingAnual = market[0][ix.index("trailingAnnualDividendRate", 0)]
+
                     exdiv = (
                         fecha.strftime("%d-%b")
                         if fecha and fecha.month == date
@@ -3284,21 +3327,28 @@ class DashMain:
                     )
                     avgcost = position["costobase"] / position["position"]
 
-                    a_meses = (
-                        meses if string is None or string == "" else string.split(",")
-                    )
+                    # Solo calcular dividendos si ha pagado en el último año
+                    if trallingAnual > 0:
+                        a_meses = (
+                            meses if string is None or string == "" else string.split(",")
+                        )
 
-                    # calcula la cantidad de pagos - filtrar cadenas vacías
-                    distribuir = [s.strip()[:3] for s in a_meses if s.strip()]
-                    rata = div / len(distribuir) if len(distribuir) > 0 else last
+                        # calcula la cantidad de pagos - filtrar cadenas vacías
+                        distribuir = [s.strip()[:3] for s in a_meses if s.strip()]
+                        rata = div / len(distribuir) if len(distribuir) > 0 else last
 
-                    # asume pago de dividends son iguales
-                    for i, mes in enumerate(distribuir):
-                        if mes in meses:  # Validar que el mes existe en la lista
-                            dividends[meses.index(mes)] = rata * position["position"]
+                        # asume pago de dividends son iguales
+                        for i, mes in enumerate(distribuir):
+                            if mes in meses:  # Validar que el mes existe en la lista
+                                dividends[meses.index(mes)] = rata * position["position"]
 
-                    # recalculo de rendimiento en función avgcost
-                    rend = div / avgcost if avgcost > 0 else 0
+                        # recalculo de rendimiento en función avgcost
+                        rend = div / avgcost if avgcost > 0 else 0
+                    else:
+                        # Activo no paga dividendos - valores en 0
+                        dividends = [0] * 12
+                        rend = 0.0
+                        exdiv = ""
 
                 book.update(
                     {
