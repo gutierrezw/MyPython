@@ -226,6 +226,7 @@ class DataHub:
     manager_events = {}
     manager_after = {}
     manager_buysell = {}
+    rebalanceo = {}
     procesos = []
     logger = {}
     orders = {}
