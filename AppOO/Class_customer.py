@@ -156,9 +156,7 @@ class DataHub:
     # ========================================================================================================
     # GRUPO 1: CONFIGURACIÓN DE COLORES (Cargable desde DB)
     # ========================================================================================================
-    session_data = BDsystem.get_sesion_by_vehiculo(
-                                vehiculo="DataHub"
-    )
+    session_data = BDsystem.get_sesion_by_vehiculo(vehiculo="DataHub")
     envs_config = json.loads(session_data["userapi"].decode("utf-8"))
     bgcolor = envs_config["bgcolor"]
     cgcolor = envs_config["cgcolor"]
@@ -179,7 +177,7 @@ class DataHub:
     # ========================================================================================================
     # GRUPO 2: MONITOREO DE CPU Y MEMORIA (Cargable desde DB)
     # ========================================================================================================
-    DCpu = []   
+    DCpu = []
     DMem = []
     display = envs_config["display"] or None
     max_points = envs_config["max_points"] or 40
@@ -189,14 +187,14 @@ class DataHub:
     # ========================================================================================================
     # GRUPO 3: PARÁMETROS DE TRADING (Cargable desde DB)
     # ========================================================================================================
-    MinProfit = envs_config["MinProfit"]  or 50
+    MinProfit = envs_config["MinProfit"] or 50
     Toleranciasell = envs_config["Toleranciasell"] or 0.10
     MaxRoi = envs_config["MaxRoi"] or 0.09
 
-    InicioInversior = envs_config["InicioInversior"] 
+    InicioInversior = envs_config["InicioInversior"]
     ib_gateway_host = envs_config["ib_gateway_host"]
     ib_gateway_port = envs_config["ib_gateway_port"]
-    
+
     # ========================================================================================================
     # GRUPO 4: ESTRUCTURAS RUNTIME (NO configurables - se inicializan en código)
     # ========================================================================================================
@@ -323,9 +321,7 @@ class DataHub:
             datahub_session = BDsystem.get_sesion_by_vehiculo(vehiculo="DataHub")
 
             if not datahub_session or not datahub_session.get("userapi"):
-                print(
-                    "[DataHub.load_from_database] ADVERTENCIA: No se encontró configuración en DataHub"
-                )
+                print("[DataHub.load_from_database] ADVERTENCIA: No se encontró configuración en DataHub")
                 return False
 
             # Decodificar JSON desde BLOB
@@ -374,9 +370,7 @@ class DataHub:
                 # Convertir string a date
                 inicio_str = envs_config["InicioInversior"]
                 if isinstance(inicio_str, str):
-                    DataHub.InicioInversior = datetime.strptime(
-                        inicio_str, "%Y-%m-%d"
-                    ).date()
+                    DataHub.InicioInversior = datetime.strptime(inicio_str, "%Y-%m-%d").date()
 
             if "ib_gateway_host" in envs_config:
                 DataHub.ib_gateway_host = envs_config["ib_gateway_host"]
@@ -427,107 +421,63 @@ class DataHub:
             return 0
 
     # write CSV: Oportunity sell
-    def csv_OptionSales_write(account=None):
-        def write_file(archivo=None, accion="detalle", struct=None):
-            try:
-                if accion == "header":
-                    writer.writerow(DataHub.ColumnCsvSell)
-
-                elif accion == "detalle":
-                    writer.writerow(
-                        [
-                            struct["symbol"],
-                            struct["account"],
-                            struct["vehiculo"],
-                            struct["option"],
-                            struct["profit"],
-                            struct["cantidad lotes"],
-                            struct["cantidad sell"],
-                            struct["last"],
-                            struct["fecha"],
-                            struct["costoCum"],
-                            struct["roi"],
-                            struct["costobase"],
-                            struct["position"],
-                            struct["disponible"],
-                            struct["pos avgCost"],
-                            struct["pos position"],
-                            struct["pos costobase"],
-                            struct["datos_tecnicos"],
-                            struct["Recomendado"],
-                            struct["Comentarios"],
-                        ]
-                    )
-
-            except Exception as e:
-                print(f"write_file(): {e}")
-
-        # detalla lotes ganadores -- gwi001
-        def procesa_sell(in_sell):
-            try:
-                for i, values in enumerate(in_sell):
-
-                    # rechaza profit por debajo del umbral esperado
-                    if values["profit"] < DataHub.MinProfit:
-                        continue
-
-                    ventas = DataHub.maximiza_sell_lotes(
-                        account=values["account"],
-                        symbol=values["symbol"],
-                        last=values["last"],
-                        c_sell=values["cantidad lotes"],
-                        position=values["position"],
-                        costobase=values["costobase"],
-                    )
-
-                    anterior = None
-                    for keys, sell in ventas.items():
-                        if sell["profit"] != anterior:
-
-                            datosTenicos = (
-                                json.dumps(values["datos_tecnicos"])
-                                if "datos_tecnicos" in values
-                                else {}
-                            )
-                            struct = {}
-                            struct.update({"symbol": values["symbol"]})
-                            struct.update({"account": values["account"]})
-                            struct.update({"vehiculo": values["vehiculo"]})
-                            struct.update({"option": keys})
-                            struct.update({"profit": sell["profit"]})
-                            struct.update({"cantidad lotes": sell["lotes"]})
-                            struct.update({"cantidad sell": sell["cantidad sell"]})
-                            struct.update({"last": values["last"]})
-                            struct.update({"fecha": datetime.now().date()})
-                            struct.update({"costoCum": sell["costo lote"]})
-                            struct.update({"roi": sell["roi"]})
-                            struct.update({"costobase": values["costobase"]})
-                            struct.update({"position": values["position"]})
-                            struct.update({"disponible": values["disponible"]})
-                            struct.update({"pos avgCost": sell["pos avgCost"]})
-                            struct.update({"pos position": sell["pos position"]})
-                            struct.update({"pos costobase": sell["pos costobase"]})
-                            struct.update({"datos_tecnicos": datosTenicos})
-                            struct.update({"Recomendado": 0})
-                            struct.update({"Comentarios": "SinNota"})
-
-                        anterior = sell["profit"]
-                        write_file(accion="detalle", struct=struct)
-            except Exception as e:
-                print(f"procesa_sell(): {e}")
-
+    def csv_OptionSales_write() -> None:
+        """Genera CSV con oportunidades de venta para modelo IA."""
         try:
-            path = define_FileCache(name=f"csv_datosIA_sell.csv")
-            s_sell = DataHub.get_info_symbols_gain()
+            path = define_FileCache(name="csv_datosIA_sell.csv")
+            sells = DataHub.get_info_symbols_gain()
 
-            # loock write de CSV sell
             with DataHub.lockCsvAi:
                 with open(path, mode="w", newline="", encoding="utf-8") as file:
                     writer = csv.writer(file)
-                    write_file(accion="header")
+                    writer.writerow(DataHub.ColumnCsvSell)
 
-                    # recorre info()
-                    procesa_sell(s_sell)
+                    for item in sells:
+                        # Filtra profit por debajo del umbral
+                        if item["profit"] < DataHub.MinProfit:
+                            continue
+
+                        ventas = DataHub.maximiza_sell_lotes(
+                            account=item["account"],
+                            symbol=item["symbol"],
+                            last=item["last"],
+                            c_sell=item["cantidad lotes"],
+                            position=item["position"],
+                            costobase=item["costobase"],
+                        )
+
+                        profit_anterior = None
+                        for opcion, venta in ventas.items():
+                            # Evita duplicados con mismo profit
+                            if venta["profit"] == profit_anterior:
+                                continue
+                            profit_anterior = venta["profit"]
+
+                            datos_tec = json.dumps(item.get("datos_tecnicos", {}))
+                            writer.writerow(
+                                [
+                                    item["symbol"],
+                                    item["account"],
+                                    item["vehiculo"],
+                                    opcion,
+                                    venta["profit"],
+                                    venta["lotes"],
+                                    venta["cantidad sell"],
+                                    item["last"],
+                                    datetime.now().date(),
+                                    venta["costo lote"],
+                                    venta["roi"],
+                                    item["costobase"],
+                                    item["position"],
+                                    item["disponible"],
+                                    venta["pos avgCost"],
+                                    venta["pos position"],
+                                    venta["pos costobase"],
+                                    datos_tec,
+                                    0,  # Recomendado
+                                    "SinNota",  # Comentarios
+                                ]
+                            )
         except Exception as e:
             print(f"csv_OptionSales_write(): {e}")
 
@@ -730,9 +680,7 @@ class DataHub:
             print(f"get_lotesGainLost: {e}")
 
     # optimiza venta de lotes para la gain de capital
-    def maximiza_sell_lotes(
-        account=None, symbol=None, last=None, c_sell=None, position=None, costobase=None
-    ):
+    def maximiza_sell_lotes(account=None, symbol=None, last=None, c_sell=None, position=None, costobase=None):
         try:
             pre_sell = {
                 " 25%": {
@@ -768,9 +716,7 @@ class DataHub:
             }
 
             # lista de lotes ganadores y last
-            list_gain = DataHub.get_lotesGainLost(
-                opcion="gain", account=account, symbol=symbol, last=last
-            )
+            list_gain = DataHub.get_lotesGainLost(opcion="gain", account=account, symbol=symbol, last=last)
             if list_gain:
                 ebook, lotes_gain, pos_sell = (enumerate(list_gain), len(list_gain), {})
                 eof_book, read = next(ebook, (None, None))
@@ -794,9 +740,7 @@ class DataHub:
                         cost_acum = pre_sell[" 25%"]["costo lote"] + costo
                         new_position = position - cant_acum
                         new_costobase = costobase - cost_acum
-                        new_avgCost = (
-                            new_costobase / new_position if new_position > 0 else 0
-                        )
+                        new_avgCost = new_costobase / new_position if new_position > 0 else 0
                         roi = (gain_acum / cost_acum) if cost_acum > 0 else 0
                         pre_sell[" 25%"] = {
                             "cantidad sell": cant_acum,
@@ -818,9 +762,7 @@ class DataHub:
                         cost_acum = pre_sell[" 33%"]["costo lote"] + costo
                         new_position = position - cant_acum
                         new_costobase = costobase - cost_acum
-                        new_avgCost = (
-                            new_costobase / new_position if new_position > 0 else 0
-                        )
+                        new_avgCost = new_costobase / new_position if new_position > 0 else 0
                         roi = (gain_acum / cost_acum) if cost_acum > 0 else 0
 
                         pre_sell[" 33%"] = {
@@ -843,9 +785,7 @@ class DataHub:
                         cost_acum = pre_sell["100%"]["costo lote"] + costo
                         new_position = position - cant_acum
                         new_costobase = costobase - cost_acum
-                        new_avgCost = (
-                            new_costobase / new_position if new_position > 0 else 0
-                        )
+                        new_avgCost = new_costobase / new_position if new_position > 0 else 0
                         roi = (gain_acum / cost_acum) if cost_acum > 0 else 0
 
                         pre_sell["100%"] = {
@@ -957,9 +897,7 @@ class MyOrders:
                                 "hash_id_oportunidad": hash_id_Op,
                             }
                         )
-                        self.RepositorioOportunidades.insert_order_trader(
-                            values=values, symbol=symbol
-                        )
+                        self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
                 return response, enviada, values
             except Exception as e:
                 print(f"place_OrderStock(): {e}")
@@ -997,9 +935,7 @@ class MyOrders:
                             "stampSubmit": datetime.fromtimestamp(stamp),
                             "hash_id_oportunidad": hash_id_Op,
                         }
-                        self.RepositorioOportunidades.insert_order_trader(
-                            values=values, symbol=symbol
-                        )
+                        self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
 
                 return response, enviada, values
             except Exception as e:
@@ -1098,9 +1034,7 @@ class MyOrders:
                         bg="black",
                         fg="white",
                     )
-                    label_value = tk.Label(
-                        win, text=f"{value}", font=("Arial", 8), bg="black", fg="white"
-                    )
+                    label_value = tk.Label(win, text=f"{value}", font=("Arial", 8), bg="black", fg="white")
 
                     i = list(submit[attribute].keys()).index(fields)
                     label_keys.grid(row=i, column=0, padx=5, pady=5, sticky=W)
@@ -1141,30 +1075,22 @@ class MyOrders:
 
         def completa_orden(symbol, pedido, submit):
 
-            response = self.put_completa_orden(
-                self.account, self.vehiculo, symbol, pedido, submit
-            )
+            response = self.put_completa_orden(self.account, self.vehiculo, symbol, pedido, submit)
             eexit()
 
         def submit_stock():
             try:
-                submit = self.IClient.place_order_scenario(
-                    account_id=self.account, order=orden
-                )
+                submit = self.IClient.place_order_scenario(account_id=self.account, order=orden)
                 if submit:
 
                     win1, win2, win3 = ventana(cambio=submit["position"]["change"])
 
                     # pack() columna cantidad(win1)
-                    display(
-                        win=win1, submit=submit, attribute="amount", locate="vertical"
-                    )
+                    display(win=win1, submit=submit, attribute="amount", locate="vertical")
 
                     # pack() position cantidad(win2)
                     a_list = ["equity", "initial", "maintenance", "position"]
-                    display(
-                        win=win2, submit=submit, attribute=a_list, locate="horizontal"
-                    )
+                    display(win=win2, submit=submit, attribute=a_list, locate="horizontal")
 
                     bt3 = tk.Button(
                         win3,
@@ -1378,9 +1304,7 @@ class MyOrders:
         # valida que este disponible en Spot la cantidad de
         def valida_wallet_spot():
             try:
-                cantidad, t_qty = self.crypto_wallet_free(
-                    symbol=symbol, SetLotSize=True
-                ), float(qty)
+                cantidad, t_qty = self.crypto_wallet_free(symbol=symbol, SetLotSize=True), float(qty)
 
                 # valida cantidad en spot y rescata de earn si es necesario
                 if cantidad < t_qty:
@@ -1616,9 +1540,7 @@ class MyOrders:
             if (qty > 0) and (prc > 0):
 
                 # controla order para Stock y Crypto
-                orden = self.format_orden(
-                    self.vehiculo, self.symbol, idd, tip, prc, opt, tim, qty
-                )
+                orden = self.format_orden(self.vehiculo, self.symbol, idd, tip, prc, opt, tim, qty)
                 self.submit_orden(self.symbol, orden, option)
         except Exception as e:
             print(f"valida_orden_vehiculo({self.vehiculo})]: {e}")
@@ -1641,9 +1563,7 @@ class MyOrders:
 # Superclase para unificar atributos de los activos
 class TickerInfo(MyOrders):
     def __init__(self, account, vehiculo):
-        MyOrders.__init__(
-            self, account=account, vehiculo=vehiculo
-        )  # Inicializa los atributos de MyOrders
+        MyOrders.__init__(self, account=account, vehiculo=vehiculo)  # Inicializa los atributos de MyOrders
 
         self.summary = {}
         self.resumen = {}
@@ -1681,9 +1601,7 @@ class TickerInfo(MyOrders):
         try:
             self.positions = []
 
-            cartera = self.PlanInversion.select_inversion(
-                tipoin=self.vehiculo, ticket="all"
-            )
+            cartera = self.PlanInversion.select_inversion(tipoin=self.vehiculo, ticket="all")
             positions = sort_positions(cartera, self.orden)
 
             for position in positions:
@@ -1825,9 +1743,7 @@ class TickerInfo(MyOrders):
                 else:
 
                     # si no tiene activos, datos o update, lo reconstruye
-                    indicadores, lotSize = get_datos(
-                        symbol=symbol, vehiculo=vehiculo, datos=datos
-                    )
+                    indicadores, lotSize = get_datos(symbol=symbol, vehiculo=vehiculo, datos=datos)
 
                     update = False
                     with DataHub.lockInfo:
@@ -1849,9 +1765,7 @@ class TickerInfo(MyOrders):
             elif symbol not in self.info.keys():
 
                 # reconstruye datos del symbol
-                indicadores, lotSize = get_datos(
-                    symbol=symbol, vehiculo=vehiculo, datos=datos
-                )
+                indicadores, lotSize = get_datos(symbol=symbol, vehiculo=vehiculo, datos=datos)
 
                 update = False
                 with DataHub.lockInfo:
@@ -1873,9 +1787,7 @@ class TickerInfo(MyOrders):
             return {}, pd.DataFrame(), False
 
     # define estrategia por dividendos
-    def rendimiento_dividends(
-        self, fg=None, activo=None, datos=None, symbol=None, plot="no", period="5y"
-    ):
+    def rendimiento_dividends(self, fg=None, activo=None, datos=None, symbol=None, plot="no", period="5y"):
         """
         Calcula el rendimiento histórico de dividendos y genera estrategia de inversión.
 
@@ -1951,35 +1863,23 @@ class TickerInfo(MyOrders):
             y_datos, value, meses = pd.DataFrame(), "E", []
             if not (symbol is None):
                 if activo is None:
-                    (activo, datos, ind_update) = self.ts_yfinance_symbol(
-                        symbol=symbol, vehiculo=self.vehiculo
-                    )
+                    (activo, datos, ind_update) = self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
 
                 if isinstance(activo, yf.Ticker):
                     empresa = activo.info["shortName"]
                     # ALINEACIÓN: Usar trailingAnnualDividendRate (TTM) en lugar de dividendRate
                     # trailingAnnualDividendRate = suma de dividendos pagados en últimos 12 meses
                     trailing_annual = (
-                        activo.info["trailingAnnualDividendRate"]
-                        if "trailingAnnualDividendRate" in activo.info
-                        else 0
+                        activo.info["trailingAnnualDividendRate"] if "trailingAnnualDividendRate" in activo.info else 0
                     )
-                    dividend_rate = (
-                        activo.info["dividendRate"]
-                        if "dividendRate" in activo.info
-                        else 0
-                    )
+                    dividend_rate = activo.info["dividendRate"] if "dividendRate" in activo.info else 0
                 else:
                     # pasa por aca cuando carga los activos en ts_yfinance_symbol()
                     empresa = activo["shortName"] if "shortName" in activo else symbol
                     trailing_annual = (
-                        activo["trailingAnnualDividendRate"]
-                        if "trailingAnnualDividendRate" in activo
-                        else 0
+                        activo["trailingAnnualDividendRate"] if "trailingAnnualDividendRate" in activo else 0
                     )
-                    dividend_rate = (
-                        activo["dividendRate"] if "dividendRate" in activo else 0
-                    )
+                    dividend_rate = activo["dividendRate"] if "dividendRate" in activo else 0
 
                 # ============================================================================
                 # VALIDACIÓN: No listar símbolos que no reportan dividendos
@@ -1989,9 +1889,7 @@ class TickerInfo(MyOrders):
                     return pd.DataFrame(), "X", []  # Retornar vacío
 
                 if "Dividends" not in datos:
-                    raise ValueError(
-                        "El symbol (" + symbol + ") No se construyo info() 'Dividends'"
-                    )
+                    raise ValueError("El symbol (" + symbol + ") No se construyo info() 'Dividends'")
 
                 elif "Dividends" in datos:
                     m_div = datos[datos["Dividends"] != 0]
@@ -2022,14 +1920,10 @@ class TickerInfo(MyOrders):
                         m_index = m_datos.index
 
                         # replantea el dividendo anual y su rendimiento
-                        y_datos = pd.DataFrame(
-                            columns=["Close", "Dividends", "Rendimiento"]
-                        )
+                        y_datos = pd.DataFrame(columns=["Close", "Dividends", "Rendimiento"])
                         y_datos["Close"] = m_datos["Close"].resample("YE").mean()
                         y_datos["Dividends"] = m_datos["Dividends"].resample("YE").sum()
-                        y_datos["Rendimiento"] = (
-                            m_datos["Rendimiento"].resample("YE").sum()
-                        )
+                        y_datos["Rendimiento"] = m_datos["Rendimiento"].resample("YE").sum()
 
                         y_index = y_datos.index
                         if len(d_index) > 0:
@@ -2049,9 +1943,7 @@ class TickerInfo(MyOrders):
                             forward_yield_calculated = trailing_annual / current_price
 
                             # Actualizar último año (año en curso) con rendimiento forward
-                            y_datos.loc[y_index[-1], "Rendimiento"] = (
-                                forward_yield_calculated
-                            )
+                            y_datos.loc[y_index[-1], "Rendimiento"] = forward_yield_calculated
                             y_datos.loc[y_index[-1], "Close"] = current_price
 
                             # NOTA: También podríamos actualizar el dividendo proyectado del año actual
@@ -2083,17 +1975,11 @@ class TickerInfo(MyOrders):
                                 )
 
                             m = y_datos.describe()["Rendimiento"]["mean"]
-                            i = y_datos[y_datos["Rendimiento"] > m][
-                                "Rendimiento"
-                            ].mean()
-                            s = y_datos[y_datos["Rendimiento"] < m][
-                                "Rendimiento"
-                            ].mean()
+                            i = y_datos[y_datos["Rendimiento"] > m]["Rendimiento"].mean()
+                            s = y_datos[y_datos["Rendimiento"] < m]["Rendimiento"].mean()
 
                             dforward = y_datos.loc[y_index[-1], "Rendimiento"]
-                            value = (
-                                "I" if dforward > m else "S" if dforward < m else "N",
-                            )
+                            value = ("I" if dforward > m else "S" if dforward < m else "N",)
 
                 return y_datos, value, meses
         except Exception as e:
@@ -2123,9 +2009,7 @@ class TickerInfo(MyOrders):
                                 if "lotSize" in self.info[symbol]["lotSize"]:
                                     stepSize = self.info[symbol]["lotSize"]["stepSize"]
                                     Exp = calculate_decimal_places(stepSize)
-                                    cantidad = math.trunc(
-                                        float(keys["free"] * 10**Exp)
-                                    ) / (10**Exp)
+                                    cantidad = math.trunc(float(keys["free"] * 10**Exp)) / (10**Exp)
                                 else:
                                     cantidad = float(keys["free"])
                             break
@@ -2198,19 +2082,13 @@ class TickerInfo(MyOrders):
     # rescata de wallet EARN la cantidad indicada
     def crypto_earn_rescate(self, symbol=None, amount=0):
         try:
-            response = self.BClient.get_redeem_flexible_product(
-                productId=symbol, amount=amount, recvWindow=5000
-            )
+            response = self.BClient.get_redeem_flexible_product(productId=symbol, amount=amount, recvWindow=5000)
             if response:
                 if "success" in response.keys():
                     if not response["success"]:
                         ticket = "LD" + symbol.replace("001", "")
-                        disponible = self.crypto_wallert_free(
-                            self, Symbol=ticket, wallet="earn"
-                        )
-                        message = "La disponibilidad para rescatar {} en earn es de {:>,.5f}".format(
-                            ticket, disponible
-                        )
+                        disponible = self.crypto_wallert_free(self, Symbol=ticket, wallet="earn")
+                        message = "La disponibilidad para rescatar {} en earn es de {:>,.5f}".format(ticket, disponible)
 
                         self.messagebox.showinfo(title="Alerta", message=message)
             return
@@ -2240,9 +2118,7 @@ class TickerInfo(MyOrders):
                 self.procesos.append({"running": {task: 0}})
 
             self.schRemoteOrder_itera += 1
-            DataHub.update_self_procesos(
-                proces="running", tarea=task, itera=self.schRemoteOrder_itera
-            )
+            DataHub.update_self_procesos(proces="running", tarea=task, itera=self.schRemoteOrder_itera)
 
             # si hay ordenes en QremoteOrder las procesa
             trama, future = DataHub.QremoteOrder[self.vehiculo].get_next_order()
@@ -2294,9 +2170,7 @@ class TickerInfo(MyOrders):
         try:
 
             t_wait, update = DataHub.last_process[self.vehiculo], False
-            update = diaria_book_performance(
-                account=self.account, vehiculo=self.vehiculo, proces=t_wait
-            )
+            update = diaria_book_performance(account=self.account, vehiculo=self.vehiculo, proces=t_wait)
 
             # si actualizó tabla diaria, calcula proxima fecha de update
             if update:
@@ -2316,9 +2190,7 @@ class TickerInfo(MyOrders):
                 self.procesos.append({"running": {task: 0}})
 
             self.schDiario_itera += 1
-            DataHub.update_self_procesos(
-                proces="running", tarea=task, itera=self.schDiario_itera
-            )
+            DataHub.update_self_procesos(proces="running", tarea=task, itera=self.schDiario_itera)
         except Exception as e:
             print("[schedule_diario()]: {}".format(e))
 
@@ -2334,12 +2206,10 @@ class TickerInfo(MyOrders):
             # update de dividends en tabla market aplica solo para Stock
             wait = DataHub.last_process["dividends_en_market_stock"]
             if wait < datetime.now():
-                
+
                 # Versión con yfinance (para comparar con IB)
                 self.dividends_en_market_stock(activos)
-                DataHub.last_process["dividends_en_market_stock"] = (
-                    datetime.now() + timedelta(minutes=5)
-                )
+                DataHub.last_process["dividends_en_market_stock"] = datetime.now() + timedelta(minutes=5)
 
             # contabiliza ejecución del schedule
             task = f"schedule_operativo({self.vehiculo})"
@@ -2349,9 +2219,7 @@ class TickerInfo(MyOrders):
                 self.procesos.append({"running": {task: 0}})
 
             self.schOperativo_itera += 1
-            DataHub.update_self_procesos(
-                proces="running", tarea=task, itera=self.schOperativo_itera
-            )
+            DataHub.update_self_procesos(proces="running", tarea=task, itera=self.schOperativo_itera)
 
             # revisa update trader vehículos
             # self.trader_api_vehiculo()
@@ -2373,9 +2241,7 @@ class TickerInfo(MyOrders):
                 self.procesos.append({"running": {task: 0}})
 
             self.schTrader_itera += 1
-            DataHub.update_self_procesos(
-                proces="running", tarea=task, itera=self.schTrader_itera
-            )
+            DataHub.update_self_procesos(proces="running", tarea=task, itera=self.schTrader_itera)
         except Exception as e:
             print("[schedule_operativo()]: {}".format(e))
 
@@ -2389,8 +2255,8 @@ class TickerInfo(MyOrders):
 
             self.oportunidades_buy()
 
-            # exporta oportunadades al agente IA
-            DataHub.csv_OptionSales_write(account=self.account)
+            # exporta oportunidades al agente IA
+            DataHub.csv_OptionSales_write()
 
             # contabiliza ejecución del schedule
             task = f"schedule_oportunidades({self.vehiculo})"
@@ -2400,9 +2266,7 @@ class TickerInfo(MyOrders):
                 self.procesos.append({"running": {task: 0}})
 
             self.schOportunidades += 1
-            DataHub.update_self_procesos(
-                proces="running", tarea=task, itera=self.schOportunidades
-            )
+            DataHub.update_self_procesos(proces="running", tarea=task, itera=self.schOportunidades)
         except schedule.ScheduleError as e:
             print("[schedule_oportunidades()]: {}".format(e))
 
@@ -2415,7 +2279,7 @@ class TickerInfo(MyOrders):
         """
         try:
             # Validar que manager_buysell esté disponible
-            if not hasattr(DataHub, 'manager_buysell') or not DataHub.manager_buysell:
+            if not hasattr(DataHub, "manager_buysell") or not DataHub.manager_buysell:
                 return
 
             # Validar que las dimensiones tengan datos antes de ejecutar
@@ -2444,7 +2308,7 @@ class TickerInfo(MyOrders):
             asignaciones = engine.budget_allocator(min_ticket=100.0)
 
             # Almacenar resultados en DataHub para visualización
-            if not hasattr(DataHub, 'rebalanceo'):
+            if not hasattr(DataHub, "rebalanceo"):
                 DataHub.rebalanceo = {}
 
             # Verificar si hay cambios respecto a la ejecución anterior
@@ -2457,27 +2321,23 @@ class TickerInfo(MyOrders):
                 asignaciones_previas = datos_previos.get("asignaciones", [])
 
                 # Considerar que hay cambio si gaps o número de asignaciones cambió
-                if (gaps_previos == engine.gaps and
-                    len(asignaciones_previas) == len(asignaciones)):
+                if gaps_previos == engine.gaps and len(asignaciones_previas) == len(asignaciones):
                     hay_cambios = False
 
-            DataHub.rebalanceo[self.vehiculo] = {
-                "timestamp": datetime.now(),
-                "vehiculo": self.vehiculo,
-                "gaps": engine.gaps,
-                "normalized_gaps": engine.normalized_gaps,
-                "dimension_priority": engine.dimension_priority,
-                "ranking": ranking[:10],  # Top 10
-                "asignaciones": asignaciones,
-                "total_sugerido": sum(a["monto_sugerido"] for a in asignaciones)
-            }
-
-            # Solo imprimir cuando hay cambios
-            # Mensaje eliminado para reducir ruido en consola
+            if hay_cambios:
+                DataHub.rebalanceo[self.vehiculo] = {
+                    "timestamp": datetime.now(),
+                    "vehiculo": self.vehiculo,
+                    "gaps": engine.gaps,
+                    "normalized_gaps": engine.normalized_gaps,
+                    "dimension_priority": engine.dimension_priority,
+                    "ranking": ranking[:10],  # Top 10
+                    "asignaciones": asignaciones,
+                    "total_sugerido": sum(a["monto_sugerido"] for a in asignaciones),
+                }
 
         except Exception as e:
             print(f"[ejecutar_rebalanceo()]: {e}")
-            import traceback
             traceback.print_exc()
 
     # invoca price websocket y suscribe symbols
@@ -2491,9 +2351,7 @@ class TickerInfo(MyOrders):
             mensaje_callback=self.on_message_binance_websocket,
         )
         if log and (self.WStreams.counter == 1):
-            print(
-                f"schedule_WebsocketBinanceStream:: symbols({len(self.activos)}),{datetime.now()}"
-            )
+            print(f"schedule_WebsocketBinanceStream:: symbols({len(self.activos)}),{datetime.now()}")
 
         # self.WStreams.on_open()
         self.WStreams.websocket_loop(limit=limit, log=False)
@@ -2508,9 +2366,7 @@ class TickerInfo(MyOrders):
             mensaje_callback=self.on_message_binance_websocket,
         )
         if log and (self.WsClient.counter == 1):
-            print(
-                f"schedule_WebsocketBinanceApiClient:: symbols({len(self.activos)}),{datetime.now()}"
-            )
+            print(f"schedule_WebsocketBinanceApiClient:: symbols({len(self.activos)}),{datetime.now()}")
 
         # itera hasta el límit
         self.WsClient.my_allOrders(assets=self.activos, limit=10, sleep=1)
@@ -2520,9 +2376,7 @@ class TickerInfo(MyOrders):
 # class para visualizar del vehiculo
 class WidgetVehiculo(TickerInfo):
     def __init__(self, master, account, vehiculo):
-        TickerInfo.__init__(
-            self, account=account, vehiculo=vehiculo
-        )  # Inicializa los atributos de TickerInfo
+        TickerInfo.__init__(self, account=account, vehiculo=vehiculo)  # Inicializa los atributos de TickerInfo
 
         self.index = {
             "Ticket": "ticket",
@@ -2554,9 +2408,7 @@ class WidgetVehiculo(TickerInfo):
         win0 = ttk.Frame(master, padding=(0, 5, 0, 0), style="C.TFrame")  # header
         win0.pack_propagate(False)
 
-        win2 = ttk.Frame(
-            master, width=980, height=400, padding=(0, 0, 0, 0)
-        )  # positions detalle
+        win2 = ttk.Frame(master, width=980, height=400, padding=(0, 0, 0, 0))  # positions detalle
         win3 = ttk.Frame(master, padding=(0, 0, 0, 0))  # graficos verticales
         win4 = ttk.Frame(master, padding=(0, 0, 0, 0))  # graficos inferiores
 
@@ -2570,18 +2422,10 @@ class WidgetVehiculo(TickerInfo):
         wi00.pack_propagate(False)
         wi01.pack_propagate(False)
 
-        wi30 = ttk.Frame(
-            win3, padding=(1, 3, 1, 2), style="C.TFrame"
-        )  # Imagen derecha superior
-        wi31 = ttk.Frame(
-            win3, padding=(1, 1, 1, 1), style="C.TFrame"
-        )  # Imagen derecha inferior
-        wi40 = ttk.Frame(
-            win4, padding=(1, 1, 1, 1), style="C.TFrame"
-        )  # imagen inferior izquierda
-        wi41 = ttk.Frame(
-            win4, padding=(1, 1, 1, 1), style="B.TFrame"
-        )  # Oportunidades inferior derecha
+        wi30 = ttk.Frame(win3, padding=(1, 3, 1, 2), style="C.TFrame")  # Imagen derecha superior
+        wi31 = ttk.Frame(win3, padding=(1, 1, 1, 1), style="C.TFrame")  # Imagen derecha inferior
+        wi40 = ttk.Frame(win4, padding=(1, 1, 1, 1), style="C.TFrame")  # imagen inferior izquierda
+        wi41 = ttk.Frame(win4, padding=(1, 1, 1, 1), style="B.TFrame")  # Oportunidades inferior derecha
 
         wi00.grid(row=0, column=0)
         wi01.grid(row=0, column=1)
@@ -2598,16 +2442,10 @@ class WidgetVehiculo(TickerInfo):
         for i, (key, value) in enumerate(self.resumen.items()):
             if i == 0:  # escribe dGyP
                 t_dgyp = f"dGyP: {int(value):>6d}"
-                self.panel_label.append(
-                    ttk.Label(
-                        wi00, text=t_dgyp, style=gbg, font=("Courier", 24, "bold")
-                    )
-                )
+                self.panel_label.append(ttk.Label(wi00, text=t_dgyp, style=gbg, font=("Courier", 24, "bold")))
 
             if i > 0:
-                self.panel_label.append(
-                    ttk.Label(wi01, text=key, style="C.TLabel", font=("Courier", 9))
-                )
+                self.panel_label.append(ttk.Label(wi01, text=key, style="C.TLabel", font=("Courier", 9)))
                 self.panel_label.append(
                     tk.Label(
                         wi01,
@@ -2774,9 +2612,7 @@ class WidgetVehiculo(TickerInfo):
         bott.pack(side=tk.BOTTOM, expand=True)
 
         self.m_heard = self.create_treeviews(master=top, height=1, show="headings")
-        self.m_tree = self.create_treeviews(
-            master=bott, height=self.height, show="tree"
-        )
+        self.m_tree = self.create_treeviews(master=bott, height=self.height, show="tree")
 
         self.positions = []
         self.select_activo = None
@@ -2864,12 +2700,8 @@ class WidgetVehiculo(TickerInfo):
 
                 # controla el color de cada celda
                 tree.tag_configure("even", background="black", foreground="white")
-                tree.tag_configure(
-                    "even_green", foreground="White", background="dark green"
-                )
-                tree.tag_configure(
-                    "even_red", foreground="White", background="firebrick4"
-                )
+                tree.tag_configure("even_green", foreground="White", background="dark green")
+                tree.tag_configure("even_red", foreground="White", background="firebrick4")
                 tree.tag_configure("odd", background="Silver", foreground="black")
                 tree.tag_configure("odd_green", foreground="black", background="green2")
                 tree.tag_configure("odd_red", foreground="black", background="red3")
@@ -2949,9 +2781,7 @@ class WidgetVehiculo(TickerInfo):
     # Conectar los eventos de movimiento del mouse
     def on_mouse_wheel(self, event):
         try:
-            if (
-                event.state & 0x0001
-            ):  # Detecta si Shift está presionado (para scroll horizontal)
+            if event.state & 0x0001:  # Detecta si Shift está presionado (para scroll horizontal)
                 for tree in self.m_tree:
                     tree.xview_scroll(-1 * (event.delta // 120), "units")
             else:  # Scroll vertical
@@ -3004,45 +2834,29 @@ class WidgetVehiculo(TickerInfo):
         try:
             # rescribe resumen en panel - parte superior
             if self.resumen:
-                dgyp = (
-                    self.resumen[" dgyp       :"]
-                    if " dgyp       :" in self.resumen
-                    else 0
-                )
+                dgyp = self.resumen[" dgyp       :"] if " dgyp       :" in self.resumen else 0
                 gbg = display_red_green(dgyp)
                 for i, (key, value) in enumerate(self.resumen.items()):
                     if i == 0:
                         t_dgyp = f"dGyP: {int(value):>6d}"
-                        self.panel_label[i].config(
-                            text=t_dgyp, style=gbg, font=("Courier", 24, "bold")
-                        )
+                        self.panel_label[i].config(text=t_dgyp, style=gbg, font=("Courier", 24, "bold"))
 
                     if i > 0:
                         # display linea superior header
                         k = 2 * i - 1
                         if i < 5:
                             self.panel_label[k].config(text=key, font=("Courier", 9))
-                            self.panel_label[k + 1].config(
-                                text=value, font=("Courier", 9)
-                            )
+                            self.panel_label[k + 1].config(text=value, font=("Courier", 9))
 
                         # display linea inferior header
                         if i > 4:
                             if " Conexión   :" != key:
-                                self.panel_label[k].config(
-                                    text=key, font=("Courier", 9)
-                                )
-                                self.panel_label[k + 1].config(
-                                    text=value, font=("Courier", 9)
-                                )
+                                self.panel_label[k].config(text=key, font=("Courier", 9))
+                                self.panel_label[k + 1].config(text=value, font=("Courier", 9))
                             elif " Conexión   :" == key:
                                 cox = display_red_green(0)
-                                self.panel_label[k].config(
-                                    text=key, font=("Courier", 9)
-                                )
-                                self.panel_label[k + 1].config(
-                                    text=value, fg="yellow", font=("Courier", 9)
-                                )
+                                self.panel_label[k].config(text=key, font=("Courier", 9))
+                                self.panel_label[k + 1].config(text=value, fg="yellow", font=("Courier", 9))
 
             # rescribe valores de oportunidades sell
             message = []
@@ -3085,11 +2899,7 @@ class WidgetVehiculo(TickerInfo):
             )
             if positions:
                 for position in positions:
-                    unprofit += (
-                        position["unrealizedpnl"]
-                        if position["unrealizedpnl"] > 0
-                        else 0
-                    )
+                    unprofit += position["unrealizedpnl"] if position["unrealizedpnl"] > 0 else 0
                     dividendos += position["dividendo"]
                     costobase += position["costobase"]
                     # es reemplazado ya que es necesario tener value offline
@@ -3142,11 +2952,7 @@ class WidgetVehiculo(TickerInfo):
                     # comparte totalización de gyp diarias
                     dividendos = self.summary[base]["dividends"]
                     mktvalue = self.summary[base]["netliquidationvalue"]
-                    debit = (
-                        self.summary[base]["cashbalance"]
-                        if self.summary[base]["cashbalance"] < 0
-                        else 0
-                    )
+                    debit = self.summary[base]["cashbalance"] if self.summary[base]["cashbalance"] < 0 else 0
                     cash = self.summary[base]["cashbalance"]
                     gyp = self.summary[base]["unrealizedpnl"]
 
@@ -3244,11 +3050,7 @@ class WidgetVehiculo(TickerInfo):
                 position["dgyp"],
                 position["position"],
                 position["mrkprice"],
-                (
-                    position["costobase"] / position["position"]
-                    if position["position"] > 0
-                    else 0
-                ),
+                (position["costobase"] / position["position"] if position["position"] > 0 else 0),
                 position["costobase"],
                 position["mrkprice"] * position["position"],
                 position["unrealizedpnl"],
@@ -3427,15 +3229,11 @@ class WidgetVehiculo(TickerInfo):
                 cv3.get_tk_widget().pack()
 
                 # Gráfica performance de dividendo
-                (market, iy) = self.Market.select(
-                    account=self.account, symbol=self.symbol
-                )
+                (market, iy) = self.Market.select(account=self.account, symbol=self.symbol)
                 if market:
                     if market[0][iy.index("categoriaActivo")] in ("I", "N", "S", "X"):
                         # ubica información de yfinance.Ticker, para mostrar gráfico de dividends
-                        (activo, datos, update) = self.ts_yfinance_symbol(
-                            symbol=self.symbol, vehiculo=self.vehiculo
-                        )
+                        (activo, datos, update) = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=self.vehiculo)
                         self.rendimiento_dividends(
                             fg=fg2,
                             activo=activo,
@@ -3453,9 +3251,7 @@ class WidgetVehiculo(TickerInfo):
                     asset=self.symbol,
                 )
 
-                (ticket, rtn_index, cum_index, index_ref) = vehiculo_parm(
-                    vehiculo=self.vehiculo
-                )
+                (ticket, rtn_index, cum_index, index_ref) = vehiculo_parm(vehiculo=self.vehiculo)
                 parm = {
                     "BTC": index_ref,
                     "++ index": "++ " + self.symbol,
@@ -3476,12 +3272,8 @@ class WidgetVehiculo(TickerInfo):
                 # busca datos yf.download si activo tiene dividendos (stock)
                 vehiculo = "hist" if self.vehiculo == "Stock" else "download"
 
-                (activo, pdatos, update) = self.ts_yfinance_symbol(
-                    symbol=self.symbol, vehiculo=vehiculo
-                )
-                self.gchar["periodo"] = (
-                    periodo if accion == "p" else self.gchar["periodo"]
-                )
+                (activo, pdatos, update) = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=vehiculo)
+                self.gchar["periodo"] = periodo if accion == "p" else self.gchar["periodo"]
                 self.gchar["tipo"] = tipo if accion == "t" else self.gchar["tipo"]
 
                 chart_symbol(fg=fg, datos=pdatos, keys=self.gchar)
@@ -3499,13 +3291,9 @@ class WidgetVehiculo(TickerInfo):
 
                         # Recorrer los hijos del padre
                         for child in tree.get_children(parent):
-                            x_cant += float(
-                                tree.item(child, "values")[2]
-                            )  # cantidades por lote
+                            x_cant += float(tree.item(child, "values")[2])  # cantidades por lote
                             acum = float(tree.item(child, "values")[4])  # gyp por lote
-                            cost = float(
-                                tree.item(child, "values")[5]
-                            )  # costobase por lote
+                            cost = float(tree.item(child, "values")[5])  # costobase por lote
 
                         # Actualizar el valor del padre
                         # x_roi = (acum / self.gchar['costobase']) if self.gchar['costobase'] > 0 else 0
@@ -3535,15 +3323,9 @@ class WidgetVehiculo(TickerInfo):
             # muestra el arbol con last  y los lotes gain y lost
             def treeview_lotes() -> ttk.Treeview:
                 try:
-                    rns = ttk.Frame(
-                        lote, padding=(1, 1, 1, 1), style="C.TFrame"
-                    )  # heard
-                    rnb = ttk.Frame(
-                        lote, padding=(1, 1, 1, 1), style="C.TFrame"
-                    )  # tree
-                    scr = ttk.Frame(
-                        lote, padding=(1, 1, 1, 1), style="C.TFrame"
-                    )  # scroll
+                    rns = ttk.Frame(lote, padding=(1, 1, 1, 1), style="C.TFrame")  # heard
+                    rnb = ttk.Frame(lote, padding=(1, 1, 1, 1), style="C.TFrame")  # tree
+                    scr = ttk.Frame(lote, padding=(1, 1, 1, 1), style="C.TFrame")  # scroll
                     rns.pack(side=tk.TOP, fill=tk.X, expand=True)
                     rnb.pack(side=tk.TOP, fill=tk.X, expand=True)
                     scr.pack(side=tk.TOP, fill=tk.X, expand=True)
@@ -3569,18 +3351,14 @@ class WidgetVehiculo(TickerInfo):
                         "bene",
                         "GPa",
                     ]
-                    x_heard = ttk.Treeview(
-                        rns, columns=fields, height=1, style="TFrame"
-                    )
+                    x_heard = ttk.Treeview(rns, columns=fields, height=1, style="TFrame")
                     x_heard.tag_configure("blue", background="blue", foreground="white")
 
                     x_heard.column("#0", width=55, minwidth=55)
                     x_heard.heading("#0", text="Lote")
                     x_heard.pack(side=tk.RIGHT, anchor=tk.E)
 
-                    x_tree = ttk.Treeview(
-                        rnb, columns=fields, height=6, style="TFrame", show="tree"
-                    )
+                    x_tree = ttk.Treeview(rnb, columns=fields, height=6, style="TFrame", show="tree")
                     for j, key in enumerate(fields):
                         x_heard.column(key, width=93, minwidth=93, anchor="e")
                         x_heard.heading(key, text=heading[j])
@@ -3588,16 +3366,12 @@ class WidgetVehiculo(TickerInfo):
                         x_tree.column(key, width=93, minwidth=93, anchor="e")
                         x_tree.heading(key, text=heading[j])
 
-                    x_tree.tag_configure(
-                        "green", background="green", foreground="white"
-                    )
+                    x_tree.tag_configure("green", background="green", foreground="white")
                     x_tree.tag_configure("red", background="red", foreground="white")
                     x_tree.column("#0", width=55, minwidth=55)
                     x_tree.pack(side=tk.RIGHT, anchor=tk.E)
 
-                    hscroll = ttk.Scrollbar(
-                        scr, orient="horizontal", command=on_sync_treeview_scroll
-                    )
+                    hscroll = ttk.Scrollbar(scr, orient="horizontal", command=on_sync_treeview_scroll)
                     x_heard.config(xscrollcommand=hscroll.set)
                     x_tree.config(xscrollcommand=hscroll.set)
                     hscroll.pack(side=tk.BOTTOM, fill=tk.X)
@@ -3730,15 +3504,9 @@ class WidgetVehiculo(TickerInfo):
             self.rnb.grab_set()
             self.rnb.protocol("WM_DELETE_WINDOW", eexit)
 
-            win1 = ttk.Frame(
-                self.rnb, padding=(1, 1, 1, 1), style="C.TFrame"
-            )  # gráfica activo
-            win2 = ttk.Frame(
-                self.rnb, padding=(1, 1, 1, 1), style="C.TFrame"
-            )  # botones gráfico y widget
-            win3 = ttk.Frame(
-                self.rnb, padding=(1, 1, 1, 1), style="W.TFrame"
-            )  # ventana de lotes
+            win1 = ttk.Frame(self.rnb, padding=(1, 1, 1, 1), style="C.TFrame")  # gráfica activo
+            win2 = ttk.Frame(self.rnb, padding=(1, 1, 1, 1), style="C.TFrame")  # botones gráfico y widget
+            win3 = ttk.Frame(self.rnb, padding=(1, 1, 1, 1), style="W.TFrame")  # ventana de lotes
             win1.pack(fill=tk.X)
             win2.pack(fill=tk.X)
             win3.pack(fill=tk.X)
@@ -3822,9 +3590,7 @@ class WidgetVehiculo(TickerInfo):
                 width=8,
                 bg="blue",
                 fg="white",
-                command=lambda: self.trader_lotes_fiscales(
-                    option="BUY", parm=self.gchar
-                ),
+                command=lambda: self.trader_lotes_fiscales(option="BUY", parm=self.gchar),
             )
             ft2 = tk.Button(
                 win20,
@@ -3832,9 +3598,7 @@ class WidgetVehiculo(TickerInfo):
                 width=8,
                 bg="red",
                 fg="white",
-                command=lambda: self.trader_lotes_fiscales(
-                    option="SELL", parm=self.gchar
-                ),
+                command=lambda: self.trader_lotes_fiscales(option="SELL", parm=self.gchar),
             )
             ft3 = tk.Button(
                 win20,
@@ -3890,9 +3654,7 @@ class WidgetVehiculo(TickerInfo):
 
             # muestra resumen de lotes
             if AGain or ALost:
-                list_fiscales(
-                    lote=win3, a_gain=AGain, a_lost=ALost, last=self.gchar["ticket"]
-                )
+                list_fiscales(lote=win3, a_gain=AGain, a_lost=ALost, last=self.gchar["ticket"])
 
             # más graficos de analisis cuando se parte del portafolio
             if analisis:
@@ -3920,22 +3682,14 @@ class WidgetVehiculo(TickerInfo):
         self.orderActivas.grab_set()
 
         # primer nivel para trader
-        self.WindowsBuySell_trader(
-            rnb=self.orderActivas, option=option, parm=self.gchar
-        )
+        self.WindowsBuySell_trader(rnb=self.orderActivas, option=option, parm=self.gchar)
 
     def ventanas_activas(self):
         symbol, ws, sell = self.gchar["ticket"], {}, {}
 
         if symbol is not None:
-            ws = (
-                self.info[symbol]["websocket"]
-                if "websocket" in self.info[symbol].keys()
-                else {}
-            )
-            sell = (
-                self.info[symbol]["sell"] if "sell" in self.info[symbol].keys() else {}
-            )
+            ws = self.info[symbol]["websocket"] if "websocket" in self.info[symbol].keys() else {}
+            sell = self.info[symbol]["sell"] if "sell" in self.info[symbol].keys() else {}
 
             if ws:
                 bid = ws["bid"]
@@ -4335,9 +4089,7 @@ class WidgetVehiculo(TickerInfo):
 
             # Configuración del gráfico
             self.graph[0][1].clear()
-            self.graph[0][1].suptitle(
-                parm.get("titulo", ""), color=self.cchart["titulo"], fontsize="medium"
-            )
+            self.graph[0][1].suptitle(parm.get("titulo", ""), color=self.cchart["titulo"], fontsize="medium")
             ax = self.graph[0][1].add_subplot()
             # ax.set_box_aspect(parm.get("aspect", 0.8))
             ax.set_facecolor(self.cchart["fondo_fig"])
@@ -4413,9 +4165,7 @@ class WidgetVehiculo(TickerInfo):
     def graph_gain_loss(self, data, parm):
         try:
             self.graph[1][1].clear()
-            self.graph[1][1].suptitle(
-                parm["titulo"], color=self.cchart["titulo"], fontsize="medium"
-            )
+            self.graph[1][1].suptitle(parm["titulo"], color=self.cchart["titulo"], fontsize="medium")
             ax = self.graph[1][1].add_subplot()
             ax.set_facecolor(self.cchart["fondo_fig"])
 
@@ -4423,12 +4173,8 @@ class WidgetVehiculo(TickerInfo):
             df_rendimiento = pd.DataFrame(data, columns=["Symbol", "Rendimiento"])
             df_rendimiento["Rendimiento_Pct"] = df_rendimiento["Rendimiento"] * 100
 
-            ganadores = df_rendimiento[df_rendimiento["Rendimiento"] >= 0].nlargest(
-                5, "Rendimiento_Pct"
-            )
-            perdedores = df_rendimiento[df_rendimiento["Rendimiento"] < 0].nsmallest(
-                5, "Rendimiento_Pct"
-            )
+            ganadores = df_rendimiento[df_rendimiento["Rendimiento"] >= 0].nlargest(5, "Rendimiento_Pct")
+            perdedores = df_rendimiento[df_rendimiento["Rendimiento"] < 0].nsmallest(5, "Rendimiento_Pct")
 
             # Combinar y ordenar para el gráfico único
             # Es clave ordenar los perdedores de la mayor pérdida a la menor, y los ganadores de la mayor a la menor.
@@ -4441,20 +4187,13 @@ class WidgetVehiculo(TickerInfo):
             )
 
             # Asignar colores basados en si es ganancia o pérdida
-            colores = [
-                "mediumseagreen" if r >= 0 else "tomato"
-                for r in df_combinado["Rendimiento_Pct"]
-            ]
+            colores = ["mediumseagreen" if r >= 0 else "tomato" for r in df_combinado["Rendimiento_Pct"]]
 
-            ax.bar(
-                df_combinado["Symbol"], df_combinado["Rendimiento_Pct"], color=colores
-            )
+            ax.bar(df_combinado["Symbol"], df_combinado["Rendimiento_Pct"], color=colores)
 
             xlabels = ax.get_xticklabels()
             ylabels = ax.get_yticklabels()
-            plt.setp(
-                xlabels, ha="right", fontsize=6, color=self.cchart["asx"], rotation=30
-            )
+            plt.setp(xlabels, ha="right", fontsize=6, color=self.cchart["asx"], rotation=30)
             plt.setp(ylabels, ha="right", fontsize=6, color=self.cchart["texto"])
             ax.set_xlabel("", fontsize="x-small", color=self.cchart["texto"])
             ax.set_ylabel("Rendimiento (%)", fontsize=7, color=self.cchart["texto"])
@@ -4508,15 +4247,9 @@ class WidgetVehiculo(TickerInfo):
 
             # seleccionar series a graficar en orden predecible:
             # tomar valores de parm que sean strings y existan en data.columns
-            series_cols = [
-                v for k, v in parm.items() if isinstance(v, str) and v in data.columns
-            ]
+            series_cols = [v for k, v in parm.items() if isinstance(v, str) and v in data.columns]
             # esperamos al menos dos series para el eje izquierdo (performance comparativa)
-            left_series = (
-                series_cols[:2]
-                if len(series_cols) >= 2
-                else (series_cols + [None, None])[:2]
-            )
+            left_series = series_cols[:2] if len(series_cols) >= 2 else (series_cols + [None, None])[:2]
 
             # plot eje izquierdo (performance comparativa)
             if left_series[0]:
@@ -4535,9 +4268,7 @@ class WidgetVehiculo(TickerInfo):
                 )
 
             # formateo eje X
-            Xformatter = (
-                "%b-%y" if parm.get("periodo") in ("6M", "1Y", "5Y") else "%d-%b"
-            )
+            Xformatter = "%b-%y" if parm.get("periodo") in ("6M", "1Y", "5Y") else "%d-%b"
             ax.xaxis.set_major_formatter(mdates.DateFormatter(Xformatter))
 
             xlabels = ax.get_xticklabels()
@@ -4698,25 +4429,13 @@ class WidgetVehiculo(TickerInfo):
             # leyenda: construimos patches según las series dibujadas
             patches = []
             if left_series[0]:
-                patches.append(
-                    mpatches.Patch(color=self.cchart["plot5"], label=left_series[0])
-                )
+                patches.append(mpatches.Patch(color=self.cchart["plot5"], label=left_series[0]))
             if left_series[1]:
-                patches.append(
-                    mpatches.Patch(color=self.cchart["plot2"], label=left_series[1])
-                )
+                patches.append(mpatches.Patch(color=self.cchart["plot2"], label=left_series[1]))
             if value_col:
-                patches.append(
-                    mpatches.Patch(
-                        color=self.cchart["plot1"], label="Values Market", alpha=0.45
-                    )
-                )
+                patches.append(mpatches.Patch(color=self.cchart["plot1"], label="Values Market", alpha=0.45))
             if costo_col:
-                patches.append(
-                    mpatches.Patch(
-                        color=self.cchart["plot3"], label="Cost Base", alpha=0.35
-                    )
-                )
+                patches.append(mpatches.Patch(color=self.cchart["plot3"], label="Cost Base", alpha=0.35))
 
             legend_loc = parm.get("legend", "upper left")
             if patches:
@@ -4758,11 +4477,7 @@ class WidgetVehiculo(TickerInfo):
                 tunr += key["unrealizedpnl"]
                 tpro += pobj
 
-                rend = (
-                    key["unrealizedpnl"] / key["costobase"]
-                    if key["costobase"] > 10
-                    else 0
-                )
+                rend = key["unrealizedpnl"] / key["costobase"] if key["costobase"] > 10 else 0
                 if rend > -0.8:
                     GainLoss.append(
                         {
@@ -4774,9 +4489,7 @@ class WidgetVehiculo(TickerInfo):
                 if i < 4:
                     wvals.append([key["costobase"], pobj])
                     wrati.append(key["unrealizedpnl"])
-                    wprof.append(
-                        0 if key["unrealizedpnl"] < 0 else key["unrealizedpnl"]
-                    )
+                    wprof.append(0 if key["unrealizedpnl"] < 0 else key["unrealizedpnl"])
                     wdebi.append(key["deuda"])
                     ticket = convierte_ticket_crypto(key["ticket"])[0:10]
                     wlabe.append(ticket)
@@ -4811,9 +4524,7 @@ class WidgetVehiculo(TickerInfo):
                 }
 
             # Obtiene Dataframe de performance
-            ddatos = performa_asset(
-                account=self.account, vehiculo=self.vehiculo, tipo=self.vehiculo
-            )
+            ddatos = performa_asset(account=self.account, vehiculo=self.vehiculo, tipo=self.vehiculo)
             return pdatos, ddatos, GainLoss
 
         try:
@@ -4904,9 +4615,7 @@ class CustomTreeview:
 
         # Sincronizar el scroll vertical si se habilita
         if self.show_vscroll:
-            self.vscroll = ttk.Scrollbar(
-                self.right, orient="vertical", command=self.on_sync_vtreeview_scroll
-            )
+            self.vscroll = ttk.Scrollbar(self.right, orient="vertical", command=self.on_sync_vtreeview_scroll)
             self.vscroll.pack(side=tk.RIGHT, fill=tk.Y)
             self.tree_fixed.config(yscrollcommand=self.vscroll.set)
             self.tree_scroll.config(yscrollcommand=self.vscroll.set)
@@ -4914,9 +4623,7 @@ class CustomTreeview:
         # Sincronizar el scroll horizontal si se habilita
         if self.show_hscroll:
             if not self.fixed_row:
-                self.hscroll = ttk.Scrollbar(
-                    self.master, orient="horizontal", command=self.tree_scroll.xview
-                )
+                self.hscroll = ttk.Scrollbar(self.master, orient="horizontal", command=self.tree_scroll.xview)
                 self.hscroll.pack(side=tk.BOTTOM, fill=tk.X)
                 self.tree_scroll.config(xscrollcommand=self.hscroll.set)
 
@@ -4968,17 +4675,13 @@ class CustomTreeview:
                         tree.move(k, "", index)
 
             # Alternar entre ascendente y descendente
-            col_tree.heading(
-                col, command=lambda: ordenar_columnas(col_tree, col, not reverse)
-            )
+            col_tree.heading(col, command=lambda: ordenar_columnas(col_tree, col, not reverse))
 
         if not self.fixed_columns:
             return
 
         # construye parte fixed
-        tree_fixed = ttk.Treeview(
-            master, columns=self.fixed_columns, show=show, height=height
-        )
+        tree_fixed = ttk.Treeview(master, columns=self.fixed_columns, show=show, height=height)
         tree_fixed.heading("#0")
         tree_fixed.column("#0", width=0, minwidth=1)
 
@@ -4989,57 +4692,33 @@ class CustomTreeview:
                 tree_fixed.heading(
                     col,
                     text=col,
-                    command=lambda _col=col, _tree=tree_fixed: ordenar_columnas(
-                        _tree, _col, False
-                    ),
+                    command=lambda _col=col, _tree=tree_fixed: ordenar_columnas(_tree, _col, False),
                 )
             else:
                 tree_fixed.heading(col, text=col)
 
-            anchor = (
-                self.column_alignments[col]["anchor"]
-                if col in self.column_alignments.keys()
-                else "center"
-            )
-            width = (
-                self.column_alignments[col]["width"]
-                if col in self.column_alignments.keys()
-                else "60"
-            )
+            anchor = self.column_alignments[col]["anchor"] if col in self.column_alignments.keys() else "center"
+            width = self.column_alignments[col]["width"] if col in self.column_alignments.keys() else "60"
 
             tree_fixed.column(col, width=width, anchor=anchor)
 
         # construye parte scrollable
-        scrollable_columns = [
-            col for col in self.columns if col not in self.fixed_columns
-        ]
-        tree_scroll = ttk.Treeview(
-            master, columns=scrollable_columns, show=show, height=height
-        )
+        scrollable_columns = [col for col in self.columns if col not in self.fixed_columns]
+        tree_scroll = ttk.Treeview(master, columns=scrollable_columns, show=show, height=height)
         tree_scroll.heading("#0")
         tree_scroll.column("#0", width=0, minwidth=1)
 
         for col in scrollable_columns:
             if show != "tree":
-                anchor = (
-                    self.column_alignments[col]["anchor"]
-                    if col in self.column_alignments.keys()
-                    else "center"
-                )
-                width = (
-                    self.column_alignments[col]["width"]
-                    if col in self.column_alignments.keys()
-                    else "60"
-                )
+                anchor = self.column_alignments[col]["anchor"] if col in self.column_alignments.keys() else "center"
+                width = self.column_alignments[col]["width"] if col in self.column_alignments.keys() else "60"
 
                 # activa ordainment por columna
                 if self.sort_columns:
                     tree_scroll.heading(
                         col,
                         text=col,
-                        command=lambda _col=col, _tree=tree_scroll: ordenar_columnas(
-                            _tree, _col, False
-                        ),
+                        command=lambda _col=col, _tree=tree_scroll: ordenar_columnas(_tree, _col, False),
                     )
                 else:
                     tree_scroll.heading(col, text=col)
@@ -5091,12 +4770,8 @@ class CustomTreeview:
                 else:
                     # treeview tipo arbol
                     if padre is None:
-                        fixed = self.tree_fixed.insert(
-                            "", "end", text=texto, values=fixed_values
-                        )
-                        scroll = self.tree_scroll.insert(
-                            "", "end", values=scrollable_values
-                        )
+                        fixed = self.tree_fixed.insert("", "end", text=texto, values=fixed_values)
+                        scroll = self.tree_scroll.insert("", "end", values=scrollable_values)
                         self.arbol.update({texto: {"fixed": fixed, "scroll": scroll}})
 
                         self.tree_fixed.item(fixed, open=True)
@@ -5105,12 +4780,8 @@ class CustomTreeview:
                         fixed = self.arbol[padre]["fixed"]
                         scroll = self.arbol[padre]["scroll"]
 
-                        items = self.tree_fixed.insert(
-                            fixed, "end", values=fixed_values
-                        )
-                        posts = self.tree_scroll.insert(
-                            scroll, "end", values=scrollable_values
-                        )
+                        items = self.tree_fixed.insert(fixed, "end", values=fixed_values)
+                        posts = self.tree_scroll.insert(scroll, "end", values=scrollable_values)
 
         if self.fixed_row:
             if summary is not None:
@@ -5197,9 +4868,7 @@ class MyWebsocket:
                     print("subscribe_stocks({})".format(len(self.idsymbol)))
 
                 else:
-                    raise ValueError(
-                        "La lista  self.idsymbol está vacía. No se puede continuar."
-                    )
+                    raise ValueError("La lista  self.idsymbol está vacía. No se puede continuar.")
 
             except Exception as error:
                 print("[subscribe_stock()]: {}".format(error))
@@ -5207,9 +4876,7 @@ class MyWebsocket:
         def update_subscribe(new_idsymbol):
             try:
                 with self.lock:
-                    unsubscribe_params = [
-                        f"{crypto.lower()}@miniTicker" for crypto in self.idsymbol
-                    ]
+                    unsubscribe_params = [f"{crypto.lower()}@miniTicker" for crypto in self.idsymbol]
                     self.ws.send(
                         json.dumps(
                             {
@@ -5224,9 +4891,7 @@ class MyWebsocket:
                     self.subscribe_to_idsymbol()
 
             except Exception as e:
-                print(
-                    "[MyWebsocket.update_subscribe_{}()]: {}".format(self.vehiculo, e)
-                )
+                print("[MyWebsocket.update_subscribe_{}()]: {}".format(self.vehiculo, e))
                 time.sleep(5)
 
         self.ws = websocket.WebSocketApp(
@@ -5404,9 +5069,7 @@ class MyMessageBox(tk.Toplevel):
 
 # Class para el manejo de Switch
 class ToggleSwitch(ttk.Checkbutton):
-    def __init__(
-        self, master=None, on_text="ON", off_text="OFF", command=None, **kwargs
-    ):
+    def __init__(self, master=None, on_text="ON", off_text="OFF", command=None, **kwargs):
         # Utiliza un estilo personalizado para el widget
         # style = ttk.Style()
 
@@ -5588,9 +5251,7 @@ class ProgressBar(tk.Frame):
 
         # Calcular posiciones normalizadas (0 a 1)
         zero_position = (0 - min_val) / total_range if total_range > 0 else 0
-        avance_position = (
-            (self.avance - min_val) / total_range if total_range > 0 else 0
-        )
+        avance_position = (self.avance - min_val) / total_range if total_range > 0 else 0
 
         # Convertir a píxeles
         zero_pixel = int(self.width * zero_position)
@@ -5600,9 +5261,7 @@ class ProgressBar(tk.Frame):
         radius = min(8, self.height // 4)
 
         # Dibujar fondo de la barra con bordes redondeados
-        self._draw_rounded_rect(
-            0, 0, self.width, self.height, radius, fill=self.bg_cavas
-        )
+        self._draw_rounded_rect(0, 0, self.width, self.height, radius, fill=self.bg_cavas)
 
         # Calcular ancho de la barra (desde 0 hasta avance)
         if self.avance >= 0:
@@ -5650,9 +5309,7 @@ class ProgressBar(tk.Frame):
                 color = "#E74C3C"  # Rojo
 
             # Barra de progreso principal
-            self._draw_rounded_rect(
-                progress_start, 0, progress_end, self.height, radius, fill=color
-            )
+            self._draw_rounded_rect(progress_start, 0, progress_end, self.height, radius, fill=color)
 
             # Efecto de brillo en la parte superior
             self._draw_rounded_rect(
@@ -5676,14 +5333,10 @@ class ProgressBar(tk.Frame):
 
         # Dibujar marcador de inicio (partida) si es diferente de cero
         if self.partida != 0:
-            partida_position = (
-                (self.partida - min_val) / total_range if total_range > 0 else 0
-            )
+            partida_position = (self.partida - min_val) / total_range if total_range > 0 else 0
             partida_pos = int(partida_position * self.width)
             # Línea del marcador
-            self.canvas.create_line(
-                partida_pos, 3, partida_pos, self.height - 3, fill="#E74C3C", width=3
-            )
+            self.canvas.create_line(partida_pos, 3, partida_pos, self.height - 3, fill="#E74C3C", width=3)
             # Círculo superior
             self.canvas.create_oval(
                 partida_pos - 4,
@@ -5696,9 +5349,7 @@ class ProgressBar(tk.Frame):
             )
 
         # Dibujar marcador de objetivo (proyección)
-        proyeccion_position = (
-            (self.proyeccion - min_val) / total_range if total_range > 0 else 1
-        )
+        proyeccion_position = (self.proyeccion - min_val) / total_range if total_range > 0 else 1
         proyeccion_pos = int(proyeccion_position * self.width)
         arrow_size = min(12, self.height // 3)
         self.canvas.create_polygon(
@@ -5718,11 +5369,7 @@ class ProgressBar(tk.Frame):
         percent_text = f"{avance_text}"
 
         # Determinar posición del texto (en el centro de la barra de progreso)
-        text_x = (
-            (progress_start + progress_end) // 2
-            if progress_width > 20
-            else self.width // 2
-        )
+        text_x = (progress_start + progress_end) // 2 if progress_width > 20 else self.width // 2
 
         # Sombra del texto
         self.canvas.create_text(
@@ -5850,8 +5497,6 @@ if __name__ == "__main__":
     # master = tk.Tk()
     messageBox = MyMessageBox()
     # messageBox.showinfo(title="------ Sell", message="Solo tiene disponible "+ str(0) + " USDT")
-    resp = messageBox.askquestion(
-        title="------ Sell", message="Solo tiene disponible " + str(0) + " USDT"
-    )
+    resp = messageBox.askquestion(title="------ Sell", message="Solo tiene disponible " + str(0) + " USDT")
     print(resp)
     # master.mainloop()

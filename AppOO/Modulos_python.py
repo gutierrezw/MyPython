@@ -10,6 +10,7 @@ import math
 import hmac
 import copy
 import signal
+import joblib
 import urllib
 import urllib3
 import hashlib
@@ -132,3 +133,9 @@ from matplotlib.dates import (
 from finvizfinance.quote import finvizfinance
 from finvizfinance.group.overview import Overview
 from finvizfinance.group.performance import Performance
+
+# modulos IA
+from sklearn.exceptions import UndefinedMetricWarning
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
+from sklearn.metrics import classification_report, f1_score, roc_auc_score

@@ -1,9 +1,9 @@
-# Configuración de Ruff para el proyecto
-# https://docs.astral.sh/ruff/
-
 # ============================================================================
-# CONVENCIONES DE CÓDIGO DEL PROYECTO (no verificables por Ruff)
+# CONFIGURACIÓN DEL PROYECTO
 # ============================================================================
+# Archivo unificado de configuración para Black, Ruff, y otras herramientas
+#
+# CONVENCIONES DE CÓDIGO DEL PROYECTO (no verificables automáticamente):
 # 1. FUNCIONES INTERNAS (nested functions):
 #    - Deben definirse SIEMPRE al inicio del método/función padre
 #    - Nunca definir funciones a mitad del código
@@ -25,13 +25,55 @@
 #    - Métodos estáticos/de clase al final
 # ============================================================================
 
-# Configuración general
+# ============================================================================
+# BLACK - Formateador de código
+# ============================================================================
+[tool.black]
+line-length = 120
+target-version = ['py310']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    __pycache__
+    | \.git
+    | venv
+    | env
+    | \.venv
+    | build
+    | dist
+)/
+'''
+
+# ============================================================================
+# RUFF - Linter rápido
+# https://docs.astral.sh/ruff/
+# ============================================================================
+[tool.ruff]
 line-length = 120
 target-version = "py310"
 indent-width = 4
 
-# Reglas a activar
-[lint]
+extend-exclude = [
+    "__pycache__",
+    ".git",
+    "venv",
+    "env",
+    ".venv",
+    "*.egg-info",
+    "build",
+    "dist",
+]
+
+# Configuración de formato (compatible con Black)
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+skip-magic-trailing-comma = false
+docstring-code-format = false
+
+# Reglas de linting
+[tool.ruff.lint]
 select = [
     # === IMPORTS (OBLIGATORIO) ===
     "I",      # isort - ordenamiento de imports
@@ -52,13 +94,12 @@ select = [
     "RUF",    # reglas específicas de ruff
 ]
 
-# Reglas a ignorar (excepciones justificadas)
 ignore = [
     "E501",   # line too long (manejado por line-length)
 ]
 
 # Reglas específicas de imports
-[lint.isort]
+[tool.ruff.lint.isort]
 force-single-line = false
 lines-after-imports = 2
 section-order = [
@@ -76,21 +117,7 @@ known-first-party = [
     "AppValuations"
 ]
 
-# Archivos a excluir
-extend-exclude = [
-    "__pycache__",
-    ".git",
-    "venv",
-    "env",
-    ".venv",
-    "*.egg-info",
-    "build",
-    "dist",
-]
-
 # Excepciones por archivo
-[lint.per-file-ignores]
-# Permitir imports no usados en __init__.py
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-# Permitir prints en scripts principales
 "DashMainV9_ia.py" = ["T20"]
