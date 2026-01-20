@@ -12,7 +12,6 @@ from sklearn.metrics import classification_report, f1_score, roc_auc_score
 from Modulos_Mysql import RepositorioOportunidadesBuySell
 from Modulos_Utilitarios import define_FileCache
 
-
 class ModeloOportunidadesSell:
     def __init__(self):
         self.modelo = None

@@ -1506,11 +1506,10 @@ def grupo_activos(fg: object, parm=None, strategy=None):
     fg.clear()
     ax = fg.add_subplot()
     ax.set_facecolor(cchart["fondo"])
-    ax.set_box_aspect(parm["aspect"])
 
-    data, dividends, ValueMarket = {}, {}, 0
+    data, ValueMarket = {}, 0
 
-    #  Construction de dict() para grafico
+    # Construcción de dict() para gráfico
     for keys, activos in strategy.items():
         cbase, vmark = 0.0, 0.0
         for activo in activos:
@@ -1520,57 +1519,54 @@ def grupo_activos(fg: object, parm=None, strategy=None):
         data.update({keys: (cbase, vmark)})
 
     keys = list(data.keys())
-    etiquetas = ["Capital", "Valor Market"]
-    grafico = {
-        etiquetas[0]: [data[categoria][0] for categoria in keys],
-        etiquetas[1]: [data[categoria][1] for categoria in keys],
-    }
     x = np.arange(len(keys))
-    mean = np.mean([data[categoria][1] for categoria in keys])
-    ValueMarket = np.sum([data[categoria][1] for categoria in keys])
-    smean = f" μ = {mean:.0f}$"
 
-    p_legend, bar_objects, width, multiplier = [], [], 0.40, 0
-    for attribute, measurement in grafico.items():
-        offset = width * multiplier
-        rects = ax.bar(x + offset, measurement, width, label=attribute)
-        bar_objects.append(rects)
-        multiplier += 1
+    cbase = np.array([data[k][0] for k in keys])
+    vmark = np.array([data[k][1] for k in keys])
+    mean = np.mean(vmark)
+    ValueMarket = np.sum(vmark)
 
-    # Accedemos a la primera barra para obtener su color
-    for i, rect_container in enumerate(bar_objects):
-        color = rect_container[0].get_facecolor()
-        p_legend.append(mpatches.Patch(color=color, label=etiquetas[i]))
+    p_legend, colores = [], [cchart["plot9"], cchart["plot31"]]
+    
+    # Gráfico de área estilo grupo_dividendo
+    ax.fill_between(x, cbase, color=colores[0], alpha=0.99, label="Capital")
+    ax.fill_between(x, vmark, color=colores[1], alpha=0.99, label="Valor Market")
 
-    ax.spines[["top", "bottom", "left", "right"]].set_visible(False)
-    ax.grid(True, color=cchart["texto"], linewidth=0.1)
-    ax.spines.bottom.set_color(cchart["asx"])
-    ax.spines.left.set_color(cchart["asx"])
-    ax.spines.bottom.set_visible(True)
-    ax.spines.right.set_visible(True)
-    ax.yaxis.tick_right()
-
-    xlabels = ax.get_xticklabels()
-    ylabels = ax.get_yticklabels()
-    plt.setp(xlabels, ha="right", fontsize=6, color=cchart["asx"], rotation=30)
-    plt.setp(ylabels, ha="left", fontsize=6, color=cchart["texto"])
-
-    ax.set_ylabel("Valor en (USD)", fontsize=7, color=cchart["texto"])
+    # Configurar legend
+    p_legend.append(mpatches.Patch(color=colores[0], label="Capital"))
+    p_legend.append(mpatches.Patch(color=colores[1], label="Valor Market"))
     fg.legend(loc=parm["legend"], handles=p_legend, fontsize=6)
     fg.suptitle(parm["titulo"], fontsize="medium", color=cchart["titulo"])
 
-    ax.set_xticks(x + width / 2, keys)
+    # Configurar eje X
+    ax.set_xticks(x)
+    ax.set_xticklabels(keys, rotation=45, ha="right")
+    ax.set(xlim=[x[0], x[-1]])
+    xlabels = ax.get_xticklabels()
+    plt.setp(xlabels, ha="right", fontsize=6, color=cchart["asx"], rotation=25)
+
+    ax.spines[["top", "bottom", "right"]].set_visible(False)
+    ax.spines["left"].set_color(cchart["asy"])
+    ax.grid(True, color=cchart["texto"], linewidth=0.1)
+
+    # Configurar eje Y
+    ylabels = ax.get_yticklabels()
+    plt.setp(ylabels, ha="right", fontsize=6, color=cchart["texto"])
+    ax.set_ylabel("Valor en (USD)", fontsize=6, color=cchart["asx"])
     ax.yaxis.set_major_formatter(currency)
     ax.tick_params(axis="y", colors=cchart["asx"])
+
+    # Línea de media
+    ax.axhline(mean, linewidth=0.6, ls="--", color=cchart["texto"])
+    smean = f" μ = {mean:.0f}$"
     ax.text(
         int(len(x) / 2),
         mean * 1.2,
         smean,
         fontsize=6,
-        va="center",
+        ha="center",
         color=cchart["texto"],
     )
-    ax.axhline(mean, linewidth=0.6, ls="--", color=cchart["texto"])
 
     # Construir summary con formato compatible para rebalanceo
     total_inversion = sum(data[categoria][0] for categoria in keys)

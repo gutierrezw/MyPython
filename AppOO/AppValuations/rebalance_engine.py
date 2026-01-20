@@ -719,6 +719,9 @@ class RebalanceEngine(MetodoEngine):
 
         return self.candidates
 
+    # =========================
+    # FASE 6 — Caso especiales  (gwi)
+    # =========================
     def _score_candidates_crypto(self):
         """
         Scoring específico para Crypto basado en equilibrio de costobase.
@@ -1151,15 +1154,18 @@ class RebalanceEngine(MetodoEngine):
             symbol = candidate["symbol"]
             score = candidate.get("score", 0.0)
 
-            if score <= 0:
-                continue
-
             # obtener vehículo real
             vehiculo = BDsystem.get_vehiculo_by_ticket(symbol)
             if not vehiculo:
                 continue
 
+            if score <= 0:
+                continue
+
+            # Obetine min inversion y la agrega a ranking, 
             pinvertir = vehiculo.get("Pinvertir", 0.0)
+            candidate["pinvertir"] = pinvertir 
+            
             if pinvertir < min_ticket:
                 continue
 
@@ -1179,7 +1185,8 @@ class RebalanceEngine(MetodoEngine):
             asignaciones.append(
                 {
                     "symbol": symbol,
-                    "monto_sugerido": monto,
+                    #"monto_sugerido": monto,
+                    "monto_sugerido": gap_valor,
                     "pinvertir": pinvertir,
                     "score": round(score, 4),
                     "impacto": candidate["impacto"],

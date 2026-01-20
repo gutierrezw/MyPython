@@ -156,34 +156,14 @@ class DataHub:
     # ========================================================================================================
     # GRUPO 1: CONFIGURACIÓN DE COLORES (Cargable desde DB)
     # ========================================================================================================
-    bgcolor = "DarkCyan"
-    cgcolor = "black"
-    cchart = {
-        "texto": "white",
-        "titulo": "cyan",
-        "fondo": "DarkCyan",
-        "fondo_fig": "black",
-        "asx": "black",
-        "asy": "black",
-        "axsy": "grey",
-        "axsx": "grey",
-        "2eje": "orange",
-        "plot0": "white",
-        "plot1": "green",
-        "plot11": "GreenYellow",
-        "plot2": "orange",
-        "plot21": "DarkOrange",
-        "plot3": "red",
-        "plot31": "OrangeRed",
-        "plot4": "yellow",
-        "plot41": "Gold",
-        "plot5": "DodgerBlue",
-        "plot6": "skyblue",
-        "plot7": "grey",
-        "plot8": "black",
-        "plot9": "blue",
-        "tab20": colormaps.get_cmap("tab20"),
-    }
+    session_data = BDsystem.get_sesion_by_vehiculo(
+                                vehiculo="DataHub"
+    )
+    envs_config = json.loads(session_data["userapi"].decode("utf-8"))
+    bgcolor = envs_config["bgcolor"]
+    cgcolor = envs_config["cgcolor"]
+    cchart = envs_config["cchart"]
+    cchart["tab20"] = colormaps.get_cmap("tab20")
     colors = {
         "bgcolor": bgcolor,
         "cgcolor": cgcolor,
@@ -199,23 +179,24 @@ class DataHub:
     # ========================================================================================================
     # GRUPO 2: MONITOREO DE CPU Y MEMORIA (Cargable desde DB)
     # ========================================================================================================
-    DCpu = []
+    DCpu = []   
     DMem = []
-    display = None
-    max_points = 40
-    interval = 1
-    CpuLock = None
+    display = envs_config["display"] or None
+    max_points = envs_config["max_points"] or 40
+    interval = envs_config["interval"] or 1
+    CpuLock = envs_config["CpuLock"] or None
 
     # ========================================================================================================
     # GRUPO 3: PARÁMETROS DE TRADING (Cargable desde DB)
     # ========================================================================================================
-    MinProfit = 50.0
-    Toleranciasell = 0.10
-    MaxRoi = 0.09
-    InicioInversior = date(2020, 7, 31)
-    ib_gateway_host = r"https://localhost"
-    ib_gateway_port = r"5501"
+    MinProfit = envs_config["MinProfit"]  or 50
+    Toleranciasell = envs_config["Toleranciasell"] or 0.10
+    MaxRoi = envs_config["MaxRoi"] or 0.09
 
+    InicioInversior = envs_config["InicioInversior"] 
+    ib_gateway_host = envs_config["ib_gateway_host"]
+    ib_gateway_port = envs_config["ib_gateway_port"]
+    
     # ========================================================================================================
     # GRUPO 4: ESTRUCTURAS RUNTIME (NO configurables - se inicializan en código)
     # ========================================================================================================
@@ -2353,6 +2334,7 @@ class TickerInfo(MyOrders):
             # update de dividends en tabla market aplica solo para Stock
             wait = DataHub.last_process["dividends_en_market_stock"]
             if wait < datetime.now():
+                
                 # Versión con yfinance (para comparar con IB)
                 self.dividends_en_market_stock(activos)
                 DataHub.last_process["dividends_en_market_stock"] = (

@@ -400,6 +400,194 @@ class BDsystem:  # -------------------------------------------------------------
             print(f"[Mysql::delete_sesion()]: {error}")
             return False
 
+    # =========================
+    # Métodos para define_modelosia
+    # =========================
+    @staticmethod
+    def get_modelo_ia(modelo: str) -> Optional[dict]:
+        """
+        Obtiene configuración de un modelo IA por nombre.
+
+        Args:
+            modelo: Nombre del modelo (ej: 'modelo_sellv01')
+
+        Returns:
+            dict con campos: id, modelo, Nombre, paramts, documents, define_modelo, timestamp
+            None si no existe
+        """
+        try:
+            conn = BDsystem.connect_dbase("select.define_modelosia", False)
+            cursor = conn.cursor()
+
+            sql = "SELECT * FROM bdinv.modelos_ia WHERE modelo = %s"
+            cursor.execute(sql, (modelo,))
+            result = cursor.fetchone()
+
+            if not result:
+                return None
+
+            columns = [col[0] for col in cursor.description]
+            return dict(zip(columns, result))
+        except Exception as error:
+            print(f"[Mysql::get_modelo_ia()]: {error}")
+            return None
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def get_all_modelos_ia() -> list:
+        """
+        Obtiene todos los modelos IA registrados.
+
+        Returns:
+            Lista de dicts con la configuración de cada modelo
+        """
+        try:
+            conn = BDsystem.connect_dbase("select.define_modelosia", False)
+            cursor = conn.cursor()
+
+            sql = "SELECT * FROM bdinv.modelos_ia ORDER BY modelo"
+            cursor.execute(sql)
+            results = cursor.fetchall()
+
+            if not results:
+                return []
+
+            columns = [col[0] for col in cursor.description]
+            return [dict(zip(columns, row)) for row in results]
+        except Exception as error:
+            print(f"[Mysql::get_all_modelos_ia()]: {error}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def insert_modelo_ia(modelo: str, nombre: str, paramts: bytes = None,
+                         documents: bytes = None, tipo_modelo: str = None, define_modelo: str = None) -> bool:
+        """
+        Inserta un nuevo modelo IA.
+
+        Args:
+            modelo: Identificador único del modelo (PK)
+            nombre: Nombre descriptivo del modelo
+            paramts: Parámetros del modelo (blob serializado)
+            documents: Documentación/metadata (blob serializado)
+            define_modelo: Definición/tipo del modelo
+
+        Returns:
+            True si se insertó correctamente, False en caso de error
+        """
+        try:
+            conn = BDsystem.connect_dbase("insert.define_modelosia", False)
+            cursor = conn.cursor()
+
+            sql = """
+                INSERT INTO bdinv.modelos_ia
+                (modelo, Nombre, paramts, documents, define_modelo, tipo_modelo)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            cursor.execute(sql, (modelo, nombre, paramts, documents, define_modelo, tipo_modelo))
+            conn.commit()
+
+            rows_affected = cursor.rowcount
+            cursor.close()
+            conn.close()
+            return rows_affected > 0
+        except Exception as error:
+            print(f"[Mysql::insert_modelo_ia()]: {error}")
+            return False
+
+    @staticmethod
+    def update_modelo_ia(modelo: str, nombre: str = None, paramts: bytes = None,
+                         documents: bytes = None, define_modelo: str = None, tipo_modelo: str = None) -> bool:
+        """
+        Actualiza un modelo IA existente.
+
+        Args:
+            modelo: Identificador del modelo a actualizar (PK)
+            nombre: Nuevo nombre (opcional)
+            paramts: Nuevos parámetros (opcional)
+            documents: Nueva documentación (opcional)
+            define_modelo: Nueva definición (opcional)
+
+        Returns:
+            True si se actualizó correctamente, False en caso de error
+        """
+        try:
+            conn = BDsystem.connect_dbase("update.define_modelosia", False)
+            cursor = conn.cursor()
+
+            # Construir query dinámicamente según campos proporcionados
+            updates = []
+            values = []
+
+            if nombre is not None:
+                updates.append("Nombre = %s")
+                values.append(nombre)
+            if paramts is not None:
+                updates.append("paramts = %s")
+                values.append(paramts)
+            if documents is not None:
+                updates.append("documents = %s")
+                values.append(documents)
+            if define_modelo is not None:
+                updates.append("define_modelo = %s")
+                values.append(define_modelo)
+            if tipo_modelo is not None:
+                updates.append("tipo_modelo = %s")
+                values.append(tipo_modelo)
+
+            if not updates:
+                return False
+
+            # Agregar timestamp de actualización
+            values.append(modelo)
+
+            sql = f"UPDATE bdinv.modelos_ia SET {', '.join(updates)} WHERE modelo = %s"
+            cursor.execute(sql, values)
+            conn.commit()
+
+            rows_affected = cursor.rowcount
+            cursor.close()
+            conn.close()
+            return rows_affected > 0
+        except Exception as error:
+            print(f"[Mysql::update_modelo_ia()]: {error}")
+            return False
+
+    @staticmethod
+    def delete_modelo_ia(modelo: str) -> bool:
+        """
+        Elimina un modelo IA.
+
+        Args:
+            modelo: Identificador del modelo a eliminar
+
+        Returns:
+            True si se eliminó correctamente, False en caso de error
+        """
+        try:
+            conn = BDsystem.connect_dbase("delete.define_modelosia", False)
+            cursor = conn.cursor()
+
+            sql = "DELETE FROM bdinv.modelos_ia WHERE modelo = %s"
+            cursor.execute(sql, (modelo,))
+            conn.commit()
+
+            rows_affected = cursor.rowcount
+            cursor.close()
+            conn.close()
+            return rows_affected > 0
+        except Exception as error:
+            print(f"[Mysql::delete_modelo_ia()]: {error}")
+            return False
+
 
 class IPerformance(
     BDsystem

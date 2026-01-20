@@ -2362,7 +2362,7 @@ class DashMain:
         self.nb.add(self.win4, text="Ars            ")
         self.nb.add(self.win7, text="Ves            ", state="disabled")
         self.nb.add(self.win8, text="Crowfonding    ", state="disabled")
-        self.nb.add(self.win6, text="FuturoCrypto   ", state="disabled")
+        self.nb.add(self.win6, text="BotCrypto      ", state="disabled")
         self.nb.add(self.win2, text="Screener       ")
         self.nb.add(self.win3, text="Gestión        ")
         self.nb.add(self.win5, text="System         ")
