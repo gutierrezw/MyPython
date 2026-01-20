@@ -252,6 +252,34 @@ class DataHub:
         "Recomendado",
         "Comentarios",
     ]
+
+    ColumnCsvBuy = [
+        "Symbol",
+        "account",
+        "vehiculo",
+        "tipo",  # buy o dividends
+        "score",
+        "monto_sugerido",
+        "ganancia_precio",
+        "ganancia_inversion",
+        "cantidad_buy",
+        "last",
+        "avgcost",
+        "cantidad_post",
+        "avgcost_post",
+        "retorno_post",
+        "objetivo",
+        "dividend_yield",
+        "ex_dividend_date",
+        "pre_dividendos",
+        "post_dividendos",
+        "pre_costobase",
+        "post_costobase",
+        "Datostecnicos",
+        "Fecha",
+        "Recomendado",
+        "Comentarios",
+    ]
     SellCsvJsonDcolumnas = {
         "Symbol": "symbol",
         "Opcion": "opcion",
@@ -480,6 +508,88 @@ class DataHub:
                             )
         except Exception as e:
             print(f"csv_OptionSales_write(): {e}")
+
+    # write CSV: Oportunity buy
+    def csv_OptionBuy_write() -> None:
+        """Genera CSV con oportunidades de compra para modelo IA."""
+        try:
+            path = define_FileCache(name="csv_datosIA_buy.csv")
+
+            with DataHub.lockCsvAi:
+                with open(path, mode="w", newline="", encoding="utf-8") as file:
+                    writer = csv.writer(file)
+                    writer.writerow(DataHub.ColumnCsvBuy)
+
+                    # Obtener rebalanceo disponible
+                    if not hasattr(DataHub, "rebalanceo") or not DataHub.rebalanceo:
+                        return
+
+                    with DataHub.lockInfo:
+                        info_tmp = DataHub.info.copy()
+
+                    for vehiculo, datos in DataHub.rebalanceo.items():
+                        # Stock usa asignaciones, otros usan ranking
+                        candidatos = datos.get("asignaciones", []) if vehiculo == "Stock" else datos.get("ranking", [])
+
+                        for item in candidatos:
+                            symbol = item.get("symbol")
+                            if not symbol:
+                                continue
+
+                            # Obtener datos del símbolo desde info
+                            info_symbol = info_tmp.get(symbol, {})
+                            account = info_symbol.get("account", "")
+
+                            # Buscar datos de buy o dividends
+                            buy_data = info_symbol.get("buy") or info_symbol.get("dividends")
+                            if not buy_data:
+                                continue
+
+                            # Determinar tipo (buy o dividends)
+                            tipo = "dividends" if "dividends" in info_symbol else "buy"
+
+                            score = item.get("score", 0)
+                            monto_sugerido = item.get("monto_sugerido", 0)
+                            if monto_sugerido == 0:
+                                monto_sugerido = item.get("impacto", {}).get("gap_valor_total", 0)
+
+                            # Filtrar sin score o monto
+                            if score <= 0 or monto_sugerido <= 0:
+                                continue
+
+                            datos_tec = json.dumps(info_symbol.get("datos_tecnicos", {}))
+
+                            writer.writerow(
+                                [
+                                    symbol,
+                                    account,
+                                    vehiculo,
+                                    tipo,
+                                    score,
+                                    monto_sugerido,
+                                    buy_data.get("ganancia precio", 0),
+                                    buy_data.get("ganancia inversión", 0),
+                                    buy_data.get("cantidad buy", 0),
+                                    buy_data.get("last", 0),
+                                    buy_data.get("avgcost", 0),
+                                    buy_data.get("cantidad post", 0),
+                                    buy_data.get("avgCost post", 0),
+                                    buy_data.get("retorno post", 0),
+                                    buy_data.get("objetivo", 0),
+                                    buy_data.get("dividendYield", 0),
+                                    buy_data.get("exDividendDate", ""),
+                                    buy_data.get("pre dividendos", 0),
+                                    buy_data.get("post dividendos", 0),
+                                    buy_data.get("pre costobase", 0),
+                                    buy_data.get("post costobase", 0),
+                                    datos_tec,
+                                    datetime.now().date(),
+                                    0,  # Recomendado
+                                    "SinNota",  # Comentarios
+                                ]
+                            )
+        except Exception as e:
+            print(f"csv_OptionBuy_write(): {e}")
 
     # recorre DataHub.info() para mostrar lo disponible para la sell
     def get_info_symbols_gain():
@@ -2257,6 +2367,7 @@ class TickerInfo(MyOrders):
 
             # exporta oportunidades al agente IA
             DataHub.csv_OptionSales_write()
+            DataHub.csv_OptionBuy_write()
 
             # contabiliza ejecución del schedule
             task = f"schedule_oportunidades({self.vehiculo})"
