@@ -1,22 +1,27 @@
-import pandas as pd
-import joblib
-import json
-import warnings
-
-import numpy as np
-
-from sklearn.exceptions import UndefinedMetricWarning
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
-from sklearn.metrics import classification_report, f1_score, roc_auc_score
+from Modulos_python import (
+    pd,
+    joblib,
+    json,
+    warnings,
+    np,
+    UndefinedMetricWarning,
+    RandomForestClassifier,
+    train_test_split,
+    StratifiedKFold,
+    cross_val_score,
+    classification_report,
+    f1_score,
+    roc_auc_score,
+)
 from Modulos_Mysql import RepositorioOportunidadesBuySell
 from Modulos_Utilitarios import define_FileCache
+
 
 class ModeloOportunidadesSell:
     def __init__(self):
         self.modelo = None
         self.metrics = None
-        self.modelo_name = 'modelo_sellv01'
+        self.modelo_name = "modelo_sellv01"
 
         # Accesos MySql ----------------------------------------------------------------------------------------------
         self.ReOportunidades = RepositorioOportunidadesBuySell()
@@ -32,9 +37,9 @@ class ModeloOportunidadesSell:
             row_dict = dict(zip(columnas, fila))
 
             # Elimina columnas innecesarias para el modelo
-            keys_delete = ['id', 'tipo', 'subtipo', 'origen', 'timestamp', 'fecha', 'estado', 'nota', 'enviada']
+            keys_delete = ["id", "tipo", "subtipo", "origen", "timestamp", "fecha", "estado", "nota", "enviada"]
             for key in keys_delete:
-                row_dict.pop(key, None) 
+                row_dict.pop(key, None)
 
             json_detalle = row_dict.get("json_detalle")
             if not json_detalle:
@@ -45,7 +50,7 @@ class ModeloOportunidadesSell:
 
                 # Limpieza de indicadores si vienen como string
                 indicadores = detalle.get("indicadores", {})
-              
+
                 row_dict["datos_tecnicos"] = indicadores
                 row_dict["profit"] = detalle.get("profit")
                 row_dict["roi"] = detalle.get("roi")
@@ -54,22 +59,22 @@ class ModeloOportunidadesSell:
 
             except (EncodingWarning, Exception) as e:
                 print(f"convertir_dataset_entrenamiento(): {e}")
-    
+
         return pd.DataFrame(registros)
-      
+
     def aplanar_datos_tecnicos(self, df):
         """Extrae indicadores diarios, semanales y mensuales de la columna 'datos_tecnicos'"""
         try:
             registros = []
-            timeframes = {"diaria": "_d", "semanal": "_w", "mensual": "_m" }
-            timeMaxMin = {"diaria": "13_semanas", "semanal": "26_semanas", "mensual": "52_semanas" }
+            timeframes = {"diaria": "_d", "semanal": "_w", "mensual": "_m"}
+            timeMaxMin = {"diaria": "13_semanas", "semanal": "26_semanas", "mensual": "52_semanas"}
 
             for _, rows in df.iterrows():
                 plano = {}
 
                 # crea struct a partir de json
-                fila = json.loads(rows['datos_tecnicos'])
-                                          
+                fila = json.loads(rows["datos_tecnicos"])
+
                 if not isinstance(fila, dict):
                     registros.append(plano)
                     continue
@@ -98,14 +103,14 @@ class ModeloOportunidadesSell:
                     # Fibonacci
                     fibo = fuente.get("retroceso_fibonacci", {})
                     plano[f"fibo_longico{sufijo}"] = fibo.get("longico")
-                    
+
                     # Aplanar retroceso alcista
                     fibo_alcista = fibo.get("tendencia alcista", {})
                     for nivel, valor in fibo_alcista.items():
                         nivel_limpio = nivel.strip().replace("%", "").replace(".", "_")
                         col_name = f"fibo_alcista_{nivel_limpio}{sufijo}"
-                        plano[col_name] = valor 
-                    
+                        plano[col_name] = valor
+
                     # Aplanar retroceso bajista
                     fibo_bajista = fibo.get("tendencia_bajista", {})
                     for nivel, valor in fibo_bajista.items():
@@ -133,17 +138,29 @@ class ModeloOportunidadesSell:
         # Todas las features disponibles por timeframe
         # NOTA: fibo_alcista y fibo_bajista son dicts con múltiples niveles, no se incluyen aquí
         # ROI agregado como feature importante para decisiones de venta
-        base_features = ['rsi', 'macd', 'Close',
-                        'EMA020', 'EMA050', 'EMA100', 'EMA200',
-                        'EMA009', 'EMA021', 'EMA055', 'EMA144',
-                        'fibo_longico'
+        base_features = [
+            "rsi",
+            "macd",
+            "Close",
+            "EMA020",
+            "EMA050",
+            "EMA100",
+            "EMA200",
+            "EMA009",
+            "EMA021",
+            "EMA055",
+            "EMA144",
+            "fibo_longico",
         ]
         # Features que no dependen de timeframe
-        scalar_features = ['roi']
+        scalar_features = ["roi"]
         other_features = [
-            '13_semanas_max_d', '13_semanas_min_d',
-            '26_semanas_max_w', '26_semanas_min_w',
-            '52_semanas_max_m', '52_semanas_min_m'
+            "13_semanas_max_d",
+            "13_semanas_min_d",
+            "26_semanas_max_w",
+            "26_semanas_min_w",
+            "52_semanas_max_m",
+            "52_semanas_min_m",
         ]
 
         # 1. Generar lista de columnas técnicas como antes (basado en usar_timeframes)
@@ -178,17 +195,17 @@ class ModeloOportunidadesSell:
         df = df.dropna(subset=columnas_validas + ["recomendado"])
 
         # 6. Solo los que han sido aprobados o rechazados
-        df = df[df['recomendado'].isin([1, -1])]
+        df = df[df["recomendado"].isin([1, -1])]
 
         if df.empty:
             print(f"cargar_datos(): No quedan filas después del filtrado")
             raise ValueError("No hay datos para entrenar después del filtrado")
 
         # 7. Etiqueta binaria
-        df['etiqueta'] = df['recomendado'].apply(lambda x: "Display/Opportunity" if x == 1 else "Hide/Opportunity")
+        df["etiqueta"] = df["recomendado"].apply(lambda x: "Display/Opportunity" if x == 1 else "Hide/Opportunity")
 
-        return df[columnas_validas], df['etiqueta']
-    
+        return df[columnas_validas], df["etiqueta"]
+
     def entrenar_modelo(self, df, n_folds=5):
         """
         Entrena el modelo usando validación cruzada estratificada.
@@ -201,17 +218,15 @@ class ModeloOportunidadesSell:
             # Validación cruzada estratificada con balanceo de clases
             cv = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
             modelo = RandomForestClassifier(
-                n_estimators=100,
-                class_weight='balanced',  # Balancea automáticamente clases desiguales
-                random_state=42
+                n_estimators=100, class_weight="balanced", random_state=42  # Balancea automáticamente clases desiguales
             )
 
             # Calcular métricas con cross-validation
-            cv_accuracy = cross_val_score(modelo, X, y, cv=cv, scoring='accuracy')
-            cv_f1 = cross_val_score(modelo, X, y, cv=cv, scoring='f1_weighted')
-            cv_precision = cross_val_score(modelo, X, y, cv=cv, scoring='precision_weighted')
-            cv_recall = cross_val_score(modelo, X, y, cv=cv, scoring='recall_weighted')
-            cv_roc_auc = cross_val_score(modelo, X, y, cv=cv, scoring='roc_auc')
+            cv_accuracy = cross_val_score(modelo, X, y, cv=cv, scoring="accuracy")
+            cv_f1 = cross_val_score(modelo, X, y, cv=cv, scoring="f1_weighted")
+            cv_precision = cross_val_score(modelo, X, y, cv=cv, scoring="precision_weighted")
+            cv_recall = cross_val_score(modelo, X, y, cv=cv, scoring="recall_weighted")
+            cv_roc_auc = cross_val_score(modelo, X, y, cv=cv, scoring="roc_auc")
 
             # Entrenar modelo final con todos los datos
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, stratify=y, random_state=42)
@@ -224,7 +239,11 @@ class ModeloOportunidadesSell:
             class_counts = y.value_counts()
             n_aprobadas = class_counts.get("Display/Opportunity", 0)
             n_rechazadas = class_counts.get("Hide/Opportunity", 0)
-            balance_ratio = min(n_aprobadas, n_rechazadas) / max(n_aprobadas, n_rechazadas) if max(n_aprobadas, n_rechazadas) > 0 else 0
+            balance_ratio = (
+                min(n_aprobadas, n_rechazadas) / max(n_aprobadas, n_rechazadas)
+                if max(n_aprobadas, n_rechazadas) > 0
+                else 0
+            )
 
             # Guardar métricas de validación cruzada
             self.metrics = {
@@ -242,14 +261,14 @@ class ModeloOportunidadesSell:
                 "n_samples": len(X),
                 "n_aprobadas": int(n_aprobadas),
                 "n_rechazadas": int(n_rechazadas),
-                "balance_ratio": float(balance_ratio)
+                "balance_ratio": float(balance_ratio),
             }
 
             # Calcular métricas adicionales en test set
             self.metricas_de_clases(X, y, y_test, X_test)
 
         except Exception as e:
-            print('entrenar_modelo(): {}'.format(e))
+            print("entrenar_modelo(): {}".format(e))
 
     def metricas_de_clases(self, X, y, y_test, X_test):
         """Agrega métricas del test set al diccionario de métricas existente"""
@@ -277,7 +296,7 @@ class ModeloOportunidadesSell:
 
     def calcular_feature_importance(self):
         """Calcula y guarda la importancia de las features del modelo"""
-        if self.modelo is None or not hasattr(self.modelo, 'feature_importances_'):
+        if self.modelo is None or not hasattr(self.modelo, "feature_importances_"):
             return
 
         importances = self.modelo.feature_importances_
@@ -290,14 +309,11 @@ class ModeloOportunidadesSell:
         top_features = []
         for i in range(min(10, len(indices))):
             idx = indices[i]
-            top_features.append({
-                "feature": feature_names[idx],
-                "importance": float(importances[idx])
-            })
+            top_features.append({"feature": feature_names[idx], "importance": float(importances[idx])})
 
         if self.metrics is None:
             self.metrics = {}
-        self.metrics["feature_importance"] = top_features   
+        self.metrics["feature_importance"] = top_features
 
     def predecir_modelo(self, df):
         try:
@@ -313,26 +329,26 @@ class ModeloOportunidadesSell:
             df_resultado = df.copy()
             df_resultado["prediccion"] = predicciones
             df_resultado["confianza"] = probabilidades[:, 1]
-            
+
             # elimina las filas con NaN
-            df_resultado = df_resultado.dropna(subset=['roi'])
+            df_resultado = df_resultado.dropna(subset=["roi"])
 
             return df_resultado
         except (EncodingWarning, Exception) as e:
-            print('predecir_modelo(): {}'.format(e))
+            print("predecir_modelo(): {}".format(e))
 
-    def save_modelo(self, file='modelo_ia'):
+    def save_modelo(self, file="modelo_ia"):
         """Guarda el modelo y sus métricas usando define_FileCache"""
-        path_modelo = define_FileCache(f'{file}.pkl')
-        path_metrics = define_FileCache(f'{file}_metrics.pkl')
+        path_modelo = define_FileCache(f"{file}.pkl")
+        path_metrics = define_FileCache(f"{file}_metrics.pkl")
         joblib.dump(self.modelo, path_modelo)
         if self.metrics:
             joblib.dump(self.metrics, path_metrics)
 
-    def load_modelo(self, file='modelo_ia'):
+    def load_modelo(self, file="modelo_ia"):
         """Carga el modelo y sus métricas si existen"""
-        path_modelo = define_FileCache(f'{file}.pkl')
-        path_metrics = define_FileCache(f'{file}_metrics.pkl')
+        path_modelo = define_FileCache(f"{file}.pkl")
+        path_metrics = define_FileCache(f"{file}_metrics.pkl")
         try:
             self.modelo = joblib.load(path_modelo)
         except FileNotFoundError:
@@ -344,14 +360,15 @@ class ModeloOportunidadesSell:
 
     # Ordena tareas para el entrenamiento del modelo de Sell
     def run_entraminetoSell(self):
-        datos = self.ReOportunidades.obtener_por_tipo(tipo='sell')
+        datos = self.ReOportunidades.obtener_por_tipo(tipo="sell")
         if datos[0]:
             df = self.convertir_dataset_entrenamiento(datos)
             df = self.aplanar_datos_tecnicos(df)
             self.entrenar_modelo(df)
             self.save_modelo(file=self.modelo_name)
 
-if __name__ == '__main__':
-    
+
+if __name__ == "__main__":
+
     AiSell = ModeloOportunidadesSell()
     AiSell.run_entraminetoSell()
