@@ -74,6 +74,13 @@ class ClassAgenteIA:
         self.PlanInversion = PlanInversion()
         self.sesion = self.PlanInversion.get_sesion_by_vehiculo(self.vehiculo)
 
+        # variables Modelo sell
+        modelo = BDsystem.get_modelo_ia(modelo="modelo_sellv01")
+        modelo_config = json.loads(modelo["paramts"].decode("utf-8"))
+        self.umbral = modelo_config.get("umbral_sell", 0.50)
+        self.umbralObserv = modelo_config.get("umbral_observacion", 0.35)
+        self.confianza = modelo_config.get("umbral_confianza", 0.60)
+
         # Asigna Nombre Logging
         self.logger = logging.getLogger("ClassAgenteIA")
 
@@ -172,7 +179,7 @@ class ClassAgenteIA:
 
                 # oportunidades con fitros IA
                 elif self.activaIA:
-                    await self.evaluar_oportunidades_con_IA(df_sell)
+                    await self.evaluar_oportunidades_con_IA(df_sell=df_sell, umbral_venta=self.umbral, umbral_observacion=self.umbralObserv)
         except (EncodingWarning, Exception) as e:
             print(f"Agente_ManagerSell(): {e}")
 
@@ -745,6 +752,13 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self.threadCall = None
         self.activaIA = True
 
+        # variables Modelo sell
+        modelo = BDsystem.get_modelo_ia(modelo="modelo_sellv01")
+        modelo_config = json.loads(modelo["paramts"].decode("utf-8"))
+        self.umbral = modelo_config.get("umbral_sell", 0.50)
+        self.umbralObserv = modelo_config.get("umbral_observacion", 0.35)
+        
+
         # activa Telegram
         self._activar_telegram()
 
@@ -1011,7 +1025,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             print(f"evaluar_oportunidades(): {e}")
 
     # Obtener oportunidades desde modelo IA
-    async def evaluar_oportunidades_con_IA(self, df_sell, umbral_venta=0.65, umbral_observacion=0.35):
+    async def evaluar_oportunidades_con_IA(self, df_sell=None, umbral_venta=0.65, umbral_observacion=0.35):
         """
         Sistema de dos umbrales:
         - confianza >= umbral_venta (0.65): Enviar a Telegram para vender

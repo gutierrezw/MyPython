@@ -16,22 +16,30 @@ from Modulos_python import (
     traceback,
     logging,
     mpatches,
+    filedialog,
 )
-from Modulos_Mysql import RepositorioOportunidadesBuySell
+from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem
 from Class_customer import (
     MyMessageBox,
     DataHub,
     CacheHut,
 )
 from Class_IA_modelos import ModeloOportunidadesSell
+from Class_DashBot import Chatbot
 
 
 # clase paar monitorear el estado del sistema
 class system_status(tk.Frame):
     def __init__(self, master=None, colores=None):
         self.system = master
-        self.colors = colores
         self.itemsInfo = None
+
+        # Decodificar JSON desde BLOB
+        self.bgcolor = colores["bgcolor"]
+        self.fgcolor = colores["bgcolor"]
+        self.cgcolor = colores["cgcolor"]
+        self.cchart = colores["cchart"]
+
 
         # Lista para rastrear todos los after() callbacks
         self.after_ids = []
@@ -588,14 +596,14 @@ class system_status(tk.Frame):
 
             # Configurar colores y estilos mejorados (consistente con manager_buysell)
             detalle.tag_configure(
-                "header", foreground="cyan", font=("TkDefaultFont", 10, "bold")
+                "header", foreground=self.bgcolor, font=("TkDefaultFont", 10, "bold")
             )
             detalle.tag_configure(
                 "section", foreground="yellow", font=("TkDefaultFont", 9, "bold")
             )
             detalle.tag_configure("info", foreground="lightgreen")
             detalle.tag_configure("summary", foreground="orange")
-            detalle.tag_configure("value", foreground="white")
+            detalle.tag_configure("value", foreground=self.fgcolor)
             detalle.tag_configure("error", foreground="red")
             detalle.tag_configure("warning", foreground="orange")
 
@@ -975,14 +983,14 @@ class system_status(tk.Frame):
 
             # Configurar colores y estilos (consistente con otros módulos)
             detalle.tag_configure(
-                "header", foreground="cyan", font=("TkDefaultFont", 10, "bold")
+                "header", foreground=self.bgcolor, font=("TkDefaultFont", 10, "bold")
             )
             detalle.tag_configure(
                 "section", foreground="yellow", font=("TkDefaultFont", 9, "bold")
             )
             detalle.tag_configure("info", foreground="lightgreen")
             detalle.tag_configure("summary", foreground="orange")
-            detalle.tag_configure("value", foreground="white")
+            detalle.tag_configure("value", foreground=self.fgcolor)
             detalle.tag_configure("data", foreground="lightgray", font=("Courier", 8))
             detalle.tag_configure("error", foreground="red")
             detalle.tag_configure("warning", foreground="orange")
@@ -1209,14 +1217,14 @@ class system_status(tk.Frame):
 
                 # Configurar colores
                 tree.tag_configure(
-                    "header", foreground="cyan", font=("TkDefaultFont", 11, "bold")
+                    "header", foreground=self.bgcolor, font=("TkDefaultFont", 11, "bold")
                 )
                 tree.tag_configure(
                     "section", foreground="yellow", font=("TkDefaultFont", 9, "bold")
                 )
                 tree.tag_configure("info", foreground="lightgreen")
                 tree.tag_configure("summary", foreground="orange")
-                tree.tag_configure("value", foreground="white")
+                tree.tag_configure("value", foreground=self.fgcolor)
 
                 # Scrollbar
                 vsb = ttk.Scrollbar(tree, orient=tk.VERTICAL, command=tree.yview)
@@ -1667,7 +1675,7 @@ class system_status(tk.Frame):
 
             # Configurar colores y estilos
             detalle.tag_configure(
-                "header", foreground="cyan", font=("TkDefaultFont", 10, "bold")
+                "header", foreground=self.bgcolor, font=("TkDefaultFont", 10, "bold")
             )
             detalle.tag_configure(
                 "section", foreground="yellow", font=("TkDefaultFont", 9, "bold")
@@ -1675,7 +1683,7 @@ class system_status(tk.Frame):
             detalle.tag_configure("info", foreground="lightgreen")
             detalle.tag_configure("summary", foreground="orange")
             detalle.tag_configure("subkey", foreground="lightblue")
-            detalle.tag_configure("value", foreground="white")
+            detalle.tag_configure("value", foreground=self.fgcolor)
             detalle.tag_configure("data", foreground="lightgray", font=("Courier", 8))
             detalle.tag_configure("error", foreground="red")
             detalle.tag_configure("warning", foreground="orange")
@@ -1712,42 +1720,88 @@ class system_status(tk.Frame):
         - LISTA (izquierda): Ranking de activos priorizados
         - DETALLE (derecha): Score, impacto por dimensión, monto sugerido
         """
-        def display_rebalanceo_detail(index):
-            """Muestra detalle del activo seleccionado"""
+
+        def on_double_click(event):
+            item = lista.selection()
+            if item:
+                valores = lista.item(item[0])
+                texto = valores["text"].strip()
+                tags = valores.get("tags", ())
+
+                # Solo procesar items de activos (tag "item"), no headers
+                if "item" in tags and texto:
+                    symbol = texto
+                    display_rebalanceo_detail(symbol)
+
+        def display_rebalanceo_detail(symbol):
+            """Muestra detalle del activo seleccionado por symbol"""
             try:
-                for item in detalle.get_children():
-                    detalle.delete(item)
+                for child in detalle.get_children():
+                    detalle.delete(child)
 
                 if not hasattr(DataHub, 'rebalanceo') or not DataHub.rebalanceo:
                     detalle.insert("", "end", text="⚠️ Motor de rebalanceo no ejecutado aún", tags=("warning",))
                     return
 
-                asignaciones = DataHub.rebalanceo.get("asignaciones", [])
+                # Buscar el activo en todos los vehículos
+                found_item = None
+                found_vehiculo = None
 
-                if index >= len(asignaciones):
-                    detalle.insert("", "end", text="⚠️ Índice fuera de rango", tags=("warning",))
+                for vehiculo, datos in DataHub.rebalanceo.items():
+                    # Buscar en asignaciones primero
+                    asignaciones = datos.get("asignaciones", [])
+                    for item in asignaciones:
+                        if item.get("symbol") == symbol:
+                            found_item = item
+                            found_vehiculo = vehiculo
+                            break
+
+                    # Si no está en asignaciones, buscar en ranking
+                    if not found_item:
+                        ranking = datos.get("ranking", [])
+                        for item in ranking:
+                            if item.get("symbol") == symbol:
+                                found_item = item
+                                found_vehiculo = vehiculo
+                                break
+
+                    if found_item:
+                        break
+
+                if not found_item:
+                    detalle.insert("", "end", text=f"⚠️ Activo {symbol} no encontrado", tags=("warning",))
                     return
 
-                item = asignaciones[index]
-
-                detalle.insert("", "end", text=f"📊 Symbol: {item['symbol']}", tags=("header",))
+                detalle.insert("", "end", text=f"📊 {found_item['symbol']} ({found_vehiculo})", tags=("header",))
                 detalle.insert("", "end", text="", tags=("spacer",))
 
-                detalle.insert("", "end", text=f"Score: {item['score']:.4f}", tags=("info",))
-                detalle.insert("", "end", text=f"Monto sugerido: ${item['monto_sugerido']:,.2f}", tags=("info",))
-                detalle.insert("", "end", text=f"Presupuesto (Pinvertir): ${item['pinvertir']:,.2f}", tags=("info",))
+                detalle.insert("", "end", text=f"Score: {found_item.get('score', 0):.4f}", tags=("info",))
+
+                # Monto sugerido puede estar en diferentes lugares según el vehículo
+                monto_sugerido = found_item.get('monto_sugerido', 0)
+                if monto_sugerido == 0:
+                    # Para Crypto, el monto está en impacto.gap_valor_total
+                    monto_sugerido = found_item.get('impacto', {}).get('gap_valor_total', 0)
+
+                detalle.insert("", "end", text=f"Monto sugerido: ${monto_sugerido:,.2f}", tags=("info",))
+                detalle.insert("", "end", text=f"Presupuesto (Pinvertir): ${found_item.get('pinvertir', 0):,.2f}", tags=("info",))
                 detalle.insert("", "end", text="", tags=("spacer",))
 
                 node_impacto = detalle.insert("", "end", text="📂 Impacto por dimensión", tags=("section",))
 
-                impacto = item.get("impacto", {})
+                impacto = found_item.get("impacto", {})
                 for dim, valor in impacto.items():
-                    if dim not in ["gap_valor_total", "gap_valor_norm"] and valor > 0:
-                        detalle.insert(node_impacto, "end", text=f"  {dim}: {valor:.4f}", tags=("value",))
+                    if dim not in ["gap_valor_total", "gap_valor_norm"]:
+                        if isinstance(valor, (int, float)) and valor > 0:
+                            detalle.insert(node_impacto, "end", text=f"  {dim}: {valor:.4f}", tags=("value",))
+                        elif isinstance(valor, (int, float)):
+                            detalle.insert(node_impacto, "end", text=f"  {dim}: ${valor:,.2f}", tags=("value",))
 
                 detalle.insert("", "end", text="", tags=("spacer",))
                 detalle.insert("", "end", text=f"Gap valor total: ${impacto.get('gap_valor_total', 0):,.2f}", tags=("summary",))
-                detalle.insert("", "end", text=f"Gap valor norm: {impacto.get('gap_valor_norm', 0):.4f}", tags=("summary",))
+                gap_norm = impacto.get('gap_valor_norm', 0)
+                if gap_norm:
+                    detalle.insert("", "end", text=f"Gap valor norm: {gap_norm:.4f}", tags=("summary",))
 
             except Exception as e:
                 print(f"display_rebalanceo_detail(): {e}")
@@ -1757,13 +1811,13 @@ class system_status(tk.Frame):
             dims = []
             # Abreviaturas: D=dividendos, S=sectores, T=tipos, R=regiones
             if impacto.get("dividendos", 0) > 0:
-                dims.append("D")
+                dims.append("Div")
             if impacto.get("sectores", 0) > 0:
-                dims.append("S")
+                dims.append("Sec")
             if impacto.get("tipos", 0) > 0:
-                dims.append("T")
+                dims.append("Tip")
             if impacto.get("regiones", 0) > 0:
-                dims.append("R")
+                dims.append("Reg")
             return " ".join(dims) if dims else "-"
 
         def update_rebalanceo_list():
@@ -1792,10 +1846,15 @@ class system_status(tk.Frame):
                         ranking = datos.get("ranking", [])
 
                         # Usar asignaciones si existen, sino usar ranking con score > 0
+                        top = 0
                         if asignaciones:
                             for idx, item in enumerate(asignaciones):
                                 impacto = item.get("impacto", {})
                                 dims_str = get_dims_activas(impacto)
+
+                                # muestra Top 10 asiganaciones
+                                if top > 10:
+                                    break
 
                                 # Filtra activos con sugrido  == 0
                                 if item['monto_sugerido'] == 0:
@@ -1805,17 +1864,24 @@ class system_status(tk.Frame):
                                     "",
                                     "end",
                                     text=f"  {item['symbol']}",
-                                    values=(f"{item['score']:.4f}", dims_str, f"${item['monto_sugerido']:,.0f}"),
+                                    values=(f"{item['score']:.4f}", dims_str, f"${item['monto_sugerido']:,.0f}", f"${item['pinvertir']:,.0f}"),
                                     tags=("item",)
                                 )
+                                top += 1
                         elif ranking:
                             # Mostrar ranking directamente (para Crypto u otros sin asignaciones)
                             for item in ranking:
                                 score = item.get("score", 0)
+                                pinvertir = item.get("pinvertir", 0)
+
                                 if score > 0:
                                     impacto = item.get("impacto", {})
                                     # Para Crypto mostrar gap_valor_total como monto sugerido
                                     monto = impacto.get("gap_valor_total", 0)
+
+                                    # muestra Top 10 ranking
+                                    if top > 10:
+                                        break
 
                                     # Filtra activos con sugrido  == 0
                                     if monto == 0:
@@ -1825,9 +1891,10 @@ class system_status(tk.Frame):
                                         "",
                                         "end",
                                         text=f"  {item['symbol']}",
-                                        values=(f"{score:.4f}", "", f"${monto:,.0f}"),
+                                        values=(f"{score:.4f}", "", f"${monto:,.0f}", f"${pinvertir:,.0f}"),
                                         tags=("item",)
                                     )
+                                    top += 1
                         else:
                             lista.insert("", "end", text="  Sin recom.", values=("", "", ""), tags=("info",))
 
@@ -1876,36 +1943,29 @@ class system_status(tk.Frame):
             except Exception as e:
                 print(f"show_gap_summary(): {e}")
 
-        def on_double_click(event):
-            item = lista.selection()
-            if item:
-                valores = lista.item(item[0])
-                texto = valores["text"]
-                if texto.startswith("#"):
-                    index = int(texto.split()[0][1:]) - 1
-                    display_rebalanceo_detail(index)
-
         try:
-            lista = ttk.Treeview(self.rebalanceo, columns=("score", "dims", "monto"), height=12, show="tree headings", style="TFrame")
+            lista = ttk.Treeview(self.rebalanceo, columns=("score", "dims", "monto", "inver"), height=12, show="tree headings", style="TFrame")
             lista.column("#0", width=120, anchor="w")
             lista.column("score", width=80, anchor="center")
-            lista.column("dims", width=100, anchor="w")
+            lista.column("dims", width=150, anchor="w")
             lista.column("monto", width=120, anchor="e")
+            lista.column("inver", width=120, anchor="e")
 
             lista.heading("#0", text="Ranking")
             lista.heading("score", text="Score")
             lista.heading("dims", text="Dimensiones")
             lista.heading("monto", text="Monto Sugerido $")
+            lista.heading("inver", text="Monto Invertir $")
 
-            lista.tag_configure("header", background="black", foreground="lime")
-            lista.tag_configure("info", foreground="white")
+            lista.tag_configure("header", background=self.cgcolor, foreground="lime")
+            lista.tag_configure("info", foreground=self.fgcolor)
             lista.tag_configure("item", foreground="lightgreen")
 
             detalle = ttk.Treeview(self.rebalanceo, height=12, show="tree", style="TFrame")
             detalle.column("#0", width=400)
 
             detalle.tag_configure("header", font=("Arial", 10, "bold"), foreground="lime")
-            detalle.tag_configure("section", font=("Arial", 9, "bold"), foreground="white")
+            detalle.tag_configure("section", font=("Arial", 9, "bold"), foreground=self.fgcolor)
             detalle.tag_configure("info", foreground="lightgray")
             detalle.tag_configure("summary", foreground="lime", font=("Arial", 9, "bold"))
             detalle.tag_configure("value", foreground="lightgreen")
@@ -2116,188 +2176,6 @@ class system_status(tk.Frame):
                     f"Revisa la consola para más detalles."
                 )
 
-        def actualizar_metricas():
-            """Actualiza las métricas del modelo"""
-            try:
-                # Limpiar tree
-                for item in metrics_tree.get_children():
-                    metrics_tree.delete(item)
-
-                for item in metrics_tree.get_children():
-                    metrics_tree.delete(item)
-
-                # Cargar modelo
-                modelo = ModeloOportunidadesSell()
-                modelo.load_modelo(modelo.modelo_name)
-
-                # Obtener métricas del modelo
-                if hasattr(modelo, 'metrics') and modelo.metrics:
-                    metrics_tree.insert("", "end", text="🎯 Métricas de Rendimiento", values=("", "", ""), tags=("header",))
-
-                    precision = modelo.metrics.get("precision", 0)
-                    recall = modelo.metrics.get("recall", 0)
-                    f1 = modelo.metrics.get("f1_score", 0)
-                    accuracy = modelo.metrics.get("accuracy", 0)
-
-                    # Determinar color según valor
-                    def get_tag(value):
-                        if value >= 0.75: return "good"
-                        if value >= 0.60: return "warning"
-                        return "bad"
-
-                    metrics_tree.insert("", "end", text="  Precisión", values=(f"{precision:.2%}", "", ""), tags=(get_tag(precision),))
-                    metrics_tree.insert("", "end", text="  Recall", values=(f"{recall:.2%}", "", ""), tags=(get_tag(recall),))
-                    metrics_tree.insert("", "end", text="  F1-Score", values=(f"{f1:.2%}", "", ""), tags=(get_tag(f1),))
-                    metrics_tree.insert("", "end", text="  Accuracy", values=(f"{accuracy:.2%}", "", ""), tags=(get_tag(accuracy),))
-
-                    metrics_tree.insert("", "end", text="", values=("", "", ""))
-                else:
-                    metrics_tree.insert("", "end", text="🎯 Métricas de Rendimiento", values=("", "", ""), tags=("header",))
-                    metrics_tree.insert("", "end", text="  ℹ️ Modelo no entrenado", values=("", "", ""), tags=("warning",))
-                    metrics_tree.insert("", "end", text="  Entrena el modelo para ver métricas", values=("", "", ""), tags=("info",))
-                    metrics_tree.insert("", "end", text="", values=("", "", ""))
-
-                # Información del dataset usando método centralizado
-                df_stats = chatbot.obtener_dataframe_entrenamiento_IA(tipo="sell", return_stats=False)
-                total = len(df_stats)
-                df_apr = df_stats[df_stats["recomendado"] == 1] if total > 0 else pd.DataFrame()
-                df_rec = df_stats[df_stats["recomendado"] == -1] if total > 0 else pd.DataFrame()
-                aprobadas = len(df_apr)
-                rechazadas = len(df_rec)
-
-                # Calcular promedios ROI y Confianza
-                roi_apr, roi_rec, conf_apr, conf_rec = 0, 0, 0, 0
-                if total > 0:
-                    if "roi" in df_stats.columns:
-                        roi_apr = df_apr["roi"].dropna().mean() if len(df_apr) > 0 else 0
-                        roi_rec = df_rec["roi"].dropna().mean() if len(df_rec) > 0 else 0
-                        roi_apr = roi_apr if pd.notna(roi_apr) else 0
-                        roi_rec = roi_rec if pd.notna(roi_rec) else 0
-                    # Obtener confianza promedio del json_detalle
-                    repo = RepositorioOportunidadesBuySell()
-                    todas_ops, ix = repo.obtener_por_tipo(tipo="sell")
-                    conf_apr_list, conf_rec_list = [], []
-                    for op in todas_ops:
-                        try:
-                            rec = op[ix.index("recomendado")]
-                            json_raw = op[ix.index("json_detalle")]
-                            if json_raw and rec in [1, -1]:
-                                detalle = json.loads(json_raw) if isinstance(json_raw, str) else json_raw
-                                if isinstance(detalle, str):
-                                    detalle = json.loads(detalle)
-                                if isinstance(detalle, dict) and "confianza" in detalle:
-                                    conf = detalle["confianza"]
-                                    if isinstance(conf, (int, float)):
-                                        if rec == 1:
-                                            conf_apr_list.append(conf)
-                                        else:
-                                            conf_rec_list.append(conf)
-                        except Exception:
-                            continue
-                    conf_apr = sum(conf_apr_list) / len(conf_apr_list) if conf_apr_list else 0
-                    conf_rec = sum(conf_rec_list) / len(conf_rec_list) if conf_rec_list else 0
-
-                metrics_tree.insert("", "end", text="📚 Dataset Sell (decisiones)", values=("", "", ""), tags=("header",))
-                metrics_tree.insert("", "end", text="  Total con decisión", values=(f"{total}", "", ""), tags=("info",))
-
-                roi_apr_str = f"{roi_apr*100:.1f}%" if roi_apr != 0 else "-"
-                conf_apr_str = f"{conf_apr*100:.1f}%" if conf_apr != 0 else "-"
-                metrics_tree.insert("", "end", text="  Aprobadas (rec=1)", values=(f"{aprobadas}", roi_apr_str, conf_apr_str), tags=("good",))
-
-                roi_rec_str = f"{roi_rec*100:.1f}%" if roi_rec != 0 else "-"
-                conf_rec_str = f"{conf_rec*100:.1f}%" if conf_rec != 0 else "-"
-                metrics_tree.insert("", "end", text="  Rechazadas (rec=-1)", values=(f"{rechazadas}", roi_rec_str, conf_rec_str), tags=("bad",))
-
-                entrenables = aprobadas + rechazadas
-                tag_entrenables = "good" if entrenables >= 50 else "warning" if entrenables >= 20 else "bad"
-                metrics_tree.insert("", "end", text="  Muestras para entrenar", values=(f"{entrenables}", "", ""), tags=(tag_entrenables,))
-
-                # Distribución de confianza en predicciones recientes
-                # Usar DataFrame ya obtenido - últimas 100 filas
-                if total > 0:
-                    # Obtener datos con stats para acceder a json_detalle completo
-                    repo = RepositorioOportunidadesBuySell()
-                    todas_oportunidades, ix = repo.obtener_por_tipo(tipo="sell")
-
-                    # Filtrar solo con decisión y con json_detalle
-                    oportunidades_recientes = [
-                        op for op in todas_oportunidades
-                        if op[ix.index("recomendado")] in [1, -1] and op[ix.index("json_detalle")]
-                    ][-100:]
-
-                    confianzas = []
-                    for op in oportunidades_recientes:
-                        try:
-                            json_detalle_raw = op[ix.index("json_detalle")]
-
-                            # Manejar doble codificación si es necesario
-                            if isinstance(json_detalle_raw, str):
-                                detalle = json.loads(json_detalle_raw)
-                                # Si aún es string, intentar parsear de nuevo
-                                if isinstance(detalle, str):
-                                    detalle = json.loads(detalle)
-                            else:
-                                detalle = json_detalle_raw
-
-                            # Validar que sea dict y tenga confianza
-                            if isinstance(detalle, dict) and "confianza" in detalle:
-                                conf_value = detalle["confianza"]
-                                # Validar que sea numérico
-                                if isinstance(conf_value, (int, float)):
-                                    confianzas.append(conf_value)
-                        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-                            continue
-
-                    if confianzas:
-                        # Calcular distribución por rangos
-                        rangos = [
-                            ("90-100%", 0.90, 1.01, "high"),
-                            ("75-90%", 0.75, 0.90, "high"),
-                            ("65-75%", 0.65, 0.75, "medium"),
-                            ("50-65%", 0.50, 0.65, "low"),
-                            ("< 50%", 0.0, 0.50, "verylow"),
-                        ]
-
-                        total_conf = len(confianzas)
-                        metrics_tree.insert("", "end", text=f"Total predicciones: {total_conf}", values=("", ""), tags=("header",))
-                        metrics_tree.insert("", "end", text="", values=("", ""))
-
-                        for rango_nombre, min_val, max_val, tag in rangos:
-                            count = sum(1 for c in confianzas if min_val <= c < max_val)
-                            pct = (count / total_conf * 100) if total_conf > 0 else 0
-                            metrics_tree.insert("", "end", text=f"  {rango_nombre}", values=(count, f"{pct:.1f}%"), tags=(tag,))
-
-                        # Estadísticas adicionales
-                        metrics_tree.insert("", "end", text="", values=("", ""))
-                        metrics_tree.insert("", "end", text="📊 Estadísticas", values=("", ""), tags=("header",))
-
-                        media = sum(confianzas) / len(confianzas)
-                        tag_media = "good" if media >= 0.70 else "warning" if media >= 0.60 else "bad"
-                        metrics_tree.insert("", "end", text="  Confianza media", values=(f"{media:.2%}", ""), tags=(tag_media,))
-
-                        maxima = max(confianzas)
-                        minima = min(confianzas)
-                        metrics_tree.insert("", "end", text="  Confianza máxima", values=(f"{maxima:.2%}", ""), tags=("info",))
-                        metrics_tree.insert("", "end", text="  Confianza mínima", values=(f"{minima:.2%}", ""), tags=("info",))
-
-                        # Alertas
-                        metrics_tree.insert("", "end", text="", values=("", ""))
-                        bajo_umbral = sum(1 for c in confianzas if c < 0.65)
-                        pct_bajo = (bajo_umbral / total_conf * 100) if total_conf > 0 else 0
-
-                        if pct_bajo > 50:
-                            metrics_tree.insert("", "end", text="⚠️ ALERTA", values=("", ""), tags=("bad",))
-                            metrics_tree.insert("", "end", text=f"  {pct_bajo:.1f}% bajo umbral 65%", values=("", ""), tags=("bad",))
-                            metrics_tree.insert("", "end", text="  Considera re-entrenar", values=("", ""), tags=("warning",))
-                    else:
-                        metrics_tree.insert("", "end", text="ℹ️ No hay datos de confianza", values=("", ""), tags=("info",))
-                else:
-                    metrics_tree.insert("", "end", text="ℹ️ No hay predicciones recientes", values=("", ""), tags=("info",))
-            except Exception as e:
-                metrics_tree.insert("", "end", text=f"❌ Error: {str(e)[:50]}", values=("", "", ""), tags=("bad",))
-                print(f"actualizar_metricas(): {e}")
-                traceback.print_exc()
-
         # Programar actualización automática cada 30 segundos
         def auto_actualizar():
             if self.is_running:
@@ -2305,7 +2183,381 @@ class system_status(tk.Frame):
                 after_id = self.system.after(30000, auto_actualizar)
                 self.after_ids.append(after_id)
 
+        def actualizar_metricas():
+            """Actualiza las métricas del modelo y oportunidades actuales"""
+            try:
+                # Limpiar trees
+                for item in metrics_tree.get_children():
+                    metrics_tree.delete(item)
 
+                for item in opp_tree.get_children():
+                    opp_tree.delete(item)
+
+                # Cargar modelo
+                modelo = ModeloOportunidadesSell()
+                modelo.load_modelo(modelo.modelo_name)
+
+                # === 1. DATASET SELL (primero) ===
+                # Calcular promedios ROI y Profit por decisión
+                roi_apr, roi_rec, profit_apr, profit_rec = 0, 0, 0, 0
+                if chatbot is not None:
+                    df_stats = chatbot.obtener_dataframe_entrenamiento_IA(tipo="sell", return_stats=False)
+                    total = len(df_stats)
+                    df_apr = df_stats[df_stats["recomendado"] == 1] if total > 0 else pd.DataFrame()
+                    df_rec = df_stats[df_stats["recomendado"] == -1] if total > 0 else pd.DataFrame()
+                    aprobadas = len(df_apr)
+                    rechazadas = len(df_rec)
+
+                    # Calcular promedios ROI
+                    if "roi" in df_stats.columns:
+                        roi_apr = df_apr["roi"].dropna().mean() if len(df_apr) > 0 else 0
+                        roi_rec = df_rec["roi"].dropna().mean() if len(df_rec) > 0 else 0
+                        roi_apr = roi_apr if pd.notna(roi_apr) else 0
+                        roi_rec = roi_rec if pd.notna(roi_rec) else 0
+
+                    # Calcular promedios Profit
+                    if "profit" in df_stats.columns:
+                        profit_apr = df_apr["profit"].dropna().mean() if len(df_apr) > 0 else 0
+                        profit_rec = df_rec["profit"].dropna().mean() if len(df_rec) > 0 else 0
+                        profit_apr = profit_apr if pd.notna(profit_apr) else 0
+                        profit_rec = profit_rec if pd.notna(profit_rec) else 0
+                else:
+                    total, aprobadas, rechazadas = 0, 0, 0
+
+                metrics_tree.insert("", "end", text="📚 Dataset Sell (decisiones)", values=("", "", ""), tags=("header",))
+                metrics_tree.insert("", "end", text="  Total con decisión", values=(f"{total}", "", ""), tags=("info",))
+
+                roi_apr_str = f"{roi_apr*100:.1f}%" if roi_apr != 0 else "-"
+                profit_apr_str = f"${profit_apr:,.0f}" if profit_apr != 0 else "-"
+                metrics_tree.insert("", "end", text="  Aprobadas (rec=1)", values=(f"{aprobadas}", roi_apr_str, profit_apr_str), tags=("good",))
+
+                roi_rec_str = f"{roi_rec*100:.1f}%" if roi_rec != 0 else "-"
+                profit_rec_str = f"${profit_rec:,.0f}" if profit_rec != 0 else "-"
+                metrics_tree.insert("", "end", text="  Rechazadas (rec=-1)", values=(f"{rechazadas}", roi_rec_str, profit_rec_str), tags=("bad",))
+
+                entrenables = aprobadas + rechazadas
+                tag_entrenables = "good" if entrenables >= 50 else "warning" if entrenables >= 20 else "bad"
+                metrics_tree.insert("", "end", text="  Muestras para entrenar", values=(f"{entrenables}", "", ""), tags=(tag_entrenables,))
+
+                # === 2. MÉTRICAS CV ===
+                if hasattr(modelo, 'metrics') and modelo.metrics:
+                    metrics_tree.insert("", "end", text="", values=("", "", ""))
+                    metrics_tree.insert("", "end", text="🎯 Métricas CV (5-fold)", values=("", "", ""), tags=("header",))
+
+                    precision = modelo.metrics.get("precision", 0)
+                    precision_std = modelo.metrics.get("precision_std", 0)
+                    recall = modelo.metrics.get("recall", 0)
+                    recall_std = modelo.metrics.get("recall_std", 0)
+                    f1 = modelo.metrics.get("f1_score", 0)
+                    f1_std = modelo.metrics.get("f1_std", 0)
+                    accuracy = modelo.metrics.get("accuracy", 0)
+                    accuracy_std = modelo.metrics.get("accuracy_std", 0)
+
+                    def get_tag(value):
+                        if value >= 0.75: return "good"
+                        if value >= 0.60: return "warning"
+                        return "bad"
+
+                    metrics_tree.insert("", "end", text="  Precisión", values=(f"{precision:.0%}±{precision_std*100:.0f}", "", ""), tags=(get_tag(precision),))
+                    metrics_tree.insert("", "end", text="  Recall", values=(f"{recall:.0%}±{recall_std*100:.0f}", "", ""), tags=(get_tag(recall),))
+                    metrics_tree.insert("", "end", text="  F1-Score", values=(f"{f1:.0%}±{f1_std*100:.0f}", "", ""), tags=(get_tag(f1),))
+                    metrics_tree.insert("", "end", text="  Accuracy", values=(f"{accuracy:.0%}±{accuracy_std*100:.0f}", "", ""), tags=(get_tag(accuracy),))
+
+                    # === 3. TOP 10 FEATURES ===
+                    feature_imp = modelo.metrics.get("feature_importance", [])
+                    if feature_imp:
+                        metrics_tree.insert("", "end", text="", values=("", "", ""))
+                        metrics_tree.insert("", "end", text="🔍 Top 10 Features", values=("", "", ""), tags=("header",))
+                        for i, feat in enumerate(feature_imp[:10]):
+                            name = feat["feature"].replace("_d", "").replace("_", " ")
+                            imp = feat["importance"]
+                            metrics_tree.insert("", "end", text=f"  {i+1}. {name}", values=(f"{imp:.1%}", "", ""), tags=("info",))
+                else:
+                    metrics_tree.insert("", "end", text="", values=("", "", ""))
+                    metrics_tree.insert("", "end", text="🎯 Métricas CV", values=("", "", ""), tags=("header",))
+                    metrics_tree.insert("", "end", text="  ℹ️ Modelo no entrenado", values=("", "", ""), tags=("warning",))
+
+                # === Oportunidades Actuales (desde CSV en tiempo real) ===
+                try:
+                    df_sell = Chatbot.readCSV(file="csv_datosIA_sell")
+
+                    if df_sell is not None and not df_sell.empty:
+                        # Cargar modelo para predecir
+                        modelo_pred = ModeloOportunidadesSell()
+                        modelo_pred.load_modelo(modelo_pred.modelo_name)
+
+                        if modelo_pred.modelo is not None:
+                            # Preparar datos para predicción
+                            df_pred = df_sell.copy()
+                            df_pred = df_pred.rename(columns=DataHub.SellCsvJsonDcolumnas)
+                            df_aplanado = modelo_pred.aplanar_datos_tecnicos(df_pred)
+
+                            if df_aplanado is not None and not df_aplanado.empty:
+                                resultado = modelo_pred.predecir_modelo(df_aplanado)
+
+                                if resultado is not None and not resultado.empty:
+                                    # Contadores
+                                    n_vender = 0
+                                    n_observar = 0
+                                    n_ignorar = 0
+
+                                    # Recolectar datos para ordenar por ROI
+                                    oportunidades = []
+                                    for i, (_, row_pred) in enumerate(resultado.iterrows()):
+                                        if i >= len(df_sell):
+                                            break
+                                        row_orig = df_sell.iloc[i]
+
+                                        symbol = row_orig.get("Symbol", "???")
+                                        roi = row_orig.get("%Roi", 0) * 100
+                                        conf = row_pred.get("confianza", 0)
+                                        opcion = row_orig.get("Opcion", "")
+
+                                        # Extraer RSI del JSON si existe
+                                        rsi = 0
+                                        try:
+                                            datos_tec = row_orig.get("Datostecnicos", "{}")
+                                            if isinstance(datos_tec, str):
+                                                datos_tec = json.loads(datos_tec)
+                                            rsi = datos_tec.get("diaria", {}).get("rsi", 0)
+                                        except:
+                                            pass
+
+                                        # Determinar estado según umbrales
+                                        if conf >= 0.65:
+                                            estado = "VENDER"
+                                            tag = "vender"
+                                            n_vender += 1
+                                        elif conf >= 0.35:
+                                            estado = "Observar"
+                                            tag = "observar"
+                                            n_observar += 1
+                                        else:
+                                            estado = "Ignorar"
+                                            tag = "ignorar"
+                                            n_ignorar += 1
+
+                                        oportunidades.append({
+                                            "symbol": symbol,
+                                            "opcion": opcion,
+                                            "rsi": rsi,
+                                            "roi": roi,
+                                            "conf": conf,
+                                            "estado": estado,
+                                            "tag": tag
+                                        })
+
+                                    # Ordenar por ROI decreciente
+                                    oportunidades.sort(key=lambda x: x["roi"], reverse=True)
+
+                                    # Insertar ordenados
+                                    for opp in oportunidades:
+                                        opp_tree.insert("", "end",
+                                            text=opp["symbol"],
+                                            values=(opp["opcion"], f"{opp['rsi']:.1f}", f"{opp['roi']:.1f}", f"{opp['conf']:.2f}", opp["estado"]),
+                                            tags=(opp["tag"],)
+                                        )
+
+                                    # Resumen en una línea simple
+                                    opp_tree.insert("", "end",
+                                        text=f"Total: {len(resultado)}",
+                                        values=("", f"V:{n_vender}", f"O:{n_observar}", f"I:{n_ignorar}", ""),
+                                        tags=("header",)
+                                    )
+                                else:
+                                    opp_tree.insert("", "end", text="Sin predicciones", values=("", "", "", "", ""), tags=("ignorar",))
+                            else:
+                                opp_tree.insert("", "end", text="Error aplanando", values=("", "", "", "", ""), tags=("ignorar",))
+                        else:
+                            opp_tree.insert("", "end", text="Modelo no cargado", values=("", "", "", "", ""), tags=("ignorar",))
+                    else:
+                        opp_tree.insert("", "end", text="Sin oportunidades", values=("", "", "", "", ""), tags=("ignorar",))
+                except Exception as e_opp:
+                    opp_tree.insert("", "end", text=f"Error: {str(e_opp)[:30]}", values=("", "", "", "", ""), tags=("ignorar",))
+
+            except Exception as e:
+                metrics_tree.insert("", "end", text=f"❌ Error: {str(e)[:50]}", values=("", "", ""), tags=("bad",))
+                print(f"actualizar_metricas(): {e}")
+                traceback.print_exc()
+
+        def modificar_parametros():
+            """Abre ventana para modificar parámetros del modelo IA"""
+            
+            def guardar():
+                """Guarda los cambios en BD"""
+                try:
+                    nombre = entry_nombre.get().strip()
+                    tipo = entry_tipo.get().strip()
+                    define = entry_define.get().strip()
+                    params_str = text_params.get("1.0", tk.END).strip()
+                    docs_str = text_docs.get("1.0", tk.END).strip()
+
+                    # Validar JSON de parámetros
+                    try:
+                        json.loads(params_str)
+                    except json.JSONDecodeError as e:
+                        msg = MyMessageBox(config_window)
+                        msg.showinfo("Error", f"JSON de parámetros inválido:\n{e}")
+                        return
+
+                    params_bytes = params_str.encode('utf-8')
+                    docs_bytes = docs_str.encode('utf-8') if docs_str else None
+
+                    if modelo_data:
+                        success = BDsystem.update_modelo_ia(
+                            modelo=modelo_name, nombre=nombre, tipo_modelo=tipo,
+                            paramts=params_bytes, documents=docs_bytes, define_modelo=define
+                        )
+                    else:
+                        success = BDsystem.insert_modelo_ia(
+                            modelo=modelo_name, nombre=nombre, tipo_modelo=tipo,
+                            paramts=params_bytes, documents=docs_bytes, define_modelo=define
+                        )
+
+                    if success:
+                        msg = MyMessageBox(config_window)
+                        msg.showinfo("Éxito", "Configuración guardada correctamente")
+                        on_close()
+                    else:
+                        msg = MyMessageBox(config_window)
+                        msg.showinfo("Error", "No se pudo guardar la configuración")
+                except Exception as e:
+                    print(f"guardar(): {e}")
+                    msg = MyMessageBox(config_window)
+                    msg.showinfo("Error", f"Error al guardar:\n{e}")
+
+            def cancelar():
+                on_close()
+
+            def on_close():
+                self._modelo_config_window = None
+                config_window.destroy()
+  
+            def cargar_documento():
+                """Carga documentación desde archivo"""
+                filepath = filedialog.askopenfilename(
+                    parent=config_window,
+                    title="Seleccionar documento",
+                    filetypes=[("Archivos de texto", "*.txt"), ("Markdown", "*.md"), ("Todos", "*.*")]
+                )
+                if filepath:
+                    try:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        text_docs.delete("1.0", tk.END)
+                        text_docs.insert("1.0", content)
+                    except Exception as e:
+                        msg = MyMessageBox(config_window)
+                        msg.showinfo("Error", f"Error al cargar archivo:\n{e}")
+
+            # Función helper para crear filas
+            def crear_fila(parent, label_text, default_value="", readonly=False):
+                frame = tk.Frame(parent, bg=self.bgcolor)
+                frame.pack(fill=tk.X, pady=4)
+                lbl = tk.Label(frame, text=label_text, width=20, anchor="w", bg=self.bgcolor, fg=label_fg)
+                lbl.pack(side=tk.LEFT)
+                entry = tk.Entry(frame, width=53, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor)
+                entry.insert(0, default_value)
+                if readonly:
+                    entry.configure(state="readonly")
+                entry.pack(side=tk.LEFT, padx=5)
+                return entry
+
+
+            # Verificar si ya existe ventana abierta
+            if hasattr(self, '_modelo_config_window') and self._modelo_config_window:
+                try:
+                    if self._modelo_config_window.winfo_exists():
+                        self._modelo_config_window.lift()
+                        self._modelo_config_window.focus_force()
+                        return
+                except:
+                    self._modelo_config_window = None
+
+            # Colores desde DataHub
+            entry_bg = self.cchart.get("fondo_fig", self.cgcolor)
+            label_fg = self.cchart.get("texto", self.fgcolor)
+
+            # Crear ventana Toplevel
+            config_window = tk.Toplevel(self.system)
+            config_window.title("Configuración Modelo IA - Sell")
+            config_window.geometry("530x380")
+            config_window.configure(bg=self.bgcolor)
+            config_window.resizable(False, False)
+            self._modelo_config_window = config_window
+
+            # Posicionar ventana a la derecha y más abajo
+            config_window.update_idletasks()
+            x = self.system.winfo_x() + self.system.winfo_width() + 10
+            y = self.system.winfo_y() + 380
+            config_window.geometry(f"+{x}+{y}")
+
+            # Obtener modelo actual desde la instancia
+            modelo = ModeloOportunidadesSell()
+            modelo_name = modelo.modelo_name
+
+            # Cargar datos existentes de BD
+            modelo_data = BDsystem.get_modelo_ia(modelo_name)
+
+            # Frame principal
+            main_frame = tk.Frame(config_window, bg=self.bgcolor, padx=15, pady=10)
+            main_frame.pack(fill=tk.BOTH, expand=True)
+  
+            # Campos del formulario
+            entry_modelo = crear_fila(main_frame, "Modelo:", modelo_name, readonly=True)
+            entry_nombre = crear_fila(main_frame, "Nombre:",
+                modelo_data.get("Nombre", "Modelo Sell Oportunidades"))
+            entry_tipo = crear_fila(main_frame, "Tipo Modelo:",
+                modelo_data.get("tipo_modelo", "RandomForest") )
+            entry_define = crear_fila(main_frame, "Define Modelo:",
+                modelo_data.get("define_modelo", "sell_classifier"))
+
+            # Campo: Parámetros (JSON)
+            row_params = tk.Frame(main_frame, bg=self.bgcolor)
+            row_params.pack(fill=tk.X, pady=4)
+            tk.Label(row_params, text="Parámetros (JSON):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(side=tk.LEFT, anchor=tk.N)
+
+            text_params = tk.Text(row_params, width=40, height=5, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor)
+            default_params = {"n_estimators": 100, "max_depth": 10, "min_samples_split": 5, "umbral_confianza": 0.6}
+            if modelo_data and modelo_data.get("paramts"):
+                try:
+                    params = json.loads(modelo_data["paramts"].decode('utf-8'))
+                    text_params.insert("1.0", json.dumps(params, indent=2))
+                except:
+                    text_params.insert("1.0", json.dumps(default_params, indent=2))
+            else:
+                text_params.insert("1.0", json.dumps(default_params, indent=2))
+            text_params.pack(side=tk.LEFT, padx=5)
+
+            # Campo: Documentación (BLOB)
+            row_docs = tk.Frame(main_frame, bg=self.bgcolor)
+            row_docs.pack(fill=tk.X, pady=4)
+            tk.Label(row_docs, text="Documentación (BLOB):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(side=tk.LEFT, anchor=tk.N)
+
+            docs_container = tk.Frame(row_docs, bg=self.bgcolor)
+            docs_container.pack(side=tk.LEFT, padx=5)
+
+            text_docs = tk.Text(docs_container, width=30, height=4, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor)
+            if modelo_data and modelo_data.get("documents"):
+                try:
+                    docs = modelo_data["documents"].decode('utf-8')
+                    text_docs.insert("1.0", docs)
+                except:
+                    pass
+            text_docs.pack(side=tk.LEFT)
+ 
+            ttk.Button(docs_container, text="Import", command=cargar_documento, width=10).pack(side=tk.LEFT, padx=5)
+
+            # Botones Guardar/Cancelar
+            btn_frame = tk.Frame(main_frame, bg=self.bgcolor)
+            btn_frame.pack(fill=tk.X, pady=(20, 10))
+
+            # Botones centrados
+            ttk.Button(btn_frame, text="Guardar", command=guardar, width=10).pack(side=tk.LEFT, padx=(130, 10))
+            ttk.Button(btn_frame, text="Cancel", command=cancelar, width=10).pack(side=tk.LEFT)
+
+            config_window.protocol("WM_DELETE_WINDOW", on_close)
+  
         try:
             # Frame principal dividido en dos secciones
             left_frame = ttk.Frame(self.modeloia, padding=(5, 5), style="C.TFrame")
@@ -2319,9 +2571,9 @@ class system_status(tk.Frame):
                 left_frame,
                 text="📊 Métricas del Modelo Sell",
                 font=("TkDefaultFont", 10, "bold"),
-                foreground="cyan",
-                background=self.colors.get("background")
-            )
+                foreground=self.bgcolor,
+                background=self.cgcolor)
+           
             metrics_label.pack(anchor=tk.W, pady=(0, 5))
 
             # TreeView para mostrar métricas (3 columnas: Valor, ROI Prom, Profit Prom)
@@ -2355,20 +2607,18 @@ class system_status(tk.Frame):
 
             train_btn = ttk.Button(
                 btn_frame,
-                text="Re-entrenar",
+                text="Entrenar",
                 command=entrenar_modelo,
+                width=10,
                 style="TButton"
             )
             train_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-            # TODO: Implementar ventana de configuración de parámetros
-            def modificar_parametros():
-                pass  # Pendiente: abrir ventana para ajustar umbrales, features, etc.
-
             config_btn = ttk.Button(
                 btn_frame,
-                text="Modificar",
+                text="Modelo",
                 command=modificar_parametros,
+                width=10,
                 style="TButton"
             )
             config_btn.pack(side=tk.LEFT)
@@ -2378,9 +2628,9 @@ class system_status(tk.Frame):
                 right_frame,
                 text="🎯 Oportunidades Actuales (tiempo real)",
                 font=("TkDefaultFont", 10, "bold"),
-                foreground="cyan",
-                background=self.colors.get("background")
-            )
+                foreground=self.bgcolor,
+                background=self.cgcolor)
+            
             opp_label.pack(anchor=tk.W, pady=(5, 5))
 
             # TreeView para oportunidades actuales
@@ -2407,7 +2657,7 @@ class system_status(tk.Frame):
             opp_tree.tag_configure("vender", foreground="lightgreen", font=("TkDefaultFont", 9, "bold"))
             opp_tree.tag_configure("observar", foreground="yellow")
             opp_tree.tag_configure("ignorar", foreground="gray")
-            opp_tree.tag_configure("header", foreground="cyan", font=("TkDefaultFont", 9, "bold"))
+            opp_tree.tag_configure("header", foreground=self.bgcolor, font=("TkDefaultFont", 9, "bold"))
 
             opp_tree.pack(fill=tk.BOTH, expand=True)
 
@@ -2442,204 +2692,6 @@ class system_status(tk.Frame):
             opp_tree.heading("roi", text="ROI%", command=lambda: treeview_sort_column(opp_tree, "roi", True))
             opp_tree.heading("conf", text="Conf", command=lambda: treeview_sort_column(opp_tree, "conf", True))
             opp_tree.heading("estado", text="Estado", command=lambda: treeview_sort_column(opp_tree, "estado", False))
-
-            def actualizar_metricas():
-                """Actualiza las métricas del modelo y oportunidades actuales"""
-                try:
-                    # Limpiar trees
-                    for item in metrics_tree.get_children():
-                        metrics_tree.delete(item)
-
-                    for item in opp_tree.get_children():
-                        opp_tree.delete(item)
-
-                    # Cargar modelo
-                    modelo = ModeloOportunidadesSell()
-                    modelo.load_modelo(modelo.modelo_name)
-
-                    # === 1. DATASET SELL (primero) ===
-                    # Calcular promedios ROI y Profit por decisión
-                    roi_apr, roi_rec, profit_apr, profit_rec = 0, 0, 0, 0
-                    if chatbot is not None:
-                        df_stats = chatbot.obtener_dataframe_entrenamiento_IA(tipo="sell", return_stats=False)
-                        total = len(df_stats)
-                        df_apr = df_stats[df_stats["recomendado"] == 1] if total > 0 else pd.DataFrame()
-                        df_rec = df_stats[df_stats["recomendado"] == -1] if total > 0 else pd.DataFrame()
-                        aprobadas = len(df_apr)
-                        rechazadas = len(df_rec)
-
-                        # Calcular promedios ROI
-                        if "roi" in df_stats.columns:
-                            roi_apr = df_apr["roi"].dropna().mean() if len(df_apr) > 0 else 0
-                            roi_rec = df_rec["roi"].dropna().mean() if len(df_rec) > 0 else 0
-                            roi_apr = roi_apr if pd.notna(roi_apr) else 0
-                            roi_rec = roi_rec if pd.notna(roi_rec) else 0
-
-                        # Calcular promedios Profit
-                        if "profit" in df_stats.columns:
-                            profit_apr = df_apr["profit"].dropna().mean() if len(df_apr) > 0 else 0
-                            profit_rec = df_rec["profit"].dropna().mean() if len(df_rec) > 0 else 0
-                            profit_apr = profit_apr if pd.notna(profit_apr) else 0
-                            profit_rec = profit_rec if pd.notna(profit_rec) else 0
-                    else:
-                        total, aprobadas, rechazadas = 0, 0, 0
-
-                    metrics_tree.insert("", "end", text="📚 Dataset Sell (decisiones)", values=("", "", ""), tags=("header",))
-                    metrics_tree.insert("", "end", text="  Total con decisión", values=(f"{total}", "", ""), tags=("info",))
-
-                    roi_apr_str = f"{roi_apr*100:.1f}%" if roi_apr != 0 else "-"
-                    profit_apr_str = f"${profit_apr:,.0f}" if profit_apr != 0 else "-"
-                    metrics_tree.insert("", "end", text="  Aprobadas (rec=1)", values=(f"{aprobadas}", roi_apr_str, profit_apr_str), tags=("good",))
-
-                    roi_rec_str = f"{roi_rec*100:.1f}%" if roi_rec != 0 else "-"
-                    profit_rec_str = f"${profit_rec:,.0f}" if profit_rec != 0 else "-"
-                    metrics_tree.insert("", "end", text="  Rechazadas (rec=-1)", values=(f"{rechazadas}", roi_rec_str, profit_rec_str), tags=("bad",))
-
-                    entrenables = aprobadas + rechazadas
-                    tag_entrenables = "good" if entrenables >= 50 else "warning" if entrenables >= 20 else "bad"
-                    metrics_tree.insert("", "end", text="  Muestras para entrenar", values=(f"{entrenables}", "", ""), tags=(tag_entrenables,))
-
-                    # === 2. MÉTRICAS CV ===
-                    if hasattr(modelo, 'metrics') and modelo.metrics:
-                        metrics_tree.insert("", "end", text="", values=("", "", ""))
-                        metrics_tree.insert("", "end", text="🎯 Métricas CV (5-fold)", values=("", "", ""), tags=("header",))
-
-                        precision = modelo.metrics.get("precision", 0)
-                        precision_std = modelo.metrics.get("precision_std", 0)
-                        recall = modelo.metrics.get("recall", 0)
-                        recall_std = modelo.metrics.get("recall_std", 0)
-                        f1 = modelo.metrics.get("f1_score", 0)
-                        f1_std = modelo.metrics.get("f1_std", 0)
-                        accuracy = modelo.metrics.get("accuracy", 0)
-                        accuracy_std = modelo.metrics.get("accuracy_std", 0)
-
-                        def get_tag(value):
-                            if value >= 0.75: return "good"
-                            if value >= 0.60: return "warning"
-                            return "bad"
-
-                        metrics_tree.insert("", "end", text="  Precisión", values=(f"{precision:.0%}±{precision_std*100:.0f}", "", ""), tags=(get_tag(precision),))
-                        metrics_tree.insert("", "end", text="  Recall", values=(f"{recall:.0%}±{recall_std*100:.0f}", "", ""), tags=(get_tag(recall),))
-                        metrics_tree.insert("", "end", text="  F1-Score", values=(f"{f1:.0%}±{f1_std*100:.0f}", "", ""), tags=(get_tag(f1),))
-                        metrics_tree.insert("", "end", text="  Accuracy", values=(f"{accuracy:.0%}±{accuracy_std*100:.0f}", "", ""), tags=(get_tag(accuracy),))
-
-                        # === 3. TOP 10 FEATURES ===
-                        feature_imp = modelo.metrics.get("feature_importance", [])
-                        if feature_imp:
-                            metrics_tree.insert("", "end", text="", values=("", "", ""))
-                            metrics_tree.insert("", "end", text="🔍 Top 10 Features", values=("", "", ""), tags=("header",))
-                            for i, feat in enumerate(feature_imp[:10]):
-                                name = feat["feature"].replace("_d", "").replace("_", " ")
-                                imp = feat["importance"]
-                                metrics_tree.insert("", "end", text=f"  {i+1}. {name}", values=(f"{imp:.1%}", "", ""), tags=("info",))
-                    else:
-                        metrics_tree.insert("", "end", text="", values=("", "", ""))
-                        metrics_tree.insert("", "end", text="🎯 Métricas CV", values=("", "", ""), tags=("header",))
-                        metrics_tree.insert("", "end", text="  ℹ️ Modelo no entrenado", values=("", "", ""), tags=("warning",))
-
-                    # === Oportunidades Actuales (desde CSV en tiempo real) ===
-                    try:
-                        from Class_DashBot import Chatbot
-                        df_sell = Chatbot.readCSV(file="csv_datosIA_sell")
-
-                        if df_sell is not None and not df_sell.empty:
-                            # Cargar modelo para predecir
-                            modelo_pred = ModeloOportunidadesSell()
-                            modelo_pred.load_modelo(modelo_pred.modelo_name)
-
-                            if modelo_pred.modelo is not None:
-                                # Preparar datos para predicción
-                                df_pred = df_sell.copy()
-                                df_pred = df_pred.rename(columns=DataHub.SellCsvJsonDcolumnas)
-                                df_aplanado = modelo_pred.aplanar_datos_tecnicos(df_pred)
-
-                                if df_aplanado is not None and not df_aplanado.empty:
-                                    resultado = modelo_pred.predecir_modelo(df_aplanado)
-
-                                    if resultado is not None and not resultado.empty:
-                                        # Contadores
-                                        n_vender = 0
-                                        n_observar = 0
-                                        n_ignorar = 0
-
-                                        # Recolectar datos para ordenar por ROI
-                                        oportunidades = []
-                                        for i, (_, row_pred) in enumerate(resultado.iterrows()):
-                                            if i >= len(df_sell):
-                                                break
-                                            row_orig = df_sell.iloc[i]
-
-                                            symbol = row_orig.get("Symbol", "???")
-                                            roi = row_orig.get("%Roi", 0) * 100
-                                            conf = row_pred.get("confianza", 0)
-                                            opcion = row_orig.get("Opcion", "")
-
-                                            # Extraer RSI del JSON si existe
-                                            rsi = 0
-                                            try:
-                                                datos_tec = row_orig.get("Datostecnicos", "{}")
-                                                if isinstance(datos_tec, str):
-                                                    datos_tec = json.loads(datos_tec)
-                                                rsi = datos_tec.get("diaria", {}).get("rsi", 0)
-                                            except:
-                                                pass
-
-                                            # Determinar estado según umbrales
-                                            if conf >= 0.65:
-                                                estado = "VENDER"
-                                                tag = "vender"
-                                                n_vender += 1
-                                            elif conf >= 0.35:
-                                                estado = "Observar"
-                                                tag = "observar"
-                                                n_observar += 1
-                                            else:
-                                                estado = "Ignorar"
-                                                tag = "ignorar"
-                                                n_ignorar += 1
-
-                                            oportunidades.append({
-                                                "symbol": symbol,
-                                                "opcion": opcion,
-                                                "rsi": rsi,
-                                                "roi": roi,
-                                                "conf": conf,
-                                                "estado": estado,
-                                                "tag": tag
-                                            })
-
-                                        # Ordenar por ROI decreciente
-                                        oportunidades.sort(key=lambda x: x["roi"], reverse=True)
-
-                                        # Insertar ordenados
-                                        for opp in oportunidades:
-                                            opp_tree.insert("", "end",
-                                                text=opp["symbol"],
-                                                values=(opp["opcion"], f"{opp['rsi']:.1f}", f"{opp['roi']:.1f}", f"{opp['conf']:.2f}", opp["estado"]),
-                                                tags=(opp["tag"],)
-                                            )
-
-                                        # Resumen en una línea simple
-                                        opp_tree.insert("", "end",
-                                            text=f"Total: {len(resultado)}",
-                                            values=("", f"V:{n_vender}", f"O:{n_observar}", f"I:{n_ignorar}", ""),
-                                            tags=("header",)
-                                        )
-                                    else:
-                                        opp_tree.insert("", "end", text="Sin predicciones", values=("", "", "", "", ""), tags=("ignorar",))
-                                else:
-                                    opp_tree.insert("", "end", text="Error aplanando", values=("", "", "", "", ""), tags=("ignorar",))
-                            else:
-                                opp_tree.insert("", "end", text="Modelo no cargado", values=("", "", "", "", ""), tags=("ignorar",))
-                        else:
-                            opp_tree.insert("", "end", text="Sin oportunidades", values=("", "", "", "", ""), tags=("ignorar",))
-                    except Exception as e_opp:
-                        opp_tree.insert("", "end", text=f"Error: {str(e_opp)[:30]}", values=("", "", "", "", ""), tags=("ignorar",))
-
-                except Exception as e:
-                    metrics_tree.insert("", "end", text=f"❌ Error: {str(e)[:50]}", values=("", "", ""), tags=("bad",))
-                    print(f"actualizar_metricas(): {e}")
-                    traceback.print_exc()
 
             # Actualizar métricas al inicio
             actualizar_metricas()
