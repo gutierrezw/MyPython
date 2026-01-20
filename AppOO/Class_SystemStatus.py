@@ -40,7 +40,6 @@ class system_status(tk.Frame):
         self.cgcolor = colores["cgcolor"]
         self.cchart = colores["cchart"]
 
-
         # Lista para rastrear todos los after() callbacks
         self.after_ids = []
         self.is_running = True  # Flag para controlar loops
@@ -137,33 +136,23 @@ class system_status(tk.Frame):
                 # Ordena los threads por nombre antes de procesarlos
                 for keys in sorted(threading.enumerate(), key=lambda t: t.name):
                     # obtiene contador de actividad (Running) para el job
-                    itera = DataHub.update_self_procesos(
-                        proces="thread", tarea=keys.name
-                    )
+                    itera = DataHub.update_self_procesos(proces="thread", tarea=keys.name)
                     status = f"Run({itera})" if keys.is_alive() else "Stop()"
 
                     # cuando existe la task en DataHub
                     if keys.ident in procesos["thread"]:
-                        procesos["thread"][keys.ident].update(
-                            {"tarea": keys.name, "params": status}
-                        )
+                        procesos["thread"][keys.ident].update({"tarea": keys.name, "params": status})
                     else:
                         # casos donde nose a agregado la task en DataHub
-                        procesos["thread"].update(
-                            {keys.ident: {"tarea": keys.name, "params": status}}
-                        )
+                        procesos["thread"].update({keys.ident: {"tarea": keys.name, "params": status}})
 
                 # Ordena los jobs por tag antes de mostrar
-                jobs_sorted = sorted(
-                    schedule.jobs, key=lambda job: list(job.tags)[0] if job.tags else ""
-                )
+                jobs_sorted = sorted(schedule.jobs, key=lambda job: list(job.tags)[0] if job.tags else "")
 
                 for job in jobs_sorted:
                     # obtiene contador de actividad (Running) para el job
                     job_tags = list(job.tags)[0]
-                    itera = DataHub.update_self_procesos(
-                        proces="running", tarea=job_tags
-                    )
+                    itera = DataHub.update_self_procesos(proces="running", tarea=job_tags)
 
                     if job_tags in procesos["jobs"]:
                         procesos["jobs"][job_tags].update(
@@ -186,17 +175,13 @@ class system_status(tk.Frame):
                 widget = [item for item in DataHub.procesos if "widget" in item]
 
                 # Ordena el arreglo widget por keys antes de procesarlo
-                for proceso in sorted(
-                    widget, key=lambda x: list(x["widget"].keys())[0]
-                ):
+                for proceso in sorted(widget, key=lambda x: list(x["widget"].keys())[0]):
                     grupo = proceso["widget"]
                     for task in sorted(grupo.keys()):
                         values = grupo[task]
                         name = task.split("_", 1)[1]
                         status = f"Run({values})"
-                        procesos["widget"].update(
-                            {name: {"tarea": task, "params": status}}
-                        )
+                        procesos["widget"].update({name: {"tarea": task, "params": status}})
 
                 return procesos
             except Exception as e:
@@ -245,9 +230,7 @@ class system_status(tk.Frame):
             # mueve nuevos valores de proceso a treeview
             for keys, grupo in procesos.items():
 
-                if (
-                    keys == "thread"
-                ):  # ------------------------------------------------------------------------------
+                if keys == "thread":  # ------------------------------------------------------------------------------
                     for clave, vals in grupo.items():
                         if vals["params"] == "Stop()":
                             pass
@@ -271,9 +254,7 @@ class system_status(tk.Frame):
 
                 if keys == "jobs":
                     for clave, vals in grupo.items():
-                        Bitems = buscar_item_treeview(
-                            keys=keys, iid=clave, sobre="values"
-                        )
+                        Bitems = buscar_item_treeview(keys=keys, iid=clave, sobre="values")
 
                         if Bitems is None:
                             tree.insert(
@@ -383,9 +364,7 @@ class system_status(tk.Frame):
 
                 # Verificar que el símbolo existe
                 if symbol not in DataHub.info:
-                    detalle.insert(
-                        "", "end", text=f"⚠️ {symbol}: No disponible", tags=("warning",)
-                    )
+                    detalle.insert("", "end", text=f"⚠️ {symbol}: No disponible", tags=("warning",))
                     return
 
                 data = DataHub.info[symbol]
@@ -393,16 +372,10 @@ class system_status(tk.Frame):
                 # Header con símbolo y timestamp
                 if "websocket" in data and "timestamp" in data["websocket"]:
                     timestamp = data["websocket"]["timestamp"]
-                    detalle.insert(
-                        "", "end", text=f"📊 Symbol: {symbol.upper()}", tags=("header",)
-                    )
-                    detalle.insert(
-                        "", "end", text=f"⏰ Update: {timestamp}", tags=("info",)
-                    )
+                    detalle.insert("", "end", text=f"📊 Symbol: {symbol.upper()}", tags=("header",))
+                    detalle.insert("", "end", text=f"⏰ Update: {timestamp}", tags=("info",))
                 else:
-                    detalle.insert(
-                        "", "end", text=f"📊 Symbol: {symbol.upper()}", tags=("header",)
-                    )
+                    detalle.insert("", "end", text=f"📊 Symbol: {symbol.upper()}", tags=("header",))
 
                 detalle.insert("", "end", text="", tags=("spacer",))
 
@@ -410,18 +383,12 @@ class system_status(tk.Frame):
                 for key, value in data.items():
                     if isinstance(value, dict):
                         # Crear nodo para diccionarios
-                        node = detalle.insert(
-                            "", "end", text=f"📂 {key}", tags=("section",)
-                        )
+                        node = detalle.insert("", "end", text=f"📂 {key}", tags=("section",))
 
                         for fields, valor in value.items():
                             # Formatear valores según tipo
                             if isinstance(valor, float):
-                                valor_str = (
-                                    f"{valor:,.4f}"
-                                    if abs(valor) < 1000
-                                    else f"{valor:,.2f}"
-                                )
+                                valor_str = f"{valor:,.4f}" if abs(valor) < 1000 else f"{valor:,.2f}"
                             elif isinstance(valor, (int, str)):
                                 valor_str = str(valor)
                             else:
@@ -440,9 +407,7 @@ class system_status(tk.Frame):
 
                     elif isinstance(value, pd.DataFrame):
                         # Mostrar información de DataFrames
-                        node = detalle.insert(
-                            "", "end", text=f"📋 {key}", tags=("section",)
-                        )
+                        node = detalle.insert("", "end", text=f"📋 {key}", tags=("section",))
                         detalle.insert(
                             node,
                             "end",
@@ -465,21 +430,13 @@ class system_status(tk.Frame):
                     else:
                         # Valores simples
                         if isinstance(value, float):
-                            value_str = (
-                                f"{value:,.4f}"
-                                if abs(value) < 1000
-                                else f"{value:,.2f}"
-                            )
+                            value_str = f"{value:,.4f}" if abs(value) < 1000 else f"{value:,.2f}"
                         else:
                             value_str = str(value)
-                        detalle.insert(
-                            "", "end", text=f"🔹 {key}: {value_str}", tags=("value",)
-                        )
+                        detalle.insert("", "end", text=f"🔹 {key}: {value_str}", tags=("value",))
 
             except Exception as e:
-                detalle.insert(
-                    "", "end", text=f"❌ Error al mostrar detalle: {e}", tags=("error",)
-                )
+                detalle.insert("", "end", text=f"❌ Error al mostrar detalle: {e}", tags=("error",))
                 print(f"[display_items_lista({symbol})]: {e}")
 
         # Obtener el ítem seleccionado con un solo click
@@ -595,12 +552,8 @@ class system_status(tk.Frame):
             detalle.pack(side=tk.LEFT, expand=True, fill=tk.BOTH, pady=5, padx=(2, 5))
 
             # Configurar colores y estilos mejorados (consistente con manager_buysell)
-            detalle.tag_configure(
-                "header", foreground=self.bgcolor, font=("TkDefaultFont", 10, "bold")
-            )
-            detalle.tag_configure(
-                "section", foreground="yellow", font=("TkDefaultFont", 9, "bold")
-            )
+            detalle.tag_configure("header", foreground=self.bgcolor, font=("TkDefaultFont", 10, "bold"))
+            detalle.tag_configure("section", foreground="yellow", font=("TkDefaultFont", 9, "bold"))
             detalle.tag_configure("info", foreground="lightgreen")
             detalle.tag_configure("summary", foreground="orange")
             detalle.tag_configure("value", foreground=self.fgcolor)
@@ -634,9 +587,7 @@ class system_status(tk.Frame):
                 text="👈 Selecciona un símbolo de la izquierda",
                 tags=("info",),
             )
-            detalle.insert(
-                "", "end", text="para ver su información detallada", tags=("info",)
-            )
+            detalle.insert("", "end", text="para ver su información detallada", tags=("info",))
             detalle.insert("", "end", text="", tags=("spacer",))
             detalle.insert(
                 "",
@@ -717,9 +668,7 @@ class system_status(tk.Frame):
 
                 # Si no hay items
                 if total_items == 0:
-                    lista.insert(
-                        "", "end", text="(Vacío - sin datos en cache)", tags=("empty",)
-                    )
+                    lista.insert("", "end", text="(Vacío - sin datos en cache)", tags=("empty",))
 
             except Exception as e:
                 print(f"[refresh_cache_list()]: {e}")
@@ -760,28 +709,20 @@ class system_status(tk.Frame):
                         size_str = f"{size_bytes/1024:.2f} KB"
                     else:
                         size_str = f"{size_bytes/(1024*1024):.2f} MB"
-                    detalle.insert(
-                        "", "end", text=f"💾 Tamaño: {size_str}", tags=("info",)
-                    )
+                    detalle.insert("", "end", text=f"💾 Tamaño: {size_str}", tags=("info",))
                 except:
                     pass
 
                 # Timestamp
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                detalle.insert(
-                    "", "end", text=f"⏰ Consultado: {timestamp}", tags=("info",)
-                )
+                detalle.insert("", "end", text=f"⏰ Consultado: {timestamp}", tags=("info",))
                 detalle.insert("", "end", text="", tags=("spacer",))
 
                 # Mostrar contenido según el tipo
                 if isinstance(data, pd.DataFrame):
                     # DataFrame
-                    detalle.insert(
-                        "", "end", text="📊 DataFrame - Resumen", tags=("section",)
-                    )
-                    detalle.insert(
-                        "", "end", text=f"  Filas: {data.shape[0]:,}", tags=("summary",)
-                    )
+                    detalle.insert("", "end", text="📊 DataFrame - Resumen", tags=("section",))
+                    detalle.insert("", "end", text=f"  Filas: {data.shape[0]:,}", tags=("summary",))
                     detalle.insert(
                         "",
                         "end",
@@ -816,9 +757,7 @@ class system_status(tk.Frame):
 
                 elif isinstance(data, dict):
                     # Diccionario
-                    detalle.insert(
-                        "", "end", text="📂 Diccionario - Contenido", tags=("section",)
-                    )
+                    detalle.insert("", "end", text="📂 Diccionario - Contenido", tags=("section",))
                     detalle.insert(
                         "",
                         "end",
@@ -827,9 +766,7 @@ class system_status(tk.Frame):
                     )
                     detalle.insert("", "end", text="", tags=("spacer",))
 
-                    node = detalle.insert(
-                        "", "end", text="🔹 Estructura", tags=("section",)
-                    )
+                    node = detalle.insert("", "end", text="🔹 Estructura", tags=("section",))
                     for idx, (k, v) in enumerate(data.items()):
                         if idx >= 20:  # Limitar a 20 items
                             detalle.insert(
@@ -840,15 +777,11 @@ class system_status(tk.Frame):
                             )
                             break
                         v_str = str(v)[:100] + "..." if len(str(v)) > 100 else str(v)
-                        detalle.insert(
-                            node, "end", text=f"  {k}: {v_str}", tags=("value",)
-                        )
+                        detalle.insert(node, "end", text=f"  {k}: {v_str}", tags=("value",))
 
                 elif isinstance(data, (list, tuple)):
                     # Lista o tupla
-                    detalle.insert(
-                        "", "end", text=f"📋 {tipo_data} - Contenido", tags=("section",)
-                    )
+                    detalle.insert("", "end", text=f"📋 {tipo_data} - Contenido", tags=("section",))
                     detalle.insert(
                         "",
                         "end",
@@ -857,9 +790,7 @@ class system_status(tk.Frame):
                     )
                     detalle.insert("", "end", text="", tags=("spacer",))
 
-                    node = detalle.insert(
-                        "", "end", text="🔹 Elementos", tags=("section",)
-                    )
+                    node = detalle.insert("", "end", text="🔹 Elementos", tags=("section",))
                     for idx, item in enumerate(data):
                         if idx >= 20:  # Limitar a 20 items
                             detalle.insert(
@@ -869,36 +800,24 @@ class system_status(tk.Frame):
                                 tags=("value",),
                             )
                             break
-                        item_str = (
-                            str(item)[:100] + "..."
-                            if len(str(item)) > 100
-                            else str(item)
-                        )
-                        detalle.insert(
-                            node, "end", text=f"  [{idx}]: {item_str}", tags=("value",)
-                        )
+                        item_str = str(item)[:100] + "..." if len(str(item)) > 100 else str(item)
+                        detalle.insert(node, "end", text=f"  [{idx}]: {item_str}", tags=("value",))
 
                 else:
                     # Otros tipos
                     detalle.insert("", "end", text="📦 Valor", tags=("section",))
-                    value_str = (
-                        str(data)[:500] + "..." if len(str(data)) > 500 else str(data)
-                    )
+                    value_str = str(data)[:500] + "..." if len(str(data)) > 500 else str(data)
                     detalle.insert("", "end", text=value_str, tags=("value",))
 
             except Exception as e:
-                detalle.insert(
-                    "", "end", text=f"❌ Error al mostrar detalle: {e}", tags=("error",)
-                )
+                detalle.insert("", "end", text=f"❌ Error al mostrar detalle: {e}", tags=("error",))
                 print(f"[display_cache_detail({key})]: {e}")
 
         def remove_selected_key():
             """Elimina la clave seleccionada del cache."""
             selected = lista.selection()
             if not selected:
-                self.messagebox.showinfo(
-                    "Información", "Seleccione una clave para eliminar."
-                )
+                self.messagebox.showinfo("Información", "Seleccione una clave para eliminar.")
                 return
 
             # Extraer key del texto (remover icono)
@@ -907,9 +826,7 @@ class system_status(tk.Frame):
 
             if key in CacheHut.cache:
                 del CacheHut.cache[key]
-                self.messagebox.showinfo(
-                    "Cache", f"✅ Clave '{key}' eliminada del cache."
-                )
+                self.messagebox.showinfo("Cache", f"✅ Clave '{key}' eliminada del cache.")
                 refresh_cache_list()
                 # Limpiar detalle
                 for item in detalle.get_children():
@@ -921,9 +838,7 @@ class system_status(tk.Frame):
                     tags=("info",),
                 )
             else:
-                self.messagebox.showwarning(
-                    "Cache", f"⚠️ Clave '{key}' no encontrada o ya expirada."
-                )
+                self.messagebox.showwarning("Cache", f"⚠️ Clave '{key}' no encontrada o ya expirada.")
 
         #   EVENTOS DE INTERFAZ
         def on_double_click(event):
@@ -982,12 +897,8 @@ class system_status(tk.Frame):
             detalle.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=5, padx=(2, 5))
 
             # Configurar colores y estilos (consistente con otros módulos)
-            detalle.tag_configure(
-                "header", foreground=self.bgcolor, font=("TkDefaultFont", 10, "bold")
-            )
-            detalle.tag_configure(
-                "section", foreground="yellow", font=("TkDefaultFont", 9, "bold")
-            )
+            detalle.tag_configure("header", foreground=self.bgcolor, font=("TkDefaultFont", 10, "bold"))
+            detalle.tag_configure("section", foreground="yellow", font=("TkDefaultFont", 9, "bold"))
             detalle.tag_configure("info", foreground="lightgreen")
             detalle.tag_configure("summary", foreground="orange")
             detalle.tag_configure("value", foreground=self.fgcolor)
@@ -1007,24 +918,16 @@ class system_status(tk.Frame):
             frame_btn = ttk.Frame(self.cache)
             frame_btn.pack(fill=tk.X, pady=(0, 5), padx=5)
 
-            ttk.Button(frame_btn, text="🔄 Refrescar", command=refresh_cache_list).pack(
-                side=tk.LEFT, padx=5
-            )
-            ttk.Button(frame_btn, text="🗑️ Eliminar", command=remove_selected_key).pack(
-                side=tk.LEFT, padx=5
-            )
+            ttk.Button(frame_btn, text="🔄 Refrescar", command=refresh_cache_list).pack(side=tk.LEFT, padx=5)
+            ttk.Button(frame_btn, text="🗑️ Eliminar", command=remove_selected_key).pack(side=tk.LEFT, padx=5)
 
             # --- Bind eventos ---
             lista.bind("<Double-Button-1>", on_double_click)
             lista.bind("<<TreeviewSelect>>", on_item_selected)
 
             # Mostrar mensaje inicial en detalle
-            detalle.insert(
-                "", "end", text="👈 Selecciona un item de la izquierda", tags=("info",)
-            )
-            detalle.insert(
-                "", "end", text="para ver su información detallada", tags=("info",)
-            )
+            detalle.insert("", "end", text="👈 Selecciona un item de la izquierda", tags=("info",))
+            detalle.insert("", "end", text="para ver su información detallada", tags=("info",))
             detalle.insert("", "end", text="", tags=("spacer",))
             detalle.insert(
                 "",
@@ -1062,9 +965,7 @@ class system_status(tk.Frame):
             try:
                 # Binance WebSocket Streams
                 try:
-                    binance_ws = (
-                        hasattr(DataHub, "WStreams") and DataHub.WStreams is not None
-                    )
+                    binance_ws = hasattr(DataHub, "WStreams") and DataHub.WStreams is not None
                     apis["Binance WebSocket"] = {
                         "status": "🟢 Conectado" if binance_ws else "🔴 Desconectado",
                         "type": "WebSocket Streams",
@@ -1083,9 +984,7 @@ class system_status(tk.Frame):
 
                 # Binance API Client
                 try:
-                    binance_api = (
-                        hasattr(DataHub, "WsClient") and DataHub.WsClient is not None
-                    )
+                    binance_api = hasattr(DataHub, "WsClient") and DataHub.WsClient is not None
                     apis["Binance API"] = {
                         "status": "🟢 Conectado" if binance_api else "🔴 Desconectado",
                         "type": "WebSocket API Client",
@@ -1155,9 +1054,7 @@ class system_status(tk.Frame):
                 apis = get_api_status()
 
                 # Contador de conectadas
-                connected_count = sum(
-                    1 for api in apis.values() if api.get("connected")
-                )
+                connected_count = sum(1 for api in apis.values() if api.get("connected"))
                 total_count = len(apis)
 
                 # Insertar APIs en la lista con tres columnas
@@ -1177,9 +1074,7 @@ class system_status(tk.Frame):
                     )
 
                 # Actualizar header con contador
-                lista.heading(
-                    "#0", text=f"API ({connected_count}/{total_count} activas)"
-                )
+                lista.heading("#0", text=f"API ({connected_count}/{total_count} activas)")
 
             except Exception as e:
                 print(f"[refresh_api_list()]: {e}")
@@ -1195,9 +1090,7 @@ class system_status(tk.Frame):
                 api_info = apis.get(clean_name)
 
                 if not api_info:
-                    self.messagebox.showwarning(
-                        "API Info", f"⚠️ {clean_name}: No encontrada"
-                    )
+                    self.messagebox.showwarning("API Info", f"⚠️ {clean_name}: No encontrada")
                     return
 
                 # Crear ventana Toplevel
@@ -1216,12 +1109,8 @@ class system_status(tk.Frame):
                 tree.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
                 # Configurar colores
-                tree.tag_configure(
-                    "header", foreground=self.bgcolor, font=("TkDefaultFont", 11, "bold")
-                )
-                tree.tag_configure(
-                    "section", foreground="yellow", font=("TkDefaultFont", 9, "bold")
-                )
+                tree.tag_configure("header", foreground=self.bgcolor, font=("TkDefaultFont", 11, "bold"))
+                tree.tag_configure("section", foreground="yellow", font=("TkDefaultFont", 9, "bold"))
                 tree.tag_configure("info", foreground="lightgreen")
                 tree.tag_configure("summary", foreground="orange")
                 tree.tag_configure("value", foreground=self.fgcolor)
@@ -1236,12 +1125,8 @@ class system_status(tk.Frame):
                 tree.insert("", "end", text="", tags=("spacer",))
 
                 # Información básica
-                tree.insert(
-                    "", "end", text=f"📊 Estado: {api_info['status']}", tags=("info",)
-                )
-                tree.insert(
-                    "", "end", text=f"🔧 Tipo: {api_info['type']}", tags=("info",)
-                )
+                tree.insert("", "end", text=f"📊 Estado: {api_info['status']}", tags=("info",))
+                tree.insert("", "end", text=f"🔧 Tipo: {api_info['type']}", tags=("info",))
                 tree.insert(
                     "",
                     "end",
@@ -1257,15 +1142,11 @@ class system_status(tk.Frame):
 
                 # Timestamp
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                tree.insert(
-                    "", "end", text=f"⏰ Consultado: {timestamp}", tags=("info",)
-                )
+                tree.insert("", "end", text=f"⏰ Consultado: {timestamp}", tags=("info",))
                 tree.insert("", "end", text="", tags=("spacer",))
 
                 # Información adicional según API
-                node = tree.insert(
-                    "", "end", text="📋 Información Adicional", tags=("section",)
-                )
+                node = tree.insert("", "end", text="📋 Información Adicional", tags=("section",))
 
                 if "Binance" in clean_name:
                     tree.insert(
@@ -1274,9 +1155,7 @@ class system_status(tk.Frame):
                         text="  • Mercado: Cryptocurrencies",
                         tags=("value",),
                     )
-                    tree.insert(
-                        node, "end", text="  • Frecuencia: Tiempo real", tags=("value",)
-                    )
+                    tree.insert(node, "end", text="  • Frecuencia: Tiempo real", tags=("value",))
                     tree.insert(
                         node,
                         "end",
@@ -1303,12 +1182,8 @@ class system_status(tk.Frame):
                         text="  • Frecuencia: 15 min delay (free)",
                         tags=("value",),
                     )
-                    tree.insert(
-                        node, "end", text="  • Límites: 2000 req/hora", tags=("value",)
-                    )
-                    tree.insert(
-                        node, "end", text="  • Cobertura: Global", tags=("value",)
-                    )
+                    tree.insert(node, "end", text="  • Límites: 2000 req/hora", tags=("value",))
+                    tree.insert(node, "end", text="  • Cobertura: Global", tags=("value",))
 
                 elif "Interactive Brokers" in clean_name:
                     tree.insert(
@@ -1317,9 +1192,7 @@ class system_status(tk.Frame):
                         text="  • Mercado: Global (Stocks, Forex, etc)",
                         tags=("value",),
                     )
-                    tree.insert(
-                        node, "end", text="  • Frecuencia: Tiempo real", tags=("value",)
-                    )
+                    tree.insert(node, "end", text="  • Frecuencia: Tiempo real", tags=("value",))
                     tree.insert(
                         node,
                         "end",
@@ -1334,18 +1207,14 @@ class system_status(tk.Frame):
                     )
 
                 elif "Finviz" in clean_name:
-                    tree.insert(
-                        node, "end", text="  • Mercado: US Stocks", tags=("value",)
-                    )
+                    tree.insert(node, "end", text="  • Mercado: US Stocks", tags=("value",))
                     tree.insert(
                         node,
                         "end",
                         text="  • Datos: Screener, Charts, News",
                         tags=("value",),
                     )
-                    tree.insert(
-                        node, "end", text="  • Método: Web Scraping", tags=("value",)
-                    )
+                    tree.insert(node, "end", text="  • Método: Web Scraping", tags=("value",))
                     tree.insert(
                         node,
                         "end",
@@ -1360,9 +1229,7 @@ class system_status(tk.Frame):
                 btn_frame = ttk.Frame(main_frame)
                 btn_frame.pack(fill=tk.X, pady=(5, 0))
 
-                ttk.Button(
-                    btn_frame, text="✖️ Cerrar", command=detail_window.destroy
-                ).pack(side=tk.RIGHT, padx=5)
+                ttk.Button(btn_frame, text="✖️ Cerrar", command=detail_window.destroy).pack(side=tk.RIGHT, padx=5)
 
                 # Centrar ventana
                 detail_window.update_idletasks()
@@ -1478,34 +1345,24 @@ class system_status(tk.Frame):
                 data = DataHub.manager_buysell.get(key)
 
                 if data is None:
-                    detalle.insert(
-                        "", "end", text=f"⚠️ {key}: No disponible aún", tags=("warning",)
-                    )
+                    detalle.insert("", "end", text=f"⚠️ {key}: No disponible aún", tags=("warning",))
                     return
 
                 # Header con el nombre del item
-                detalle.insert(
-                    "", "end", text=f"📊 Item: {key.upper()}", tags=("header",)
-                )
+                detalle.insert("", "end", text=f"📊 Item: {key.upper()}", tags=("header",))
                 detalle.insert("", "end", text="", tags=("spacer",))
 
                 # Información del tipo de objeto
                 tipo_data = type(data).__name__
-                detalle.insert(
-                    "", "end", text=f"Tipo de objeto: {tipo_data}", tags=("info",)
-                )
+                detalle.insert("", "end", text=f"Tipo de objeto: {tipo_data}", tags=("info",))
 
                 # Timestamp de actualización
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                detalle.insert(
-                    "", "end", text=f"Última consulta: {timestamp}", tags=("info",)
-                )
+                detalle.insert("", "end", text=f"Última consulta: {timestamp}", tags=("info",))
                 detalle.insert("", "end", text="", tags=("spacer",))
 
                 # Mostrar estructura completa del objeto
-                node_estructura = detalle.insert(
-                    "", "end", text="📂 Estructura Completa", tags=("section",)
-                )
+                node_estructura = detalle.insert("", "end", text="📂 Estructura Completa", tags=("section",))
 
                 # Si es un diccionario, mostrar sus claves y valores
                 if isinstance(data, dict):
@@ -1527,9 +1384,7 @@ class system_status(tk.Frame):
                                 tags=("subkey",),
                             )
                             for k, v in subvalue.items():
-                                detalle.insert(
-                                    subnode, "end", text=f"  {k}: {v}", tags=("value",)
-                                )
+                                detalle.insert(subnode, "end", text=f"  {k}: {v}", tags=("value",))
                         elif isinstance(subvalue, (list, tuple)):
                             # Mostrar listas/tuplas
                             subnode = detalle.insert(
@@ -1538,9 +1393,7 @@ class system_status(tk.Frame):
                                 text=f"🔹 {subkey} (lista con {len(subvalue)} elementos)",
                                 tags=("subkey",),
                             )
-                            for idx, item in enumerate(
-                                subvalue[:10]
-                            ):  # Mostrar solo primeros 10
+                            for idx, item in enumerate(subvalue[:10]):  # Mostrar solo primeros 10
                                 detalle.insert(
                                     subnode,
                                     "end",
@@ -1563,9 +1416,7 @@ class system_status(tk.Frame):
                                 text=f"🔹 {subkey}",
                                 tags=("subkey",),
                             )
-                            detalle.insert(
-                                subnode, "end", text=f"  {df_info}", tags=("value",)
-                            )
+                            detalle.insert(subnode, "end", text=f"  {df_info}", tags=("value",))
                             detalle.insert(
                                 subnode,
                                 "end",
@@ -1583,15 +1434,9 @@ class system_status(tk.Frame):
 
                 # Si es DataFrame directamente
                 elif isinstance(data, pd.DataFrame):
-                    detalle.insert(
-                        "", "end", text="📋 Resumen del DataFrame", tags=("section",)
-                    )
-                    detalle.insert(
-                        "", "end", text=f"Filas: {data.shape[0]}", tags=("summary",)
-                    )
-                    detalle.insert(
-                        "", "end", text=f"Columnas: {data.shape[1]}", tags=("summary",)
-                    )
+                    detalle.insert("", "end", text="📋 Resumen del DataFrame", tags=("section",))
+                    detalle.insert("", "end", text=f"Filas: {data.shape[0]}", tags=("summary",))
+                    detalle.insert("", "end", text=f"Columnas: {data.shape[1]}", tags=("summary",))
                     detalle.insert(
                         "",
                         "end",
@@ -1601,26 +1446,20 @@ class system_status(tk.Frame):
 
                     # Mostrar primeras filas
                     detalle.insert("", "end", text="", tags=("spacer",))
-                    detalle.insert(
-                        "", "end", text="📊 Primeras 5 filas:", tags=("section",)
-                    )
+                    detalle.insert("", "end", text="📊 Primeras 5 filas:", tags=("section",))
                     df_string = data.head().to_string()
                     for line in df_string.split("\n"):
                         detalle.insert("", "end", text=line, tags=("data",))
 
                 # Si es otro tipo de objeto
                 else:
-                    detalle.insert(
-                        node_estructura, "end", text=str(data)[:500], tags=("value",)
-                    )
+                    detalle.insert(node_estructura, "end", text=str(data)[:500], tags=("value",))
 
                 # Expandir nodo principal
                 detalle.item(node_estructura, open=True)
 
             except Exception as e:
-                detalle.insert(
-                    "", "end", text=f"❌ Error al mostrar detalle: {e}", tags=("error",)
-                )
+                detalle.insert("", "end", text=f"❌ Error al mostrar detalle: {e}", tags=("error",))
                 print(f"[display_buysell_detail({key})]: {e}")
 
         def on_double_click(event):
@@ -1646,9 +1485,7 @@ class system_status(tk.Frame):
                     for key in sorted(DataHub.manager_buysell.keys()):
                         lista.insert("", "end", text=key, tags=("item",))
                 else:
-                    lista.insert(
-                        "", "end", text="(Vacío - esperando datos)", tags=("empty",)
-                    )
+                    lista.insert("", "end", text="(Vacío - esperando datos)", tags=("empty",))
 
                 # Programar siguiente actualización y registrar el after_id
                 after_id = self.system.after(30000, update_buysell_list)
@@ -1674,12 +1511,8 @@ class system_status(tk.Frame):
             detalle.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=5, padx=(2, 5))
 
             # Configurar colores y estilos
-            detalle.tag_configure(
-                "header", foreground=self.bgcolor, font=("TkDefaultFont", 10, "bold")
-            )
-            detalle.tag_configure(
-                "section", foreground="yellow", font=("TkDefaultFont", 9, "bold")
-            )
+            detalle.tag_configure("header", foreground=self.bgcolor, font=("TkDefaultFont", 10, "bold"))
+            detalle.tag_configure("section", foreground="yellow", font=("TkDefaultFont", 9, "bold"))
             detalle.tag_configure("info", foreground="lightgreen")
             detalle.tag_configure("summary", foreground="orange")
             detalle.tag_configure("subkey", foreground="lightblue")
@@ -1708,9 +1541,7 @@ class system_status(tk.Frame):
                 text="👈 Haz doble click en un item de la izquierda",
                 tags=("info",),
             )
-            detalle.insert(
-                "", "end", text="para ver su información detallada", tags=("info",)
-            )
+            detalle.insert("", "end", text="para ver su información detallada", tags=("info",))
         except Exception as e:
             print(f"manager_buysell_system(): {e}")
 
@@ -1739,7 +1570,7 @@ class system_status(tk.Frame):
                 for child in detalle.get_children():
                     detalle.delete(child)
 
-                if not hasattr(DataHub, 'rebalanceo') or not DataHub.rebalanceo:
+                if not hasattr(DataHub, "rebalanceo") or not DataHub.rebalanceo:
                     detalle.insert("", "end", text="⚠️ Motor de rebalanceo no ejecutado aún", tags=("warning",))
                     return
 
@@ -1778,13 +1609,15 @@ class system_status(tk.Frame):
                 detalle.insert("", "end", text=f"Score: {found_item.get('score', 0):.4f}", tags=("info",))
 
                 # Monto sugerido puede estar en diferentes lugares según el vehículo
-                monto_sugerido = found_item.get('monto_sugerido', 0)
+                monto_sugerido = found_item.get("monto_sugerido", 0)
                 if monto_sugerido == 0:
                     # Para Crypto, el monto está en impacto.gap_valor_total
-                    monto_sugerido = found_item.get('impacto', {}).get('gap_valor_total', 0)
+                    monto_sugerido = found_item.get("impacto", {}).get("gap_valor_total", 0)
 
                 detalle.insert("", "end", text=f"Monto sugerido: ${monto_sugerido:,.2f}", tags=("info",))
-                detalle.insert("", "end", text=f"Presupuesto (Pinvertir): ${found_item.get('pinvertir', 0):,.2f}", tags=("info",))
+                detalle.insert(
+                    "", "end", text=f"Presupuesto (Pinvertir): ${found_item.get('pinvertir', 0):,.2f}", tags=("info",)
+                )
                 detalle.insert("", "end", text="", tags=("spacer",))
 
                 node_impacto = detalle.insert("", "end", text="📂 Impacto por dimensión", tags=("section",))
@@ -1798,8 +1631,10 @@ class system_status(tk.Frame):
                             detalle.insert(node_impacto, "end", text=f"  {dim}: ${valor:,.2f}", tags=("value",))
 
                 detalle.insert("", "end", text="", tags=("spacer",))
-                detalle.insert("", "end", text=f"Gap valor total: ${impacto.get('gap_valor_total', 0):,.2f}", tags=("summary",))
-                gap_norm = impacto.get('gap_valor_norm', 0)
+                detalle.insert(
+                    "", "end", text=f"Gap valor total: ${impacto.get('gap_valor_total', 0):,.2f}", tags=("summary",)
+                )
+                gap_norm = impacto.get("gap_valor_norm", 0)
                 if gap_norm:
                     detalle.insert("", "end", text=f"Gap valor norm: {gap_norm:.4f}", tags=("summary",))
 
@@ -1828,14 +1663,14 @@ class system_status(tk.Frame):
 
                 lista.delete(*lista.get_children())
 
-                if not hasattr(DataHub, 'rebalanceo') or not DataHub.rebalanceo:
+                if not hasattr(DataHub, "rebalanceo") or not DataHub.rebalanceo:
                     lista.insert("", "end", text="⏳ Esperando...", values=("", "", ""))
                 else:
                     # Iterar sobre todos los vehículos en DataHub.rebalanceo
                     for vehiculo, datos in DataHub.rebalanceo.items():
                         timestamp = datos.get("timestamp", "N/A")
                         # Formatear timestamp si es datetime
-                        if timestamp != "N/A" and hasattr(timestamp, 'strftime'):
+                        if timestamp != "N/A" and hasattr(timestamp, "strftime"):
                             timestamp_str = timestamp.strftime("%H:%M:%S")
                         else:
                             timestamp_str = str(timestamp)
@@ -1857,15 +1692,20 @@ class system_status(tk.Frame):
                                     break
 
                                 # Filtra activos con sugrido  == 0
-                                if item['monto_sugerido'] == 0:
+                                if item["monto_sugerido"] == 0:
                                     continue
 
                                 lista.insert(
                                     "",
                                     "end",
                                     text=f"  {item['symbol']}",
-                                    values=(f"{item['score']:.4f}", dims_str, f"${item['monto_sugerido']:,.0f}", f"${item['pinvertir']:,.0f}"),
-                                    tags=("item",)
+                                    values=(
+                                        f"{item['score']:.4f}",
+                                        dims_str,
+                                        f"${item['monto_sugerido']:,.0f}",
+                                        f"${item['pinvertir']:,.0f}",
+                                    ),
+                                    tags=("item",),
                                 )
                                 top += 1
                         elif ranking:
@@ -1892,7 +1732,7 @@ class system_status(tk.Frame):
                                         "end",
                                         text=f"  {item['symbol']}",
                                         values=(f"{score:.4f}", "", f"${monto:,.0f}", f"${pinvertir:,.0f}"),
-                                        tags=("item",)
+                                        tags=("item",),
                                     )
                                     top += 1
                         else:
@@ -1914,7 +1754,7 @@ class system_status(tk.Frame):
                 for item in detalle.get_children():
                     detalle.delete(item)
 
-                if not hasattr(DataHub, 'rebalanceo') or not DataHub.rebalanceo:
+                if not hasattr(DataHub, "rebalanceo") or not DataHub.rebalanceo:
                     detalle.insert("", "end", text="⏳ Esperando primera ejecución", tags=("info",))
                     return
 
@@ -1934,9 +1774,11 @@ class system_status(tk.Frame):
                         detalle.insert("", "end", text="  Sin gaps", tags=("info",))
 
                     ranking = datos.get("ranking", [])
-                    candidatos_con_score = sum(1 for c in ranking if c.get('score', 0) > 0)
+                    candidatos_con_score = sum(1 for c in ranking if c.get("score", 0) > 0)
 
-                    detalle.insert("", "end", text=f"  Evaluados: {len(ranking)}, Score>0: {candidatos_con_score}", tags=("info",))
+                    detalle.insert(
+                        "", "end", text=f"  Evaluados: {len(ranking)}, Score>0: {candidatos_con_score}", tags=("info",)
+                    )
                     detalle.insert("", "end", text="", tags=("spacer",))
 
                 detalle.insert("", "end", text="💡 Doble click en un activo para ver detalle", tags=("info",))
@@ -1944,7 +1786,13 @@ class system_status(tk.Frame):
                 print(f"show_gap_summary(): {e}")
 
         try:
-            lista = ttk.Treeview(self.rebalanceo, columns=("score", "dims", "monto", "inver"), height=12, show="tree headings", style="TFrame")
+            lista = ttk.Treeview(
+                self.rebalanceo,
+                columns=("score", "dims", "monto", "inver"),
+                height=12,
+                show="tree headings",
+                style="TFrame",
+            )
             lista.column("#0", width=120, anchor="w")
             lista.column("score", width=80, anchor="center")
             lista.column("dims", width=150, anchor="w")
@@ -2046,9 +1894,7 @@ class system_status(tk.Frame):
                     line_mem.set_data(x, DataHub.DMem)
 
                     # Actualizar límites solo si cambió el tamaño
-                    max_x = max(
-                        len(x), DataHub.max_points if DataHub.max_points > 0 else 60
-                    )
+                    max_x = max(len(x), DataHub.max_points if DataHub.max_points > 0 else 60)
                     self.ax.set_xlim(0, max_x)
 
                 return line_cpu, line_mem
@@ -2097,23 +1943,20 @@ class system_status(tk.Frame):
 
                 # Obtener datos de entrenamiento usando método centralizado
                 # Usa chatbot.obtener_dataframe_entrenamiento_IA()
-                df, errores_parseo = chatbot.obtener_dataframe_entrenamiento_IA(
-                    tipo="sell",
-                    return_stats=True
-                )
+                df, errores_parseo = chatbot.obtener_dataframe_entrenamiento_IA(tipo="sell", return_stats=True)
 
                 if df.empty:
                     msg = MyMessageBox(self.system)
                     msg.showinfo(
                         "Sin datos para entrenar",
                         "No hay datos disponibles para entrenar el modelo Sell.\n\n"
-                        "Asegúrate de tener oportunidades Sell registradas con decisiones tomadas (1 o -1)."
+                        "Asegúrate de tener oportunidades Sell registradas con decisiones tomadas (1 o -1).",
                     )
                     return
 
                 # Calcular total de errores
                 total_errores = sum(errores_parseo.values())
-                registros = df.to_dict('records')
+                registros = df.to_dict("records")
 
                 if len(df) < 10:
                     # Construir mensaje detallado de errores
@@ -2131,7 +1974,7 @@ class system_status(tk.Frame):
                         f"Mínimo requerido: 10\n"
                         f"Total omitidos: {total_errores}\n\n"
                         f"Desglose de errores:\n{errores_msg}\n\n"
-                        f"Genera más oportunidades Sell con decisiones tomadas."
+                        f"Genera más oportunidades Sell con decisiones tomadas.",
                     )
                     return
 
@@ -2146,23 +1989,21 @@ class system_status(tk.Frame):
                 errores_msg = ""
                 if total_errores > 0:
                     errores_msg = f"\n\nRegistros omitidos ({total_errores}):\n"
-                    if errores_parseo['sin_decision'] > 0:
+                    if errores_parseo["sin_decision"] > 0:
                         errores_msg += f"• Sin decisión: {errores_parseo['sin_decision']}\n"
-                    if errores_parseo['json_invalido'] > 0:
+                    if errores_parseo["json_invalido"] > 0:
                         errores_msg += f"• JSON inválido: {errores_parseo['json_invalido']}\n"
-                    if errores_parseo['detalle_no_dict'] > 0:
+                    if errores_parseo["detalle_no_dict"] > 0:
                         errores_msg += f"• Detalle no dict: {errores_parseo['detalle_no_dict']}\n"
-                    if errores_parseo['indicadores_no_dict'] > 0:
+                    if errores_parseo["indicadores_no_dict"] > 0:
                         errores_msg += f"• Indicadores no dict: {errores_parseo['indicadores_no_dict']}\n"
-                    if errores_parseo['otros'] > 0:
+                    if errores_parseo["otros"] > 0:
                         errores_msg += f"• Otros: {errores_parseo['otros']}"
 
                 msg = MyMessageBox(self.system)
                 msg.showinfo(
                     "Entrenamiento exitoso",
-                    f"Modelo Sell entrenado exitosamente.\n\n"
-                    f"Registros procesados: {len(df)}{errores_msg}\n\n"
-                    f"Las métricas se han actualizado."
+                    f"Modelo Sell entrenado exitosamente.\n\n" f"Las métricas se han actualizado.",
                 )
             except Exception as e:
                 error_msg = str(e)
@@ -2172,8 +2013,7 @@ class system_status(tk.Frame):
                 msg = MyMessageBox(self.system)
                 msg.showinfo(
                     "Error al entrenar",
-                    f"Error al entrenar el modelo Sell:\n\n{error_msg}\n\n"
-                    f"Revisa la consola para más detalles."
+                    f"Error al entrenar el modelo Sell:\n\n{error_msg}\n\n" f"Revisa la consola para más detalles.",
                 )
 
         # Programar actualización automática cada 30 segundos
@@ -2224,25 +2064,47 @@ class system_status(tk.Frame):
                 else:
                     total, aprobadas, rechazadas = 0, 0, 0
 
-                metrics_tree.insert("", "end", text="📚 Dataset Sell (decisiones)", values=("", "", ""), tags=("header",))
+                metrics_tree.insert(
+                    "", "end", text="📚 Dataset Sell (decisiones)", values=("", "", ""), tags=("header",)
+                )
                 metrics_tree.insert("", "end", text="  Total con decisión", values=(f"{total}", "", ""), tags=("info",))
 
                 roi_apr_str = f"{roi_apr*100:.1f}%" if roi_apr != 0 else "-"
                 profit_apr_str = f"${profit_apr:,.0f}" if profit_apr != 0 else "-"
-                metrics_tree.insert("", "end", text="  Aprobadas (rec=1)", values=(f"{aprobadas}", roi_apr_str, profit_apr_str), tags=("good",))
+                metrics_tree.insert(
+                    "",
+                    "end",
+                    text="  Aprobadas (rec=1)",
+                    values=(f"{aprobadas}", roi_apr_str, profit_apr_str),
+                    tags=("good",),
+                )
 
                 roi_rec_str = f"{roi_rec*100:.1f}%" if roi_rec != 0 else "-"
                 profit_rec_str = f"${profit_rec:,.0f}" if profit_rec != 0 else "-"
-                metrics_tree.insert("", "end", text="  Rechazadas (rec=-1)", values=(f"{rechazadas}", roi_rec_str, profit_rec_str), tags=("bad",))
+                metrics_tree.insert(
+                    "",
+                    "end",
+                    text="  Rechazadas (rec=-1)",
+                    values=(f"{rechazadas}", roi_rec_str, profit_rec_str),
+                    tags=("bad",),
+                )
 
                 entrenables = aprobadas + rechazadas
                 tag_entrenables = "good" if entrenables >= 50 else "warning" if entrenables >= 20 else "bad"
-                metrics_tree.insert("", "end", text="  Muestras para entrenar", values=(f"{entrenables}", "", ""), tags=(tag_entrenables,))
+                metrics_tree.insert(
+                    "",
+                    "end",
+                    text="  Muestras para entrenar",
+                    values=(f"{entrenables}", "", ""),
+                    tags=(tag_entrenables,),
+                )
 
                 # === 2. MÉTRICAS CV ===
-                if hasattr(modelo, 'metrics') and modelo.metrics:
+                if hasattr(modelo, "metrics") and modelo.metrics:
                     metrics_tree.insert("", "end", text="", values=("", "", ""))
-                    metrics_tree.insert("", "end", text="🎯 Métricas CV (5-fold)", values=("", "", ""), tags=("header",))
+                    metrics_tree.insert(
+                        "", "end", text="🎯 Métricas CV (5-fold)", values=("", "", ""), tags=("header",)
+                    )
 
                     precision = modelo.metrics.get("precision", 0)
                     precision_std = modelo.metrics.get("precision_std", 0)
@@ -2254,28 +2116,58 @@ class system_status(tk.Frame):
                     accuracy_std = modelo.metrics.get("accuracy_std", 0)
 
                     def get_tag(value):
-                        if value >= 0.75: return "good"
-                        if value >= 0.60: return "warning"
+                        if value >= 0.75:
+                            return "good"
+                        if value >= 0.60:
+                            return "warning"
                         return "bad"
 
-                    metrics_tree.insert("", "end", text="  Precisión", values=(f"{precision:.0%}±{precision_std*100:.0f}", "", ""), tags=(get_tag(precision),))
-                    metrics_tree.insert("", "end", text="  Recall", values=(f"{recall:.0%}±{recall_std*100:.0f}", "", ""), tags=(get_tag(recall),))
-                    metrics_tree.insert("", "end", text="  F1-Score", values=(f"{f1:.0%}±{f1_std*100:.0f}", "", ""), tags=(get_tag(f1),))
-                    metrics_tree.insert("", "end", text="  Accuracy", values=(f"{accuracy:.0%}±{accuracy_std*100:.0f}", "", ""), tags=(get_tag(accuracy),))
+                    metrics_tree.insert(
+                        "",
+                        "end",
+                        text="  Precisión",
+                        values=(f"{precision:.0%}±{precision_std*100:.0f}", "", ""),
+                        tags=(get_tag(precision),),
+                    )
+                    metrics_tree.insert(
+                        "",
+                        "end",
+                        text="  Recall",
+                        values=(f"{recall:.0%}±{recall_std*100:.0f}", "", ""),
+                        tags=(get_tag(recall),),
+                    )
+                    metrics_tree.insert(
+                        "", "end", text="  F1-Score", values=(f"{f1:.0%}±{f1_std*100:.0f}", "", ""), tags=(get_tag(f1),)
+                    )
+                    metrics_tree.insert(
+                        "",
+                        "end",
+                        text="  Accuracy",
+                        values=(f"{accuracy:.0%}±{accuracy_std*100:.0f}", "", ""),
+                        tags=(get_tag(accuracy),),
+                    )
 
-                    # === 3. TOP 10 FEATURES ===
+                    # === 3. FEATURES CON IMPORTANCIA > 0 ===
                     feature_imp = modelo.metrics.get("feature_importance", [])
                     if feature_imp:
+                        # Filtrar features con importancia > 0
+                        features_positivos = [f for f in feature_imp if f["importance"] > 0]
                         metrics_tree.insert("", "end", text="", values=("", "", ""))
-                        metrics_tree.insert("", "end", text="🔍 Top 10 Features", values=("", "", ""), tags=("header",))
-                        for i, feat in enumerate(feature_imp[:10]):
-                            name = feat["feature"].replace("_d", "").replace("_", " ")
+                        metrics_tree.insert(
+                            "", "end", text=f"🔍 Features ({len(features_positivos)})", values=("", "", ""), tags=("header",)
+                        )
+                        for i, feat in enumerate(features_positivos):
+                            name = feat["feature"]  # Nombre completo
                             imp = feat["importance"]
-                            metrics_tree.insert("", "end", text=f"  {i+1}. {name}", values=(f"{imp:.1%}", "", ""), tags=("info",))
+                            metrics_tree.insert(
+                                "", "end", text=f"  {i+1}. {name}", values=(f"{imp:.1%}", "", ""), tags=("info",)
+                            )
                 else:
                     metrics_tree.insert("", "end", text="", values=("", "", ""))
                     metrics_tree.insert("", "end", text="🎯 Métricas CV", values=("", "", ""), tags=("header",))
-                    metrics_tree.insert("", "end", text="  ℹ️ Modelo no entrenado", values=("", "", ""), tags=("warning",))
+                    metrics_tree.insert(
+                        "", "end", text="  ℹ️ Modelo no entrenado", values=("", "", ""), tags=("warning",)
+                    )
 
                 # === Oportunidades Actuales (desde CSV en tiempo real) ===
                 try:
@@ -2337,43 +2229,69 @@ class system_status(tk.Frame):
                                             tag = "ignorar"
                                             n_ignorar += 1
 
-                                        oportunidades.append({
-                                            "symbol": symbol,
-                                            "opcion": opcion,
-                                            "rsi": rsi,
-                                            "roi": roi,
-                                            "conf": conf,
-                                            "estado": estado,
-                                            "tag": tag
-                                        })
+                                        oportunidades.append(
+                                            {
+                                                "symbol": symbol,
+                                                "opcion": opcion,
+                                                "rsi": rsi,
+                                                "roi": roi,
+                                                "conf": conf,
+                                                "estado": estado,
+                                                "tag": tag,
+                                            }
+                                        )
 
                                     # Ordenar por ROI decreciente
                                     oportunidades.sort(key=lambda x: x["roi"], reverse=True)
 
                                     # Insertar ordenados
                                     for opp in oportunidades:
-                                        opp_tree.insert("", "end",
+                                        opp_tree.insert(
+                                            "",
+                                            "end",
                                             text=opp["symbol"],
-                                            values=(opp["opcion"], f"{opp['rsi']:.1f}", f"{opp['roi']:.1f}", f"{opp['conf']:.2f}", opp["estado"]),
-                                            tags=(opp["tag"],)
+                                            values=(
+                                                opp["opcion"],
+                                                f"{opp['rsi']:.1f}",
+                                                f"{opp['roi']:.1f}",
+                                                f"{opp['conf']:.2f}",
+                                                opp["estado"],
+                                            ),
+                                            tags=(opp["tag"],),
                                         )
 
                                     # Resumen en una línea simple
-                                    opp_tree.insert("", "end",
+                                    opp_tree.insert(
+                                        "",
+                                        "end",
                                         text=f"Total: {len(resultado)}",
                                         values=("", f"V:{n_vender}", f"O:{n_observar}", f"I:{n_ignorar}", ""),
-                                        tags=("header",)
+                                        tags=("header",),
                                     )
                                 else:
-                                    opp_tree.insert("", "end", text="Sin predicciones", values=("", "", "", "", ""), tags=("ignorar",))
+                                    opp_tree.insert(
+                                        "",
+                                        "end",
+                                        text="Sin predicciones",
+                                        values=("", "", "", "", ""),
+                                        tags=("ignorar",),
+                                    )
                             else:
-                                opp_tree.insert("", "end", text="Error aplanando", values=("", "", "", "", ""), tags=("ignorar",))
+                                opp_tree.insert(
+                                    "", "end", text="Error aplanando", values=("", "", "", "", ""), tags=("ignorar",)
+                                )
                         else:
-                            opp_tree.insert("", "end", text="Modelo no cargado", values=("", "", "", "", ""), tags=("ignorar",))
+                            opp_tree.insert(
+                                "", "end", text="Modelo no cargado", values=("", "", "", "", ""), tags=("ignorar",)
+                            )
                     else:
-                        opp_tree.insert("", "end", text="Sin oportunidades", values=("", "", "", "", ""), tags=("ignorar",))
+                        opp_tree.insert(
+                            "", "end", text="Sin oportunidades", values=("", "", "", "", ""), tags=("ignorar",)
+                        )
                 except Exception as e_opp:
-                    opp_tree.insert("", "end", text=f"Error: {str(e_opp)[:30]}", values=("", "", "", "", ""), tags=("ignorar",))
+                    opp_tree.insert(
+                        "", "end", text=f"Error: {str(e_opp)[:30]}", values=("", "", "", "", ""), tags=("ignorar",)
+                    )
 
             except Exception as e:
                 metrics_tree.insert("", "end", text=f"❌ Error: {str(e)[:50]}", values=("", "", ""), tags=("bad",))
@@ -2382,7 +2300,7 @@ class system_status(tk.Frame):
 
         def modificar_parametros():
             """Abre ventana para modificar parámetros del modelo IA"""
-            
+
             def guardar():
                 """Guarda los cambios en BD"""
                 try:
@@ -2400,18 +2318,26 @@ class system_status(tk.Frame):
                         msg.showinfo("Error", f"JSON de parámetros inválido:\n{e}")
                         return
 
-                    params_bytes = params_str.encode('utf-8')
-                    docs_bytes = docs_str.encode('utf-8') if docs_str else None
+                    params_bytes = params_str.encode("utf-8")
+                    docs_bytes = docs_str.encode("utf-8") if docs_str else None
 
                     if modelo_data:
                         success = BDsystem.update_modelo_ia(
-                            modelo=modelo_name, nombre=nombre, tipo_modelo=tipo,
-                            paramts=params_bytes, documents=docs_bytes, define_modelo=define
+                            modelo=modelo_name,
+                            nombre=nombre,
+                            tipo_modelo=tipo,
+                            paramts=params_bytes,
+                            documents=docs_bytes,
+                            define_modelo=define,
                         )
                     else:
                         success = BDsystem.insert_modelo_ia(
-                            modelo=modelo_name, nombre=nombre, tipo_modelo=tipo,
-                            paramts=params_bytes, documents=docs_bytes, define_modelo=define
+                            modelo=modelo_name,
+                            nombre=nombre,
+                            tipo_modelo=tipo,
+                            paramts=params_bytes,
+                            documents=docs_bytes,
+                            define_modelo=define,
                         )
 
                     if success:
@@ -2432,17 +2358,17 @@ class system_status(tk.Frame):
             def on_close():
                 self._modelo_config_window = None
                 config_window.destroy()
-  
+
             def cargar_documento():
                 """Carga documentación desde archivo"""
                 filepath = filedialog.askopenfilename(
                     parent=config_window,
                     title="Seleccionar documento",
-                    filetypes=[("Archivos de texto", "*.txt"), ("Markdown", "*.md"), ("Todos", "*.*")]
+                    filetypes=[("Archivos de texto", "*.txt"), ("Markdown", "*.md"), ("Todos", "*.*")],
                 )
                 if filepath:
                     try:
-                        with open(filepath, 'r', encoding='utf-8') as f:
+                        with open(filepath, "r", encoding="utf-8") as f:
                             content = f.read()
                         text_docs.delete("1.0", tk.END)
                         text_docs.insert("1.0", content)
@@ -2463,9 +2389,8 @@ class system_status(tk.Frame):
                 entry.pack(side=tk.LEFT, padx=5)
                 return entry
 
-
             # Verificar si ya existe ventana abierta
-            if hasattr(self, '_modelo_config_window') and self._modelo_config_window:
+            if hasattr(self, "_modelo_config_window") and self._modelo_config_window:
                 try:
                     if self._modelo_config_window.winfo_exists():
                         self._modelo_config_window.lift()
@@ -2481,7 +2406,7 @@ class system_status(tk.Frame):
             # Crear ventana Toplevel
             config_window = tk.Toplevel(self.system)
             config_window.title("Configuración Modelo IA - Sell")
-            config_window.geometry("530x380")
+            config_window.geometry("530x420")
             config_window.configure(bg=self.bgcolor)
             config_window.resizable(False, False)
             self._modelo_config_window = config_window
@@ -2502,26 +2427,35 @@ class system_status(tk.Frame):
             # Frame principal
             main_frame = tk.Frame(config_window, bg=self.bgcolor, padx=15, pady=10)
             main_frame.pack(fill=tk.BOTH, expand=True)
-  
+
             # Campos del formulario
             entry_modelo = crear_fila(main_frame, "Modelo:", modelo_name, readonly=True)
-            entry_nombre = crear_fila(main_frame, "Nombre:",
-                modelo_data.get("Nombre", "Modelo Sell Oportunidades"))
-            entry_tipo = crear_fila(main_frame, "Tipo Modelo:",
-                modelo_data.get("tipo_modelo", "RandomForest") )
-            entry_define = crear_fila(main_frame, "Define Modelo:",
-                modelo_data.get("define_modelo", "sell_classifier"))
+            entry_nombre = crear_fila(main_frame, "Nombre:", modelo_data.get("Nombre", "Modelo Sell Oportunidades"))
+            entry_tipo = crear_fila(main_frame, "Tipo Modelo:", modelo_data.get("tipo_modelo", "RandomForest"))
+            entry_define = crear_fila(main_frame, "Define Modelo:", modelo_data.get("define_modelo", "sell_classifier"))
 
             # Campo: Parámetros (JSON)
             row_params = tk.Frame(main_frame, bg=self.bgcolor)
             row_params.pack(fill=tk.X, pady=4)
-            tk.Label(row_params, text="Parámetros (JSON):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(side=tk.LEFT, anchor=tk.N)
+            tk.Label(row_params, text="Parámetros (JSON):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(
+                side=tk.LEFT, anchor=tk.N
+            )
 
-            text_params = tk.Text(row_params, width=40, height=5, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor)
-            default_params = {"n_estimators": 100, "max_depth": 10, "min_samples_split": 5, "umbral_confianza": 0.6}
+            text_params = tk.Text(
+                row_params, width=40, height=7, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor
+            )
+            default_params = {
+                "n_estimators": 100,
+                "max_depth": 10,
+                "min_samples_split": 5,
+                "n_folds": 5,
+                "test_size": 0.3,
+                "umbral_sell": 0.65,
+                "umbral_observacion": 0.35,
+            }
             if modelo_data and modelo_data.get("paramts"):
                 try:
-                    params = json.loads(modelo_data["paramts"].decode('utf-8'))
+                    params = json.loads(modelo_data["paramts"].decode("utf-8"))
                     text_params.insert("1.0", json.dumps(params, indent=2))
                 except:
                     text_params.insert("1.0", json.dumps(default_params, indent=2))
@@ -2532,20 +2466,24 @@ class system_status(tk.Frame):
             # Campo: Documentación (BLOB)
             row_docs = tk.Frame(main_frame, bg=self.bgcolor)
             row_docs.pack(fill=tk.X, pady=4)
-            tk.Label(row_docs, text="Documentación (BLOB):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(side=tk.LEFT, anchor=tk.N)
+            tk.Label(row_docs, text="Documentación (BLOB):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(
+                side=tk.LEFT, anchor=tk.N
+            )
 
             docs_container = tk.Frame(row_docs, bg=self.bgcolor)
             docs_container.pack(side=tk.LEFT, padx=5)
 
-            text_docs = tk.Text(docs_container, width=30, height=4, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor)
+            text_docs = tk.Text(
+                docs_container, width=30, height=4, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor
+            )
             if modelo_data and modelo_data.get("documents"):
                 try:
-                    docs = modelo_data["documents"].decode('utf-8')
+                    docs = modelo_data["documents"].decode("utf-8")
                     text_docs.insert("1.0", docs)
                 except:
                     pass
             text_docs.pack(side=tk.LEFT)
- 
+
             ttk.Button(docs_container, text="Import", command=cargar_documento, width=10).pack(side=tk.LEFT, padx=5)
 
             # Botones Guardar/Cancelar
@@ -2557,7 +2495,7 @@ class system_status(tk.Frame):
             ttk.Button(btn_frame, text="Cancel", command=cancelar, width=10).pack(side=tk.LEFT)
 
             config_window.protocol("WM_DELETE_WINDOW", on_close)
-  
+
         try:
             # Frame principal dividido en dos secciones
             left_frame = ttk.Frame(self.modeloia, padding=(5, 5), style="C.TFrame")
@@ -2572,8 +2510,9 @@ class system_status(tk.Frame):
                 text="📊 Métricas del Modelo Sell",
                 font=("TkDefaultFont", 10, "bold"),
                 foreground=self.bgcolor,
-                background=self.cgcolor)
-           
+                background=self.cgcolor,
+            )
+
             metrics_label.pack(anchor=tk.W, pady=(0, 5))
 
             # TreeView para mostrar métricas (3 columnas: Valor, ROI Prom, Profit Prom)
@@ -2582,7 +2521,7 @@ class system_status(tk.Frame):
                 columns=("value", "roi_prom", "profit_prom"),
                 height=12,
                 show="tree headings",
-                style="TFrame"
+                style="TFrame",
             )
             metrics_tree.heading("#0", text="Métrica")
             metrics_tree.heading("value", text="Valor")
@@ -2605,22 +2544,10 @@ class system_status(tk.Frame):
             btn_frame = ttk.Frame(left_frame, style="C.TFrame")
             btn_frame.pack(fill=tk.X, pady=(5, 0))
 
-            train_btn = ttk.Button(
-                btn_frame,
-                text="Entrenar",
-                command=entrenar_modelo,
-                width=10,
-                style="TButton"
-            )
+            train_btn = ttk.Button(btn_frame, text="Entrenar", command=entrenar_modelo, width=10, style="TButton")
             train_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-            config_btn = ttk.Button(
-                btn_frame,
-                text="Modelo",
-                command=modificar_parametros,
-                width=10,
-                style="TButton"
-            )
+            config_btn = ttk.Button(btn_frame, text="Modelo", command=modificar_parametros, width=10, style="TButton")
             config_btn.pack(side=tk.LEFT)
 
             # === SECCIÓN DERECHA: Oportunidades Actuales ===
@@ -2629,8 +2556,9 @@ class system_status(tk.Frame):
                 text="🎯 Oportunidades Actuales (tiempo real)",
                 font=("TkDefaultFont", 10, "bold"),
                 foreground=self.bgcolor,
-                background=self.cgcolor)
-            
+                background=self.cgcolor,
+            )
+
             opp_label.pack(anchor=tk.W, pady=(5, 5))
 
             # TreeView para oportunidades actuales
@@ -2639,7 +2567,7 @@ class system_status(tk.Frame):
                 columns=("opcion", "rsi", "roi", "conf", "estado"),
                 height=8,
                 show="tree headings",
-                style="TFrame"
+                style="TFrame",
             )
             opp_tree.heading("#0", text="Symbol")
             opp_tree.heading("opcion", text="Opción")
@@ -2668,7 +2596,15 @@ class system_status(tk.Frame):
                     # Obtener todos los items excepto headers/resumen
                     items = [(tree.set(k, col), k) for k in tree.get_children("")]
                     # Filtrar items vacíos (headers/resumen)
-                    items = [(val, k) for val, k in items if val and not val.startswith("V:") and not val.startswith("O:") and not val.startswith("I:") and val != "Total:"]
+                    items = [
+                        (val, k)
+                        for val, k in items
+                        if val
+                        and not val.startswith("V:")
+                        and not val.startswith("O:")
+                        and not val.startswith("I:")
+                        and val != "Total:"
+                    ]
 
                     # Convertir a número si es posible
                     try:
@@ -2695,9 +2631,8 @@ class system_status(tk.Frame):
 
             # Actualizar métricas al inicio
             actualizar_metricas()
-    
+
             auto_actualizar()
         except Exception as e:
             print(f"modelo_ia_monitor(): {e}")
             traceback.print_exc()
-
