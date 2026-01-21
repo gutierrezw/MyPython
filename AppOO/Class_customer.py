@@ -299,6 +299,33 @@ class DataHub:
         "Comentarios": "comentarios",
         "Datostecnicos": "datos_tecnicos",
     }
+
+    BuyCsvJsonDcolumnas = {
+        "Symbol": "symbol",
+        "account": "account",
+        "vehiculo": "vehiculo",
+        "tipo": "tipo",
+        "score": "score",
+        "monto_sugerido": "monto_sugerido",
+        "ganancia_precio": "ganancia_precio",
+        "ganancia_inversion": "ganancia_inversion",
+        "cantidad_buy": "cantidad_buy",
+        "last": "last",
+        "avgcost": "avgcost",
+        "cantidad_post": "cantidad_post",
+        "avgcost_post": "avgcost_post",
+        "retorno_post": "retorno_post",
+        "objetivo": "objetivo",
+        "dividend_yield": "dividend_yield",
+        "ex_dividend_date": "ex_dividend_date",
+        "pre_dividendos": "pre_dividendos",
+        "post_dividendos": "post_dividendos",
+        "pre_costobase": "pre_costobase",
+        "post_costobase": "post_costobase",
+        "Datostecnicos": "datos_tecnicos",
+        "Recomendado": "recomendado",
+        "Comentarios": "comentarios",
+    }
     max_mensajes = 5
     min_tiempo = 300
 

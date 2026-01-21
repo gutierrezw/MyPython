@@ -59,7 +59,7 @@ from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversi
 from valuation_edgar_downloader import BASE_DIR, download_filing
 from valuation_xbrl_api import get_zip_files
 from Class_customer import DataHub, TickerInfo
-from Class_IA_modelos import ModeloOportunidadesSell
+from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
 from Modulos_Utilitarios import define_FileCache
 
 
@@ -168,29 +168,41 @@ class ClassAgenteIA:
     # agente para las recomendaciones de ventas ---------------------------------------------------------------------------------
     async def Agente_ManagerSell(self):
         try:
+            df_sell = self.readCSV_sell(file="csv_datosIA_sell")
 
-            # Generar un hash identificador para evitar duplicados
-            df_sell = self.readCSV(file="csv_datosIA_sell")
-            if not df_sell.empty:
+            if df_sell.empty:
+                return
 
-                # oportinidades sin filtros presentadas por DataHub.info()
-                if not self.activaIA:
-                    await self.evaluar_oportunidades(df_sell)
+            await self.evaluar_oportunidades_con_IA(
+                df_sell=df_sell,
+                umbral_venta=self.umbral,
+                umbral_observacion=self.umbralObserv,
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_ManagerSell(): {e}")
 
-                # oportunidades con fitros IA
-                elif self.activaIA:
-                    await self.evaluar_oportunidades_con_IA(df_sell=df_sell, umbral_venta=self.umbral, umbral_observacion=self.umbralObserv)
-        except (EncodingWarning, Exception) as e:
-            print(f"Agente_ManagerSell(): {e}")
+    # agente para las recomendaciones de compras
+    async def Agente_ManagerBuy(self):
+        try:
+            df_buy = self.readCSV_buy(file="csv_datosIA_buy")
+
+            if df_buy.empty:
+                return
+
+            await self.evaluar_oportunidades_buy_con_IA(
+                df_buy=df_buy,
+                umbral_compra=self.umbral,
+                umbral_observacion=self.umbralObserv,
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_ManagerBuy(): {e}")
 
     # agente paras las descargas de filings cada 3600 seg
     @wait_rate(3600)
     def Agente_downloads_filings_EDGAR(self):
         try:
             # desacrga la estructura positions
-            self.positions = self.PlanInversion.select_inversion(
-                tipoin=self.vehiculo, ticket="all"
-            )
+            self.positions = self.PlanInversion.select_inversion(tipoin=self.vehiculo, ticket="all")
 
             counter = 1
             for positio in self.positions:
@@ -300,9 +312,7 @@ class Telegram:
                     InlineKeyboardButton("⬆️ Buy", callback_data="menu_buy"),
                 ],
                 [
-                    InlineKeyboardButton(
-                        "🟢🔴 Resumen Orders", callback_data="OrdersExec"
-                    ),
+                    InlineKeyboardButton("🟢🔴 Resumen Orders", callback_data="OrdersExec"),
                     InlineKeyboardButton("🔄 Reconnect", callback_data="menu_reconnet"),
                 ],
             ]
@@ -347,30 +357,22 @@ class Telegram:
                 self.telegram_app.add_handler(CommandHandler("menu", self.handle_menu))
 
                 # 🔑 Registrar el manejador para /start
-                self.telegram_app.add_handler(
-                    CommandHandler("start", self.handle_segurity_message)
-                )
+                self.telegram_app.add_handler(CommandHandler("start", self.handle_segurity_message))
 
                 # 🔑 Registrar el manejador para CUALQUIER texto (excluyendo comandos ya manejados)
                 self.telegram_app.add_handler(
-                    MessageHandler(
-                        filters.TEXT & ~filters.COMMAND, self.handle_segurity_message
-                    )
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_segurity_message)
                 )
 
                 # 🔑 Registrar el manejador para /respuestas
-                self.telegram_app.add_handler(
-                    CallbackQueryHandler(self.handle_callback)
-                )
+                self.telegram_app.add_handler(CallbackQueryHandler(self.handle_callback))
 
                 # Inicializar bot solo para enviar mensajes iniciales
                 await self.telegram_app.initialize()
                 self.bot = self.telegram_app.bot
 
                 # Send welcome message and previous opportunities
-                await self.send_Telegram(
-                    f"🏁 Bot interno iniciado session: {datetime.now()}"
-                )
+                await self.send_Telegram(f"🏁 Bot interno iniciado session: {datetime.now()}")
                 await self.handle_menu()
 
                 # Cerrar inicialización temporal para que run_polling lo maneje
@@ -409,9 +411,7 @@ class Telegram:
 
                 # si hash_id no es proporcionado, envía mensaje simple
                 elif hash_id is None:
-                    sent_message = await self.bot.send_message(
-                        chat_id=CHAT_ID, text=texto, parse_mode="Markdown"
-                    )
+                    sent_message = await self.bot.send_message(chat_id=CHAT_ID, text=texto, parse_mode="Markdown")
                     await self._save_message(sent_message, CHAT_ID)
                     return
 
@@ -419,12 +419,8 @@ class Telegram:
                 elif hash_id is not None:
                     botones = [
                         [
-                            InlineKeyboardButton(
-                                "✅ Aprobar", callback_data=f"aprobar|{hash_id}"
-                            ),
-                            InlineKeyboardButton(
-                                "❌ Rechazar", callback_data=f"rechazar|{hash_id}"
-                            ),
+                            InlineKeyboardButton("✅ Aprobar", callback_data=f"aprobar|{hash_id}"),
+                            InlineKeyboardButton("❌ Rechazar", callback_data=f"rechazar|{hash_id}"),
                         ]
                     ]
                     reply_markup = InlineKeyboardMarkup(botones)
@@ -481,9 +477,7 @@ class Telegram:
             values, symbol = {}, None
 
             # recupera info() de Oportunidad sell
-            oportunidad, ix = self.RepositorioOportunidades.obtener_id_por_hash(
-                hash_id=hash_id
-            )
+            oportunidad, ix = self.RepositorioOportunidades.obtener_id_por_hash(hash_id=hash_id)
 
             if not oportunidad:
                 return {}, None
@@ -522,9 +516,7 @@ class Telegram:
                 response, symbol = self.put_order_aprovate_telegram(hash_id=args[0])
                 if response:
                     # message = f"✅ Oportunidad procesada :{response['status']}\n"
-                    message = (
-                        f"✅ Oportunidad procesada :{"pendinete response['status']"}\n"
-                    )
+                    message = f"✅ Oportunidad procesada :{"pendinete response['status']"}\n"
                     message += f"Symbol {symbol}: @price {round(0, 4)}"
                 if not response:
                     message = f"⚠️ Error al colocar la orden. {symbol}"
@@ -556,9 +548,7 @@ class Telegram:
                 self.MostrarOpcionMenu_enTelegram = "Buy"
 
             elif accion == "menu_reconnect":
-                await query.edit_message_text(
-                    "⚙️ Ajustes: próximamente más opciones.", parse_mode="Markdown"
-                )
+                await query.edit_message_text("⚙️ Ajustes: próximamente más opciones.", parse_mode="Markdown")
 
             elif accion == "OrdersExec":
                 self.MostrarOpcionMenu_enTelegram = "ListOrder"
@@ -685,12 +675,15 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         # Accesos MySql ----------------------------------------------------------------------------------------------
         self.RepositorioOportunidades = RepositorioOportunidadesBuySell()
         self.IAsell = ModeloOportunidadesSell()
+        self.IAbuy = ModeloOportunidadesBuy()
         self.modelo_name = self.IAsell.modelo_name
+        self.modelo_name_buy = self.IAbuy.modelo_name
 
         self.bot = None
         self.MessageTelegram = None
         self.counter = 0
         self.sell_enviados = {}
+        self.buy_enviados = {}
 
         self.iconos = tk.Frame(self, bg=self.bgcolor)
         self.chat = tk.Frame(self, bg=self.bgcolor)
@@ -713,9 +706,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
         # Activa/desactiva IA---------------------------------------------------------------------------------------
         Imagen_tk = BDsystem.select_image(idd=334, size=(32, 32))
-        self.IA = tk.Button(
-            self.iconos, image=Imagen_tk, bg=self.bgcolor, relief=tk.FLAT
-        )
+        self.IA = tk.Button(self.iconos, image=Imagen_tk, bg=self.bgcolor, relief=tk.FLAT)
         self.IA.imagen = Imagen_tk
 
         # define area de Chat ---------------------------------------------------------------------------------------
@@ -757,7 +748,6 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         modelo_config = json.loads(modelo["paramts"].decode("utf-8"))
         self.umbral = modelo_config.get("umbral_sell", 0.50)
         self.umbralObserv = modelo_config.get("umbral_observacion", 0.35)
-        
 
         # activa Telegram
         self._activar_telegram()
@@ -786,9 +776,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self.enviar_mensaje(mensaje)
 
     def ver_consejos(self):
-        mensaje = (
-            "💡 Consejo de hoy: Rebalancear tu cartera puede mejorar tu rendimiento."
-        )
+        mensaje = "💡 Consejo de hoy: Rebalancear tu cartera puede mejorar tu rendimiento."
         self.enviar_mensaje(mensaje)
 
         # muestra botón flotante
@@ -802,16 +790,14 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
     # read CSV : Oportunity
     @staticmethod
-    def readCSV(file=None):
+    def readCSV_sell(file=None):
         try:
             vacio = pd.DataFrame()
             path = define_FileCache(name=f"{file}.CSV")
 
             # look read CSV sell
             with DataHub.lockCsvAi:
-                df = pd.read_csv(
-                    path, header=0, sep=",", encoding="utf-8", index_col=False
-                )
+                df = pd.read_csv(path, header=0, sep=",", encoding="utf-8", index_col=False)
             if df.empty:
                 return vacio
 
@@ -821,12 +807,34 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             df = df.dropna(how="all", axis=1)
 
             # Filtrar recomendaciones válidas
-            df_recom = df[
-                (df["%Roi"] >= DataHub.MaxRoi) & (df["Profit"] >= DataHub.MinProfit)
-            ]
+            df_recom = df[(df["%Roi"] >= DataHub.MaxRoi) & (df["Profit"] >= DataHub.MinProfit)]
             return df_recom if not df_recom.empty else vacio
         except (EmptyDataError, FileNotFoundError):
-            # print(f"readCSV(): El archivo {path} está vacío.")
+            # print(f"readCSV_sell(): El archivo {path} está vacío.")
+            return vacio
+
+    # read CSV : Oportunity Buy
+    @staticmethod
+    def readCSV_buy(file=None):
+        try:
+            vacio = pd.DataFrame()
+            path = define_FileCache(name=f"{file}.CSV")
+
+            # look read CSV buy
+            with DataHub.lockCsvAi:
+                df = pd.read_csv(path, header=0, sep=",", encoding="utf-8", index_col=False)
+            if df.empty:
+                return vacio
+
+            df.columns = df.columns.str.strip()
+            df.reset_index(drop=True, inplace=True)
+            df["vehiculo"] = df["vehiculo"].astype(str).str.strip()
+            df = df.dropna(how="all", axis=1)
+
+            # Filtrar recomendaciones válidas para buy (score > 0 y ganancia_precio > 0)
+            df_recom = df[(df["score"] > 0) & (df["ganancia_precio"] > 0)]
+            return df_recom if not df_recom.empty else vacio
+        except (EmptyDataError, FileNotFoundError):
             return vacio
 
     # Aquí podrías iniciar/parar oportunidades chat---------------------------------------------------------------
@@ -866,15 +874,16 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     # Agente for Sell
                     self.exec_modulo_async(self.Agente_ManagerSell())
 
+                    # Agente for Buy
+                    self.exec_modulo_async(self.Agente_ManagerBuy())
+
                     # Agente for Donloads filings
                     self.Agente_downloads_filings_EDGAR()
 
                     time.sleep(15)
                     self.counter += 1
 
-                    DataHub.update_self_procesos(
-                        proces="thread", tarea=task_name, itera=self.counter
-                    )
+                    DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=self.counter)
             except EncodingWarning as e:
                 print(f"agentesIA(): {e}")
 
@@ -925,6 +934,40 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             return mensaje
         except (EncodingWarning, Exception) as e:
             print(f"message_format(): {e}")
+
+    # formato de mensaje para oportunidades de compra
+    def message_format_buy(self, row, modo=None):
+        try:
+            symbol = row.get("Symbol", "")
+            vehiculo = row.get("vehiculo", "")
+            last = row.get("last", 0)
+
+            if modo == "system":
+                mensaje = f"🟢 *System Buy: ${symbol} ({vehiculo};  @price: {last:.4f})*\n"
+                mensaje += "```\n"
+            elif modo == "ia":
+                confianza = row.get("confianza", 0)
+                mensaje = f"🟢 *IA Buy: ${symbol} ({vehiculo};  @price: {last:.4f})*\n"
+                mensaje += "```\n"
+
+            mensaje += f"{'Métrica':<18} {'Valor':>12}\n"
+            mensaje += f"{'-' * 45}\n"
+            mensaje += f"{'Ganancia Precio'  :<18} {row.get('ganancia_precio', 0):>12.2%}\n"
+            mensaje += f"{'Ganancia Inv.'    :<18} {row.get('ganancia_inversion', 0):>12.2f}\n"
+            mensaje += f"{'Dividend Yield'   :<18} {row.get('dividend_yield', 0):>12.2%}\n"
+            mensaje += f"{'Score'            :<18} {row.get('score', 0):>12.2f}\n"
+            mensaje += f"{'Monto Sugerido'   :<18} {row.get('monto_sugerido', 0):>12.2f}\n"
+            mensaje += f"{'Cantidad Buy'     :<18} {row.get('cantidad_buy', 0):>12.1f}\n"
+            mensaje += f"{'Objetivo'         :<18} {row.get('objetivo', 0):>12.4f}\n"
+
+            if modo == "ia":
+                mensaje += f"{'-' * 45}\n"
+                mensaje += f"{'Confianza IA'     :<18} {confianza:>12.1%}\n"
+
+            mensaje += "```"
+            return mensaje
+        except (EncodingWarning, Exception) as e:
+            self.logger.error(f"message_format_buy(): {e}")
 
     # controla el envío de mensajes de oportunidades
     async def opportunity_handler_message(self, hash_id, row, origen="system"):
@@ -1008,21 +1051,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             if insert:
                 # Verifica que este TRUE mostrar las ventas
                 if self.MostrarOpcionMenu_enTelegram == "Sell":
-                    await self.opportunity_handler_message(
-                        hash_id=hash_id, row=row, origen=origen
-                    )
+                    await self.opportunity_handler_message(hash_id=hash_id, row=row, origen=origen)
         except (EncodingWarning, Exception) as e:
             print(f"opportunity_handler(): {e}")
-
-    # Evalua oportunidades entrega por el sistema
-    async def evaluar_oportunidades(self, df_sell):
-        try:
-
-            for _, row in df_sell.iterrows():
-                await self.oportunity_handler(row=row, origen="system")
-
-        except (EncodingWarning, Exception) as e:
-            print(f"evaluar_oportunidades(): {e}")
 
     # Obtener oportunidades desde modelo IA
     async def evaluar_oportunidades_con_IA(self, df_sell=None, umbral_venta=0.65, umbral_observacion=0.35):
@@ -1032,52 +1063,34 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         - umbral_observacion <= confianza < umbral_venta (0.35-0.65): En observación
         - confianza < umbral_observacion (0.35): Ignorar
         """
-        # selecciona de df_sell las fila  aprobadas
-        def get_sell_aprobadas(df_en=None, df_ap=None, umbral=None):
 
-            df_ou = pd.DataFrame()
-            for _, row in df_en.iterrows():
-                for _, apro in df_ap.iterrows():
-                    if row["hash_id"] == apro["hash_id"]:
-
-                        # print(f"confianza { apro["confianza"]} >= {umbral:} >> {apro}")
-                        if apro["confianza"] >= umbral:
-                            df_ou = pd.concat(
-                                [df_ou, pd.DataFrame([row])], ignore_index=True
-                            )
-                            df_ou["Comentarios"] = (
-                                f"Oportunity sent by Sell IA Model, confianza {apro['confianza']}"
-                            )
-                            df_ou["confianza"] = apro["confianza"]
-                            break
-            return df_ou
-
-        def get_sell_observacion(df_en=None, df_ap=None, umbral_min=0.35, umbral_max=0.65):
-            """Retorna oportunidades en zona de observación (0.35 - 0.65)"""
-            df_obs = pd.DataFrame()
-            for _, row in df_en.iterrows():
-                for _, apro in df_ap.iterrows():
-                    if row["hash_id"] == apro["hash_id"]:
-                        conf = apro["confianza"]
-                        if umbral_min <= conf < umbral_max:
-                            row_copy = row.copy()
-                            row_copy["confianza"] = conf
-                            row_copy["estado_ia"] = "observacion"
-                            df_obs = pd.concat([df_obs, pd.DataFrame([row_copy])], ignore_index=True)
-                            break
-            return df_obs
+        def filtrar_por_confianza(df_merged, umbral_min, umbral_max=None, estado=None):
+            """Filtra oportunidades por rango de confianza usando merge de pandas."""
+            if umbral_max is None:
+                # Solo umbral mínimo (aprobadas)
+                df_filtrado = df_merged[df_merged["confianza"] >= umbral_min].copy()
+                df_filtrado["Comentarios"] = df_filtrado["confianza"].apply(
+                    lambda c: f"Oportunity sent by Sell IA Model, confianza {c:.2f}"
+                )
+            else:
+                # Rango de umbrales (observación)
+                df_filtrado = df_merged[
+                    (df_merged["confianza"] >= umbral_min) & (df_merged["confianza"] < umbral_max)
+                ].copy()
+                if estado:
+                    df_filtrado["estado_ia"] = estado
+            return df_filtrado
 
         try:
-            # modelo para presentar Oportunidades
+            # Cargar modelo
             self.IAsell.load_modelo(self.modelo_name)
             if self.IAsell.modelo is None:
-                print(f"evaluar_oportunidades_con_IA(): Modelo no cargado")
+                self.logger.warning("evaluar_oportunidades_con_IA(): Modelo no cargado")
                 return
 
-            # agreca columna hash_id, para luego aparear
-            df_sell.insert(0, "hash_id", " ")
-            for _, row in df_sell.iterrows():
-                hash_id = self.RepositorioOportunidades.generar_hash_id(
+            # Generar hash_id para cada fila
+            df_sell["hash_id"] = df_sell.apply(
+                lambda row: self.RepositorioOportunidades.generar_hash_id(
                     row.get("account"),
                     row.get("Symbol"),
                     row.get("Opcion"),
@@ -1085,46 +1098,207 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     "sell",
                     "gain",
                     row.get("Recomendado"),
-                )
-                row["hash_id"] = hash_id
+                ),
+                axis=1,
+            )
 
-            # Deja names columns como estan den tabla de oportunidades
+            # Renombrar columnas para compatibilidad
             df_in = df_sell.copy()
             df_in = df_in.rename(columns=DataHub.SellCsvJsonDcolumnas)
 
             # Aplicar predicción IA
             df = self.IAsell.aplanar_datos_tecnicos(df_in)
             if df is None or df.empty:
-                print(f"evaluar_oportunidades_con_IA(): df aplanado vacío")
+                self.logger.warning("evaluar_oportunidades_con_IA(): df aplanado vacío")
                 return
 
             resultado = self.IAsell.predecir_modelo(df)
             if resultado is None or resultado.empty:
-                print(f"evaluar_oportunidades_con_IA(): resultado predicción vacío")
+                self.logger.warning("evaluar_oportunidades_con_IA(): resultado predicción vacío")
                 return
 
-            # Sistema de dos umbrales:
-            # 1. Aprobadas para venta (confianza >= 0.65)
-            aprobadas = get_sell_aprobadas(
-                df_en=df_sell, df_ap=resultado, umbral=umbral_venta
+            # Merge por hash_id (O(n) en vez de O(n²))
+            df_merged = df_sell.merge(
+                resultado[["hash_id", "confianza", "clasificacion"]],
+                on="hash_id",
+                how="inner",
             )
 
-            # 2. En observación (0.35 <= confianza < 0.65)
-            observacion = get_sell_observacion(
-                df_en=df_sell, df_ap=resultado,
-                umbral_min=umbral_observacion, umbral_max=umbral_venta
-            )
+            # 1. Aprobadas para venta (confianza >= umbral_venta)
+            aprobadas = filtrar_por_confianza(df_merged, umbral_min=umbral_venta)
 
-            # recorre aprobadas para actualzzar en Oportunidades
+            # 2. En observación (umbral_observacion <= confianza < umbral_venta)
+            # observacion = filtrar_por_confianza(
+            #     df_merged, umbral_min=umbral_observacion, umbral_max=umbral_venta, estado="observacion"
+            # )
+
+            # Procesar aprobadas
             for _, row in aprobadas.iterrows():
                 await self.oportunity_handler(row=row, origen="ia")
-        except (EncodingWarning, Exception) as e:
-            print(f"evaluar_oportunidades_con_IA(): {e}")
+        except Exception as e:
+            self.logger.error(f"evaluar_oportunidades_con_IA(): {e}")
             import traceback
+
             traceback.print_exc()
 
             # Filtrar por confianza mínima
             # aprobadas = resultado[resultado["confianza"] >= umbral].copy()
+
+    # Mensaje para oportunidades de compra
+    async def opportunity_handler_message_buy(self, hash_id, row, origen="system"):
+        try:
+            # Marcar como enviado y da formato al mensaje
+            self.buy_enviados.update({hash_id: row})
+            message = self.message_format_buy(row, modo=origen)
+
+            # Send a Telegram si esta activo
+            if self.estadoTelegram:
+                await self.send_Telegram(message, hash_id)
+
+            # Send al chat si esta activo
+            if self.estadoOportunidades:
+                self._agregar_mensaje(message)
+        except (EncodingWarning, Exception) as e:
+            self.logger.error(f"opportunity_handler_message_buy(): {e}")
+
+    # Handler para oportunidades de compra
+    async def oportunity_handler_buy(self, row, origen="system"):
+        try:
+            insert = False
+            hash_id = self.RepositorioOportunidades.generar_hash_id(
+                row.get("account"),
+                row.get("Symbol"),
+                row.get("vehiculo"),
+                row.get("Fecha"),
+                "buy",
+                "rebalanceo",
+                row.get("Recomendado"),
+            )
+
+            # Válida los mensajes ya enviados
+            if hash_id in self.buy_enviados.keys():
+                # Update RepositorioOportunidades con nuevos Buy
+                insert = self.RepositorioOportunidades.actualizar_oportunidad_buy(
+                    hash_id=hash_id,
+                    estado="pendiente",
+                    origen=self.modelo_name_buy,
+                    row=row,
+                )
+                insert = True
+
+            # Inserta Oportunidad de compra
+            elif hash_id not in self.buy_enviados.keys():
+                # Verifica y actualiza hash_id y fecha de oportunidad si existe
+                existe = self.RepositorioOportunidades.actualizar_oportunidad_buy(
+                    hash_id=None,
+                    estado="pendiente",
+                    origen=self.modelo_name_buy,
+                    tipo="buy",
+                    subtipo="rebalanceo",
+                    row=row,
+                )
+                # En caso de existir, elimina hash_id anterior
+                if existe:
+                    self.buy_enviados.pop(hash_id, None)
+
+                # En caso de no existente, inserta nueva oportunidad
+                if not existe:
+                    Worigen = origen if origen == "system" else self.modelo_name_buy
+                    insert = self.RepositorioOportunidades.insertar_buy(
+                        row=row,
+                        tipo="buy",
+                        subtipo="rebalanceo",
+                        origen=Worigen,
+                    )
+                # Marca hash_id como enviada
+                self.buy_enviados.update({hash_id: row})
+
+            # Si insert es True, significa que se insertó correctamente
+            if insert:
+                # Verifica que esté TRUE mostrar las compras
+                if self.MostrarOpcionMenu_enTelegram == "Buy":
+                    await self.opportunity_handler_message_buy(hash_id=hash_id, row=row, origen=origen)
+        except (EncodingWarning, Exception) as e:
+            self.logger.error(f"oportunity_handler_buy(): {e}")
+
+    # Obtener oportunidades de compra desde modelo IA
+    async def evaluar_oportunidades_buy_con_IA(self, df_buy=None, umbral_compra=0.65, umbral_observacion=0.35):
+        """
+        Sistema de dos umbrales para Buy:
+        - confianza >= umbral_compra (0.65): Enviar a Telegram para comprar
+        - umbral_observacion <= confianza < umbral_compra: En observación
+        - confianza < umbral_observacion: Ignorar
+        """
+
+        def filtrar_por_confianza(df_merged, umbral_min, umbral_max=None, estado=None):
+            """Filtra oportunidades por rango de confianza usando merge de pandas."""
+            if umbral_max is None:
+                df_filtrado = df_merged[df_merged["confianza"] >= umbral_min].copy()
+                df_filtrado["Comentarios"] = df_filtrado["confianza"].apply(
+                    lambda c: f"Oportunity sent by Buy IA Model, confianza {c:.2f}"
+                )
+            else:
+                df_filtrado = df_merged[
+                    (df_merged["confianza"] >= umbral_min) & (df_merged["confianza"] < umbral_max)
+                ].copy()
+                if estado:
+                    df_filtrado["estado_ia"] = estado
+            return df_filtrado
+
+        try:
+            # Cargar modelo
+            self.IAbuy.load_modelo(self.modelo_name_buy)
+            if self.IAbuy.modelo is None:
+                self.logger.warning("evaluar_oportunidades_buy_con_IA(): Modelo no cargado")
+                return
+
+            # Generar hash_id para cada fila
+            df_buy["hash_id"] = df_buy.apply(
+                lambda row: self.RepositorioOportunidades.generar_hash_id(
+                    row.get("account"),
+                    row.get("Symbol"),
+                    row.get("vehiculo"),
+                    row.get("Fecha"),
+                    "buy",
+                    "rebalanceo",
+                    row.get("Recomendado"),
+                ),
+                axis=1,
+            )
+
+            # Renombrar columnas para compatibilidad
+            df_in = df_buy.copy()
+            df_in = df_in.rename(columns=DataHub.BuyCsvJsonDcolumnas)
+
+            # Aplicar predicción IA
+            df = self.IAbuy.aplanar_datos_tecnicos(df_in)
+            if df is None or df.empty:
+                self.logger.warning("evaluar_oportunidades_buy_con_IA(): df aplanado vacío")
+                return
+
+            resultado = self.IAbuy.predecir_modelo(df)
+            if resultado is None or resultado.empty:
+                self.logger.warning("evaluar_oportunidades_buy_con_IA(): resultado predicción vacío")
+                return
+
+            # Merge por hash_id
+            df_merged = df_buy.merge(
+                resultado[["hash_id", "confianza", "clasificacion"]],
+                on="hash_id",
+                how="inner",
+            )
+
+            # Aprobadas para compra (confianza >= umbral_compra)
+            aprobadas = filtrar_por_confianza(df_merged, umbral_min=umbral_compra)
+
+            # Procesar aprobadas
+            for _, row in aprobadas.iterrows():
+                await self.oportunity_handler_buy(row=row, origen="ia")
+        except Exception as e:
+            self.logger.error(f"evaluar_oportunidades_buy_con_IA(): {e}")
+            import traceback
+
+            traceback.print_exc()
 
     # obtenen muestra para entrenamiento del modelo de sell
     def obtener_dataframe_entrenamiento_IA(self, tipo="sell", return_stats=False):
@@ -1156,7 +1330,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 "json_invalido": 0,
                 "detalle_no_dict": 0,
                 "indicadores_no_dict": 0,
-                "otros": 0
+                "otros": 0,
             }
 
             for op in oportunidades:
@@ -1200,12 +1374,26 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                         continue
 
                     # Extraer datos de indicadores diarios (preferencia)
-                    indicadores_diaria = indicadores.get("diaria", {}) if isinstance(indicadores.get("diaria"), dict) else {}
+                    indicadores_diaria = (
+                        indicadores.get("diaria", {}) if isinstance(indicadores.get("diaria"), dict) else {}
+                    )
 
                     # Extraer EMAs largos y cortos
-                    emas_largos = indicadores_diaria.get("ema(20,50,100,200)", {}) if isinstance(indicadores_diaria.get("ema(20,50,100,200)"), dict) else {}
-                    emas_cortos = indicadores_diaria.get("ema(09,21,055,144)", {}) if isinstance(indicadores_diaria.get("ema(09,21,055,144)"), dict) else {}
-                    fibo = indicadores_diaria.get("retroceso_fibonacci", {}) if isinstance(indicadores_diaria.get("retroceso_fibonacci"), dict) else {}
+                    emas_largos = (
+                        indicadores_diaria.get("ema(20,50,100,200)", {})
+                        if isinstance(indicadores_diaria.get("ema(20,50,100,200)"), dict)
+                        else {}
+                    )
+                    emas_cortos = (
+                        indicadores_diaria.get("ema(09,21,055,144)", {})
+                        if isinstance(indicadores_diaria.get("ema(09,21,055,144)"), dict)
+                        else {}
+                    )
+                    fibo = (
+                        indicadores_diaria.get("retroceso_fibonacci", {})
+                        if isinstance(indicadores_diaria.get("retroceso_fibonacci"), dict)
+                        else {}
+                    )
 
                     # Nombres con sufijo _d para compatibilidad con cargar_datos() en Class_IA_modelos
                     fila = {
