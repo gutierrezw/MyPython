@@ -102,29 +102,34 @@ def use_dataframe_cache(df_cache):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            use_cache = kwargs.pop("use_cache", True)
-            key = (func.__name__, args, tuple(sorted(kwargs.items())))
 
-            # uso datos cacheados
-            if use_cache and df_cache.has(key):
-                return df_cache.get(key)
+            try:
+                use_cache = kwargs.pop("use_cache", True)
+                key = (func.__name__, args, tuple(sorted(kwargs.items())))
 
-            df_cache.logger.warning(
-                textwrap.dedent(
-                    f"""
-                    ===============================================
-                    {func.__name__}():
-                    🟡 [CACHE MISS] - descargando datos frescos...
-                    ===============================================
-                    args : {args}
-                    keys : {key[2]}
-                    """
+                # uso datos cacheados
+                if use_cache and df_cache.has(key):
+                    return df_cache.get(key)
+
+                result = func(*args, **kwargs)
+
+                if use_cache:
+                    df_cache.set(key, result)
+            except Exception as e:
+                df_cache.logger.warning(
+                    textwrap.dedent(
+                        f"""
+                        ===============================================
+                        {func.__name__}():
+                        🟡 [CACHE MISS] - descargando datos frescos...
+                        ===============================================
+                        args : {args}
+                        keys : {key[2]}
+                        error: {e}
+                        """
+                    )
                 )
-            )
-            result = func(*args, **kwargs)
 
-            if use_cache:
-                df_cache.set(key, result)
             return result
 
         return wrapper
@@ -208,9 +213,7 @@ class InfoYfinance:
                                 "exDividendDate",
                                 "firstTradeDateEpochUtc",
                             ):
-                                get_info.update(
-                                    {keys: datetime.fromtimestamp(activo[keys])}
-                                )
+                                get_info.update({keys: datetime.fromtimestamp(activo[keys])})
                             else:
                                 if activo[keys] is not None:
                                     get_info.update({keys: activo[keys]})
@@ -218,29 +221,14 @@ class InfoYfinance:
                         elif "lastFiscalYearEnd" not in activo:
                             if "fundInceptionDate" in activo:
                                 get_info.update(
-                                    {
-                                        "lastFiscalYearEnd": datetime.fromtimestamp(
-                                            activo["fundInceptionDate"]
-                                        )
-                                    }
+                                    {"lastFiscalYearEnd": datetime.fromtimestamp(activo["fundInceptionDate"])}
                                 )
                             else:
-                                get_info.update(
-                                    {"lastFiscalYearEnd": datetime.now().date()}
-                                )
+                                get_info.update({"lastFiscalYearEnd": datetime.now().date()})
 
                     # asegura que el registro tenga lastFiscalYearEnd
-                    if (
-                        "lastFiscalYearEnd" not in get_info
-                        and "exDividendDate" in activo
-                    ):
-                        get_info.update(
-                            {
-                                "lastFiscalYearEnd": datetime.fromtimestamp(
-                                    activo["exDividendDate"]
-                                )
-                            }
-                        )
+                    if "lastFiscalYearEnd" not in get_info and "exDividendDate" in activo:
+                        get_info.update({"lastFiscalYearEnd": datetime.fromtimestamp(activo["exDividendDate"])})
 
                     # asegura que el registro tenga exDividendDate
                     if "exDividendDate" not in activo:
@@ -268,9 +256,7 @@ class InfoYfinance:
                         get_info.update({"shortName": activo["longName"]})
                     elif "shortName" not in get_info and "longName" not in activo:
                         if "longBusinessSummary" in activo:
-                            get_info.update(
-                                {"shortName": activo["longBusinessSummary"][0:30]}
-                            )
+                            get_info.update({"shortName": activo["longBusinessSummary"][0:30]})
 
                 return get_info
         except EncodingWarning as e:
@@ -281,9 +267,7 @@ class InfoYfinance:
 # 📊 Función principal get_yfinance: encapsula llamados a yfinance
 # =================================================================
 @use_dataframe_cache(CacheHut)
-def get_yfinance(
-    ticket=None, vehiculo="Stock", period="5y", interval="1d", desde=None, hasta=None
-):
+def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desde=None, hasta=None):
     """
     @param ticket: id de activo
     @param vehiculo: tipo de activo Crypto, stock
@@ -323,9 +307,7 @@ def get_yfinance(
             dat = yf.Ticker(convierte_ticket_crypto(ticket))
 
             activo = safe_get_info(dat, convierte_ticket_crypto(ticket))
-            pdatos = get_klines_info(
-                symbol=ticket, period=period, desde=desde, hasta=hasta
-            )
+            pdatos = get_klines_info(symbol=ticket, period=period, desde=desde, hasta=hasta)
             return activo, pdatos
 
         # exclusivo para FCi Argentina, obtiene data desde Diaaria_CNV
@@ -347,7 +329,7 @@ def get_yfinance(
 
             activo = yf.Ticker(ticket)
             dividends = activo.dividends
-            pdatos = yf.download(ticket, start=desde, end=hasta, auto_adjust=True)
+            pdatos = yf.download(ticket, start=desde, end=hasta, auto_adjust=True, progress=False)
 
             # extraer el primer nivel de las columnas sacando infor Ticker
             pdatos.columns = pdatos.columns.get_level_values(0)
@@ -360,9 +342,7 @@ def get_yfinance(
             pdatos["Dividends"] = dividends
 
             # estoy siguinedo para sacar warnings de pandas
-            pdatos["Dividends"] = (
-                pdatos["Dividends"].fillna(0).infer_objects(copy=False).astype(float)
-            )
+            pdatos["Dividends"] = pdatos["Dividends"].fillna(0).infer_objects(copy=False).astype(float)
             return activo, pdatos
 
         else:
@@ -371,7 +351,7 @@ def get_yfinance(
                 # download sin fecha desde y hasta
                 if is_none(desde) and is_none(hasta):
 
-                    pdatos = yf.download(ticket, period=period, auto_adjust=True)
+                    pdatos = yf.download(ticket, period=period, auto_adjust=True, progress=False)
 
                     # extraer el primer nivel de las columnas sacando infor Ticker
                     pdatos.columns = pdatos.columns.get_level_values(0)
@@ -380,7 +360,7 @@ def get_yfinance(
                 # download con fecha desde y hasta
                 if not is_none(desde) and not is_none(hasta):
 
-                    pdatos = yf.download(ticket, start=str(desde), auto_adjust=True)
+                    pdatos = yf.download(ticket, start=str(desde), auto_adjust=True, progress=False)
 
                     # extraer el primer nivel de las columnas sacando infor Ticker
                     pdatos.columns = pdatos.columns.get_level_values(0)
@@ -390,13 +370,11 @@ def get_yfinance(
 
             # obtiene dataframe desde download BINANCE
             elif "USDT" in ticket:
-                pdatos = get_klines_info(
-                    symbol=ticket, period=period, desde=desde, hasta=hasta
-                )
+                pdatos = get_klines_info(symbol=ticket, period=period, desde=desde, hasta=hasta)
                 activo = {}
                 return activo, pdatos
     except (Exception, EncodingWarning) as e:
-        print(f"[Error:: get_yfinance()]: {e}")
+        print(f"[Error:: safe_get_info()]: {e}")
         time.sleep(3)
 
 
@@ -414,9 +392,7 @@ def get_klines_info(symbol=None, period="5y", interval="1d", desde=None, hasta=N
             while actual < ffecha:
                 siguiente = actual + timedelta(days=limit)
                 if siguiente >= ffecha:
-                    intervalos.append(
-                        (int(actual.timestamp() * 1000), int(ffecha.timestamp() * 1000))
-                    )
+                    intervalos.append((int(actual.timestamp() * 1000), int(ffecha.timestamp() * 1000)))
                 elif siguiente < ffecha:
                     intervalos.append(
                         (
@@ -430,9 +406,7 @@ def get_klines_info(symbol=None, period="5y", interval="1d", desde=None, hasta=N
         elif cantidad.days < limit:
             x_desde = datetime.combine(ifecha, datetime.min.time())
             x_hasta = datetime.combine(ffecha, datetime.max.time())
-            intervalos.append(
-                (int(x_desde.timestamp() * 1000), int(x_hasta.timestamp() * 1000))
-            )
+            intervalos.append((int(x_desde.timestamp() * 1000), int(x_hasta.timestamp() * 1000)))
 
         return intervalos
 
@@ -489,11 +463,7 @@ def get_klines_info(symbol=None, period="5y", interval="1d", desde=None, hasta=N
             # Localizar la zona horaria a UTC primero si es naive, luego convertir a America/New_York
             if not df.empty:
                 if df["Date"].dt.tz is None:
-                    df["Date"] = (
-                        df["Date"]
-                        .dt.tz_localize("UTC")
-                        .dt.tz_convert("America/New_York")
-                    )
+                    df["Date"] = df["Date"].dt.tz_localize("UTC").dt.tz_convert("America/New_York")
                 else:
                     df["Date"] = df["Date"].dt.tz_convert("America/New_York")
 
@@ -517,9 +487,7 @@ def get_ultimo_dia_mercado(market="Stock"):
     if market == "Stock":
         (activo, datos) = get_yfinance(ticket="^GSPC", period="7d", vehiculo="download")
     elif market == "Crypto":
-        (activo, datos) = get_yfinance(
-            ticket="BTC-USD", period="7d", vehiculo="download"
-        )
+        (activo, datos) = get_yfinance(ticket="BTC-USD", period="7d", vehiculo="download")
     elif market == "BBVA.ARS":
         (activo, datos) = get_yfinance(ticket="^MERV", period="7d", vehiculo="download")
 
@@ -546,9 +514,7 @@ def cagar_archivo(account=None, titulo=None, tipo="csv"):
     @return: interfaz  para seleccionar tipo de archivo
     """
     try:
-        ruta = filedialog.askopenfilename(
-            title=titulo, filetypes=(("Archivos " + tipo.upper(), "*." + tipo),)
-        )
+        ruta = filedialog.askopenfilename(title=titulo, filetypes=(("Archivos " + tipo.upper(), "*." + tipo),))
         extracto, ilog = {}, False
         if ruta:
             if ruta.endswith("." + tipo):
@@ -587,18 +553,12 @@ def get_extractos_csv(account=None, ruta=None):
 
                         f_obj = datetime.strptime(f_fin, "%B %d, %Y")
                         fecha = f_obj.strftime("%Y-%m-%d")
-                        extracto.update(
-                            {"extracto": datetime.strptime(fecha, "%Y-%m-%d")}
-                        )
+                        extracto.update({"extracto": datetime.strptime(fecha, "%Y-%m-%d")})
 
                     if ("Title" in row) and ("Activity Statement" in row):
                         ilog = True
 
-                elif (
-                    ("Cash Report" in row)
-                    and ("Data" in row)
-                    and ("Commissions" in row)
-                ):
+                elif ("Cash Report" in row) and ("Data" in row) and ("Commissions" in row):
                     ix = (
                         "Cash Report",
                         "Header",
@@ -609,9 +569,7 @@ def get_extractos_csv(account=None, ruta=None):
                         "Futures",
                         "Paxos",
                     )
-                    extracto.update(
-                        {"comisiones": abs(float(row[ix.index("Securities")]))}
-                    )
+                    extracto.update({"comisiones": abs(float(row[ix.index("Securities")]))})
 
                 elif ("Dividends" in row) and ("Data" in row) and ("Total" in row):
                     ix = (
@@ -625,9 +583,7 @@ def get_extractos_csv(account=None, ruta=None):
                     )
                     extracto.update({"dividendos": row[ix.index("Amount")]})
 
-                elif (
-                    ("Withholding Tax" in row) and ("Data" in row) and ("Total" in row)
-                ):
+                elif ("Withholding Tax" in row) and ("Data" in row) and ("Total" in row):
                     ix = (
                         "Withholding Tax",
                         "Header",
@@ -653,11 +609,7 @@ def get_extractos_csv(account=None, ruta=None):
                     )
                     extracto.update({"fee": abs(float(row[ix.index("Amount")]))})
 
-                elif (
-                    ("Deposits & Withdrawals" in row)
-                    and ("Data" in row)
-                    and ("USD" in row)
-                ):
+                elif ("Deposits & Withdrawals" in row) and ("Data" in row) and ("USD" in row):
                     ix = (
                         "Deposits & Withdrawals",
                         "Header",
@@ -685,18 +637,11 @@ def get_extractos_csv(account=None, ruta=None):
                     )
 
                     if "Debit" in row[ix.index("Description")]:
-                        extracto.update(
-                            {"imargen": abs(float(row[ix.index("Amount")]))}
-                        )
+                        extracto.update({"imargen": abs(float(row[ix.index("Amount")]))})
                     if "Managed Securities" in row[ix.index("Description")]:
                         extracto.update({"idevengo": row[ix.index("Amount")]})
 
-                elif (
-                    ("Open Positions" in row)
-                    and ("Total" in row)
-                    and ("Stocks" in row)
-                    and ("USD" in row)
-                ):
+                elif ("Open Positions" in row) and ("Total" in row) and ("Stocks" in row) and ("USD" in row):
                     ix = (
                         "Open Positions",
                         "Header",
@@ -777,9 +722,7 @@ def get_index_performa(vehiculo=None, date=None):
     (symbol, rtn_index, cum_index, index_ref) = vehiculo_parm(vehiculo=vehiculo)
     performa = pd.DataFrame()
 
-    (activo, datos) = get_yfinance(
-        ticket=symbol, vehiculo="download", desde=f_inicio, hasta=hoy
-    )
+    (activo, datos) = get_yfinance(ticket=symbol, vehiculo="download", desde=f_inicio, hasta=hoy)
 
     performa[rtn_index] = datos["Close"].pct_change()
     performa[cum_index] = (1 + performa[rtn_index]).cumprod() - 1
@@ -893,30 +836,22 @@ def chart_symbol(fg=None, datos=None, keys=None):
             where=(vmin < pdatos["Close"].values),
         )
         if keys["position"]:
-            buy_signal, x1, x2 = operaciones_book(
-                p_tipo="O", frame=keys["booktrading"], df=pclose
-            )
+            buy_signal, x1, x2 = operaciones_book(p_tipo="O", frame=keys["booktrading"], df=pclose)
             z_buy = dict(y1=x1, y2=x2, color="Olive", alpha=0.3)
             z_sell = dict(y1=x2, y2=vmax, color="DarkCyan", alpha=0.2)
             if p_tipo != "line":
                 ema = [
-                    mpf.make_addplot(
-                        pdatos["EMA009"], color="orange", ax=ax, alpha=0.6
-                    ),
+                    mpf.make_addplot(pdatos["EMA009"], color="orange", ax=ax, alpha=0.6),
                     mpf.make_addplot(pdatos["EMA021"], color="blue", ax=ax, alpha=0.6),
                     mpf.make_addplot(pdatos["EMA055"], color="cyan", ax=ax, alpha=0.6),
-                    mpf.make_addplot(
-                        pdatos["EMA144"], color="purple", ax=ax, alpha=0.6
-                    ),
+                    mpf.make_addplot(pdatos["EMA144"], color="purple", ax=ax, alpha=0.6),
                     mpf.make_addplot(
                         pdatos["EMA009"],
                         fill_between=[f_above, f_below],
                         ax=ax,
                         alpha=0.6,
                     ),
-                    mpf.make_addplot(
-                        pdatos["EMA021"], fill_between=z_buy, ax=ax, alpha=0.6
-                    ),
+                    mpf.make_addplot(pdatos["EMA021"], fill_between=z_buy, ax=ax, alpha=0.6),
                     mpf.make_addplot(
                         pdatos["EMA009"],
                         color="Olive",
@@ -1010,14 +945,10 @@ def chart_symbol(fg=None, datos=None, keys=None):
         else:
             if p_tipo != "line":
                 ema = [
-                    mpf.make_addplot(
-                        pdatos["EMA009"], color="orange", ax=ax, alpha=0.6
-                    ),
+                    mpf.make_addplot(pdatos["EMA009"], color="orange", ax=ax, alpha=0.6),
                     mpf.make_addplot(pdatos["EMA021"], color="blue", ax=ax, alpha=0.6),
                     mpf.make_addplot(pdatos["EMA055"], color="cyan", ax=ax, alpha=0.6),
-                    mpf.make_addplot(
-                        pdatos["EMA144"], color="purple", ax=ax, alpha=0.6
-                    ),
+                    mpf.make_addplot(pdatos["EMA144"], color="purple", ax=ax, alpha=0.6),
                     mpf.make_addplot(
                         pdatos["EMA009"],
                         fill_between=[f_above, f_below],
@@ -1147,9 +1078,7 @@ def chart_symbol(fg=None, datos=None, keys=None):
         )
 
         if p_tipo != "line":
-            x_emaplot, x_alcista, x_bajista, x_long, f_desde, z_buy, z_sell = m_emaplot(
-                p_tipo
-            )
+            x_emaplot, x_alcista, x_bajista, x_long, f_desde, z_buy, z_sell = m_emaplot(p_tipo)
             mpf.plot(
                 pdatos,
                 type=tipo,
@@ -1240,16 +1169,12 @@ def chart_symbol(fg=None, datos=None, keys=None):
         pdatos["EMA021"] = ta.trend.ema_indicator(pclose, window=21)
         pdatos["EMA009"] = ta.trend.ema_indicator(pclose, window=9)
         pdatos["ivolume"] = (
-            100
-            * (pdatos["Volume"] - pdatos["Volume"].min())
-            / (pdatos["Volume"].max() - pdatos["Volume"].min())
+            100 * (pdatos["Volume"] - pdatos["Volume"].min()) / (pdatos["Volume"].max() - pdatos["Volume"].min())
         )
 
         icolor = ["orange", "blue", "cyan", "purple"]
         ilabel = ["EMA(09)", "EMA(21)", "EMA(55)", "EMA(144)"]
-        st, emaplot, emaline, long, desde, t_alcista, t_bajista, zone_sell, zone_buy = (
-            add_plot(tipo)
-        )
+        st, emaplot, emaline, long, desde, t_alcista, t_bajista, zone_sell, zone_buy = add_plot(tipo)
 
         # setup de ejes de coordenadas
         ax.spines[["left", "top", "right", "bottom"]].set_visible(False)
@@ -1259,9 +1184,7 @@ def chart_symbol(fg=None, datos=None, keys=None):
         ax.set_ylabel("Precio($)", fontsize="x-small", color=keys["tcolor"])
         plt.setp(ax.get_xticklabels(), ha="right", rotation=30, fontsize=5)
         plt.setp(ax.get_yticklabels(), ha="right", fontsize=6, color=keys["tcolor"])
-        plt.rcParams.update(
-            {"axes.labelsize": 6, "xtick.labelsize": 6, "ytick.labelsize": 6}
-        )
+        plt.rcParams.update({"axes.labelsize": 6, "xtick.labelsize": 6, "ytick.labelsize": 6})
 
         # indicadores de gráfico
         av.spines[["left", "top", "right"]].set_visible(False)
@@ -1332,9 +1255,7 @@ def setup_fear_greed(fg: object, parm=None):
 
     def char_plot(ax=None, x=None, y=None, score=None, color=None, titulo=None):
         face = (
-            cchart["plot41"]
-            if (score > 45) and (score < 60)
-            else cchart["plot11"] if score < 45 else cchart["plot31"]
+            cchart["plot41"] if (score > 45) and (score < 60) else cchart["plot11"] if score < 45 else cchart["plot31"]
         )
         acolor = cchart["plot11"] if face == cchart["plot41"] else cchart["plot41"]
         ax.set_facecolor(face)
@@ -1467,12 +1388,8 @@ def setup_fear_greed(fg: object, parm=None):
         # Ajusta el tamaño relativo de los subplots para ocupar más área
         # gs = fg.add_gridspec(2, 1, height_ratios=[1, 1], left=0.05, right=0.95, top=0.95, bottom=0.05, hspace=0.15)
         gs = fg.add_gridspec(2, 1)
-        ax = fg.add_subplot(
-            gs[0], axes_class=floating_axes.FloatingAxes, grid_helper=grid_help01
-        )
-        ay = fg.add_subplot(
-            gs[1], axes_class=floating_axes.FloatingAxes, grid_helper=grid_help01
-        )
+        ax = fg.add_subplot(gs[0], axes_class=floating_axes.FloatingAxes, grid_helper=grid_help01)
+        ay = fg.add_subplot(gs[1], axes_class=floating_axes.FloatingAxes, grid_helper=grid_help01)
         ax.grid()
         ay.grid()
 
@@ -1527,7 +1444,7 @@ def grupo_activos(fg: object, parm=None, strategy=None):
     ValueMarket = np.sum(vmark)
 
     p_legend, colores = [], [cchart["plot9"], cchart["plot31"]]
-    
+
     # Gráfico de área estilo grupo_dividendo
     ax.fill_between(x, cbase, color=colores[0], alpha=0.99, label="Capital")
     ax.fill_between(x, vmark, color=colores[1], alpha=0.99, label="Valor Market")
@@ -1621,19 +1538,14 @@ def grupo_region(fg: object, strategy=None, parm=None):
                 if key_sec not in list(d_country.keys()):
                     d_country[key_sec] = {
                         "Capital": float(activo["costobase"]),
-                        "Valor Market": float(activo["costobase"])
-                        + activo["unrealizedpnl"],
+                        "Valor Market": float(activo["costobase"]) + activo["unrealizedpnl"],
                     }
 
                 elif key_sec in list(d_country.keys()):
                     d_country[key_sec]["Capital"] += float(activo["costobase"])
-                    d_country[key_sec]["Valor Market"] += (
-                        float(activo["costobase"]) + activo["unrealizedpnl"]
-                    )
+                    d_country[key_sec]["Valor Market"] += float(activo["costobase"]) + activo["unrealizedpnl"]
             # agerga peso de cada pais
-            d_country[key_sec]["Peso"] = (
-                d_country[key_sec]["Valor Market"] / ValueMarket
-            )
+            d_country[key_sec]["Peso"] = d_country[key_sec]["Valor Market"] / ValueMarket
 
         return d_country, ValueMarket
 
@@ -1657,17 +1569,11 @@ def grupo_region(fg: object, strategy=None, parm=None):
     ax.plot(x, vmark, color=cchart["plot2"])
 
     # Rellenar cuando value > base (ganancia)
-    ax.fill_between(
-        x, cbase, vmark, where=vmark >= cbase, interpolate=True, color=cchart["plot2"]
-    )
-    ax.fill_between(
-        x, vmark, 0, where=vmark >= 0, interpolate=True, color=cchart["plot2"]
-    )
+    ax.fill_between(x, cbase, vmark, where=vmark >= cbase, interpolate=True, color=cchart["plot2"])
+    ax.fill_between(x, vmark, 0, where=vmark >= 0, interpolate=True, color=cchart["plot2"])
 
     # Rellenar cuando value < base (pérdida)
-    ax.fill_between(
-        x, cbase, vmark, where=vmark <= cbase, interpolate=True, color=cchart["plot9"]
-    )
+    ax.fill_between(x, cbase, vmark, where=vmark <= cbase, interpolate=True, color=cchart["plot9"])
 
     p_legend.append(mpatches.Patch(color=cchart["plot9"], label="Capital"))
     p_legend.append(mpatches.Patch(color=cchart["plot2"], label="Valor Market"))
@@ -1726,9 +1632,7 @@ def Agente_income_Manager(fg: object, parm=None):
         hasta = datetime.now() - timedelta(days=dias)
 
         extracto = PInversion.select_extracto(extract="sum*")
-        diaria, ix = Performa.select_diaria_performance(
-            accion="hasta", date=hasta.date(), symbol="all"
-        )
+        diaria, ix = Performa.select_diaria_performance(accion="hasta", date=hasta.date(), symbol="all")
 
         clave, gain, dividends = [], [], []
         clave.append(hoy.strftime("%B-%y"))
@@ -1894,9 +1798,7 @@ def grupo_sector(fig: object, positions=None, parm=None):
         for keys, measurement in datos.items():
             offset = width * multiplier
             if keys == "Perf Year":
-                ax.bar(
-                    x + offset, measurement, width, color=cchart["plot6"], alpha=0.30
-                )
+                ax.bar(x + offset, measurement, width, color=cchart["plot6"], alpha=0.30)
                 p_legend.append(mpatches.Patch(color=cchart["plot6"], label=keys))
 
             if keys == "Perf Quart":
@@ -1959,9 +1861,7 @@ def grupo_sector(fig: object, positions=None, parm=None):
         hace_1a = hoy - pd.DateOffset(years=1)
 
         # Descargar datos desde hace 1 año hasta hoy
-        etf, pdatos = get_yfinance(
-            ticket=symbol, vehiculo="Dividends", desde=hace_1a, hasta=hoy
-        )
+        etf, pdatos = get_yfinance(ticket=symbol, vehiculo="Dividends", desde=hace_1a, hasta=hoy)
 
         # Asegurarse de tener cierre ajustado
         hist = pdatos[pdatos["Close"].notna()]
@@ -2026,14 +1926,10 @@ def grupo_sector(fig: object, positions=None, parm=None):
         }
     except HTTPError as e:
         if "403" in str(e):
-            print(
-                f"grupo_sector():🔴 ERROR FINVIZ: Bloqueo 403 Forbidden. Reintento en 5 minutos. Mensaje: {e}"
-            )
+            print(f"grupo_sector():🔴 ERROR FINVIZ: Bloqueo 403 Forbidden. Reintento en 5 minutos. Mensaje: {e}")
 
         elif "404" in str(e):
-            print(
-                f"grupo_sector():🔴 ERROR FINVIZ: La página no se encuentra (404). Revisar la librería."
-            )
+            print(f"grupo_sector():🔴 ERROR FINVIZ: La página no se encuentra (404). Revisar la librería.")
 
         else:
             # Cualquier otro error HTTP
@@ -2144,9 +2040,7 @@ def get_dividends(account=None, vehiculo=None):
 # Gráfica Diversificación vs. pago dividendos
 def grupo_dividendo(fg: object, parm=None):
     try:
-        datos, struct, ValueMarket = get_dividends(
-            account=parm["account"], vehiculo=parm["vehiculo"]
-        )
+        datos, struct, ValueMarket = get_dividends(account=parm["account"], vehiculo=parm["vehiculo"])
         p_legend = []
         if datos is not None and not datos.empty:
             fg.clear()
@@ -2160,12 +2054,8 @@ def grupo_dividendo(fg: object, parm=None):
             p_legend, colores = [], [cchart["plot5"], cchart["plot31"]]
 
             # Graficar 'dividendos' con transparencia
-            ax.fill_between(
-                x, datos["dividendos"], color=colores[0], alpha=0.99, label="Dividendos"
-            )
-            ax.fill_between(
-                x, datos["cobrados"], color=colores[1], alpha=0.99, label="Cobrados"
-            )
+            ax.fill_between(x, datos["dividendos"], color=colores[0], alpha=0.99, label="Dividendos")
+            ax.fill_between(x, datos["cobrados"], color=colores[1], alpha=0.99, label="Cobrados")
 
             # Configurar de la legend
             p_legend.append(mpatches.Patch(color=colores[0], label="Dividendos"))
@@ -2197,9 +2087,7 @@ def grupo_dividendo(fg: object, parm=None):
             mean = datos["cobrados"].mean()
             ax.axhline(mean, linewidth=0.6, ls="--", color=cchart["texto"])
             media = f" μ = {mean:.0f}$"
-            ax.text(
-                x[6], mean * 1.2, media, fontsize=6, ha="center", color=cchart["texto"]
-            )
+            ax.text(x[6], mean * 1.2, media, fontsize=6, ha="center", color=cchart["texto"])
 
             return {
                 "datos": datos,
@@ -2212,9 +2100,7 @@ def grupo_dividendo(fg: object, parm=None):
 
 
 # gráfica performance de dividendos
-def chart_rendimiento_dividendos(
-    fg=None, datos=None, dlabl=None, cchart=None, asset=None
-):
+def chart_rendimiento_dividendos(fg=None, datos=None, dlabl=None, cchart=None, asset=None):
     try:
         fg.clear()
         ax = fg.add_subplot()
@@ -2224,15 +2110,11 @@ def chart_rendimiento_dividendos(
         av.set_aspect("auto")
 
         p_legend, p_zonas = [], []
-        p_legend.append(
-            mpatches.Patch(color=cchart["plot4"], label=dlabl["symbol"], alpha=0.4)
-        )
+        p_legend.append(mpatches.Patch(color=cchart["plot4"], label=dlabl["symbol"], alpha=0.4))
 
         p_zonas.append(mpatches.Patch(color=cchart["plot3"], label=dlabl["sell"]))
         p_zonas.append(mpatches.Patch(color=cchart["plot1"], label=dlabl["buy"]))
-        p_zonas.append(
-            mpatches.Patch(color=cchart["plot5"], label=dlabl["symbol"], alpha=0.4)
-        )
+        p_zonas.append(mpatches.Patch(color=cchart["plot5"], label=dlabl["symbol"], alpha=0.4))
 
         fg.legend(handles=p_zonas, loc=dlabl["legend"], fontsize=6)
         fg.suptitle(
@@ -2551,9 +2433,7 @@ def chart_trazaplan(fg=None, traza=None, cchart=None):
                 p_legend.append(mpatches.Patch(color=cchart["plot5"], label=keys))
 
             if keys == "Rendimiento":
-                av.bar(
-                    x + offset, measurement, width / 2, color=cchart["2eje"], alpha=0.9
-                )
+                av.bar(x + offset, measurement, width / 2, color=cchart["2eje"], alpha=0.9)
                 p_legend.append(mpatches.Patch(color=cchart["2eje"], label=keys))
 
         fg.legend(loc="outside upper right", handles=p_legend, fontsize=5)

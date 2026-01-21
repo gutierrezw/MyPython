@@ -24,7 +24,7 @@ from Class_customer import (
     DataHub,
     CacheHut,
 )
-from Class_IA_modelos import ModeloOportunidadesSell
+from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
 from Class_DashBot import Chatbot
 
 
@@ -58,6 +58,7 @@ class system_status(tk.Frame):
         self.buysell = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.rebalanceo = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.modeloia = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
+        self.modeloiabuy = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.debugging = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
 
         # Frames para la derecha
@@ -78,6 +79,7 @@ class system_status(tk.Frame):
         self.bottom.add(self.buysell, text="BuySell")
         self.bottom.add(self.rebalanceo, text="Rebalanceo")
         self.bottom.add(self.modeloia, text="Sell IA")
+        self.bottom.add(self.modeloiabuy, text="Buy IA")
         self.bottom.add(self.debugging, text="Debugging")
 
         self.bottom.pack(side=tk.BOTTOM, fill=tk.BOTH)
@@ -88,7 +90,7 @@ class system_status(tk.Frame):
         self.system.bind("<Destroy>", self._on_destroy)
 
         self.process_system()
-        # NOTA: modelo_ia_monitor() se llama desde start_chatbot() después de inicializar chatbot
+        # NOTA: sell_ia_monitor() se llama desde start_chatbot() después de inicializar chatbot
 
     def _on_destroy(self, event):
         """Limpia recursos al cerrar la ventana"""
@@ -1921,7 +1923,7 @@ class system_status(tk.Frame):
 
         self.rv.draw()
 
-    def modelo_ia_monitor(self, chatbot=None):
+    def sell_ia_monitor(self, chatbot=None):
         """
         Monitor del modelo de IA para oportunidades Sell.
         Muestra métricas, distribución de confianza y permite re-entrenar.
@@ -2154,7 +2156,11 @@ class system_status(tk.Frame):
                         features_positivos = [f for f in feature_imp if f["importance"] > 0]
                         metrics_tree.insert("", "end", text="", values=("", "", ""))
                         metrics_tree.insert(
-                            "", "end", text=f"🔍 Features ({len(features_positivos)})", values=("", "", ""), tags=("header",)
+                            "",
+                            "end",
+                            text=f"🔍 Features ({len(features_positivos)})",
+                            values=("", "", ""),
+                            tags=("header",),
                         )
                         for i, feat in enumerate(features_positivos):
                             name = feat["feature"]  # Nombre completo
@@ -2171,7 +2177,7 @@ class system_status(tk.Frame):
 
                 # === Oportunidades Actuales (desde CSV en tiempo real) ===
                 try:
-                    df_sell = Chatbot.readCSV(file="csv_datosIA_sell")
+                    df_sell = Chatbot.readCSV_sell(file="csv_datosIA_sell")
 
                     if df_sell is not None and not df_sell.empty:
                         # Cargar modelo para predecir
@@ -2634,5 +2640,715 @@ class system_status(tk.Frame):
 
             auto_actualizar()
         except Exception as e:
-            print(f"modelo_ia_monitor(): {e}")
+            print(f"sell_ia_monitor(): {e}")
+            traceback.print_exc()
+
+    def buy_ia_monitor(self, chatbot=None):
+        """
+        Monitor del modelo de IA para oportunidades Buy.
+        Muestra métricas, distribución de confianza y permite re-entrenar.
+
+        Args:
+            chatbot: Instancia de AsistenteChatbot (se pasa desde DashMain.start_chatbot)
+        """
+        # Validar que chatbot esté disponible
+        if chatbot is None:
+            return
+
+        def entrenar_modelo():
+            """Inicia el entrenamiento del modelo usando lógica centralizada"""
+            try:
+                # Instanciar modelo
+                modelo = ModeloOportunidadesBuy()
+
+                # Obtener datos de entrenamiento usando método centralizado
+                df, errores_parseo = chatbot.obtener_dataframe_entrenamiento_IA(tipo="buy", return_stats=True)
+
+                if df.empty:
+                    msg = MyMessageBox(self.system)
+                    msg.showinfo(
+                        "Sin datos para entrenar",
+                        "No hay datos disponibles para entrenar el modelo Buy.\n\n"
+                        "Asegúrate de tener oportunidades Buy registradas con decisiones tomadas (1 o -1).",
+                    )
+                    return
+
+                # Calcular total de errores
+                total_errores = sum(errores_parseo.values())
+
+                if len(df) < 10:
+                    # Construir mensaje detallado de errores
+                    errores_msg = f"Sin decisión tomada: {errores_parseo.get('sin_decision', 0)}\n"
+                    errores_msg += f"JSON inválido: {errores_parseo.get('json_invalido', 0)}\n"
+                    errores_msg += f"Detalle no es dict: {errores_parseo.get('detalle_no_dict', 0)}\n"
+                    errores_msg += f"Indicadores no es dict: {errores_parseo.get('indicadores_no_dict', 0)}\n"
+                    errores_msg += f"Otros errores: {errores_parseo.get('otros', 0)}"
+
+                    msg = MyMessageBox(self.system)
+                    msg.showinfo(
+                        "Datos insuficientes",
+                        f"Datos insuficientes para entrenar el modelo.\n\n"
+                        f"Registros válidos: {len(df)}\n"
+                        f"Mínimo requerido: 10\n"
+                        f"Total omitidos: {total_errores}\n\n"
+                        f"Desglose de errores:\n{errores_msg}\n\n"
+                        f"Genera más oportunidades Buy con decisiones tomadas.",
+                    )
+                    return
+
+                # Entrenar modelo
+                modelo.entrenar_modelo(df)
+                modelo.save_modelo(modelo.modelo_name)
+
+                # Actualizar métricas
+                actualizar_metricas()
+
+                msg = MyMessageBox(self.system)
+                msg.showinfo(
+                    "Entrenamiento exitoso",
+                    f"Modelo Buy entrenado exitosamente.\n\n" f"Las métricas se han actualizado.",
+                )
+            except Exception as e:
+                error_msg = str(e)
+                print(f"entrenar_modelo(): {e}")
+                traceback.print_exc()
+
+                msg = MyMessageBox(self.system)
+                msg.showinfo(
+                    "Error al entrenar",
+                    f"Error al entrenar el modelo Buy:\n\n{error_msg}\n\n" f"Revisa la consola para más detalles.",
+                )
+
+        # Programar actualización automática cada 30 segundos
+        def auto_actualizar():
+            if self.is_running:
+                actualizar_metricas()
+                after_id = self.system.after(30000, auto_actualizar)
+                self.after_ids.append(after_id)
+
+        def actualizar_metricas():
+            """Actualiza las métricas del modelo y oportunidades actuales"""
+            try:
+                # Limpiar trees
+                for item in metrics_tree.get_children():
+                    metrics_tree.delete(item)
+
+                for item in opp_tree.get_children():
+                    opp_tree.delete(item)
+
+                # Cargar modelo
+                modelo = ModeloOportunidadesBuy()
+                modelo.load_modelo(modelo.modelo_name)
+
+                # === 1. DATASET BUY (primero) ===
+                ganancia_apr, ganancia_rec, score_apr, score_rec = 0, 0, 0, 0
+                if chatbot is not None:
+                    df_stats = chatbot.obtener_dataframe_entrenamiento_IA(tipo="buy", return_stats=False)
+                    total = len(df_stats)
+                    df_apr = df_stats[df_stats["recomendado"] == 1] if total > 0 else pd.DataFrame()
+                    df_rec = df_stats[df_stats["recomendado"] == -1] if total > 0 else pd.DataFrame()
+                    aprobadas = len(df_apr)
+                    rechazadas = len(df_rec)
+
+                    # Calcular promedios ganancia_precio
+                    if "ganancia_precio" in df_stats.columns:
+                        ganancia_apr = df_apr["ganancia_precio"].dropna().mean() if len(df_apr) > 0 else 0
+                        ganancia_rec = df_rec["ganancia_precio"].dropna().mean() if len(df_rec) > 0 else 0
+                        ganancia_apr = ganancia_apr if pd.notna(ganancia_apr) else 0
+                        ganancia_rec = ganancia_rec if pd.notna(ganancia_rec) else 0
+
+                    # Calcular promedios Score
+                    if "score" in df_stats.columns:
+                        score_apr = df_apr["score"].dropna().mean() if len(df_apr) > 0 else 0
+                        score_rec = df_rec["score"].dropna().mean() if len(df_rec) > 0 else 0
+                        score_apr = score_apr if pd.notna(score_apr) else 0
+                        score_rec = score_rec if pd.notna(score_rec) else 0
+                else:
+                    total, aprobadas, rechazadas = 0, 0, 0
+
+                metrics_tree.insert(
+                    "", "end", text="📚 Dataset Buy (decisiones)", values=("", "", ""), tags=("header",)
+                )
+                metrics_tree.insert("", "end", text="  Total con decisión", values=(f"{total}", "", ""), tags=("info",))
+
+                ganancia_apr_str = f"{ganancia_apr*100:.1f}%" if ganancia_apr != 0 else "-"
+                score_apr_str = f"{score_apr:.2f}" if score_apr != 0 else "-"
+                metrics_tree.insert(
+                    "",
+                    "end",
+                    text="  Aprobadas (rec=1)",
+                    values=(f"{aprobadas}", ganancia_apr_str, score_apr_str),
+                    tags=("good",),
+                )
+
+                ganancia_rec_str = f"{ganancia_rec*100:.1f}%" if ganancia_rec != 0 else "-"
+                score_rec_str = f"{score_rec:.2f}" if score_rec != 0 else "-"
+                metrics_tree.insert(
+                    "",
+                    "end",
+                    text="  Rechazadas (rec=-1)",
+                    values=(f"{rechazadas}", ganancia_rec_str, score_rec_str),
+                    tags=("bad",),
+                )
+
+                entrenables = aprobadas + rechazadas
+                tag_entrenables = "good" if entrenables >= 50 else "warning" if entrenables >= 20 else "bad"
+                metrics_tree.insert(
+                    "",
+                    "end",
+                    text="  Muestras para entrenar",
+                    values=(f"{entrenables}", "", ""),
+                    tags=(tag_entrenables,),
+                )
+
+                # === 2. MÉTRICAS CV ===
+                if hasattr(modelo, "metrics") and modelo.metrics:
+                    metrics_tree.insert("", "end", text="", values=("", "", ""))
+                    metrics_tree.insert(
+                        "", "end", text="🎯 Métricas CV (5-fold)", values=("", "", ""), tags=("header",)
+                    )
+
+                    precision = modelo.metrics.get("precision", 0)
+                    precision_std = modelo.metrics.get("precision_std", 0)
+                    recall = modelo.metrics.get("recall", 0)
+                    recall_std = modelo.metrics.get("recall_std", 0)
+                    f1 = modelo.metrics.get("f1_score", 0)
+                    f1_std = modelo.metrics.get("f1_std", 0)
+                    accuracy = modelo.metrics.get("accuracy", 0)
+                    accuracy_std = modelo.metrics.get("accuracy_std", 0)
+
+                    def get_tag(value):
+                        if value >= 0.75:
+                            return "good"
+                        if value >= 0.60:
+                            return "warning"
+                        return "bad"
+
+                    metrics_tree.insert(
+                        "",
+                        "end",
+                        text="  Precisión",
+                        values=(f"{precision:.0%}±{precision_std*100:.0f}", "", ""),
+                        tags=(get_tag(precision),),
+                    )
+                    metrics_tree.insert(
+                        "",
+                        "end",
+                        text="  Recall",
+                        values=(f"{recall:.0%}±{recall_std*100:.0f}", "", ""),
+                        tags=(get_tag(recall),),
+                    )
+                    metrics_tree.insert(
+                        "", "end", text="  F1-Score", values=(f"{f1:.0%}±{f1_std*100:.0f}", "", ""), tags=(get_tag(f1),)
+                    )
+                    metrics_tree.insert(
+                        "",
+                        "end",
+                        text="  Accuracy",
+                        values=(f"{accuracy:.0%}±{accuracy_std*100:.0f}", "", ""),
+                        tags=(get_tag(accuracy),),
+                    )
+
+                    # === 3. FEATURES CON IMPORTANCIA > 0 ===
+                    feature_imp = modelo.metrics.get("feature_importance", [])
+                    if feature_imp:
+                        features_positivos = [f for f in feature_imp if f["importance"] > 0]
+                        metrics_tree.insert("", "end", text="", values=("", "", ""))
+                        metrics_tree.insert(
+                            "",
+                            "end",
+                            text=f"🔍 Features ({len(features_positivos)})",
+                            values=("", "", ""),
+                            tags=("header",),
+                        )
+                        for i, feat in enumerate(features_positivos):
+                            name = feat["feature"]
+                            imp = feat["importance"]
+                            metrics_tree.insert(
+                                "", "end", text=f"  {i+1}. {name}", values=(f"{imp:.1%}", "", ""), tags=("info",)
+                            )
+                else:
+                    metrics_tree.insert("", "end", text="", values=("", "", ""))
+                    metrics_tree.insert("", "end", text="🎯 Métricas CV", values=("", "", ""), tags=("header",))
+                    metrics_tree.insert(
+                        "", "end", text="  ℹ️ Modelo no entrenado", values=("", "", ""), tags=("warning",)
+                    )
+
+                # === Oportunidades Actuales (desde CSV en tiempo real) ===
+                try:
+                    df_buy = Chatbot.readCSV_buy(file="csv_datosIA_buy")
+
+                    if df_buy is not None and not df_buy.empty:
+                        # Cargar modelo para predecir
+                        modelo_pred = ModeloOportunidadesBuy()
+                        modelo_pred.load_modelo(modelo_pred.modelo_name)
+
+                        if modelo_pred.modelo is not None:
+                            # Preparar datos para predicción
+                            df_pred = df_buy.copy()
+                            df_pred = df_pred.rename(columns=DataHub.BuyCsvJsonDcolumnas)
+                            df_aplanado = modelo_pred.aplanar_datos_tecnicos(df_pred)
+
+                            if df_aplanado is not None and not df_aplanado.empty:
+                                resultado = modelo_pred.predecir_modelo(df_aplanado)
+
+                                if resultado is not None and not resultado.empty:
+                                    # Contadores
+                                    n_comprar = 0
+                                    n_observar = 0
+                                    n_ignorar = 0
+
+                                    # Recolectar datos para ordenar por score
+                                    oportunidades = []
+                                    for i, (_, row_pred) in enumerate(resultado.iterrows()):
+                                        if i >= len(df_buy):
+                                            break
+                                        row_orig = df_buy.iloc[i]
+
+                                        symbol = row_orig.get("Symbol", "???")
+                                        ganancia = row_orig.get("ganancia_precio", 0) * 100
+                                        conf = row_pred.get("confianza", 0)
+                                        vehiculo = row_orig.get("vehiculo", "")
+                                        score = row_orig.get("score", 0)
+
+                                        # Extraer RSI del JSON si existe
+                                        rsi = 0
+                                        try:
+                                            datos_tec = row_orig.get("Datostecnicos", "{}")
+                                            if isinstance(datos_tec, str):
+                                                datos_tec = json.loads(datos_tec)
+                                            rsi = datos_tec.get("diaria", {}).get("rsi", 0)
+                                        except:
+                                            pass
+
+                                        # Determinar estado según umbrales
+                                        if conf >= 0.65:
+                                            estado = "COMPRAR"
+                                            tag = "comprar"
+                                            n_comprar += 1
+                                        elif conf >= 0.35:
+                                            estado = "Observar"
+                                            tag = "observar"
+                                            n_observar += 1
+                                        else:
+                                            estado = "Ignorar"
+                                            tag = "ignorar"
+                                            n_ignorar += 1
+
+                                        oportunidades.append(
+                                            {
+                                                "symbol": symbol,
+                                                "vehiculo": vehiculo,
+                                                "rsi": rsi,
+                                                "ganancia": ganancia,
+                                                "score": score,
+                                                "conf": conf,
+                                                "estado": estado,
+                                                "tag": tag,
+                                            }
+                                        )
+
+                                    # Ordenar por score decreciente
+                                    oportunidades.sort(key=lambda x: x["score"], reverse=True)
+
+                                    # Insertar ordenados
+                                    for opp in oportunidades:
+                                        opp_tree.insert(
+                                            "",
+                                            "end",
+                                            text=opp["symbol"],
+                                            values=(
+                                                opp["vehiculo"],
+                                                f"{opp['rsi']:.1f}",
+                                                f"{opp['ganancia']:.1f}",
+                                                f"{opp['conf']:.2f}",
+                                                opp["estado"],
+                                            ),
+                                            tags=(opp["tag"],),
+                                        )
+
+                                    # Resumen en una línea simple
+                                    opp_tree.insert(
+                                        "",
+                                        "end",
+                                        text=f"Total: {len(resultado)}",
+                                        values=("", f"C:{n_comprar}", f"O:{n_observar}", f"I:{n_ignorar}", ""),
+                                        tags=("header",),
+                                    )
+                                else:
+                                    opp_tree.insert(
+                                        "",
+                                        "end",
+                                        text="Sin predicciones",
+                                        values=("", "", "", "", ""),
+                                        tags=("ignorar",),
+                                    )
+                            else:
+                                opp_tree.insert(
+                                    "", "end", text="Error aplanando", values=("", "", "", "", ""), tags=("ignorar",)
+                                )
+                        else:
+                            opp_tree.insert(
+                                "", "end", text="Modelo no cargado", values=("", "", "", "", ""), tags=("ignorar",)
+                            )
+                    else:
+                        opp_tree.insert(
+                            "", "end", text="Sin oportunidades", values=("", "", "", "", ""), tags=("ignorar",)
+                        )
+                except Exception as e_opp:
+                    opp_tree.insert(
+                        "", "end", text=f"Error: {str(e_opp)[:30]}", values=("", "", "", "", ""), tags=("ignorar",)
+                    )
+
+            except Exception as e:
+                metrics_tree.insert("", "end", text=f"❌ Error: {str(e)[:50]}", values=("", "", ""), tags=("bad",))
+                print(f"actualizar_metricas(): {e}")
+                traceback.print_exc()
+
+        def modificar_parametros():
+            """Abre ventana para modificar parámetros del modelo IA Buy"""
+
+            def guardar():
+                """Guarda los cambios en BD"""
+                try:
+                    nombre = entry_nombre.get().strip()
+                    tipo = entry_tipo.get().strip()
+                    define = entry_define.get().strip()
+                    params_str = text_params.get("1.0", tk.END).strip()
+                    docs_str = text_docs.get("1.0", tk.END).strip()
+
+                    # Validar JSON de parámetros
+                    try:
+                        json.loads(params_str)
+                    except json.JSONDecodeError as e:
+                        msg = MyMessageBox(config_window)
+                        msg.showinfo("Error", f"JSON de parámetros inválido:\n{e}")
+                        return
+
+                    params_bytes = params_str.encode("utf-8")
+                    docs_bytes = docs_str.encode("utf-8") if docs_str else None
+
+                    if modelo_data:
+                        success = BDsystem.update_modelo_ia(
+                            modelo=modelo_name,
+                            nombre=nombre,
+                            tipo_modelo=tipo,
+                            paramts=params_bytes,
+                            documents=docs_bytes,
+                            define_modelo=define,
+                        )
+                    else:
+                        success = BDsystem.insert_modelo_ia(
+                            modelo=modelo_name,
+                            nombre=nombre,
+                            tipo_modelo=tipo,
+                            paramts=params_bytes,
+                            documents=docs_bytes,
+                            define_modelo=define,
+                        )
+
+                    if success:
+                        msg = MyMessageBox(config_window)
+                        msg.showinfo("Éxito", "Configuración guardada correctamente")
+                        on_close()
+                    else:
+                        msg = MyMessageBox(config_window)
+                        msg.showinfo("Error", "No se pudo guardar la configuración")
+                except Exception as e:
+                    print(f"guardar(): {e}")
+                    msg = MyMessageBox(config_window)
+                    msg.showinfo("Error", f"Error al guardar:\n{e}")
+
+            def cancelar():
+                on_close()
+
+            def on_close():
+                self._modelo_buy_config_window = None
+                config_window.destroy()
+
+            def cargar_documento():
+                """Carga documentación desde archivo"""
+                filepath = filedialog.askopenfilename(
+                    parent=config_window,
+                    title="Seleccionar documento",
+                    filetypes=[("Archivos de texto", "*.txt"), ("Markdown", "*.md"), ("Todos", "*.*")],
+                )
+                if filepath:
+                    try:
+                        with open(filepath, "r", encoding="utf-8") as f:
+                            content = f.read()
+                        text_docs.delete("1.0", tk.END)
+                        text_docs.insert("1.0", content)
+                    except Exception as e:
+                        msg = MyMessageBox(config_window)
+                        msg.showinfo("Error", f"Error al cargar archivo:\n{e}")
+
+            # Función helper para crear filas
+            def crear_fila(parent, label_text, default_value="", readonly=False):
+                frame = tk.Frame(parent, bg=self.bgcolor)
+                frame.pack(fill=tk.X, pady=4)
+                lbl = tk.Label(frame, text=label_text, width=20, anchor="w", bg=self.bgcolor, fg=label_fg)
+                lbl.pack(side=tk.LEFT)
+                entry = tk.Entry(frame, width=53, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor)
+                entry.insert(0, default_value)
+                if readonly:
+                    entry.configure(state="readonly")
+                entry.pack(side=tk.LEFT, padx=5)
+                return entry
+
+            # Verificar si ya existe ventana abierta
+            if hasattr(self, "_modelo_buy_config_window") and self._modelo_buy_config_window:
+                try:
+                    if self._modelo_buy_config_window.winfo_exists():
+                        self._modelo_buy_config_window.lift()
+                        self._modelo_buy_config_window.focus_force()
+                        return
+                except:
+                    self._modelo_buy_config_window = None
+
+            # Colores desde DataHub
+            entry_bg = self.cchart.get("fondo_fig", self.cgcolor)
+            label_fg = self.cchart.get("texto", self.fgcolor)
+
+            # Crear ventana Toplevel
+            config_window = tk.Toplevel(self.system)
+            config_window.title("Configuración Modelo IA - Buy")
+            config_window.geometry("530x420")
+            config_window.configure(bg=self.bgcolor)
+            config_window.resizable(False, False)
+            self._modelo_buy_config_window = config_window
+
+            # Posicionar ventana a la derecha y más abajo
+            config_window.update_idletasks()
+            x = self.system.winfo_x() + self.system.winfo_width() + 10
+            y = self.system.winfo_y() + 380
+            config_window.geometry(f"+{x}+{y}")
+
+            # Obtener modelo actual desde la instancia
+            modelo = ModeloOportunidadesBuy()
+            modelo_name = modelo.modelo_name
+
+            # Cargar datos existentes de BD
+            modelo_data = BDsystem.get_modelo_ia(modelo_name)
+
+            # Frame principal
+            main_frame = tk.Frame(config_window, bg=self.bgcolor, padx=15, pady=10)
+            main_frame.pack(fill=tk.BOTH, expand=True)
+
+            # Campos del formulario
+            entry_modelo = crear_fila(main_frame, "Modelo:", modelo_name, readonly=True)
+            entry_nombre = crear_fila(
+                main_frame,
+                "Nombre:",
+                modelo_data.get("Nombre", "Modelo Buy Oportunidades") if modelo_data else "Modelo Buy Oportunidades",
+            )
+            entry_tipo = crear_fila(
+                main_frame,
+                "Tipo Modelo:",
+                modelo_data.get("tipo_modelo", "RandomForest") if modelo_data else "RandomForest",
+            )
+            entry_define = crear_fila(
+                main_frame,
+                "Define Modelo:",
+                modelo_data.get("define_modelo", "buy_classifier") if modelo_data else "buy_classifier",
+            )
+
+            # Campo: Parámetros (JSON)
+            row_params = tk.Frame(main_frame, bg=self.bgcolor)
+            row_params.pack(fill=tk.X, pady=4)
+            tk.Label(row_params, text="Parámetros (JSON):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(
+                side=tk.LEFT, anchor=tk.N
+            )
+
+            text_params = tk.Text(
+                row_params, width=40, height=7, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor
+            )
+            default_params = {
+                "n_estimators": 100,
+                "max_depth": 10,
+                "min_samples_split": 5,
+                "n_folds": 5,
+                "test_size": 0.3,
+                "umbral_buy": 0.65,
+                "umbral_observacion": 0.35,
+            }
+            if modelo_data and modelo_data.get("paramts"):
+                try:
+                    params = json.loads(modelo_data["paramts"].decode("utf-8"))
+                    text_params.insert("1.0", json.dumps(params, indent=2))
+                except:
+                    text_params.insert("1.0", json.dumps(default_params, indent=2))
+            else:
+                text_params.insert("1.0", json.dumps(default_params, indent=2))
+            text_params.pack(side=tk.LEFT, padx=5)
+
+            # Campo: Documentación (BLOB)
+            row_docs = tk.Frame(main_frame, bg=self.bgcolor)
+            row_docs.pack(fill=tk.X, pady=4)
+            tk.Label(row_docs, text="Documentación (BLOB):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(
+                side=tk.LEFT, anchor=tk.N
+            )
+
+            docs_container = tk.Frame(row_docs, bg=self.bgcolor)
+            docs_container.pack(side=tk.LEFT, padx=5)
+
+            text_docs = tk.Text(
+                docs_container, width=30, height=4, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor
+            )
+            if modelo_data and modelo_data.get("documents"):
+                try:
+                    docs = modelo_data["documents"].decode("utf-8")
+                    text_docs.insert("1.0", docs)
+                except:
+                    pass
+            text_docs.pack(side=tk.LEFT)
+
+            ttk.Button(docs_container, text="Import", command=cargar_documento, width=10).pack(side=tk.LEFT, padx=5)
+
+            # Botones Guardar/Cancelar
+            btn_frame = tk.Frame(main_frame, bg=self.bgcolor)
+            btn_frame.pack(fill=tk.X, pady=(20, 10))
+
+            # Botones centrados
+            ttk.Button(btn_frame, text="Guardar", command=guardar, width=10).pack(side=tk.LEFT, padx=(130, 10))
+            ttk.Button(btn_frame, text="Cancel", command=cancelar, width=10).pack(side=tk.LEFT)
+
+            config_window.protocol("WM_DELETE_WINDOW", on_close)
+
+        try:
+            # Frame principal dividido en dos secciones
+            left_frame = ttk.Frame(self.modeloiabuy, padding=(5, 5), style="C.TFrame")
+            right_frame = ttk.Frame(self.modeloiabuy, padding=(5, 5), style="C.TFrame")
+
+            left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+            # === SECCIÓN IZQUIERDA: Métricas y Estadísticas ===
+            metrics_label = ttk.Label(
+                left_frame,
+                text="📊 Métricas del Modelo Buy",
+                font=("TkDefaultFont", 10, "bold"),
+                foreground=self.bgcolor,
+                background=self.cgcolor,
+            )
+
+            metrics_label.pack(anchor=tk.W, pady=(0, 5))
+
+            # TreeView para mostrar métricas (3 columnas: Valor, Ganancia Prom, Score Prom)
+            metrics_tree = ttk.Treeview(
+                left_frame,
+                columns=("value", "ganancia_prom", "score_prom"),
+                height=12,
+                show="tree headings",
+                style="TFrame",
+            )
+            metrics_tree.heading("#0", text="Métrica")
+            metrics_tree.heading("value", text="Valor")
+            metrics_tree.heading("ganancia_prom", text="Ganancia Prom")
+            metrics_tree.heading("score_prom", text="Score Prom")
+            metrics_tree.column("#0", width=180)
+            metrics_tree.column("value", width=70, anchor=tk.E)
+            metrics_tree.column("ganancia_prom", width=70, anchor=tk.E)
+            metrics_tree.column("score_prom", width=70, anchor=tk.E)
+
+            metrics_tree.tag_configure("header", foreground="yellow", font=("TkDefaultFont", 9, "bold"))
+            metrics_tree.tag_configure("good", foreground="lightgreen")
+            metrics_tree.tag_configure("warning", foreground="orange")
+            metrics_tree.tag_configure("bad", foreground="red")
+            metrics_tree.tag_configure("info", foreground="lightblue")
+
+            metrics_tree.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+            # Botones para modelo
+            btn_frame = ttk.Frame(left_frame, style="C.TFrame")
+            btn_frame.pack(fill=tk.X, pady=(5, 0))
+
+            train_btn = ttk.Button(btn_frame, text="Entrenar", command=entrenar_modelo, width=10, style="TButton")
+            train_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+            config_btn = ttk.Button(btn_frame, text="Modelo", command=modificar_parametros, width=10, style="TButton")
+            config_btn.pack(side=tk.LEFT)
+
+            # === SECCIÓN DERECHA: Oportunidades Actuales ===
+            opp_label = ttk.Label(
+                right_frame,
+                text="🎯 Oportunidades Compra (tiempo real)",
+                font=("TkDefaultFont", 10, "bold"),
+                foreground=self.bgcolor,
+                background=self.cgcolor,
+            )
+
+            opp_label.pack(anchor=tk.W, pady=(5, 5))
+
+            # TreeView para oportunidades actuales
+            opp_tree = ttk.Treeview(
+                right_frame,
+                columns=("vehiculo", "rsi", "ganancia", "conf", "estado"),
+                height=8,
+                show="tree headings",
+                style="TFrame",
+            )
+            opp_tree.heading("#0", text="Symbol")
+            opp_tree.heading("vehiculo", text="Vehículo")
+            opp_tree.heading("rsi", text="RSI")
+            opp_tree.heading("ganancia", text="Gan%")
+            opp_tree.heading("conf", text="Conf")
+            opp_tree.heading("estado", text="Estado")
+            opp_tree.column("#0", width=60)
+            opp_tree.column("vehiculo", width=50, anchor=tk.CENTER)
+            opp_tree.column("rsi", width=45, anchor=tk.E)
+            opp_tree.column("ganancia", width=50, anchor=tk.E)
+            opp_tree.column("conf", width=45, anchor=tk.E)
+            opp_tree.column("estado", width=70, anchor=tk.CENTER)
+
+            opp_tree.tag_configure("comprar", foreground="lightgreen", font=("TkDefaultFont", 9, "bold"))
+            opp_tree.tag_configure("observar", foreground="yellow")
+            opp_tree.tag_configure("ignorar", foreground="gray")
+            opp_tree.tag_configure("header", foreground=self.bgcolor, font=("TkDefaultFont", 9, "bold"))
+
+            opp_tree.pack(fill=tk.BOTH, expand=True)
+
+            # Función para ordenar TreeView por columna
+            def treeview_sort_column(tree, col, reverse):
+                """Ordena el TreeView por columna al hacer clic en el header"""
+                try:
+                    items = [(tree.set(k, col), k) for k in tree.get_children("")]
+                    items = [
+                        (val, k)
+                        for val, k in items
+                        if val
+                        and not val.startswith("C:")
+                        and not val.startswith("O:")
+                        and not val.startswith("I:")
+                        and val != "Total:"
+                    ]
+
+                    try:
+                        items.sort(key=lambda t: float(t[0].replace("%", "")), reverse=reverse)
+                    except ValueError:
+                        items.sort(key=lambda t: t[0], reverse=reverse)
+
+                    for index, (val, k) in enumerate(items):
+                        tree.move(k, "", index)
+
+                    tree.heading(col, command=lambda: treeview_sort_column(tree, col, not reverse))
+                except Exception:
+                    pass
+
+            # Configurar headers para ordenamiento
+            opp_tree.heading("#0", text="Symbol", command=lambda: treeview_sort_column(opp_tree, "#0", False))
+            opp_tree.heading(
+                "vehiculo", text="Vehículo", command=lambda: treeview_sort_column(opp_tree, "vehiculo", False)
+            )
+            opp_tree.heading("rsi", text="RSI", command=lambda: treeview_sort_column(opp_tree, "rsi", True))
+            opp_tree.heading("ganancia", text="Gan%", command=lambda: treeview_sort_column(opp_tree, "ganancia", True))
+            opp_tree.heading("conf", text="Conf", command=lambda: treeview_sort_column(opp_tree, "conf", True))
+            opp_tree.heading("estado", text="Estado", command=lambda: treeview_sort_column(opp_tree, "estado", False))
+
+            # Actualizar métricas al inicio
+            actualizar_metricas()
+
+            auto_actualizar()
+        except Exception as e:
+            print(f"buy_ia_monitor(): {e}")
             traceback.print_exc()

@@ -1589,7 +1589,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         # encuentra factor de conversión para las positions que no están USD
                         p, exDividendDate, dividendYield, dividendo = (
                             {},
-                            0.0,
+                            "9999-12-31",
                             0.0,
                             0.0,
                         )
@@ -2795,11 +2795,12 @@ class DashMain:
         except Exception as e:
             self.chatbot = None
 
-        # Inicializar monitor de modelo IA después de que chatbot esté disponible
-        # El monitor está en la clase system_status, pasamos el chatbot como parámetro
+        # Inicializar monitores de modelos IA después de que chatbot esté disponible
+        # Los monitores están en la clase system_status, pasamos el chatbot como parámetro
         try:
             if hasattr(self, 'system') and self.chatbot is not None:
-                self.system.modelo_ia_monitor(chatbot=self.chatbot)
+                self.system.sell_ia_monitor(chatbot=self.chatbot)
+                self.system.buy_ia_monitor(chatbot=self.chatbot)
         except Exception:
             pass
 

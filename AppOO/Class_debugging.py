@@ -92,17 +92,13 @@ class ManagerEvents:
 
                     # actualiza iteración de proceso
                     counter += 1
-                    self.DataHub.update_self_procesos(
-                        proces="thread", tarea=task_name, itera=counter
-                    )
+                    self.DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=counter)
 
             task_name = f"schedule_pending(all)"
             counter = 0
             self.DataHub.procesos.append({"thread": {task_name: counter}})
 
-            t = threading.Thread(
-                target=loopSchedule, name=task_name, args=(counter,), daemon=True
-            )
+            t = threading.Thread(target=loopSchedule, name=task_name, args=(counter,), daemon=True)
             t.start()
 
             print("Start:({})".format(task_name))
@@ -122,9 +118,7 @@ class ManagerEvents:
                 for name, thread in list(self.threads.items()):
                     if not thread.is_alive() and self.running_flags.get(name, False):
                         self.logger.warning(f"🔄 Thread {name} caído. Rearmando...")
-                        target, args, kwargs = self.thread_params.get(
-                            name, (None, (), {})
-                        )
+                        target, args, kwargs = self.thread_params.get(name, (None, (), {}))
                         if target:
                             self.register_thread(name, target, *args, **kwargs)
 
@@ -187,9 +181,7 @@ class MangerAfterEvents:
             name = f"job_{len(self.after_jobs)}"
 
         try:
-            job_id = self.root.after(
-                delay_ms, lambda: self._run_callback(name, callback)
-            )
+            job_id = self.root.after(delay_ms, lambda: self._run_callback(name, callback))
             self.after_jobs[name] = job_id
             return job_id
         except Exception as e:
@@ -250,9 +242,7 @@ class Debugging:
         self.handled_CacheLogger_name()
 
         # Formato de logs
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(name)s - %(threadName)s - %(message)s"
-        )
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(name)s - %(threadName)s - %(message)s")
 
         # Handler para archivo rotativo
         file_handler = RotatingFileHandler(
@@ -284,7 +274,7 @@ class Debugging:
 
         # manager logging
         self.logger.update({"yfinance": logging.getLogger("yfinance")})
-        self.logger["yfinance"].setLevel(logging.DEBUG)
+        self.logger["yfinance"].setLevel(logging.WARNING)
 
         # manager logging
         self.logger.update({"IBroks_Client": logging.getLogger("IBroks_Client")})
@@ -295,15 +285,11 @@ class Debugging:
         self.logger["requests_cache"].setLevel(logging.WARNING)
 
         # manager logging
-        self.logger.update(
-            {"matplotlib.font_manager": logging.getLogger("matplotlib.font_manager")}
-        )
+        self.logger.update({"matplotlib.font_manager": logging.getLogger("matplotlib.font_manager")})
         self.logger["matplotlib.font_manager"].setLevel(logging.WARNING)
 
         # manager logging
-        self.logger.update(
-            {"PIL.PngImagePlugin": logging.getLogger("PIL.PngImagePlugin")}
-        )
+        self.logger.update({"PIL.PngImagePlugin": logging.getLogger("PIL.PngImagePlugin")})
         self.logger["PIL.PngImagePlugin"].setLevel(logging.WARNING)
 
         # manager logging
@@ -311,9 +297,7 @@ class Debugging:
         self.logger["peewee"].setLevel(logging.WARNING)
 
         # manager logging
-        self.logger.update(
-            {"urllib3.connectionpool": logging.getLogger("urllib3.connectionpool")}
-        )
+        self.logger.update({"urllib3.connectionpool": logging.getLogger("urllib3.connectionpool")})
         self.logger["urllib3.connectionpool"].setLevel(logging.WARNING)
 
         # manager logging
@@ -322,11 +306,7 @@ class Debugging:
 
         # manager logging
         self.logger.update(
-            {
-                "binance.websocket.websocket_client": logging.getLogger(
-                    "binance.websocket.websocket_client"
-                )
-            }
+            {"binance.websocket.websocket_client": logging.getLogger("binance.websocket.websocket_client")}
         )
         self.logger["binance.websocket.websocket_client"].setLevel(logging.WARNING)
 
@@ -337,6 +317,10 @@ class Debugging:
         # manager logging
         self.logger.update({"ClassChatbot": logging.getLogger("ClassChatbot")})
         self.logger["ClassChatbot"].setLevel(logging.WARNING)
+
+        # manager logging
+        self.logger.update({"ClassMoodeloIA": logging.getLogger("ClassMoodeloIA")})
+        self.logger["ClassMoodeloIA"].setLevel(logging.WARNING)
 
         # manager logging
         self.logger.update({"ClassMyOrders": logging.getLogger("ClassMyOrders")})
@@ -468,6 +452,4 @@ class Debugging:
 
                 # actualiza iteración de proceso
                 counter += 1
-                self.DataHub.update_self_procesos(
-                    proces="thread", tarea=task_name, itera=counter
-                )
+                self.DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=counter)
