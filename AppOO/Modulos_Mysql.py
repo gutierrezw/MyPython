@@ -2200,6 +2200,80 @@ class RepositorioOportunidadesBuySell(
         }
         return json.dumps(detalle)
 
+    def detalle_OportunidadBuy(self, origen, row=None):
+        detalle = {
+            "ganancia_precio": row.get("ganancia_precio", 0),
+            "ganancia_inversion": row.get("ganancia_inversion", 0),
+            "dividend_yield": row.get("dividend_yield", 0),
+            "score": row.get("score", 0),
+            "Confianza": row.get("confianza", 0),
+            "monto_sugerido": row.get("monto_sugerido", 0),
+            "cantidad_buy": row.get("cantidad_buy", 0),
+            "last": row.get("last", 0),
+            "avgcost": row.get("avgcost", 0),
+            "cantidad_post": row.get("cantidad_post", 0),
+            "avgcost_post": row.get("avgcost_post", 0),
+            "retorno_post": row.get("retorno_post", 0),
+            "objetivo": row.get("objetivo", 0),
+            "ex_dividend_date": row.get("ex_dividend_date"),
+            "pre_dividendos": row.get("pre_dividendos", 0),
+            "post_dividendos": row.get("post_dividendos", 0),
+            "pre_costobase": row.get("pre_costobase", 0),
+            "post_costobase": row.get("post_costobase", 0),
+            "recomendado": row.get("Recomendado"),
+            "comentarios": row.get("Comentarios"),
+            "indicadores": row.get("Datostecnicos") or {},
+            "otros": {"modelo": origen, "timestamp_local": str(datetime.now())},
+        }
+        return json.dumps(detalle)
+
+    # Inserta una nueva oportunidad de compra
+    def insertar_buy(self, row, tipo="buy", subtipo=None, origen=None):
+        try:
+            hash_id = self.generar_hash_id(
+                row.get("account"),
+                row.get("Symbol"),
+                row.get("vehiculo"),
+                row.get("Fecha"),
+                tipo,
+                subtipo,
+                row.get("Recomendado"),
+            )
+            detalle = self.detalle_OportunidadBuy(origen, row)
+
+            sql = """
+                    INSERT IGNORE INTO oportunidadesbuysell
+                    (symbol, account, vehiculo, opcion, tipo, subtipo, origen, hash_id,
+                    recomendado, estado, fecha, nota, json_detalle)
+                    VALUES (%s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s, %s, %s)
+                """
+
+            datos = (
+                row["Symbol"],
+                row["account"],
+                row["vehiculo"],
+                row.get("tipo", ""),
+                tipo,
+                subtipo,
+                origen,
+                hash_id,
+                row.get("Recomendado"),
+                "pendiente",
+                row["Fecha"],
+                row.get("Comentarios"),
+                detalle,
+            )
+
+            with self._conectar(tabla="insert.oportunidadesbuysell") as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql, datos)
+                conn.commit()
+                return True
+        except (Exception, EncodingWarning, connect.Error) as error:
+            print(f"[Mysql:: RepositorioOportunidadesBuySell.insertar_buy(): {error}]")
+            return False
+
     # Inserta una nueva oportunidad en la base de datos
     def insertar_sell(
         self,
@@ -2314,6 +2388,60 @@ class RepositorioOportunidadesBuySell(
         except (Exception, EncodingWarning, connect.Error) as error:
             print(
                 f"[Mysql:: RepositorioOportunidadesBuySell.actualizar_oportunidad(): {error}]"
+            )
+
+    # update de una oportunidad de compra existente
+    def actualizar_oportunidad_buy(
+        self, hash_id=None, estado=None, origen=None, tipo=None, subtipo=None, row=None
+    ):
+        try:
+            # caso de actualización con hash_id (actualiza oportunidad específica)
+            if hash_id is not None:
+                sql = """
+                    UPDATE oportunidadesbuysell
+                    SET json_detalle = %s, timestamp = NOW()
+                    WHERE hash_id = %s AND estado = %s
+                """
+                detalle = self.detalle_OportunidadBuy(origen=origen, row=row)
+                datos = (detalle, hash_id, estado)
+
+            # caso de actualización sin hash_id (actualiza la última oportunidad pendiente)
+            if hash_id is None:
+                sql = """
+                    UPDATE oportunidadesbuysell
+                    SET json_detalle = %s, timestamp = NOW(), hash_id = %s, fecha = %s
+                    WHERE account = %s AND symbol = %s AND vehiculo = %s AND tipo = 'buy' AND estado = 'pendiente'
+                """
+                account = row.get("account", "")
+                symbol = row.get("Symbol", "")
+                vehiculo = row.get("vehiculo", "")
+                fecha = row.get("Fecha", "")
+
+                # genera nuevo hash_id
+                hash_id = self.generar_hash_id(
+                    account,
+                    symbol,
+                    vehiculo,
+                    fecha,
+                    tipo,
+                    subtipo,
+                    row.get("Recomendado"),
+                )
+
+                detalle = self.detalle_OportunidadBuy(origen=origen, row=row)
+                datos = (detalle, hash_id, fecha, account, symbol, vehiculo)
+
+            with self._conectar(tabla="accionoportunidades") as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql, datos)
+                rows_afectadas = cursor.rowcount
+                conn.commit()
+
+                return True if rows_afectadas > 0 else False
+
+        except (Exception, EncodingWarning, connect.Error) as error:
+            print(
+                f"[Mysql:: RepositorioOportunidadesBuySell.actualizar_oportunidad_buy(): {error}]"
             )
 
     # establec enlace entre oportunidad y buySell
