@@ -647,11 +647,11 @@ class IB(IBClient):
         self.task = "IBKR-Tickle(On)"
 
         # Define URL Components
-        ib_gateway_host = r"https://localhost"
-        ib_gateway_port = r"5501"
+        self.ib_gateway_host = r"https://localhost"
+        self.ib_gateway_port = r"5501"
         # self.ib_gateway_path = ib_gateway_host + ":" + ib_gateway_port
 
-        self.ib_gateway_path = f"{ib_gateway_host}:{ib_gateway_port}"
+        self.ib_gateway_path = f"{self.ib_gateway_host}:{self.ib_gateway_port}"
         self.backup_gateway_path = r"https://cdcdyn.interactivebrokers.com/portal.proxy"
         self.login_gateway_path = self.ib_gateway_path + "/sso/Login?forwardTo=22&RL=1&ip2loc=on"
 
@@ -715,7 +715,9 @@ class IB(IBClient):
 
             status = self.is_authenticated(check=True)
             if not status.get("authenticated", False):
-                raise RuntimeError("Sesión IBKR no autenticada. Requiere login web en https://localhost:5000")
+                raise RuntimeError(
+                    f"Sesión IBKR no autenticada. Requiere login web en {self.ib_gateway_host}:{self.ib_gateway_port}"
+                )
 
     # ===========================================================
     # Keep-alive (background)
@@ -734,7 +736,8 @@ class IB(IBClient):
                 counter += 1
 
                 if not auth:
-                    logging.warning("Tickle OK pero sesión no autenticada")
+                    logging.warning(f"Tickle OK pero sesión no autenticada {datetime.now()}")
+                    time.sleep(900)
 
             except Exception as e:
                 logging.error(f"Tickle falló: {e}")
@@ -745,7 +748,7 @@ class IB(IBClient):
         Inicia el loop de tickle en background.
         """
         try:
-            logging.warning("✅ Tickle inciado inicializado correctamente")
+            logging.warning("✅ Tickle inicializado correctamente")
 
             if hasattr(self, "_tickle_thread"):
                 return  # ya iniciado
@@ -1153,8 +1156,7 @@ class IB(IBClient):
 
         return content
 
-    @staticmethod
-    def orderconfirm(replyid=None):
+    def orderconfirm(self, replyid=None):
         """
         provisional :: An extension of the `place_confirm` endpoint but allows to confirm id orders.
 
@@ -1162,7 +1164,7 @@ class IB(IBClient):
         DESC: The number ID to place an order.
         TYPE: String
         """
-        base_url = "https://localhost:5501/v1/api/"
+        base_url = f"{self.ib_gateway_host}:{self.ib_gateway_port}/v1/api/"
         endpoint = r"iserver/reply/{}".format(replyid)
         reply_url = "".join([base_url, endpoint])
         json_body = {"confirmed": True}
@@ -1171,7 +1173,6 @@ class IB(IBClient):
 
         return content
 
-    @staticmethod
     def deleteorder(self, account_id=None, customer_order_id=None):
         """Provisional Deletes the order specified by the customer order ID.
 
@@ -1185,7 +1186,7 @@ class IB(IBClient):
         """
 
         # define request components
-        base_url = "https://localhost:5501/v1/api/"
+        base_url = f"{self.ib_gateway_host}:{self.ib_gateway_port}/v1/api/"
         endpoint = r"iserver/account/{}/order/{}".format(account_id, customer_order_id)
         req_type = "DELETE"
         reply_url = "".join([base_url, endpoint])

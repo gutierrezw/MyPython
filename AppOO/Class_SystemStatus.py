@@ -538,9 +538,25 @@ class system_status(tk.Frame):
             # DataHub.manager_after._safe(30000, update_datahub(), name="update_datahub")
 
         try:
+            # Frame superior para botones
+            btn_frame = ttk.Frame(self.datahub, style="C.TFrame")
+            btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(2, 0), padx=5)
+
+            btn_docs = ttk.Button(
+                btn_frame,
+                text="Modelo",
+                command=lambda: self._documentar_estructura("DataHub"),
+                width=10,
+            )
+            btn_docs.pack(side=tk.LEFT, padx=2)
+
+            # Frame contenedor para lista y detalle
+            content_frame = ttk.Frame(self.datahub)
+            content_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
             # define TreeView para mostras  Lista y detalle de items DataHub.Info()
-            lista = ttk.Treeview(self.datahub, style="TFrame")
-            detalle = ttk.Treeview(self.datahub, style="TFrame")
+            lista = ttk.Treeview(content_frame, style="TFrame")
+            detalle = ttk.Treeview(content_frame, style="TFrame")
 
             # Configurar headers
             lista.heading("#0", text="DataHub - Símbolos")
@@ -878,9 +894,12 @@ class system_status(tk.Frame):
             self.after_ids.append(after_id)
 
         try:
+            frame_top = ttk.Frame(self.cache, style="C.TFrame")
+            frame_top.pack(side=tk.TOP, fill=tk.X)
+
             # Crear TreeViews para lista y detalle
-            lista = ttk.Treeview(self.cache, columns=("tipo", "tamaño"), style="TFrame")
-            detalle = ttk.Treeview(self.cache, style="TFrame")
+            lista = ttk.Treeview(frame_top, columns=("tipo", "tamaño"), height=14, style="TFrame")
+            detalle = ttk.Treeview(frame_top, height=16, style="TFrame")
 
             # Configurar headers y columnas de lista
             lista.heading("#0", text="Cache Keys")
@@ -917,11 +936,11 @@ class system_status(tk.Frame):
             hsb.pack(side=tk.BOTTOM, fill=tk.X)
 
             # --- Botonera ---
-            frame_btn = ttk.Frame(self.cache)
-            frame_btn.pack(fill=tk.X, pady=(0, 5), padx=5)
+            frame_btn = ttk.Frame(self.cache, style="C.TFrame")
+            frame_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=(0, 5), padx=5)
 
-            ttk.Button(frame_btn, text="🔄 Refrescar", command=refresh_cache_list).pack(side=tk.LEFT, padx=5)
-            ttk.Button(frame_btn, text="🗑️ Eliminar", command=remove_selected_key).pack(side=tk.LEFT, padx=5)
+            ttk.Button(frame_btn, text="Refrescar", width=10, command=refresh_cache_list).pack(side=tk.LEFT, padx=5)
+            ttk.Button(frame_btn, text="Eliminar", width=10, command=remove_selected_key).pack(side=tk.LEFT, padx=5)
 
             # --- Bind eventos ---
             lista.bind("<Double-Button-1>", on_double_click)
@@ -941,7 +960,6 @@ class system_status(tk.Frame):
             # --- Carga inicial y auto-refresh ---
             refresh_cache_list()
             auto_refresh()
-
         except Exception as e:
             traceback.print_exc()
             print(f"monitor_cache(): {e}")
@@ -1471,6 +1489,14 @@ class system_status(tk.Frame):
                 key = lista.item(selected[0], "text")
                 display_buysell_detail(key)
 
+        def on_item_selected(event):
+            """Evento de selección simple en la lista"""
+            selected = lista.selection()
+            if selected:
+                key = lista.item(selected[0], "text")
+                if key and not key.startswith("("):  # Ignorar items vacíos
+                    display_buysell_detail(key)
+
         def update_buysell_list():
             """Actualiza la lista de manager_buysell cada 30 segundos"""
             try:
@@ -1492,14 +1518,29 @@ class system_status(tk.Frame):
                 # Programar siguiente actualización y registrar el after_id
                 after_id = self.system.after(30000, update_buysell_list)
                 self.after_ids.append(after_id)
-
             except Exception as e:
                 print(f"[update_buysell_list()]: {e}")
 
         try:
+            # Frame superior para botones
+            btn_frame = ttk.Frame(self.buysell, style="C.TFrame")
+            btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(2, 0), padx=5)
+
+            btn_docs = ttk.Button(
+                btn_frame,
+                text="Modelo",
+                command=lambda: self._documentar_estructura("BuySell"),
+                width=10,
+            )
+            btn_docs.pack(side=tk.LEFT, padx=2)
+
+            # Frame contenedor para lista y detalle
+            content_frame = ttk.Frame(self.buysell)
+            content_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
             # Crear TreeViews para lista y detalle
-            lista = ttk.Treeview(self.buysell, style="TFrame")
-            detalle = ttk.Treeview(self.buysell, style="TFrame")
+            lista = ttk.Treeview(content_frame, style="TFrame")
+            detalle = ttk.Treeview(content_frame, style="TFrame")
 
             # Configurar headers
             lista.heading("#0", text="Manager BuySell")
@@ -1525,8 +1566,9 @@ class system_status(tk.Frame):
             lista.tag_configure("item", foreground="lightgreen")
             lista.tag_configure("empty", foreground="gray")
 
-            # Bind evento doble click
+            # Bind eventos
             lista.bind("<Double-Button-1>", on_double_click)
+            lista.bind("<<TreeviewSelect>>", on_item_selected)
 
             # Scrollbars para detalle
             hsb = ttk.Scrollbar(detalle, orient=tk.HORIZONTAL, command=detalle.xview)
@@ -1536,14 +1578,18 @@ class system_status(tk.Frame):
             # Iniciar actualización de lista
             update_buysell_list()
 
-            # Mostrar mensaje inicial en detalle
-            detalle.insert(
-                "",
-                "end",
-                text="👈 Haz doble click en un item de la izquierda",
-                tags=("info",),
-            )
-            detalle.insert("", "end", text="para ver su información detallada", tags=("info",))
+            # Mostrar "activos" automáticamente al cargar
+            if DataHub.manager_buysell and "activos" in DataHub.manager_buysell:
+                display_buysell_detail("activos")
+            else:
+                # Mensaje inicial si no hay datos
+                detalle.insert(
+                    "",
+                    "end",
+                    text="⏳ Esperando datos de activos...",
+                    tags=("info",),
+                )
+                detalle.insert("", "end", text="Haz doble click en un item para ver detalle", tags=("info",))
         except Exception as e:
             print(f"manager_buysell_system(): {e}")
 
@@ -1788,8 +1834,24 @@ class system_status(tk.Frame):
                 print(f"show_gap_summary(): {e}")
 
         try:
+            # Frame superior para botones
+            btn_frame = ttk.Frame(self.rebalanceo, style="C.TFrame")
+            btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(2, 0), padx=5)
+
+            btn_docs = ttk.Button(
+                btn_frame,
+                text="Modelo",
+                command=lambda: self._documentar_estructura("Rebalanceo"),
+                width=10,
+            )
+            btn_docs.pack(side=tk.LEFT, padx=2)
+
+            # Frame contenedor para lista y detalle
+            content_frame = ttk.Frame(self.rebalanceo)
+            content_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
             lista = ttk.Treeview(
-                self.rebalanceo,
+                content_frame,
                 columns=("score", "dims", "monto", "inver"),
                 height=12,
                 show="tree headings",
@@ -1811,7 +1873,7 @@ class system_status(tk.Frame):
             lista.tag_configure("info", foreground=self.fgcolor)
             lista.tag_configure("item", foreground="lightgreen")
 
-            detalle = ttk.Treeview(self.rebalanceo, height=12, show="tree", style="TFrame")
+            detalle = ttk.Treeview(content_frame, height=12, show="tree", style="TFrame")
             detalle.column("#0", width=400)
 
             detalle.tag_configure("header", font=("Arial", 10, "bold"), foreground="lime")
@@ -1922,6 +1984,287 @@ class system_status(tk.Frame):
         self.monitor_animation = ani
 
         self.rv.draw()
+
+    def _modificar_parametros_modelo(self, tipo_modelo="sell"):
+        """
+        Función unificada para modificar parámetros de modelos IA (Sell/Buy).
+
+        Args:
+            tipo_modelo: "sell" o "buy"
+        """
+
+        def guardar():
+            """Guarda los cambios en BD"""
+            try:
+                nombre = entry_nombre.get().strip()
+                tipo = entry_tipo.get().strip()
+                define = entry_define.get().strip()
+                params_str = text_params.get("1.0", tk.END).strip()
+                docs_str = text_docs.get("1.0", tk.END).strip()
+
+                # Validar JSON de parámetros
+                try:
+                    json.loads(params_str)
+                except json.JSONDecodeError as e:
+                    msg = MyMessageBox(config_window)
+                    msg.showinfo("Error", f"JSON de parámetros inválido:\n{e}")
+                    return
+
+                params_bytes = params_str.encode("utf-8")
+                docs_bytes = docs_str.encode("utf-8") if docs_str else None
+
+                if modelo_data:
+                    success = BDsystem.update_modelo_ia(
+                        modelo=modelo_name,
+                        nombre=nombre,
+                        tipo_modelo=tipo,
+                        paramts=params_bytes,
+                        documents=docs_bytes,
+                        define_modelo=define,
+                    )
+                else:
+                    success = BDsystem.insert_modelo_ia(
+                        modelo=modelo_name,
+                        nombre=nombre,
+                        tipo_modelo=tipo,
+                        paramts=params_bytes,
+                        documents=docs_bytes,
+                        define_modelo=define,
+                    )
+
+                if success:
+                    msg = MyMessageBox(config_window)
+                    msg.showinfo("Éxito", "Configuración guardada correctamente")
+                    on_close()
+                else:
+                    msg = MyMessageBox(config_window)
+                    msg.showinfo("Error", "No se pudo guardar la configuración")
+            except Exception as e:
+                print(f"guardar(): {e}")
+                msg = MyMessageBox(config_window)
+                msg.showinfo("Error", f"Error al guardar:\n{e}")
+
+        def cancelar():
+            on_close()
+
+        def on_close():
+            window_attr = f"_modelo_{tipo_modelo}_config_window"
+            setattr(self, window_attr, None)
+            config_window.destroy()
+
+        def cargar_documento():
+            """Carga documentación desde archivo"""
+            filepath = filedialog.askopenfilename(
+                parent=config_window,
+                title="Seleccionar documento",
+                filetypes=[("Markdown", "*.md"), ("Archivos de texto", "*.txt"), ("Todos", "*.*")],
+            )
+            if filepath:
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    text_docs.delete("1.0", tk.END)
+                    text_docs.insert("1.0", content)
+                except Exception as e:
+                    msg = MyMessageBox(config_window)
+                    msg.showinfo("Error", f"Error al cargar archivo:\n{e}")
+
+        def ver_documentacion():
+            """Abre ventana para visualizar documentación"""
+            docs_content = text_docs.get("1.0", tk.END).strip()
+            if not docs_content:
+                msg = MyMessageBox(config_window)
+                msg.showinfo("Info", "No hay documentación cargada")
+                return
+
+            # Crear ventana de visualización
+            doc_window = tk.Toplevel(config_window)
+            doc_window.title(f"Documentación - {modelo_name}")
+            doc_window.geometry("700x500")
+            doc_window.configure(bg=self.bgcolor)
+
+            # Frame con scroll
+            doc_frame = tk.Frame(doc_window, bg=self.bgcolor)
+            doc_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+            # Scrollbar
+            scrollbar = tk.Scrollbar(doc_frame)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+            # Text widget para mostrar documentación
+            doc_text = tk.Text(
+                doc_frame,
+                wrap=tk.WORD,
+                bg=entry_bg,
+                fg=self.fgcolor,
+                font=("Consolas", 10),
+                yscrollcommand=scrollbar.set,
+            )
+            doc_text.pack(fill=tk.BOTH, expand=True)
+            scrollbar.config(command=doc_text.yview)
+
+            # Insertar contenido
+            doc_text.insert("1.0", docs_content)
+            doc_text.configure(state="disabled")  # Solo lectura
+
+            # Botón cerrar
+            ttk.Button(doc_window, text="Cerrar", command=doc_window.destroy, width=10).pack(pady=10)
+
+        def crear_fila(parent, label_text, default_value="", readonly=False):
+            """Helper para crear filas de formulario"""
+            frame = tk.Frame(parent, bg=self.bgcolor)
+            frame.pack(fill=tk.X, pady=4)
+            lbl = tk.Label(frame, text=label_text, width=20, anchor="w", bg=self.bgcolor, fg=label_fg)
+            lbl.pack(side=tk.LEFT)
+            entry = tk.Entry(frame, width=53, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor)
+            entry.insert(0, default_value)
+            if readonly:
+                entry.configure(state="readonly")
+            entry.pack(side=tk.LEFT, padx=5)
+            return entry
+
+        # Verificar si ya existe ventana abierta
+        window_attr = f"_modelo_{tipo_modelo}_config_window"
+        if hasattr(self, window_attr) and getattr(self, window_attr):
+            try:
+                existing_window = getattr(self, window_attr)
+                if existing_window.winfo_exists():
+                    existing_window.lift()
+                    existing_window.focus_force()
+                    return
+            except:
+                setattr(self, window_attr, None)
+
+        # Colores desde DataHub
+        entry_bg = self.cchart.get("fondo_fig", self.cgcolor)
+        label_fg = self.cchart.get("texto", self.fgcolor)
+
+        # Crear ventana Toplevel
+        config_window = tk.Toplevel(self.system)
+        titulo = "Configuración Modelo IA - Sell" if tipo_modelo == "sell" else "Configuración Modelo IA - Buy"
+        config_window.title(titulo)
+        config_window.geometry("530x450")
+        config_window.configure(bg=self.bgcolor)
+        config_window.resizable(False, False)
+        setattr(self, window_attr, config_window)
+
+        # Posicionar ventana
+        config_window.update_idletasks()
+        x = self.system.winfo_x() + self.system.winfo_width() + 10
+        y = self.system.winfo_y() + 380
+        config_window.geometry(f"+{x}+{y}")
+
+        # Obtener modelo según tipo
+        if tipo_modelo == "sell":
+            modelo = ModeloOportunidadesSell()
+            default_nombre = "Modelo Sell Oportunidades"
+            default_define = "sell_classifier"
+            default_params = {
+                "n_estimators": 100,
+                "max_depth": 10,
+                "min_samples_split": 5,
+                "n_folds": 5,
+                "test_size": 0.3,
+                "umbral_sell": 0.65,
+                "umbral_observacion": 0.35,
+            }
+        elif tipo_modelo == "buy":
+            modelo = ModeloOportunidadesBuy()
+            default_nombre = "Modelo Buy Oportunidades"
+            default_define = "buy_classifier"
+            default_params = {
+                "n_estimators": 100,
+                "max_depth": 10,
+                "min_samples_split": 5,
+                "n_folds": 5,
+                "test_size": 0.3,
+                "umbral_buy": 0.65,
+                "umbral_observacion": 0.35,
+            }
+
+        modelo_name = modelo.modelo_name
+
+        # Cargar datos existentes de BD
+        modelo_data = BDsystem.get_modelo_ia(modelo_name)
+
+        # Frame principal
+        main_frame = tk.Frame(config_window, bg=self.bgcolor, padx=15, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Campos del formulario
+        entry_modelo = crear_fila(main_frame, "Modelo:", modelo_name, readonly=True)
+        entry_nombre = crear_fila(
+            main_frame,
+            "Nombre:",
+            modelo_data.get("Nombre", default_nombre) if modelo_data else default_nombre,
+        )
+        entry_tipo = crear_fila(
+            main_frame,
+            "Tipo Modelo:",
+            modelo_data.get("tipo_modelo", "RandomForest") if modelo_data else "RandomForest",
+        )
+        entry_define = crear_fila(
+            main_frame,
+            "Define Modelo:",
+            modelo_data.get("define_modelo", default_define) if modelo_data else default_define,
+        )
+
+        # Campo: Parámetros (JSON)
+        row_params = tk.Frame(main_frame, bg=self.bgcolor)
+        row_params.pack(fill=tk.X, pady=4)
+        tk.Label(row_params, text="Parámetros (JSON):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(
+            side=tk.LEFT, anchor=tk.N
+        )
+
+        text_params = tk.Text(
+            row_params, width=40, height=7, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor
+        )
+        if modelo_data and modelo_data.get("paramts"):
+            try:
+                params = json.loads(modelo_data["paramts"].decode("utf-8"))
+                text_params.insert("1.0", json.dumps(params, indent=2))
+            except:
+                text_params.insert("1.0", json.dumps(default_params, indent=2))
+        else:
+            text_params.insert("1.0", json.dumps(default_params, indent=2))
+        text_params.pack(side=tk.LEFT, padx=5)
+
+        # Campo: Documentación (BLOB)
+        row_docs = tk.Frame(main_frame, bg=self.bgcolor)
+        row_docs.pack(fill=tk.X, pady=4)
+        tk.Label(row_docs, text="Documentación:", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(
+            side=tk.LEFT, anchor=tk.N
+        )
+
+        docs_container = tk.Frame(row_docs, bg=self.bgcolor)
+        docs_container.pack(side=tk.LEFT, padx=5)
+
+        text_docs = tk.Text(
+            docs_container, width=30, height=4, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor
+        )
+        if modelo_data and modelo_data.get("documents"):
+            try:
+                docs = modelo_data["documents"].decode("utf-8")
+                text_docs.insert("1.0", docs)
+            except:
+                pass
+        text_docs.pack(side=tk.LEFT)
+
+        # Botones Import y View para documentación
+        docs_btn_frame = tk.Frame(docs_container, bg=self.bgcolor)
+        docs_btn_frame.pack(side=tk.LEFT, padx=5)
+        ttk.Button(docs_btn_frame, text="Import", command=cargar_documento, width=8).pack(pady=2)
+        ttk.Button(docs_btn_frame, text="View", command=ver_documentacion, width=8).pack(pady=2)
+
+        # Botones Guardar/Cancelar
+        btn_frame = tk.Frame(main_frame, bg=self.bgcolor)
+        btn_frame.pack(fill=tk.X, pady=(20, 10))
+
+        # Botones centrados
+        ttk.Button(btn_frame, text="Guardar", command=guardar, width=10).pack(side=tk.LEFT, padx=(130, 10))
+        ttk.Button(btn_frame, text="Cancel", command=cancelar, width=10).pack(side=tk.LEFT)
+
+        config_window.protocol("WM_DELETE_WINDOW", on_close)
 
     def sell_ia_monitor(self, chatbot=None):
         """
@@ -2354,204 +2697,6 @@ class system_status(tk.Frame):
                 print(f"actualizar_metricas(): {e}")
                 traceback.print_exc()
 
-        def modificar_parametros():
-            """Abre ventana para modificar parámetros del modelo IA"""
-
-            def guardar():
-                """Guarda los cambios en BD"""
-                try:
-                    nombre = entry_nombre.get().strip()
-                    tipo = entry_tipo.get().strip()
-                    define = entry_define.get().strip()
-                    params_str = text_params.get("1.0", tk.END).strip()
-                    docs_str = text_docs.get("1.0", tk.END).strip()
-
-                    # Validar JSON de parámetros
-                    try:
-                        json.loads(params_str)
-                    except json.JSONDecodeError as e:
-                        msg = MyMessageBox(config_window)
-                        msg.showinfo("Error", f"JSON de parámetros inválido:\n{e}")
-                        return
-
-                    params_bytes = params_str.encode("utf-8")
-                    docs_bytes = docs_str.encode("utf-8") if docs_str else None
-
-                    if modelo_data:
-                        success = BDsystem.update_modelo_ia(
-                            modelo=modelo_name,
-                            nombre=nombre,
-                            tipo_modelo=tipo,
-                            paramts=params_bytes,
-                            documents=docs_bytes,
-                            define_modelo=define,
-                        )
-                    else:
-                        success = BDsystem.insert_modelo_ia(
-                            modelo=modelo_name,
-                            nombre=nombre,
-                            tipo_modelo=tipo,
-                            paramts=params_bytes,
-                            documents=docs_bytes,
-                            define_modelo=define,
-                        )
-
-                    if success:
-                        msg = MyMessageBox(config_window)
-                        msg.showinfo("Éxito", "Configuración guardada correctamente")
-                        on_close()
-                    else:
-                        msg = MyMessageBox(config_window)
-                        msg.showinfo("Error", "No se pudo guardar la configuración")
-                except Exception as e:
-                    print(f"guardar(): {e}")
-                    msg = MyMessageBox(config_window)
-                    msg.showinfo("Error", f"Error al guardar:\n{e}")
-
-            def cancelar():
-                on_close()
-
-            def on_close():
-                self._modelo_config_window = None
-                config_window.destroy()
-
-            def cargar_documento():
-                """Carga documentación desde archivo"""
-                filepath = filedialog.askopenfilename(
-                    parent=config_window,
-                    title="Seleccionar documento",
-                    filetypes=[("Archivos de texto", "*.txt"), ("Markdown", "*.md"), ("Todos", "*.*")],
-                )
-                if filepath:
-                    try:
-                        with open(filepath, "r", encoding="utf-8") as f:
-                            content = f.read()
-                        text_docs.delete("1.0", tk.END)
-                        text_docs.insert("1.0", content)
-                    except Exception as e:
-                        msg = MyMessageBox(config_window)
-                        msg.showinfo("Error", f"Error al cargar archivo:\n{e}")
-
-            # Función helper para crear filas
-            def crear_fila(parent, label_text, default_value="", readonly=False):
-                frame = tk.Frame(parent, bg=self.bgcolor)
-                frame.pack(fill=tk.X, pady=4)
-                lbl = tk.Label(frame, text=label_text, width=20, anchor="w", bg=self.bgcolor, fg=label_fg)
-                lbl.pack(side=tk.LEFT)
-                entry = tk.Entry(frame, width=53, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor)
-                entry.insert(0, default_value)
-                if readonly:
-                    entry.configure(state="readonly")
-                entry.pack(side=tk.LEFT, padx=5)
-                return entry
-
-            # Verificar si ya existe ventana abierta
-            if hasattr(self, "_modelo_config_window") and self._modelo_config_window:
-                try:
-                    if self._modelo_config_window.winfo_exists():
-                        self._modelo_config_window.lift()
-                        self._modelo_config_window.focus_force()
-                        return
-                except:
-                    self._modelo_config_window = None
-
-            # Colores desde DataHub
-            entry_bg = self.cchart.get("fondo_fig", self.cgcolor)
-            label_fg = self.cchart.get("texto", self.fgcolor)
-
-            # Crear ventana Toplevel
-            config_window = tk.Toplevel(self.system)
-            config_window.title("Configuración Modelo IA - Sell")
-            config_window.geometry("530x420")
-            config_window.configure(bg=self.bgcolor)
-            config_window.resizable(False, False)
-            self._modelo_config_window = config_window
-
-            # Posicionar ventana a la derecha y más abajo
-            config_window.update_idletasks()
-            x = self.system.winfo_x() + self.system.winfo_width() + 10
-            y = self.system.winfo_y() + 380
-            config_window.geometry(f"+{x}+{y}")
-
-            # Obtener modelo actual desde la instancia
-            modelo = ModeloOportunidadesSell()
-            modelo_name = modelo.modelo_name
-
-            # Cargar datos existentes de BD
-            modelo_data = BDsystem.get_modelo_ia(modelo_name)
-
-            # Frame principal
-            main_frame = tk.Frame(config_window, bg=self.bgcolor, padx=15, pady=10)
-            main_frame.pack(fill=tk.BOTH, expand=True)
-
-            # Campos del formulario
-            entry_modelo = crear_fila(main_frame, "Modelo:", modelo_name, readonly=True)
-            entry_nombre = crear_fila(main_frame, "Nombre:", modelo_data.get("Nombre", "Modelo Sell Oportunidades"))
-            entry_tipo = crear_fila(main_frame, "Tipo Modelo:", modelo_data.get("tipo_modelo", "RandomForest"))
-            entry_define = crear_fila(main_frame, "Define Modelo:", modelo_data.get("define_modelo", "sell_classifier"))
-
-            # Campo: Parámetros (JSON)
-            row_params = tk.Frame(main_frame, bg=self.bgcolor)
-            row_params.pack(fill=tk.X, pady=4)
-            tk.Label(row_params, text="Parámetros (JSON):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(
-                side=tk.LEFT, anchor=tk.N
-            )
-
-            text_params = tk.Text(
-                row_params, width=40, height=7, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor
-            )
-            default_params = {
-                "n_estimators": 100,
-                "max_depth": 10,
-                "min_samples_split": 5,
-                "n_folds": 5,
-                "test_size": 0.3,
-                "umbral_sell": 0.65,
-                "umbral_observacion": 0.35,
-            }
-            if modelo_data and modelo_data.get("paramts"):
-                try:
-                    params = json.loads(modelo_data["paramts"].decode("utf-8"))
-                    text_params.insert("1.0", json.dumps(params, indent=2))
-                except:
-                    text_params.insert("1.0", json.dumps(default_params, indent=2))
-            else:
-                text_params.insert("1.0", json.dumps(default_params, indent=2))
-            text_params.pack(side=tk.LEFT, padx=5)
-
-            # Campo: Documentación (BLOB)
-            row_docs = tk.Frame(main_frame, bg=self.bgcolor)
-            row_docs.pack(fill=tk.X, pady=4)
-            tk.Label(row_docs, text="Documentación (BLOB):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(
-                side=tk.LEFT, anchor=tk.N
-            )
-
-            docs_container = tk.Frame(row_docs, bg=self.bgcolor)
-            docs_container.pack(side=tk.LEFT, padx=5)
-
-            text_docs = tk.Text(
-                docs_container, width=30, height=4, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor
-            )
-            if modelo_data and modelo_data.get("documents"):
-                try:
-                    docs = modelo_data["documents"].decode("utf-8")
-                    text_docs.insert("1.0", docs)
-                except:
-                    pass
-            text_docs.pack(side=tk.LEFT)
-
-            ttk.Button(docs_container, text="Import", command=cargar_documento, width=10).pack(side=tk.LEFT, padx=5)
-
-            # Botones Guardar/Cancelar
-            btn_frame = tk.Frame(main_frame, bg=self.bgcolor)
-            btn_frame.pack(fill=tk.X, pady=(20, 10))
-
-            # Botones centrados
-            ttk.Button(btn_frame, text="Guardar", command=guardar, width=10).pack(side=tk.LEFT, padx=(130, 10))
-            ttk.Button(btn_frame, text="Cancel", command=cancelar, width=10).pack(side=tk.LEFT)
-
-            config_window.protocol("WM_DELETE_WINDOW", on_close)
-
         try:
             # Frame principal dividido en dos secciones
             left_frame = ttk.Frame(self.modeloia, padding=(5, 5), style="C.TFrame")
@@ -2603,7 +2748,13 @@ class system_status(tk.Frame):
             train_btn = ttk.Button(btn_frame, text="Entrenar", command=entrenar_modelo, width=10, style="TButton")
             train_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-            config_btn = ttk.Button(btn_frame, text="Modelo", command=modificar_parametros, width=10, style="TButton")
+            config_btn = ttk.Button(
+                btn_frame,
+                text="Modelo",
+                command=lambda: self._modificar_parametros_modelo("sell"),
+                width=10,
+                style="TButton",
+            )
             config_btn.pack(side=tk.LEFT)
 
             # === SECCIÓN DERECHA: Oportunidades Actuales ===
@@ -3107,216 +3258,6 @@ class system_status(tk.Frame):
                 print(f"actualizar_metricas(): {e}")
                 traceback.print_exc()
 
-        def modificar_parametros():
-            """Abre ventana para modificar parámetros del modelo IA Buy"""
-
-            def guardar():
-                """Guarda los cambios en BD"""
-                try:
-                    nombre = entry_nombre.get().strip()
-                    tipo = entry_tipo.get().strip()
-                    define = entry_define.get().strip()
-                    params_str = text_params.get("1.0", tk.END).strip()
-                    docs_str = text_docs.get("1.0", tk.END).strip()
-
-                    # Validar JSON de parámetros
-                    try:
-                        json.loads(params_str)
-                    except json.JSONDecodeError as e:
-                        msg = MyMessageBox(config_window)
-                        msg.showinfo("Error", f"JSON de parámetros inválido:\n{e}")
-                        return
-
-                    params_bytes = params_str.encode("utf-8")
-                    docs_bytes = docs_str.encode("utf-8") if docs_str else None
-
-                    if modelo_data:
-                        success = BDsystem.update_modelo_ia(
-                            modelo=modelo_name,
-                            nombre=nombre,
-                            tipo_modelo=tipo,
-                            paramts=params_bytes,
-                            documents=docs_bytes,
-                            define_modelo=define,
-                        )
-                    else:
-                        success = BDsystem.insert_modelo_ia(
-                            modelo=modelo_name,
-                            nombre=nombre,
-                            tipo_modelo=tipo,
-                            paramts=params_bytes,
-                            documents=docs_bytes,
-                            define_modelo=define,
-                        )
-
-                    if success:
-                        msg = MyMessageBox(config_window)
-                        msg.showinfo("Éxito", "Configuración guardada correctamente")
-                        on_close()
-                    else:
-                        msg = MyMessageBox(config_window)
-                        msg.showinfo("Error", "No se pudo guardar la configuración")
-                except Exception as e:
-                    print(f"guardar(): {e}")
-                    msg = MyMessageBox(config_window)
-                    msg.showinfo("Error", f"Error al guardar:\n{e}")
-
-            def cancelar():
-                on_close()
-
-            def on_close():
-                self._modelo_buy_config_window = None
-                config_window.destroy()
-
-            def cargar_documento():
-                """Carga documentación desde archivo"""
-                filepath = filedialog.askopenfilename(
-                    parent=config_window,
-                    title="Seleccionar documento",
-                    filetypes=[("Archivos de texto", "*.txt"), ("Markdown", "*.md"), ("Todos", "*.*")],
-                )
-                if filepath:
-                    try:
-                        with open(filepath, "r", encoding="utf-8") as f:
-                            content = f.read()
-                        text_docs.delete("1.0", tk.END)
-                        text_docs.insert("1.0", content)
-                    except Exception as e:
-                        msg = MyMessageBox(config_window)
-                        msg.showinfo("Error", f"Error al cargar archivo:\n{e}")
-
-            # Función helper para crear filas
-            def crear_fila(parent, label_text, default_value="", readonly=False):
-                frame = tk.Frame(parent, bg=self.bgcolor)
-                frame.pack(fill=tk.X, pady=4)
-                lbl = tk.Label(frame, text=label_text, width=20, anchor="w", bg=self.bgcolor, fg=label_fg)
-                lbl.pack(side=tk.LEFT)
-                entry = tk.Entry(frame, width=53, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor)
-                entry.insert(0, default_value)
-                if readonly:
-                    entry.configure(state="readonly")
-                entry.pack(side=tk.LEFT, padx=5)
-                return entry
-
-            # Verificar si ya existe ventana abierta
-            if hasattr(self, "_modelo_buy_config_window") and self._modelo_buy_config_window:
-                try:
-                    if self._modelo_buy_config_window.winfo_exists():
-                        self._modelo_buy_config_window.lift()
-                        self._modelo_buy_config_window.focus_force()
-                        return
-                except:
-                    self._modelo_buy_config_window = None
-
-            # Colores desde DataHub
-            entry_bg = self.cchart.get("fondo_fig", self.cgcolor)
-            label_fg = self.cchart.get("texto", self.fgcolor)
-
-            # Crear ventana Toplevel
-            config_window = tk.Toplevel(self.system)
-            config_window.title("Configuración Modelo IA - Buy")
-            config_window.geometry("530x420")
-            config_window.configure(bg=self.bgcolor)
-            config_window.resizable(False, False)
-            self._modelo_buy_config_window = config_window
-
-            # Posicionar ventana a la derecha y más abajo
-            config_window.update_idletasks()
-            x = self.system.winfo_x() + self.system.winfo_width() + 10
-            y = self.system.winfo_y() + 380
-            config_window.geometry(f"+{x}+{y}")
-
-            # Obtener modelo actual desde la instancia
-            modelo = ModeloOportunidadesBuy()
-            modelo_name = modelo.modelo_name
-
-            # Cargar datos existentes de BD
-            modelo_data = BDsystem.get_modelo_ia(modelo_name)
-
-            # Frame principal
-            main_frame = tk.Frame(config_window, bg=self.bgcolor, padx=15, pady=10)
-            main_frame.pack(fill=tk.BOTH, expand=True)
-
-            # Campos del formulario
-            entry_modelo = crear_fila(main_frame, "Modelo:", modelo_name, readonly=True)
-            entry_nombre = crear_fila(
-                main_frame,
-                "Nombre:",
-                modelo_data.get("Nombre", "Modelo Buy Oportunidades") if modelo_data else "Modelo Buy Oportunidades",
-            )
-            entry_tipo = crear_fila(
-                main_frame,
-                "Tipo Modelo:",
-                modelo_data.get("tipo_modelo", "RandomForest") if modelo_data else "RandomForest",
-            )
-            entry_define = crear_fila(
-                main_frame,
-                "Define Modelo:",
-                modelo_data.get("define_modelo", "buy_classifier") if modelo_data else "buy_classifier",
-            )
-
-            # Campo: Parámetros (JSON)
-            row_params = tk.Frame(main_frame, bg=self.bgcolor)
-            row_params.pack(fill=tk.X, pady=4)
-            tk.Label(row_params, text="Parámetros (JSON):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(
-                side=tk.LEFT, anchor=tk.N
-            )
-
-            text_params = tk.Text(
-                row_params, width=40, height=7, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor
-            )
-            default_params = {
-                "n_estimators": 100,
-                "max_depth": 10,
-                "min_samples_split": 5,
-                "n_folds": 5,
-                "test_size": 0.3,
-                "umbral_buy": 0.65,
-                "umbral_observacion": 0.35,
-            }
-            if modelo_data and modelo_data.get("paramts"):
-                try:
-                    params = json.loads(modelo_data["paramts"].decode("utf-8"))
-                    text_params.insert("1.0", json.dumps(params, indent=2))
-                except:
-                    text_params.insert("1.0", json.dumps(default_params, indent=2))
-            else:
-                text_params.insert("1.0", json.dumps(default_params, indent=2))
-            text_params.pack(side=tk.LEFT, padx=5)
-
-            # Campo: Documentación (BLOB)
-            row_docs = tk.Frame(main_frame, bg=self.bgcolor)
-            row_docs.pack(fill=tk.X, pady=4)
-            tk.Label(row_docs, text="Documentación (BLOB):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(
-                side=tk.LEFT, anchor=tk.N
-            )
-
-            docs_container = tk.Frame(row_docs, bg=self.bgcolor)
-            docs_container.pack(side=tk.LEFT, padx=5)
-
-            text_docs = tk.Text(
-                docs_container, width=30, height=4, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor
-            )
-            if modelo_data and modelo_data.get("documents"):
-                try:
-                    docs = modelo_data["documents"].decode("utf-8")
-                    text_docs.insert("1.0", docs)
-                except:
-                    pass
-            text_docs.pack(side=tk.LEFT)
-
-            ttk.Button(docs_container, text="Import", command=cargar_documento, width=10).pack(side=tk.LEFT, padx=5)
-
-            # Botones Guardar/Cancelar
-            btn_frame = tk.Frame(main_frame, bg=self.bgcolor)
-            btn_frame.pack(fill=tk.X, pady=(20, 10))
-
-            # Botones centrados
-            ttk.Button(btn_frame, text="Guardar", command=guardar, width=10).pack(side=tk.LEFT, padx=(130, 10))
-            ttk.Button(btn_frame, text="Cancel", command=cancelar, width=10).pack(side=tk.LEFT)
-
-            config_window.protocol("WM_DELETE_WINDOW", on_close)
-
         try:
             # Frame principal dividido en dos secciones
             left_frame = ttk.Frame(self.modeloiabuy, padding=(5, 5), style="C.TFrame")
@@ -3368,7 +3309,13 @@ class system_status(tk.Frame):
             train_btn = ttk.Button(btn_frame, text="Entrenar", command=entrenar_modelo, width=10, style="TButton")
             train_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-            config_btn = ttk.Button(btn_frame, text="Modelo", command=modificar_parametros, width=10, style="TButton")
+            config_btn = ttk.Button(
+                btn_frame,
+                text="Modelo",
+                command=lambda: self._modificar_parametros_modelo("buy"),
+                width=10,
+                style="TButton",
+            )
             config_btn.pack(side=tk.LEFT)
 
             # === SECCIÓN DERECHA: Oportunidades Actuales ===
@@ -3454,3 +3401,230 @@ class system_status(tk.Frame):
         except Exception as e:
             print(f"buy_ia_monitor(): {e}")
             traceback.print_exc()
+
+    # ============================================================================
+    # Documentación de Estructuras (DataHub, BuySell, Rebalanceo)
+    # ============================================================================
+    def _documentar_estructura(self, nombre_estructura="DataHub"):
+        """
+        Función para documentar estructuras del sistema (DataHub, BuySell, Rebalanceo).
+        Permite cargar, editar y guardar documentación técnica.
+
+        Args:
+            nombre_estructura: "DataHub", "BuySell" o "Rebalanceo"
+        """
+
+        def guardar():
+            """Guarda la documentación en BD"""
+            try:
+                docs_str = text_docs.get("1.0", tk.END).strip()
+                descripcion = entry_descripcion.get().strip()
+
+                docs_bytes = docs_str.encode("utf-8") if docs_str else None
+
+                # Usar tabla modelos_ia con prefijo "estructura_"
+                modelo_name = f"estructura_{nombre_estructura.lower()}"
+
+                if modelo_data:
+                    success = BDsystem.update_modelo_ia(
+                        modelo=modelo_name,
+                        nombre=f"Estructura {nombre_estructura}",
+                        tipo_modelo="documentacion",
+                        paramts=b"{}",
+                        documents=docs_bytes,
+                        define_modelo=descripcion,
+                    )
+                else:
+                    success = BDsystem.insert_modelo_ia(
+                        modelo=modelo_name,
+                        nombre=f"Estructura {nombre_estructura}",
+                        tipo_modelo="documentacion",
+                        paramts=b"{}",
+                        documents=docs_bytes,
+                        define_modelo=descripcion,
+                    )
+
+                if success:
+                    msg = MyMessageBox(doc_window)
+                    msg.showinfo("Éxito", "Documentación guardada correctamente")
+                else:
+                    msg = MyMessageBox(doc_window)
+                    msg.showinfo("Error", "No se pudo guardar la documentación")
+            except Exception as e:
+                print(f"guardar(): {e}")
+                msg = MyMessageBox(doc_window)
+                msg.showinfo("Error", f"Error al guardar:\n{e}")
+
+        def cancelar():
+            on_close()
+
+        def on_close():
+            window_attr = f"_doc_{nombre_estructura.lower()}_window"
+            setattr(self, window_attr, None)
+            doc_window.destroy()
+
+        def cargar_archivo():
+            """Carga documentación desde archivo"""
+            filepath = filedialog.askopenfilename(
+                parent=doc_window,
+                title="Seleccionar documento",
+                filetypes=[("Markdown", "*.md"), ("Archivos de texto", "*.txt"), ("Todos", "*.*")],
+            )
+            if filepath:
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    text_docs.delete("1.0", tk.END)
+                    text_docs.insert("1.0", content)
+                except Exception as e:
+                    msg = MyMessageBox(doc_window)
+                    msg.showinfo("Error", f"Error al cargar archivo:\n{e}")
+
+        def ver_documentacion():
+            """Abre ventana para visualizar documentación"""
+            docs_content = text_docs.get("1.0", tk.END).strip()
+            if not docs_content:
+                msg = MyMessageBox(doc_window)
+                msg.showinfo("Info", "No hay documentación cargada")
+                return
+
+            # Crear ventana de visualización
+            view_window = tk.Toplevel(doc_window)
+            view_window.title(f"Documentación - {nombre_estructura}")
+            view_window.geometry("800x600")
+            view_window.configure(bg=self.bgcolor)
+
+            # Frame con scroll
+            view_frame = tk.Frame(view_window, bg=self.bgcolor)
+            view_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+            scrollbar = tk.Scrollbar(view_frame)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+            doc_text = tk.Text(
+                view_frame,
+                wrap=tk.WORD,
+                bg="#1e1e1e",
+                fg=self.fgcolor,
+                font=("Consolas", 10),
+                yscrollcommand=scrollbar.set,
+            )
+            doc_text.pack(fill=tk.BOTH, expand=True)
+            scrollbar.config(command=doc_text.yview)
+
+            doc_text.insert("1.0", docs_content)
+            doc_text.config(state=tk.DISABLED)
+
+            # Botón cerrar
+            btn_close = ttk.Button(view_window, text="Cerrar", command=view_window.destroy)
+            btn_close.pack(pady=10)
+
+        # Verificar ventana existente
+        window_attr = f"_doc_{nombre_estructura.lower()}_window"
+        if hasattr(self, window_attr) and getattr(self, window_attr) is not None:
+            try:
+                getattr(self, window_attr).lift()
+                return
+            except tk.TclError:
+                setattr(self, window_attr, None)
+
+        # Crear ventana
+        doc_window = tk.Toplevel(self.system)
+        doc_window.title(f"Documentación - {nombre_estructura}")
+        doc_window.geometry("700x550")
+        doc_window.configure(bg=self.bgcolor)
+        doc_window.protocol("WM_DELETE_WINDOW", on_close)
+        setattr(self, window_attr, doc_window)
+
+        # Cargar datos existentes
+        modelo_name = f"estructura_{nombre_estructura.lower()}"
+        modelo_data = BDsystem.get_modelo_ia(modelo_name)
+
+        entry_bg = "#2d2d2d"
+
+        # Frame principal
+        main_frame = tk.Frame(doc_window, bg=self.bgcolor, padx=15, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Header
+        header_label = tk.Label(
+            main_frame,
+            text=f"📚 Documentación: {nombre_estructura}",
+            font=("TkDefaultFont", 12, "bold"),
+            bg=self.bgcolor,
+            fg=self.fgcolor,
+        )
+        header_label.pack(anchor=tk.W, pady=(0, 10))
+
+        # Descripción breve
+        desc_frame = tk.Frame(main_frame, bg=self.bgcolor)
+        desc_frame.pack(fill=tk.X, pady=5)
+
+        tk.Label(desc_frame, text="Descripción:", bg=self.bgcolor, fg=self.fgcolor, width=12, anchor=tk.W).pack(
+            side=tk.LEFT
+        )
+        entry_descripcion = tk.Entry(desc_frame, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor)
+        entry_descripcion.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        if modelo_data and modelo_data.get("define_modelo"):
+            entry_descripcion.insert(0, modelo_data["define_modelo"])
+        else:
+            default_desc = {
+                "DataHub": "Hub central de datos en tiempo real para activos financieros",
+                "BuySell": "Gestor de señales de compra/venta y dividendos",
+                "Rebalanceo": "Motor de rebalanceo y optimización de cartera",
+            }
+            entry_descripcion.insert(0, default_desc.get(nombre_estructura, f"Estructura {nombre_estructura}"))
+
+        # Frame para documentación
+        docs_frame = tk.Frame(main_frame, bg=self.bgcolor)
+        docs_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+        # Label y botones
+        docs_header = tk.Frame(docs_frame, bg=self.bgcolor)
+        docs_header.pack(fill=tk.X)
+
+        tk.Label(docs_header, text="Documentación Técnica:", bg=self.bgcolor, fg=self.fgcolor).pack(
+            side=tk.LEFT, anchor=tk.W
+        )
+
+        btn_view = ttk.Button(docs_header, text="View", command=ver_documentacion, width=8)
+        btn_view.pack(side=tk.RIGHT, padx=2)
+
+        btn_import = ttk.Button(docs_header, text="Import", command=cargar_archivo, width=8)
+        btn_import.pack(side=tk.RIGHT, padx=2)
+
+        # Text widget con scroll
+        text_frame = tk.Frame(docs_frame, bg=self.bgcolor)
+        text_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        scrollbar = tk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        text_docs = tk.Text(
+            text_frame,
+            height=18,
+            bg=entry_bg,
+            fg=self.fgcolor,
+            insertbackground=self.fgcolor,
+            font=("Consolas", 9),
+            wrap=tk.WORD,
+            yscrollcommand=scrollbar.set,
+        )
+        text_docs.pack(fill=tk.BOTH, expand=True)
+        scrollbar.config(command=text_docs.yview)
+
+        # Cargar documentación existente
+        if modelo_data and modelo_data.get("documents"):
+            try:
+                docs_content = modelo_data["documents"].decode("utf-8")
+                text_docs.insert("1.0", docs_content)
+            except Exception:
+                pass
+
+        # Botones de acción
+        btn_frame = tk.Frame(main_frame, bg=self.bgcolor)
+        btn_frame.pack(fill=tk.X, pady=(10, 0))
+
+        ttk.Button(btn_frame, text="Guardar", command=guardar, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Cancelar", command=cancelar, width=10).pack(side=tk.LEFT, padx=5)
