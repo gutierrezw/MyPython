@@ -2177,7 +2177,7 @@ class system_status(tk.Frame):
 
                 # === Oportunidades Actuales (desde CSV en tiempo real) ===
                 try:
-                    df_sell = Chatbot.readCSV_sell(file="csv_datosIA_sell")
+                    df_sell = Chatbot.readCSV_sell(file="csv_datosIA_sell", filtrar=False)
 
                     if df_sell is not None and not df_sell.empty:
                         # Cargar modelo para predecir
@@ -2287,8 +2287,58 @@ class system_status(tk.Frame):
                                     "", "end", text="Error aplanando", values=("", "", "", "", ""), tags=("ignorar",)
                                 )
                         else:
+                            # Sin modelo entrenado: mostrar oportunidades para etiquetar
+                            oportunidades = []
+                            for _, row_orig in df_sell.iterrows():
+                                symbol = row_orig.get("Symbol", "???")
+                                roi = row_orig.get("%Roi", 0) * 100
+                                opcion = row_orig.get("Opcion", "")
+
+                                # Extraer RSI del JSON si existe
+                                rsi = 0
+                                try:
+                                    datos_tec = row_orig.get("Datostecnicos", "{}")
+                                    if isinstance(datos_tec, str):
+                                        datos_tec = json.loads(datos_tec)
+                                    rsi = datos_tec.get("diaria", {}).get("rsi", 0)
+                                except:
+                                    pass
+
+                                oportunidades.append(
+                                    {
+                                        "symbol": symbol,
+                                        "opcion": opcion,
+                                        "rsi": rsi,
+                                        "roi": roi,
+                                    }
+                                )
+
+                            # Ordenar por ROI decreciente
+                            oportunidades.sort(key=lambda x: x["roi"], reverse=True)
+
+                            # Insertar con estado "Sin IA"
+                            for opp in oportunidades:
+                                opp_tree.insert(
+                                    "",
+                                    "end",
+                                    text=opp["symbol"],
+                                    values=(
+                                        opp["opcion"],
+                                        f"{opp['rsi']:.1f}",
+                                        f"{opp['roi']:.1f}",
+                                        "N/A",
+                                        "Sin IA",
+                                    ),
+                                    tags=("warning",),
+                                )
+
+                            # Resumen
                             opp_tree.insert(
-                                "", "end", text="Modelo no cargado", values=("", "", "", "", ""), tags=("ignorar",)
+                                "",
+                                "end",
+                                text=f"Total: {len(oportunidades)}",
+                                values=("", "", "", "", "Entrenar modelo"),
+                                tags=("header",),
                             )
                     else:
                         opp_tree.insert(
@@ -2876,7 +2926,7 @@ class system_status(tk.Frame):
 
                 # === Oportunidades Actuales (desde CSV en tiempo real) ===
                 try:
-                    df_buy = Chatbot.readCSV_buy(file="csv_datosIA_buy")
+                    df_buy = Chatbot.readCSV_buy(file="csv_datosIA_buy", filtrar=False)
 
                     if df_buy is not None and not df_buy.empty:
                         # Cargar modelo para predecir
@@ -2988,8 +3038,60 @@ class system_status(tk.Frame):
                                     "", "end", text="Error aplanando", values=("", "", "", "", ""), tags=("ignorar",)
                                 )
                         else:
+                            # Sin modelo entrenado: mostrar oportunidades para etiquetar
+                            oportunidades = []
+                            for _, row_orig in df_buy.iterrows():
+                                symbol = row_orig.get("Symbol", "???")
+                                ganancia = row_orig.get("ganancia_precio", 0) * 100
+                                vehiculo = row_orig.get("vehiculo", "")
+                                score = row_orig.get("score", 0)
+
+                                # Extraer RSI del JSON si existe
+                                rsi = 0
+                                try:
+                                    datos_tec = row_orig.get("Datostecnicos", "{}")
+                                    if isinstance(datos_tec, str):
+                                        datos_tec = json.loads(datos_tec)
+                                    rsi = datos_tec.get("diaria", {}).get("rsi", 0)
+                                except:
+                                    pass
+
+                                oportunidades.append(
+                                    {
+                                        "symbol": symbol,
+                                        "vehiculo": vehiculo,
+                                        "rsi": rsi,
+                                        "ganancia": ganancia,
+                                        "score": score,
+                                    }
+                                )
+
+                            # Ordenar por score decreciente
+                            oportunidades.sort(key=lambda x: x["score"], reverse=True)
+
+                            # Insertar con estado "Sin IA"
+                            for opp in oportunidades:
+                                opp_tree.insert(
+                                    "",
+                                    "end",
+                                    text=opp["symbol"],
+                                    values=(
+                                        opp["vehiculo"],
+                                        f"{opp['rsi']:.1f}",
+                                        f"{opp['ganancia']:.1f}",
+                                        "N/A",
+                                        "Sin IA",
+                                    ),
+                                    tags=("warning",),
+                                )
+
+                            # Resumen
                             opp_tree.insert(
-                                "", "end", text="Modelo no cargado", values=("", "", "", "", ""), tags=("ignorar",)
+                                "",
+                                "end",
+                                text=f"Total: {len(oportunidades)}",
+                                values=("", "", "", "", "Entrenar modelo"),
+                                tags=("header",),
                             )
                     else:
                         opp_tree.insert(

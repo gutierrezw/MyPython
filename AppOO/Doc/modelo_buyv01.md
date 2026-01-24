@@ -117,3 +117,73 @@ Identificar oportunidades de compra de activos basándose en indicadores de depr
 3. Priorizar activos con alto dividend_yield para estrategias de ingreso
 4. Usar en conjunto con análisis fundamental para mejores resultados
 5. Considerar el score de rebalanceo para mantener diversificación
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    CICLO DE ENTRENAMIENTO                       │
+└─────────────────────────────────────────────────────────────────┘
+
+    CSV (csv_datosIA_buy.CSV / csv_datosIA_sell.CSV)
+                          │
+                          ▼
+              readCSV_buy() / readCSV_sell()
+                          │
+                          ▼
+         evaluar_oportunidades_*_con_IA()
+                          │
+                          ▼
+                ┌─────────────────┐
+                │  load_modelo()  │
+                │                 │
+                │ ¿modelo.pkl     │
+                │   existe?       │
+                └────────┬────────┘
+                         │
+           ┌─────────────┴─────────────┐
+           │                           │
+           ▼ NO                        ▼ SÍ
+   ┌───────────────┐          ┌───────────────┐
+   │ modelo = None │          │ modelo cargado│
+   └───────┬───────┘          └───────┬───────┘
+           │                          │
+           ▼                          ▼
+   Envía TODAS las            Predice confianza
+   oportunidades              y filtra por umbral
+   origen="system"            origen="ia"
+           │                          │
+           └──────────┬───────────────┘
+                      │
+                      ▼
+           oportunity_handler_*()
+                      │
+                      ▼
+        ┌─────────────────────────┐
+        │  • Inserta en BD        │
+        │  • Envía a Telegram     │
+        └─────────────────────────┘
+                      │
+                      ▼
+        Usuario etiqueta en Telegram
+        (1 = comprar/vender, -1 = esperar/hold)
+                      │
+                      ▼
+        Datos etiquetados en tabla oportunidades
+                      │
+                      ▼
+        Botón "Entrenar" en Monitor IA
+                      │
+                      ▼
+        run_entrenamientoBuy() / run_entraminetoSell()
+                      │
+                      ▼
+        Genera modelo_buyv01.pkl / modelo_sellv01.pkl
+                      │
+                      └──────► Próximo ciclo usa el modelo ◄──┘
+Archivos Clave Modificados
+Archivo	Cambio
+Class_DashBot.py	readCSV_buy/sell(filtrar=False), envío sin modelo
+Class_SystemStatus.py	Monitor muestra oportunidades sin modelo
+Class_IA_modelos.py	ModeloOportunidadesBuy completo
+Estado Actual
+Sin modelo: Oportunidades van a BD y Telegram con origen="system"
+Con modelo: Oportunidades filtradas por IA van con origen="ia"
+Monitor: Muestra todas las oportunidades aunque no haya modelo (con "Sin IA")
