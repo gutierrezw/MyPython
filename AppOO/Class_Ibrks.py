@@ -58,9 +58,7 @@ class IBClient:  # -------------------------------------------------------------
 
         self.api_version = "v1/"
         self._operating_system = sys.platform
-        self.session_state_path: pathlib.Path = (
-            Path(__file__).parent.joinpath("server_session.json").resolve()
-        )
+        self.session_state_path: pathlib.Path = Path(__file__).parent.joinpath("server_session.json").resolve()
         self.authenticated = False
         self._is_server_running = is_server_running
 
@@ -69,25 +67,16 @@ class IBClient:  # -------------------------------------------------------------
         ib_gateway_port = r"5000"
         self.ib_gateway_path = ib_gateway_host + ":" + ib_gateway_port
         self.backup_gateway_path = r"https://cdcdyn.interactivebrokers.com/portal.proxy"
-        self.login_gateway_path = (
-            self.ib_gateway_path + "/sso/Login?forwardTo=22&RL=1&ip2loc=on"
-        )
+        self.login_gateway_path = self.ib_gateway_path + "/sso/Login?forwardTo=22&RL=1&ip2loc=on"
 
         if client_gateway_path is None:
 
             # Grab the Client Portal Path.
-            self.client_portal_folder: Path = (
-                Path(__file__)
-                .parents[1]
-                .joinpath("resources/clientportal.gw")
-                .resolve()
-            )
+            self.client_portal_folder: Path = Path(__file__).parents[1].joinpath("resources/clientportal.gw").resolve()
 
             # See if it exists.
             if not self.client_portal_folder.exists() and not self._is_server_running:
-                print(
-                    "The Client Portal Gateway doesn't exist. You need to download it before using the Library."
-                )
+                print("The Client Portal Gateway doesn't exist. You need to download it before using the Library.")
                 print("Downloading the Client Portal file...")
                 self.client_portal_client.download_and_extract()
 
@@ -178,11 +167,7 @@ class IBClient:  # -------------------------------------------------------------
         # Finally make sure we are authenticated.   >daga2004
         print("create_session:", auth_response)
         if auth_response:
-            if (
-                "authenticated" in auth_response.keys()
-                and auth_response["authenticated"]
-                and self._set_server()
-            ):
+            if "authenticated" in auth_response.keys() and auth_response["authenticated"] and self._set_server():
                 self.authenticated = True
                 return True
         else:
@@ -230,9 +215,7 @@ class IBClient:  # -------------------------------------------------------------
         else:
 
             # Update the Server.
-            server_update_content = self.update_server_account(
-                account_id=self.account, check=False
-            )
+            server_update_content = self.update_server_account(account_id=self.account, check=False)
 
             # Grab the accounts.
             server_account_content = self.server_accounts()
@@ -247,9 +230,7 @@ class IBClient:  # -------------------------------------------------------------
             Server Response: {serv_resp}
             Server Update Response: {auth_resp}
             """
-                ).format(
-                    auth_resp=server_update_content, serv_resp=server_account_content
-                )
+                ).format(auth_resp=server_update_content, serv_resp=server_account_content)
             )
 
             # TO DO: Add check market hours here and then check for a mutual fund.
@@ -301,9 +282,7 @@ class IBClient:  # -------------------------------------------------------------
 
             # Save the State.
             with open(self.session_state_path, "w") as server_file:
-                json.dump(
-                    obj={"server_process_id": self.server_process}, fp=server_file
-                )
+                json.dump(obj={"server_process_id": self.server_process}, fp=server_file)
 
         # If we are loading check the file exists first.
         elif action == "load" and file_exists:
@@ -389,9 +368,7 @@ class IBClient:  # -------------------------------------------------------------
         while max_retries > 4 or self.authenticated == False:
 
             # Grab the User Request.
-            user_input = input(
-                "Would you like to make an authenticated request (Yes/No)? "
-            ).upper()
+            user_input = input("Would you like to make an authenticated request (Yes/No)? ").upper()
 
             # If no, close the session.
             if user_input == "NO":
@@ -401,28 +378,17 @@ class IBClient:  # -------------------------------------------------------------
                 auth_response = self.is_authenticated(check=True)
 
             # Log the Auth Response.
-            logging.debug(
-                "Check User Auth Inital: {auth_resp}".format(auth_resp=auth_response)
-            )
+            logging.debug("Check User Auth Inital: {auth_resp}".format(auth_resp=auth_response))
 
-            if (
-                "statusCode" in auth_response.keys()
-                and auth_response["statusCode"] == 401
-            ):
+            if "statusCode" in auth_response.keys() and auth_response["statusCode"] == 401:
                 print("Session isn't connected, closing script.")
                 self.close_session()
 
-            elif (
-                "authenticated" in auth_response.keys()
-                and auth_response["authenticated"] == True
-            ):
+            elif "authenticated" in auth_response.keys() and auth_response["authenticated"] == True:
                 self.authenticated = True
                 break
 
-            elif (
-                "authenticated" in auth_response.keys()
-                and auth_response["authenticated"] == False
-            ):
+            elif "authenticated" in auth_response.keys() and auth_response["authenticated"] == False:
                 valid_resp = self.validate()
                 reauth_resp = self.reauthenticate()
                 auth_response = self.is_authenticated()
@@ -433,11 +399,7 @@ class IBClient:  # -------------------------------------------------------------
                         self.authenticated = True
 
                         # Log the response.
-                        logging.debug(
-                            "Had to do Server Account Request: {auth_resp}".format(
-                                auth_resp=serv_resp
-                            )
-                        )
+                        logging.debug("Had to do Server Account Request: {auth_resp}".format(auth_resp=serv_resp))
                         break
                 except EncodingWarning:
                     pass
@@ -467,9 +429,7 @@ class IBClient:  # -------------------------------------------------------------
         auth_response = self.is_authenticated(check=True)
 
         # Log the Auth response.
-        logging.debug(
-            "Check Non-User Auth Initial: {auth_resp}".format(auth_resp=auth_response)
-        )
+        logging.debug("Check Non-User Auth Initial: {auth_resp}".format(auth_resp=auth_response))
 
         # Fail early, status code means we can't authenticate.
         if "statusCode" in auth_response:
@@ -525,9 +485,7 @@ class IBClient:  # -------------------------------------------------------------
                 r"bin/run.sh",
                 r"root/conf.yaml",
             ]
-            self.server_process = subprocess.Popen(
-                args=IB_WEB_API_PROC, cwd=self.client_portal_folder
-            ).pid
+            self.server_process = subprocess.Popen(args=IB_WEB_API_PROC, cwd=self.client_portal_folder).pid
 
         return self.server_process
 
@@ -547,11 +505,7 @@ class IBClient:  # -------------------------------------------------------------
         bool -- `True` if it was connected.
         """
 
-        logging.debug(
-            "Running Client Folder at: {file_path}".format(
-                file_path=self.client_portal_folder
-            )
-        )
+        logging.debug("Running Client Folder at: {file_path}".format(file_path=self.client_portal_folder))
 
         # If needed, start the server and save the State.
         if start_server:
@@ -689,17 +643,11 @@ class IBClient:  # -------------------------------------------------------------
 
         # Make the request.
         if req_type == "POST":
-            response = requests.post(
-                url=url, headers=headers, params=params, json=json, verify=False
-            )
+            response = requests.post(url=url, headers=headers, params=params, json=json, verify=False)
         elif req_type == "GET":
-            response = requests.get(
-                url=url, headers=headers, params=params, json=json, verify=False
-            )
+            response = requests.get(url=url, headers=headers, params=params, json=json, verify=False)
         elif req_type == "DELETE":
-            response = requests.delete(
-                url=url, headers=headers, params=params, json=json, verify=False
-            )
+            response = requests.delete(url=url, headers=headers, params=params, json=json, verify=False)
 
         # grab the status code
         status_code = response.status_code
@@ -710,10 +658,7 @@ class IBClient:  # -------------------------------------------------------------
         # Check to see if it was successful
         if response.ok:
 
-            if (
-                response_headers.get("Content-Type", "null")
-                == "application/json;charset=utf-8"
-            ):
+            if response_headers.get("Content-Type", "null") == "application/json;charset=utf-8":
                 data = response.json()
             else:
                 data = response.json()
@@ -738,10 +683,7 @@ class IBClient:  # -------------------------------------------------------------
             return data
 
         # if it was a bad request print it out.  >daga2004
-        elif (
-            not response.ok
-            and url != "https://localhost:5501/v1/portal/iserver/account"
-        ):
+        elif not response.ok and url != "https://localhost:5501/v1/portal/iserver/account":
             logging.error(
                 msg=f"url: {response.url}, code: {status_code},  Message: {response.text}"
                 + f" headders: {response_headers}, requests {requests.HTTPError()}"
@@ -872,9 +814,7 @@ class IBClient:  # -------------------------------------------------------------
         else:
             req_type = "GET"
 
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, headers="none"
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, headers="none")
 
         return content
 
@@ -900,9 +840,7 @@ class IBClient:  # -------------------------------------------------------------
 
         return content
 
-    def _fundamentals_financials(
-        self, conid: str, financial_statement: str, period: str = "annual"
-    ) -> Dict:
+    def _fundamentals_financials(self, conid: str, financial_statement: str, period: str = "annual") -> Dict:
         """Grabs fundamental financial data.
 
         Overview:
@@ -937,9 +875,7 @@ class IBClient:  # -------------------------------------------------------------
         # define request components
         endpoint = "tws.proxy/fundamentals/financials/{}".format(conid)
         req_type = "GET"
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -957,9 +893,7 @@ class IBClient:  # -------------------------------------------------------------
         # define request components
         endpoint = "fundamentals/landing/{}".format(conid)
         req_type = "GET"
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -977,9 +911,7 @@ class IBClient:  # -------------------------------------------------------------
         # define request components
         endpoint = "fundamentals/landing/{}".format(conid)
         req_type = "GET"
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -999,9 +931,7 @@ class IBClient:  # -------------------------------------------------------------
         # define request components
         endpoint = "fundamentals/landing/{}".format(conid)
         req_type = "GET"
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -1021,9 +951,7 @@ class IBClient:  # -------------------------------------------------------------
         # define request components
         endpoint = "fundamentals/landing/{}".format(conid)
         req_type = "GET"
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -1041,9 +969,7 @@ class IBClient:  # -------------------------------------------------------------
         # define request components
         endpoint = "fundamentals/landing/{}".format(conid)
         req_type = "GET"
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -1061,9 +987,7 @@ class IBClient:  # -------------------------------------------------------------
         # define request components
         endpoint = "fundamentals/landing/{}".format(conid)
         req_type = "GET"
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -1081,9 +1005,7 @@ class IBClient:  # -------------------------------------------------------------
         # define request components
         endpoint = "fundamentals/landing/{}".format(conid)
         req_type = "GET"
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -1101,9 +1023,7 @@ class IBClient:  # -------------------------------------------------------------
         # define request components
         endpoint = "fundamentals/landing/{}".format(conid)
         req_type = "GET"
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -1121,9 +1041,7 @@ class IBClient:  # -------------------------------------------------------------
         # define request components
         endpoint = "fundamentals/landing/{}".format(conid)
         req_type = "GET"
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -1168,9 +1086,7 @@ class IBClient:  # -------------------------------------------------------------
         else:
             params = {"conids": conids_joined, "since": since, "fields": fields_joined}
 
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -1200,9 +1116,7 @@ class IBClient:  # -------------------------------------------------------------
         req_type = "GET"
         params = {"conid": conid, "period": period, "bar": bar}
 
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -1239,9 +1153,7 @@ class IBClient:  # -------------------------------------------------------------
         req_type = "POST"
         params = {"acctId": account_id}
 
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -1327,9 +1239,7 @@ class IBClient:  # -------------------------------------------------------------
         req_type = "GET"
         params = {"symbols": "{}".format(",".join(symbols))}
 
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -1348,9 +1258,7 @@ class IBClient:  # -------------------------------------------------------------
         endpoint = "/trsrv/stocks"
         req_type = "GET"
         params = {"symbols": "{}".format(",".join(symbols))}
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 
@@ -1573,9 +1481,7 @@ class IBClient:  # -------------------------------------------------------------
 
         # define request components
         # endpoint = r'iserver/account/trade' gwi20240416
-        endpoint = r"iserver/account/trades?days={}&accountId={}".format(
-            days, account_id
-        )
+        endpoint = r"iserver/account/trades?days={}&accountId={}".format(days, account_id)
         req_type = "GET"
         content = self._make_request(endpoint=endpoint, req_type=req_type)
 
@@ -1701,9 +1607,7 @@ class IBClient:  # -------------------------------------------------------------
 
         return content
 
-    def modify_order(
-        self, account_id: str, customer_order_id: str, order: dict
-    ) -> Dict:
+    def modify_order(self, account_id: str, customer_order_id: str, order: dict) -> Dict:
         """
         Modifies an open order. The /iserver/accounts endpoint must first
         be called.
@@ -1778,9 +1682,7 @@ class IBClient:  # -------------------------------------------------------------
 
         return content
 
-    def mutual_funds_performance(
-        self, conid: str, risk_period: str, yield_period: str, statistic_period: str
-    ) -> Dict:
+    def mutual_funds_performance(self, conid: str, risk_period: str, yield_period: str, statistic_period: str) -> Dict:
         """Grab the Lip Rating for a specified mutual fund.
 
         NAME: conid
@@ -1806,14 +1708,10 @@ class IBClient:  # -------------------------------------------------------------
         """
 
         # define request components
-        endpoint = r"fundamentals/mf_performance/{mutual_fund_id}".format(
-            mutual_fund_id=conid
-        )
+        endpoint = r"fundamentals/mf_performance/{mutual_fund_id}".format(mutual_fund_id=conid)
         req_type = "GET"
         params = {"risk_period": None, "yield_period": None, "statistic_period": None}
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, params=params
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content
 

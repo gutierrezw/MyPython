@@ -165,6 +165,31 @@ class ClassAgenteIA:
         self.ultimo_envio[symbol] = {"roi": roi, "time": ahora}
         return True
 
+    # Controla si el mensaje Buy debe enviarse a Telegram según reglas:
+    def Agente_message_Manager_Buy(self, row):
+        """
+        Reglas para Buy:
+        - mejora de score (mayor score = mejor oportunidad)
+        - tiempo mínimo desde último envío (DataHub.min_tiempo_buy)
+        """
+        symbol = row.get("Symbol", "")
+        score = row.get("score", 0)
+        ahora = datetime.now()
+
+        # Regla 1: mejora de score
+        if symbol in self.ultimo_envio_buy:
+            if score <= self.ultimo_envio_buy[symbol]["score"]:
+                return False  # no hay mejora
+
+            # Regla 2: tiempo mínimo desde último mensaje
+            delta = (ahora - self.ultimo_envio_buy[symbol]["time"]).total_seconds()
+            if delta < DataHub.min_tiempo_buy:
+                return False
+
+        # si pasó todas las reglas → actualiza registro
+        self.ultimo_envio_buy[symbol] = {"score": score, "time": ahora}
+        return True
+
     # agente para las recomendaciones de ventas ---------------------------------------------------------------------------------
     async def Agente_ManagerSell(self):
         try:
@@ -310,6 +335,7 @@ class Telegram:
                 [
                     InlineKeyboardButton("⬇️ Sell", callback_data="menu_sell"),
                     InlineKeyboardButton("⬆️ Buy", callback_data="menu_buy"),
+                    InlineKeyboardButton("⬇️⬆️ Top(7)", callback_data="menu_top"),
                 ],
                 [
                     InlineKeyboardButton("🟢🔴 Resumen Orders", callback_data="OrdersExec"),
@@ -397,10 +423,12 @@ class Telegram:
     # envio de mensaje a Telegram
     async def send_Telegram(self, texto, hash_id=None, reply_markup=None):
         try:
-            # if para otros mensajes con reply_markup
+            # Crear bot temporal para el event loop actual (evita error de event loop diferente)
+            bot = Bot(token=self.TOKEN)
+
             for CHAT_ID in self.userAuth:
                 if reply_markup is not None:
-                    sent_message = await self.bot.send_message(
+                    sent_message = await bot.send_message(
                         chat_id=CHAT_ID,
                         text=texto,
                         reply_markup=reply_markup,
@@ -411,7 +439,7 @@ class Telegram:
 
                 # si hash_id no es proporcionado, envía mensaje simple
                 elif hash_id is None:
-                    sent_message = await self.bot.send_message(chat_id=CHAT_ID, text=texto, parse_mode="Markdown")
+                    sent_message = await bot.send_message(chat_id=CHAT_ID, text=texto, parse_mode="Markdown")
                     await self._save_message(sent_message, CHAT_ID)
                     return
 
@@ -424,7 +452,7 @@ class Telegram:
                         ]
                     ]
                     reply_markup = InlineKeyboardMarkup(botones)
-                    sent_message = await self.bot.send_message(
+                    sent_message = await bot.send_message(
                         chat_id=CHAT_ID,
                         text=texto,
                         reply_markup=reply_markup,
@@ -526,7 +554,7 @@ class Telegram:
             elif accion == "rechazar":
                 self.RepositorioOportunidades.marcar_oportunidad(
                     args[0],
-                    recomendo=-1,
+                    recomendado=-1,
                     estado="rechazada",
                     razon="Rechazada desde Telegram.",
                 )
@@ -546,6 +574,9 @@ class Telegram:
                     parse_mode="Markdown",
                 )
                 self.MostrarOpcionMenu_enTelegram = "Buy"
+
+            elif accion == "menu_top":
+                await query.edit_message_text("⚙️ Ajustes: próximamente más opciones.", parse_mode="Markdown")
 
             elif accion == "menu_reconnect":
                 await query.edit_message_text("⚙️ Ajustes: próximamente más opciones.", parse_mode="Markdown")
@@ -667,7 +698,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.90)  # transparencia
         self.overrideredirect(True)  # sin bordes ni título
-        self.ultimo_envio = {}  # para controlar envíos repetidos
+        self.ultimo_envio = {}  # para controlar envíos repetidos (Sell)
+        self.ultimo_envio_buy = {}  # para controlar envíos repetidos (Buy)
 
         # Asigna Nombre Logging
         self.logger = logging.getLogger("ClassChatbot")
@@ -790,7 +822,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
     # read CSV : Oportunity
     @staticmethod
-    def readCSV_sell(file=None):
+    def readCSV_sell(file=None, filtrar=True):
         try:
             vacio = pd.DataFrame()
             path = define_FileCache(name=f"{file}.CSV")
@@ -803,19 +835,31 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             df.columns = df.columns.str.strip()
             df.reset_index(drop=True, inplace=True)
-            df["Opcion"] = df["Opcion"].astype(str).str.strip()
+
+            # Verificar que existen las columnas necesarias
+            if "Opcion" in df.columns:
+                df["Opcion"] = df["Opcion"].astype(str).str.strip()
+
             df = df.dropna(how="all", axis=1)
 
+            # Si no queremos filtrar, devolver todo (para monitor)
+            if not filtrar:
+                return df
+
             # Filtrar recomendaciones válidas
-            df_recom = df[(df["%Roi"] >= DataHub.MaxRoi) & (df["Profit"] >= DataHub.MinProfit)]
-            return df_recom if not df_recom.empty else vacio
+            if "%Roi" in df.columns and "Profit" in df.columns:
+                df_recom = df[(df["%Roi"] >= DataHub.MaxRoi) & (df["Profit"] >= DataHub.MinProfit)]
+                return df_recom if not df_recom.empty else df
+            return df
         except (EmptyDataError, FileNotFoundError):
-            # print(f"readCSV_sell(): El archivo {path} está vacío.")
+            return vacio
+        except Exception as e:
+            print(f"readCSV_sell(): {e}")
             return vacio
 
     # read CSV : Oportunity Buy
     @staticmethod
-    def readCSV_buy(file=None):
+    def readCSV_buy(file=None, filtrar=True):
         try:
             vacio = pd.DataFrame()
             path = define_FileCache(name=f"{file}.CSV")
@@ -828,13 +872,29 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             df.columns = df.columns.str.strip()
             df.reset_index(drop=True, inplace=True)
-            df["vehiculo"] = df["vehiculo"].astype(str).str.strip()
+
+            # Verificar que existen las columnas necesarias
+            if "vehiculo" in df.columns:
+                df["vehiculo"] = df["vehiculo"].astype(str).str.strip()
+
             df = df.dropna(how="all", axis=1)
 
-            # Filtrar recomendaciones válidas para buy (score > 0 y ganancia_precio > 0)
-            df_recom = df[(df["score"] > 0) & (df["ganancia_precio"] > 0)]
-            return df_recom if not df_recom.empty else vacio
+            # Si no queremos filtrar, devolver todo (para monitor)
+            if not filtrar:
+                return df
+
+            # Filtrar recomendaciones válidas para buy
+            # ganancia_precio >= MinGananciaPrecio (ej: 5%) y score >= MinScoreBuy (ej: 0.5)
+            if "score" in df.columns and "ganancia_precio" in df.columns:
+                df_recom = df[
+                    (df["ganancia_precio"] >= DataHub.MinGananciaPrecio) & (df["score"] >= DataHub.MinScoreBuy)
+                ]
+                return df_recom if not df_recom.empty else df
+            return df
         except (EmptyDataError, FileNotFoundError):
+            return vacio
+        except Exception as e:
+            print(f"readCSV_buy(): {e}")
             return vacio
 
     # Aquí podrías iniciar/parar oportunidades chat---------------------------------------------------------------
@@ -894,7 +954,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 name=task_name,
                 target=agentesIA,
             )
-        except (Exception, EncodingWarning) as error:
+        except Exception as error:
             print(f"agentesIA(): {error}")
 
     # gestiona mensajes repetidos o sin mejora
@@ -932,7 +992,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             mensaje += "```"
 
             return mensaje
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"message_format(): {e}")
 
     # formato de mensaje para oportunidades de compra
@@ -956,8 +1016,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             mensaje += f"{'Ganancia Inv.'    :<18} {row.get('ganancia_inversion', 0):>12.2f}\n"
             mensaje += f"{'Dividend Yield'   :<18} {row.get('dividend_yield', 0):>12.2%}\n"
             mensaje += f"{'Score'            :<18} {row.get('score', 0):>12.2f}\n"
-            mensaje += f"{'Monto Sugerido'   :<18} {row.get('monto_sugerido', 0):>12.2f}\n"
+            mensaje += f"{'Monto Invertir'   :<18} {row.get('pinvertir', 0):>12.2f}\n"
             mensaje += f"{'Cantidad Buy'     :<18} {row.get('cantidad_buy', 0):>12.1f}\n"
+            mensaje += f"{'Post AvgCost'     :<18} {row.get('avgCost post', 0):>12.1f}\n"
             mensaje += f"{'Objetivo'         :<18} {row.get('objetivo', 0):>12.4f}\n"
 
             if modo == "ia":
@@ -966,7 +1027,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             mensaje += "```"
             return mensaje
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             self.logger.error(f"message_format_buy(): {e}")
 
     # controla el envío de mensajes de oportunidades
@@ -988,7 +1049,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             # send al chat si esta activo
             if self.estadoOportunidades:
                 self._agregar_mensaje(message)
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"opportunity_handler_message(): {e}")
 
     # maneja las oportunidades hash_id e insert de oportunidades en función del origen
@@ -1052,7 +1113,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 # Verifica que este TRUE mostrar las ventas
                 if self.MostrarOpcionMenu_enTelegram == "Sell":
                     await self.opportunity_handler_message(hash_id=hash_id, row=row, origen=origen)
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"opportunity_handler(): {e}")
 
     # Obtener oportunidades desde modelo IA
@@ -1084,8 +1145,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         try:
             # Cargar modelo
             self.IAsell.load_modelo(self.modelo_name)
+
+            # Sin modelo: enviar todas las oportunidades para etiquetar y ganar experiencia
             if self.IAsell.modelo is None:
-                self.logger.warning("evaluar_oportunidades_con_IA(): Modelo no cargado")
+                self.logger.info("evaluar_oportunidades_con_IA(): Sin modelo, enviando para etiquetado")
+                for _, row in df_sell.iterrows():
+                    await self.oportunity_handler(row=row, origen="system")
                 return
 
             # Generar hash_id para cada fila
@@ -1137,8 +1202,6 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 await self.oportunity_handler(row=row, origen="ia")
         except Exception as e:
             self.logger.error(f"evaluar_oportunidades_con_IA(): {e}")
-            import traceback
-
             traceback.print_exc()
 
             # Filtrar por confianza mínima
@@ -1147,6 +1210,10 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
     # Mensaje para oportunidades de compra
     async def opportunity_handler_message_buy(self, hash_id, row, origen="system"):
         try:
+            # Verificar si debe enviar (control de frecuencia y mejora de score)
+            if not self.Agente_message_Manager_Buy(row):
+                return
+
             # Marcar como enviado y da formato al mensaje
             self.buy_enviados.update({hash_id: row})
             message = self.message_format_buy(row, modo=origen)
@@ -1158,7 +1225,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             # Send al chat si esta activo
             if self.estadoOportunidades:
                 self._agregar_mensaje(message)
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             self.logger.error(f"opportunity_handler_message_buy(): {e}")
 
     # Handler para oportunidades de compra
@@ -1218,7 +1285,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 # Verifica que esté TRUE mostrar las compras
                 if self.MostrarOpcionMenu_enTelegram == "Buy":
                     await self.opportunity_handler_message_buy(hash_id=hash_id, row=row, origen=origen)
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             self.logger.error(f"oportunity_handler_buy(): {e}")
 
     # Obtener oportunidades de compra desde modelo IA
@@ -1248,8 +1315,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         try:
             # Cargar modelo
             self.IAbuy.load_modelo(self.modelo_name_buy)
+
+            # Sin modelo: enviar todas las oportunidades para etiquetar y ganar experiencia
             if self.IAbuy.modelo is None:
-                self.logger.warning("evaluar_oportunidades_buy_con_IA(): Modelo no cargado")
+                self.logger.info("evaluar_oportunidades_buy_con_IA(): Sin modelo, enviando para etiquetado")
+                for _, row in df_buy.iterrows():
+                    await self.oportunity_handler_buy(row=row, origen="system")
                 return
 
             # Generar hash_id para cada fila
@@ -1296,8 +1367,6 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 await self.oportunity_handler_buy(row=row, origen="ia")
         except Exception as e:
             self.logger.error(f"evaluar_oportunidades_buy_con_IA(): {e}")
-            import traceback
-
             traceback.print_exc()
 
     # obtenen muestra para entrenamiento del modelo de sell
@@ -1419,7 +1488,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     }
                     registros.append(fila)
 
-                except (EncodingWarning, Exception) as e:
+                except Exception as e:
                     errores_parseo["otros"] += 1
                     continue
 
@@ -1429,7 +1498,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 return df, errores_parseo
             return df
 
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"obtener_dataframe_entrenamiento_IA(): {e}")
             if return_stats:
                 return pd.DataFrame(), {"error_general": str(e)}
@@ -1537,7 +1606,7 @@ def AsistenteChatbot(root=None):
         # oculta chat al inicio. Solo se activa desde el boton flotante
         bot._al_perder_foco()
 
-    except (Exception, EncodingWarning) as error:
+    except Exception as error:
         print(f"AsistenteChatbot(): {error}")
 
 

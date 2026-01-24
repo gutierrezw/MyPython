@@ -18,7 +18,7 @@ from Modulos_Utilitarios import define_FileCache
 
 
 # Parámetros por defecto del modelo
-DEFAULT_PARAMS = {
+DEFAULT_PARAMS_SELL = {
     # Parámetros del RandomForest
     "n_estimators": 100,
     "max_depth": 10,
@@ -32,13 +32,28 @@ DEFAULT_PARAMS = {
     "umbral_observacion": 0.35,  # Por debajo de este umbral se descarta
 }
 
+# Parámetros por defecto del modelo Buy
+DEFAULT_PARAMS_BUY = {
+    # Parámetros del RandomForest
+    "n_estimators": 100,
+    "max_depth": 10,
+    "min_samples_split": 5,
+    "random_state": 42,
+    # Parámetros de entrenamiento
+    "n_folds": 5,
+    "test_size": 0.3,
+    # Umbrales de predicción
+    "umbral_buy": 0.65,  # Confianza mínima para recomendar compra
+    "umbral_observacion": 0.35,  # Por debajo de este umbral se descarta
+}
+
 
 class ModeloOportunidadesSell:
     def __init__(self):
         self.modelo = None
         self.metrics = None
         self.modelo_name = "modelo_sellv01"
-        self.params = DEFAULT_PARAMS.copy()
+        self.params = DEFAULT_PARAMS_SELL.copy()
 
         # Cargar parámetros desde BD si existen
         self._cargar_params_bd()
@@ -445,22 +460,6 @@ class ModeloOportunidadesSell:
             df = self.aplanar_datos_tecnicos(df)
             self.entrenar_modelo(df)
             self.save_modelo(file=self.modelo_name)
-
-
-# Parámetros por defecto del modelo Buy
-DEFAULT_PARAMS_BUY = {
-    # Parámetros del RandomForest
-    "n_estimators": 100,
-    "max_depth": 10,
-    "min_samples_split": 5,
-    "random_state": 42,
-    # Parámetros de entrenamiento
-    "n_folds": 5,
-    "test_size": 0.3,
-    # Umbrales de predicción
-    "umbral_buy": 0.65,  # Confianza mínima para recomendar compra
-    "umbral_observacion": 0.35,  # Por debajo de este umbral se descarta
-}
 
 
 class ModeloOportunidadesBuy:
