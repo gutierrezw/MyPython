@@ -77,9 +77,14 @@ class ClassAgenteIA:
         # variables Modelo sell
         modelo = BDsystem.get_modelo_ia(modelo="modelo_sellv01")
         modelo_config = json.loads(modelo["paramts"].decode("utf-8"))
-        self.umbral = modelo_config.get("umbral_sell", 0.50)
-        self.umbralObserv = modelo_config.get("umbral_observacion", 0.35)
-        self.confianza = modelo_config.get("umbral_confianza", 0.60)
+        self.Sellumbral = modelo_config.get("umbral_sell", 0.50)
+        self.SellumbralObserv = modelo_config.get("umbral_observacion", 0.35)
+
+        # variables Modelo buy
+        modelo = BDsystem.get_modelo_ia(modelo="modelo_buyv01")
+        modelo_config = json.loads(modelo["paramts"].decode("utf-8"))
+        self.Buyumbral = modelo_config.get("umbral_sell", 0.50)
+        self.BuyumbralObserv = modelo_config.get("umbral_observacion", 0.35)
 
         # Asigna Nombre Logging
         self.logger = logging.getLogger("ClassAgenteIA")
@@ -136,7 +141,7 @@ class ClassAgenteIA:
         return decorator
 
     # Controla si el mensaje debe enviarse a Telegram según reglas:
-    def Agente_message_Manager(self, row):
+    def Agente_message_Manager_sell(self, row):
         """
         reglas:
         - mejora de ROI
@@ -190,6 +195,50 @@ class ClassAgenteIA:
         self.ultimo_envio_buy[symbol] = {"score": score, "time": ahora}
         return True
 
+    def Agente_message_Manager_Top10(self, tipo="sell"):
+        """
+        Controla si el TOP 10 debe enviarse a Telegram según reglas:
+        - Cambio en el ranking (nuevo símbolo en top 3, o cambio de posición significativo)
+        - Tiempo mínimo desde último envío (self.min_tiempo_top10)
+        Retorna: (debe_enviar: bool, ranking_actual: list)
+        """
+        ahora = datetime.now()
+
+        if tipo == "sell":
+            top10 = self.get_top_sell()
+            ultimo = self.ultimo_top10_sell
+        else:
+            top10 = self.get_top_buy()
+            ultimo = self.ultimo_top10_buy
+
+        if not top10:
+            return False, []
+
+        # Extraer símbolos del ranking actual
+        ranking_actual = [row.get("Symbol", "") for row in top10]
+
+        # Primera vez: siempre enviar
+        if not ultimo["ranking"] or ultimo["time"] is None:
+            return True, ranking_actual
+
+        # Regla 1: Cambio en TOP 3 (los más importantes)
+        top3_anterior = ultimo["ranking"][:3]
+        top3_actual = ranking_actual[:3]
+        cambio_top3 = top3_anterior != top3_actual
+
+        # Regla 2: Nuevo símbolo entró al TOP 10
+        nuevo_en_top10 = any(s not in ultimo["ranking"] for s in ranking_actual)
+
+        # Regla 3: Tiempo mínimo transcurrido
+        delta = (ahora - ultimo["time"]).total_seconds()
+        tiempo_cumplido = delta >= self.min_tiempo_top10
+
+        # Enviar si hay cambio significativo Y pasó tiempo mínimo
+        if (cambio_top3 or nuevo_en_top10) and tiempo_cumplido:
+            return True, ranking_actual
+
+        return False, ranking_actual
+
     # agente para las recomendaciones de ventas ---------------------------------------------------------------------------------
     async def Agente_ManagerSell(self):
         try:
@@ -198,10 +247,10 @@ class ClassAgenteIA:
             if df_sell.empty:
                 return
 
-            await self.evaluar_oportunidades_con_IA(
+            await self.evaluar_oportunidades_sell_con_IA(
                 df_sell=df_sell,
-                umbral_venta=self.umbral,
-                umbral_observacion=self.umbralObserv,
+                umbral_venta=self.Sellumbral,
+                umbral_observacion=self.SellumbralObserv,
             )
         except Exception as e:
             self.logger.error(f"Agente_ManagerSell(): {e}")
@@ -216,11 +265,29 @@ class ClassAgenteIA:
 
             await self.evaluar_oportunidades_buy_con_IA(
                 df_buy=df_buy,
-                umbral_compra=self.umbral,
-                umbral_observacion=self.umbralObserv,
+                umbral_compra=self.Buyumbral,
+                umbral_observacion=self.BuyumbralObserv,
             )
         except Exception as e:
             self.logger.error(f"Agente_ManagerBuy(): {e}")
+
+    # agente para enviar TOP 10 cuando cambia el ranking
+    async def Agente_ManagerTop10(self):
+        """
+        Monitorea cambios en el TOP 10 y envía actualizaciones a Telegram
+        cuando la opción Top10 está seleccionada.
+        Envía 5 Sell + 5 Buy para entrenamiento efectivo.
+        """
+        try:
+            # Solo procesar si la opción Top10 está activa
+            if self.MostrarOpcionMenu_enTelegram != "Top10":
+                return
+
+            # Verificar y enviar TOP 5 Sell + TOP 5 Buy si hay cambios
+            await self.send_top10_telegram(forzar=False)
+
+        except Exception as e:
+            self.logger.error(f"Agente_ManagerTop10(): {e}")
 
     # agente paras las descargas de filings cada 3600 seg
     @wait_rate(3600)
@@ -276,6 +343,11 @@ class Telegram:
         self.SentMessage = []
         self.DeleteMessageHash = []
         self.simulation = True
+
+        # Control de frecuencia para TOP 10
+        self.ultimo_top10_sell = {"ranking": [], "time": None}
+        self.ultimo_top10_buy = {"ranking": [], "time": None}
+        self.min_tiempo_top10 = 120  # segundos mínimo entre actualizaciones TOP 10
 
         # Token / ID que te da BotFather - personal (número)
         sesion = BDsystem.get_sesion_by_vehiculo("Chatbot")
@@ -333,12 +405,13 @@ class Telegram:
 
             botones = [
                 [
+                    InlineKeyboardButton("⬇️⬆️ Top(10)", callback_data="menu_top"),
                     InlineKeyboardButton("⬇️ Sell", callback_data="menu_sell"),
                     InlineKeyboardButton("⬆️ Buy", callback_data="menu_buy"),
-                    InlineKeyboardButton("⬇️⬆️ Top(7)", callback_data="menu_top"),
                 ],
                 [
-                    InlineKeyboardButton("🟢🔴 Resumen Orders", callback_data="OrdersExec"),
+                    InlineKeyboardButton("🎯 Performan", callback_data="performan"),
+                    InlineKeyboardButton("🟢🔴 Orders", callback_data="OrdersExec"),
                     InlineKeyboardButton("🔄 Reconnect", callback_data="menu_reconnet"),
                 ],
             ]
@@ -576,10 +649,19 @@ class Telegram:
                 self.MostrarOpcionMenu_enTelegram = "Buy"
 
             elif accion == "menu_top":
-                await query.edit_message_text("⚙️ Ajustes: próximamente más opciones.", parse_mode="Markdown")
+                self.MostrarOpcionMenu_enTelegram = "Top10"
+                await query.edit_message_text(
+                    "📊 Has seleccionado *TOP 10 Oportunidades* (5 Sell + 5 Buy).\nRecibirás las mejores para entrenar.",
+                    parse_mode="Markdown",
+                )
+                # Enviar TOP 5 Sell + TOP 5 Buy para entrenamiento
+                await self.send_top10_telegram(forzar=True)
 
             elif accion == "menu_reconnect":
                 await query.edit_message_text("⚙️ Ajustes: próximamente más opciones.", parse_mode="Markdown")
+
+            elif accion == "performan":
+                await query.edit_message_text("🎯 Perfonance: Ganancias y Perdidas.", parse_mode="Markdown")
 
             elif accion == "OrdersExec":
                 self.MostrarOpcionMenu_enTelegram = "ListOrder"
@@ -908,7 +990,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             if not self.estadoOportunidades:
                 self.estadoOportunidades = True
                 print(f"Start: (toggle_oportunidades(On))")
-        except EncodingWarning as e:
+        except Exception as e:
             print(f"toggle_oportunidades(): {e}")
 
     # esto sí lanza la coroutine correctamente
@@ -925,6 +1007,116 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             asyncio.set_event_loop(loop)
             loop.run_until_complete(modulo)
 
+    # Consultar y enviar por Telegram un resumen de órdenes ejecutadas.
+    async def list_orders_exec(self, chat_id=None, limit=25):
+        """
+        Consultar y enviar por Telegram un resumen de órdenes ejecutadas.
+        Ajusta la consulta según la fuente real (BD, RepositorioOportunidades, MyOrders, QremoteOrder, etc.).
+        """
+        try:
+            lista, ix = self.RepositorioOportunidades.select_order_trader(account="all")
+            orders = []
+            for i, trader in enumerate(lista):
+                timestamp = trader[ix.index("stampPlace")]
+
+                orders.append(
+                    {
+                        "timestamp": timestamp.strftime("%d-%b,%H%M%S"),
+                        "symbol": trader[ix.index("symbol")],
+                        "side": trader[ix.index("side")],
+                        "quantity": trader[ix.index("quantity")],
+                        "price": trader[ix.index("price")],
+                        "status": trader[ix.index("status")],
+                    }
+                )
+
+            # Si no hay órdenes, informar
+            if not orders:
+                await self.send_Telegram("ℹ️ No hay órdenes ejecutadas recientes.", None)
+                return
+
+            # Formatea la lista (ejemplo genérico)
+            lines = []
+
+            for o in orders[:limit]:
+                if isinstance(o, dict):
+                    lines.append(
+                        f"{o.get('timestamp'):>14} {o.get('symbol'):>7} "
+                        f"{o.get('side'):<4} {o.get('quantity'):>7} {o.get('price'):>7} {o.get('status'):>9}"
+                    )
+
+            message = f"🟢🔴 *Trader recent (-7 days):*\n"
+            message += f"```\n"
+            message += f"{'timestamp':<14} {'symbol':>7} {'side':>5} {'quantity':>7} {'price':>7} {'status':>5}\n"
+            message += f"{'-' * 55}\n"
+            message += "\n".join(lines)
+            message += "```"
+
+            await self.send_Telegram(message, None)
+        except Exception as e:
+            print(f"list_orders_exec(): {e}")
+
+    async def send_top10_telegram(self, forzar=False):
+        """
+        Envía las TOP oportunidades (5 Sell + 5 Buy) a Telegram para entrenamiento.
+        Envía cada oportunidad individual con botones de aprobar/rechazar.
+        - forzar=True: envía siempre (usado al seleccionar menú)
+        - forzar=False: solo envía si hay cambios significativos en el ranking
+        """
+        try:
+            # Verificar si debe enviar (control de frecuencia)
+            if not forzar:
+                debe_enviar_sell, ranking_sell = self.Agente_message_Manager_Top10("sell")
+                debe_enviar_buy, ranking_buy = self.Agente_message_Manager_Top10("buy")
+
+                if not debe_enviar_sell and not debe_enviar_buy:
+                    return
+
+            # Obtener TOP 5 de cada tipo
+            top_sell = self.get_top_sell(top=5)
+            top_buy = self.get_top_buy(top=5)
+
+            # Enviar oportunidades de SELL individualmente
+            for row in top_sell:
+                hash_id = self.RepositorioOportunidades.generar_hash_id(
+                    row.get("account"),
+                    row.get("Symbol"),
+                    row.get("Opcion"),
+                    row.get("Fecha"),
+                    "sell",
+                    "gain",
+                    row.get("Recomendado"),
+                )
+                # Enviar con origen "top10" para identificar que viene del ranking
+                await self.opportunity_handler_message_sell(hash_id=hash_id, row=row, origen="top10")
+
+            # Enviar oportunidades de BUY individualmente
+            for row in top_buy:
+                hash_id = self.RepositorioOportunidades.generar_hash_id(
+                    row.get("account"),
+                    row.get("Symbol"),
+                    row.get("vehiculo"),
+                    row.get("Fecha"),
+                    "buy",
+                    "rebalanceo",
+                    row.get("Recomendado"),
+                )
+                # Enviar con origen "top10" para identificar que viene del ranking
+                await self.opportunity_handler_message_buy(hash_id=hash_id, row=row, origen="top10")
+
+            # Actualizar registro de último envío
+            self.ultimo_top10_sell = {
+                "ranking": [r.get("Symbol", "") for r in top_sell],
+                "time": datetime.now(),
+            }
+            self.ultimo_top10_buy = {
+                "ranking": [r.get("Symbol", "") for r in top_buy],
+                "time": datetime.now(),
+            }
+
+        except Exception as e:
+            print(f"send_top10_telegram(): {e}")
+
     # Inicio del chatbot
     def run(self):
         def agentesIA():
@@ -937,6 +1129,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     # Agente for Buy
                     self.exec_modulo_async(self.Agente_ManagerBuy())
 
+                    # Agente for Top 10 (monitorea cambios en ranking)
+                    self.exec_modulo_async(self.Agente_ManagerTop10())
+
                     # Agente for Donloads filings
                     self.Agente_downloads_filings_EDGAR()
 
@@ -944,7 +1139,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     self.counter += 1
 
                     DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=self.counter)
-            except EncodingWarning as e:
+            except Exception as e:
                 print(f"agentesIA(): {e}")
 
         try:
@@ -957,8 +1152,11 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         except Exception as error:
             print(f"agentesIA(): {error}")
 
-    # gestiona mensajes repetidos o sin mejora
-    def message_format(self, row, modo=None):
+    # ============================================================================
+    # soporte para gestion de sell
+    #
+    # ============================================================================
+    def message_format_sell(self, row, modo=None):
         try:
 
             mensaje = []
@@ -968,6 +1166,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             if modo == "system":
                 mensaje = f"🔴 *System Sell: ${symbol} ({option};  @price: {price})*\n"
+                mensaje += "```\n"
+
+            elif modo == "top10":
+                roi = (row.get("%Roi", 0) or 0) * 100
+                mensaje = f"🔴📊 *TOP Sell: ${symbol} ({option};  @price: {price})*\n"
+                mensaje += f"*ROI: {roi:.2f}%*\n"
                 mensaje += "```\n"
 
             elif modo == "ia":
@@ -984,6 +1188,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             mensaje += f"{'Prec. posVenta' :<15} {row['PosAvgCost']:>12.4f}\n"
             mensaje += f"{'Pos. posVenta'  :<15} {row['PosPosition']:>12.4f}\n"
             mensaje += f"{'CostoB posVenta':<15} {row['PosCostobase']:>12.2f}\n"
+            mensaje += f"{'Valoracion'         :<18} {""}\n"
 
             if modo == "ia":
                 mensaje += f"{'-' * 45}\n"
@@ -993,54 +1198,18 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             return mensaje
         except Exception as e:
-            print(f"message_format(): {e}")
+            print(f"message_format_sell(): {e}")
 
-    # formato de mensaje para oportunidades de compra
-    def message_format_buy(self, row, modo=None):
+    async def opportunity_handler_message_sell(self, hash_id, row, origen="system"):
         try:
-            symbol = row.get("Symbol", "")
-            vehiculo = row.get("vehiculo", "")
-            last = row.get("last", 0)
-
-            if modo == "system":
-                mensaje = f"🟢 *System Buy: ${symbol} ({vehiculo};  @price: {last:.4f})*\n"
-                mensaje += "```\n"
-            elif modo == "ia":
-                confianza = row.get("confianza", 0)
-                mensaje = f"🟢 *IA Buy: ${symbol} ({vehiculo};  @price: {last:.4f})*\n"
-                mensaje += "```\n"
-
-            mensaje += f"{'Métrica':<18} {'Valor':>12}\n"
-            mensaje += f"{'-' * 45}\n"
-            mensaje += f"{'Ganancia Precio'  :<18} {row.get('ganancia_precio', 0):>12.2%}\n"
-            mensaje += f"{'Ganancia Inv.'    :<18} {row.get('ganancia_inversion', 0):>12.2f}\n"
-            mensaje += f"{'Dividend Yield'   :<18} {row.get('dividend_yield', 0):>12.2%}\n"
-            mensaje += f"{'Score'            :<18} {row.get('score', 0):>12.2f}\n"
-            mensaje += f"{'Monto Invertir'   :<18} {row.get('pinvertir', 0):>12.2f}\n"
-            mensaje += f"{'Cantidad Buy'     :<18} {row.get('cantidad_buy', 0):>12.1f}\n"
-            mensaje += f"{'Post AvgCost'     :<18} {row.get('avgCost post', 0):>12.1f}\n"
-            mensaje += f"{'Objetivo'         :<18} {row.get('objetivo', 0):>12.4f}\n"
-
-            if modo == "ia":
-                mensaje += f"{'-' * 45}\n"
-                mensaje += f"{'Confianza IA'     :<18} {confianza:>12.1%}\n"
-
-            mensaje += "```"
-            return mensaje
-        except Exception as e:
-            self.logger.error(f"message_format_buy(): {e}")
-
-    # controla el envío de mensajes de oportunidades
-    async def opportunity_handler_message(self, hash_id, row, origen="system"):
-        try:
-
-            # filtra mensajes repetidos o sin mejora
-            if not self.Agente_message_Manager(row):
+            # Para top10: siempre enviar (son los mejores para entrenar)
+            # Para otros: filtrar mensajes repetidos o sin mejora
+            if origen != "top10" and not self.Agente_message_Manager_sell(row):
                 return
 
             # Marcar como enviado y da formato al mensaje
             self.sell_enviados.update({hash_id: row})
-            message = self.message_format(row, modo=origen)
+            message = self.message_format_sell(row, modo=origen)
 
             # send a Telegram si esta activo
             if self.estadoTelegram:
@@ -1050,10 +1219,10 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             if self.estadoOportunidades:
                 self._agregar_mensaje(message)
         except Exception as e:
-            print(f"opportunity_handler_message(): {e}")
+            print(f"opportunity_handler_message_sell(): {e}")
 
     # maneja las oportunidades hash_id e insert de oportunidades en función del origen
-    async def oportunity_handler(self, row, origen="system"):
+    async def oportunity_handler_sell(self, row, origen="system"):
         try:
             insert = False
             hash_id = self.RepositorioOportunidades.generar_hash_id(
@@ -1112,12 +1281,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             if insert:
                 # Verifica que este TRUE mostrar las ventas
                 if self.MostrarOpcionMenu_enTelegram == "Sell":
-                    await self.opportunity_handler_message(hash_id=hash_id, row=row, origen=origen)
+                    await self.opportunity_handler_message_sell(hash_id=hash_id, row=row, origen=origen)
         except Exception as e:
             print(f"opportunity_handler(): {e}")
 
     # Obtener oportunidades desde modelo IA
-    async def evaluar_oportunidades_con_IA(self, df_sell=None, umbral_venta=0.65, umbral_observacion=0.35):
+    async def evaluar_oportunidades_sell_con_IA(self, df_sell=None, umbral_venta=0.65, umbral_observacion=0.35):
         """
         Sistema de dos umbrales:
         - confianza >= umbral_venta (0.65): Enviar a Telegram para vender
@@ -1148,9 +1317,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             # Sin modelo: enviar todas las oportunidades para etiquetar y ganar experiencia
             if self.IAsell.modelo is None:
-                self.logger.info("evaluar_oportunidades_con_IA(): Sin modelo, enviando para etiquetado")
+                self.logger.info("evaluar_oportunidades_sell_con_IA(): Sin modelo, enviando para etiquetado")
                 for _, row in df_sell.iterrows():
-                    await self.oportunity_handler(row=row, origen="system")
+                    await self.oportunity_handler_sell(row=row, origen="system")
                 return
 
             # Generar hash_id para cada fila
@@ -1174,12 +1343,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             # Aplicar predicción IA
             df = self.IAsell.aplanar_datos_tecnicos(df_in)
             if df is None or df.empty:
-                self.logger.warning("evaluar_oportunidades_con_IA(): df aplanado vacío")
+                self.logger.warning("evaluar_oportunidades_sell_con_IA(): df aplanado vacío")
                 return
 
             resultado = self.IAsell.predecir_modelo(df)
             if resultado is None or resultado.empty:
-                self.logger.warning("evaluar_oportunidades_con_IA(): resultado predicción vacío")
+                self.logger.warning("evaluar_oportunidades_sell_con_IA(): resultado predicción vacío")
                 return
 
             # Merge por hash_id (O(n) en vez de O(n²))
@@ -1199,19 +1368,89 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             # Procesar aprobadas
             for _, row in aprobadas.iterrows():
-                await self.oportunity_handler(row=row, origen="ia")
+                await self.oportunity_handler_sell(row=row, origen="ia")
         except Exception as e:
-            self.logger.error(f"evaluar_oportunidades_con_IA(): {e}")
+            self.logger.error(f"evaluar_oportunidades_sell_con_IA(): {e}")
             traceback.print_exc()
 
             # Filtrar por confianza mínima
             # aprobadas = resultado[resultado["confianza"] >= umbral].copy()
 
-    # Mensaje para oportunidades de compra
+    def get_top_sell(self, top=5) -> list:
+        """
+        Obtiene las TOP 10 oportunidades de venta ordenadas por ROI.
+        Criterio: Mayor ROI indica mejor momento para vender.
+        Retorna lista de diccionarios con las mejores oportunidades.
+        """
+        try:
+            if not self.sell_enviados:
+                return []
+
+            # Convertir a lista y ordenar por ROI descendente
+            oportunidades = list(self.sell_enviados.values())
+
+            # Ordenar por %Roi (mayor primero)
+            oportunidades_ordenadas = sorted(
+                oportunidades,
+                key=lambda x: (x.get("%Roi", 0) or 0, x.get("Profit", 0) or 0),
+                reverse=True,
+            )
+
+            return oportunidades_ordenadas[:top]
+        except Exception as e:
+            print(f"get_top_sell(): {e}")
+            return []
+
+    # ============================================================================
+    # soporte para gestion de buy
+    #
+    # ============================================================================
+    def message_format_buy(self, row, modo=None):
+        try:
+            symbol = row.get("Symbol", "")
+            vehiculo = row.get("vehiculo", "")
+            last = row.get("last", 0)
+
+            if modo == "system":
+                mensaje = f"🟢 *System Buy: ${symbol} ({vehiculo};  @price: {last:.4f})*\n"
+                mensaje += "```\n"
+            elif modo == "top10":
+                score = row.get("score", 0) or 0
+                gap = (row.get("ganancia_precio", 0) or 0) * 100
+                mensaje = f"🟢📊 *TOP Buy: ${symbol} ({vehiculo};  @price: {last:.4f})*\n"
+                mensaje += f"*Score: {score:.1f} | Gap: {gap:.2f}%*\n"
+                mensaje += "```\n"
+            elif modo == "ia":
+                confianza = row.get("confianza", 0)
+                mensaje = f"🟢 *IA Buy: ${symbol} ({vehiculo};  @price: {last:.4f})*\n"
+                mensaje += "```\n"
+
+            mensaje += f"{'Métrica':<18} {'Valor':>12}\n"
+            mensaje += f"{'-' * 45}\n"
+            mensaje += f"{'Ganancia Precio'  :<18} {row.get('ganancia_precio', 0):>12.2%}\n"
+            mensaje += f"{'Ganancia Inv.'    :<18} {row.get('ganancia_inversion', 0):>12.2f}\n"
+            mensaje += f"{'Dividend Yield'   :<18} {row.get('dividend_yield', 0):>12.2%}\n"
+            mensaje += f"{'Monto Invertir'   :<18} {row.get('pinvertir', 0):>12.2f}\n"
+            mensaje += f"{'Cantidad Buy'     :<18} {row.get('cantidad_buy', 0):>12.1f}\n"
+            mensaje += f"{'Prec. preBuy'     :<18} {row.get('avgcost', 0):>12.4f}\n"
+            mensaje += f"{'Prec. posBuy'     :<18} {row.get('avgcost_post', 0):>12.4f}\n"
+            mensaje += f"{'Objetivo'         :<18} {row.get('objetivo', 0):>12.4f}\n"
+            mensaje += f"{'Valoracion'       :<18} {""}\n"
+
+            if modo == "ia":
+                mensaje += f"{'-' * 45}\n"
+                mensaje += f"{'Confianza IA'     :<18} {confianza:>12.1%}\n"
+
+            mensaje += "```"
+            return mensaje
+        except Exception as e:
+            self.logger.error(f"message_format_buy(): {e}")
+
     async def opportunity_handler_message_buy(self, hash_id, row, origen="system"):
         try:
-            # Verificar si debe enviar (control de frecuencia y mejora de score)
-            if not self.Agente_message_Manager_Buy(row):
+            # Para top10: siempre enviar (son los mejores para entrenar)
+            # Para otros: verificar control de frecuencia y mejora de score
+            if origen != "top10" and not self.Agente_message_Manager_Buy(row):
                 return
 
             # Marcar como enviado y da formato al mensaje
@@ -1497,61 +1736,37 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             if return_stats:
                 return df, errores_parseo
             return df
-
         except Exception as e:
             print(f"obtener_dataframe_entrenamiento_IA(): {e}")
             if return_stats:
                 return pd.DataFrame(), {"error_general": str(e)}
             return pd.DataFrame()
 
-    # Consultar y enviar por Telegram un resumen de órdenes ejecutadas.
-    async def list_orders_exec(self, chat_id=None, limit=25):
+    def get_top_buy(self, top=5) -> list:
         """
-        Consultar y enviar por Telegram un resumen de órdenes ejecutadas.
-        Ajusta la consulta según la fuente real (BD, RepositorioOportunidades, MyOrders, QremoteOrder, etc.).
+        Obtiene las TOP 10 oportunidades de compra ordenadas por score y ganancia_precio.
+        Criterio: Mayor score indica mejor oportunidad de rebalanceo.
+                  Mayor ganancia_precio indica mejor precio respecto al objetivo.
+        Retorna lista de diccionarios con las mejores oportunidades.
         """
         try:
-            lista, ix = self.RepositorioOportunidades.select_order_trader(account="all")
-            orders = []
-            for i, trader in enumerate(lista):
-                timestamp = trader[ix.index("stampPlace")]
+            if not self.buy_enviados:
+                return []
 
-                orders.append(
-                    {
-                        "timestamp": timestamp.strftime("%d-%b,%H%M%S"),
-                        "symbol": trader[ix.index("symbol")],
-                        "side": trader[ix.index("side")],
-                        "quantity": trader[ix.index("quantity")],
-                        "price": trader[ix.index("price")],
-                        "status": trader[ix.index("status")],
-                    }
-                )
+            # Convertir a lista y ordenar por score + ganancia_precio
+            oportunidades = list(self.buy_enviados.values())
 
-            # Si no hay órdenes, informar
-            if not orders:
-                await self.send_Telegram("ℹ️ No hay órdenes ejecutadas recientes.", None)
-                return
+            # Ordenar por score (mayor primero), luego por ganancia_precio
+            oportunidades_ordenadas = sorted(
+                oportunidades,
+                key=lambda x: (x.get("score", 0) or 0, x.get("ganancia_precio", 0) or 0),
+                reverse=True,
+            )
 
-            # Formatea la lista (ejemplo genérico)
-            lines = []
-
-            for o in orders[:limit]:
-                if isinstance(o, dict):
-                    lines.append(
-                        f"{o.get('timestamp'):>14} {o.get('symbol'):>7} "
-                        f"{o.get('side'):<4} {o.get('quantity'):>7} {o.get('price'):>7} {o.get('status'):>9}"
-                    )
-
-            message = f"🟢🔴 *Trader recent (-7 days):*\n"
-            message += f"```\n"
-            message += f"{'timestamp':<14} {'symbol':>7} {'side':>5} {'quantity':>7} {'price':>7} {'status':>5}\n"
-            message += f"{'-' * 55}\n"
-            message += "\n".join(lines)
-            message += "```"
-
-            await self.send_Telegram(message, None)
+            return oportunidades_ordenadas[:top]
         except Exception as e:
-            print(f"list_orders_exec(): {e}")
+            print(f"get_top_buy(): {e}")
+            return []
 
 
 # Inicio chatbot ----------------------------------------------------------------------------------------------------------------
