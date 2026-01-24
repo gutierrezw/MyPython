@@ -22,6 +22,8 @@ from Modulos_python import (
     b64encode,
     webbrowser,
     ssl,
+    threading,
+    traceback,
 )
 from Modulos_Mysql import BDsystem
 
@@ -52,9 +54,7 @@ class BB:
             p_params["timestamp"] = int(time.time() * 1000)
             p_params["apiKey"] = a_key
 
-            payload = "&".join(
-                [f"{param}={value}" for param, value in sorted(p_params.items())]
-            )
+            payload = "&".join([f"{param}={value}" for param, value in sorted(p_params.items())])
             signature = b64encode(p_key.sign(payload.encode("utf-8")))
             p_params["signature"] = signature.decode("utf-8")
 
@@ -63,9 +63,7 @@ class BB:
         try:
             # -- WebSocket_v3_SP
             api_key = self.API_KEY
-            private_key = serialization.load_pem_private_key(
-                data=self.private_key, password=None
-            )
+            private_key = serialization.load_pem_private_key(data=self.private_key, password=None)
 
             # Sign request
             if tipo == "b64":
@@ -170,9 +168,7 @@ class MySpot(Spot):
             p_params["timestamp"] = int(time.time() * 1000)
             # p_params['apiKey'] = a_key
 
-            payload = "&".join(
-                [f"{param}={value}" for param, value in p_params.items()]
-            )
+            payload = "&".join([f"{param}={value}" for param, value in p_params.items()])
             signature = b64encode(p_key.sign(payload.encode("utf-8")))
             p_params["signature"] = signature.decode("utf-8")
 
@@ -180,9 +176,7 @@ class MySpot(Spot):
 
         try:
             # -- WebSocket_v3_SP
-            private_key = serialization.load_pem_private_key(
-                data=self.private_key, password=None
-            )
+            private_key = serialization.load_pem_private_key(data=self.private_key, password=None)
 
             # Sign request
             if tipo == "b64":
@@ -235,9 +229,7 @@ class MySpot(Spot):
 
     # repay de préstamo flexible
     @handle_binance_exceptions
-    def get_flexible_loan_repay(
-        self, loanCoin="USDT", collateralCoin=None, amount=0.001
-    ):
+    def get_flexible_loan_repay(self, loanCoin="USDT", collateralCoin=None, amount=0.001):
         """
         Reembolsa un préstamo flexible en Binance.
         """
@@ -300,9 +292,7 @@ class MySpot(Spot):
             print("[get_flexible_loan_ongoing_orders()]: {}".format(e))
 
     @handle_binance_exceptions
-    def get_c2c_trade_history(
-        self, tradeType=None, startTimestamp=None, endTimestamp=None, rows=100
-    ):
+    def get_c2c_trade_history(self, tradeType=None, startTimestamp=None, endTimestamp=None, rows=100):
         response: any = self.c2c_trade_history(
             tradeType=tradeType,
             startTimestamp=startTimestamp,
@@ -315,18 +305,12 @@ class MySpot(Spot):
     def Myget_flexible_product_position(self, current=1, size=100, recvWindow=5000):
 
         response = {}
-        response = self.get_flexible_product_position(
-            current=current, size=size, recvWindow=recvWindow
-        )
+        response = self.get_flexible_product_position(current=current, size=size, recvWindow=recvWindow)
         return response
 
     @handle_binance_exceptions
-    def get_redeem_flexible_product(
-        self, productId: str, amount: float, recvWindow=10000
-    ):
-        response = self.redeem_flexible_product(
-            productId=productId, amount=amount, recvWindow=recvWindow
-        )
+    def get_redeem_flexible_product(self, productId: str, amount: float, recvWindow=10000):
+        response = self.redeem_flexible_product(productId=productId, amount=amount, recvWindow=recvWindow)
         return response
 
     @handle_binance_exceptions
@@ -366,9 +350,7 @@ class MySpot(Spot):
 
     @handle_binance_exceptions
     def get_my_trades(self, ticket: str, limit: int, startTime: int, endTime: int):
-        response = self.my_trades(
-            ticket, limit=limit, startTime=startTime, endTime=endTime
-        )
+        response = self.my_trades(ticket, limit=limit, startTime=startTime, endTime=endTime)
         return response
 
     @handle_binance_exceptions
@@ -425,9 +407,7 @@ class WebsocketBinanceApiClient(SpotWebsocketAPIClient):
             self.close_thread(sleep=5)
 
         except Exception as e:
-            print(
-                f"WebsocketBinanceApiClient():: Error: Reintentando conexión en 5 segundos...({e})"
-            )
+            print(f"WebsocketBinanceApiClient():: Error: Reintentando conexión en 5 segundos...({e})")
             # self.reconnect()
 
     # asegura cerrar el thread
@@ -661,11 +641,10 @@ class IB(IBClient):
 
         self.api_version = "v1/"
         self._operating_system = sys.platform
-        self.session_state_path: pathlib.Path = (
-            pathlib.Path(__file__).parent.joinpath("server_session.json").resolve()
-        )
+        self.session_state_path: pathlib.Path = pathlib.Path(__file__).parent.joinpath("server_session.json").resolve()
         self.authenticated = False
         self._is_server_running = is_server_running
+        self.task = "IBKR-Tickle(On)"
 
         # Define URL Components
         ib_gateway_host = r"https://localhost"
@@ -674,9 +653,7 @@ class IB(IBClient):
 
         self.ib_gateway_path = f"{ib_gateway_host}:{ib_gateway_port}"
         self.backup_gateway_path = r"https://cdcdyn.interactivebrokers.com/portal.proxy"
-        self.login_gateway_path = (
-            self.ib_gateway_path + "/sso/Login?forwardTo=22&RL=1&ip2loc=on"
-        )
+        self.login_gateway_path = self.ib_gateway_path + "/sso/Login?forwardTo=22&RL=1&ip2loc=on"
 
         # Asigna Nombre Logging
         self.logger = logging.getLogger("IBroks_Client")
@@ -709,11 +686,84 @@ class IB(IBClient):
     def ib_is_connet(self) -> bool:
         connect = False
         if self._is_server_running:
-            if self.is_authenticated("connected") and self.is_authenticated(
-                "authenticated"
-            ):
+            if self.is_authenticated("connected") and self.is_authenticated("authenticated"):
                 connect = True
         return connect
+
+    # ===========================================================
+    # asegura conecction antes de cualquier requests
+    # ===========================================================
+    def ensure_connection(self) -> None:
+        """
+        Garantiza que el Gateway esté vivo y la sesión autenticada.
+        Lanza RuntimeError si no es recuperable.
+        """
+
+        try:
+            status = self.is_authenticated(check=True)
+        except Exception as exc:
+            raise RuntimeError("Gateway no responde") from exc
+
+        if not status:
+            raise RuntimeError("Respuesta inválida del gateway")
+
+        if not status.get("authenticated", False):
+            logging.warning("Sesión no autenticada, intentando reautenticar")
+
+            self.validate()
+            reauth = self.reauthenticate()
+
+            status = self.is_authenticated(check=True)
+            if not status.get("authenticated", False):
+                raise RuntimeError("Sesión IBKR no autenticada. Requiere login web en https://localhost:5000")
+
+    # ===========================================================
+    # Keep-alive (background)
+    # ===========================================================
+    def _tickle_loop(self, interval: int, datahub={}) -> None:
+        """
+        Loop interno para mantener viva la sesión IBKR.
+        Corre en thread daemon.
+        """
+        counter = 1
+        while True:
+            try:
+                resp = self.tickle()
+                auth = resp.get("iserver", {}).get("authStatus", {}).get("authenticated", False)
+                datahub.update_self_procesos(proces="thread", tarea=self.task, itera=counter)
+                counter += 1
+
+                if not auth:
+                    logging.warning("Tickle OK pero sesión no autenticada")
+
+            except Exception as e:
+                logging.error(f"Tickle falló: {e}")
+            time.sleep(interval)
+
+    def start_tickle(self, interval: int = 30, datahub: dict = {}) -> None:
+        """
+        Inicia el loop de tickle en background.
+        """
+        try:
+            logging.warning("✅ Tickle inciado inicializado correctamente")
+
+            if hasattr(self, "_tickle_thread"):
+                return  # ya iniciado
+
+            datahub.procesos.append({"thread": {self.task: 0}})
+            self._tickle_thread = threading.Thread(
+                target=self._tickle_loop,
+                args=(interval, datahub),
+                daemon=True,
+                name=self.task,
+            )
+            self._tickle_thread.start()
+        except Exception as e:
+            print(f"[start_tickle()]: {e}")
+            traceback.print_exc()
+
+    def stop_tickle(self):
+        self._tickle_stop.set()
 
     def create_session(self, set_server=True) -> bool:
         """Creates a new session.
@@ -769,11 +819,7 @@ class IB(IBClient):
         # Finally make sure we are authenticated.   >daga2004
         # print('create_session:', auth_response)
         if auth_response:
-            if (
-                "authenticated" in auth_response.keys()
-                and auth_response["authenticated"]
-                and self._set_server()
-            ):
+            if "authenticated" in auth_response.keys() and auth_response["authenticated"] and self._set_server():
                 self.authenticated = True
                 return True, auth_response
         else:
@@ -806,9 +852,7 @@ class IB(IBClient):
             else:
                 req_type = "GET"
 
-            content = self._make_request(
-                endpoint=endpoint, req_type=req_type, headers="none"
-            )
+            content = self._make_request(endpoint=endpoint, req_type=req_type, headers="none")
             content = content if content is not None else {}
 
             return content
@@ -853,9 +897,7 @@ class IB(IBClient):
         {srt} -- A full URL path.
         """
         return urllib.parse.unquote(
-            urllib.parse.urljoin(self.ib_gateway_path, self.api_version)
-            + r"portal/"
-            + endpoint
+            urllib.parse.urljoin(self.ib_gateway_path, self.api_version) + r"portal/" + endpoint
         )
 
     # gwi001
@@ -875,33 +917,23 @@ class IB(IBClient):
         url = self._build_url(endpoint=endpoint)
         headers = self._headers(mode=headers)
 
+        # self.ensure_connection()
+
         try:
             # Log de la petición
-            self.logger.info(
-                f"_make_request(): {req_type} {url} | params={params} | json={json}"
-            )
+            self.logger.info(f"_make_request(): {req_type} {url} | params={params} | json={json}")
 
             # Selección del método
             if req_type == "POST":
-                response = requests.post(
-                    url=url, headers=headers, params=params, json=json, verify=False
-                )
+                response = requests.post(url=url, headers=headers, params=params, json=json, verify=False)
             elif req_type == "GET":
-                response = requests.get(
-                    url=url, headers=headers, params=params, json=json, verify=False
-                )
+                response = requests.get(url=url, headers=headers, params=params, json=json, verify=False)
             elif req_type == "DELETE":
-                response = requests.delete(
-                    url=url, headers=headers, params=params, json=json, verify=False
-                )
+                response = requests.delete(url=url, headers=headers, params=params, json=json, verify=False)
             elif req_type == "PUT":
-                response = requests.put(
-                    url=url, headers=headers, params=params, json=json, verify=False
-                )
+                response = requests.put(url=url, headers=headers, params=params, json=json, verify=False)
             else:
-                self.logger.error(
-                    f"_make_request(): ❌ Tipo de request inválido {req_type}"
-                )
+                self.logger.error(f"_make_request(): ❌ Tipo de request inválido {req_type}")
                 return {}
 
             # Procesar respuesta
@@ -1022,9 +1054,7 @@ class IB(IBClient):
         six previous days.
         """
 
-        endpoint = r"iserver/account/trades?days={}&accountId={}".format(
-            days, account_id
-        )
+        endpoint = r"iserver/account/trades?days={}&accountId={}".format(days, account_id)
         req_type = "GET"
         content = self._make_request(endpoint=endpoint, req_type=req_type)
 
@@ -1073,9 +1103,7 @@ class IB(IBClient):
             endpoint = r"iserver/account/{}/orders".format(account_id)
             req_type = "POST"
 
-            content = self._make_request(
-                endpoint=endpoint, req_type=req_type, json=order
-            )
+            content = self._make_request(endpoint=endpoint, req_type=req_type, json=order)
             return content
         except (Exception, requests.exceptions.RequestException) as e:
             print("[place_order()]: {}".format(e))
@@ -1120,9 +1148,7 @@ class IB(IBClient):
         print(endpoint)
         json_body = {"confirmed": True}
         req_type = "POST"
-        content = self._make_request(
-            endpoint=endpoint, req_type=req_type, json=json_body
-        )
+        content = self._make_request(endpoint=endpoint, req_type=req_type, json=json_body)
         # gwi001 json = json_body
 
         return content
@@ -1239,9 +1265,7 @@ class IB(IBClient):
 
         return content
 
-    def modify_order(
-        self, account_id: str, customer_order_id: str, order: dict
-    ) -> Dict:
+    def modify_order(self, account_id: str, customer_order_id: str, order: dict) -> Dict:
         """
         Modifies an open order. The /iserver/accounts endpoint must first
         be called.

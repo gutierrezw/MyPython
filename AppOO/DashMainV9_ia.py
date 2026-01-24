@@ -165,9 +165,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                     symbol = x_message["s"]
                     timestamp = x_message["E"] / 1000  # Convertir a segundos
-                    Stimestamp = datetime.fromtimestamp(timestamp).strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    )
+                    Stimestamp = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
                     d_precio = {
                         symbol: {
                             "last": float(x_message.get("c", 0)),
@@ -181,9 +179,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     }
 
                     # obtiene conid para vehículo crypto
-                    crypto, found = self.RepositorioOportunidades.select_otros_activos(
-                        symbol=symbol
-                    )
+                    crypto, found = self.RepositorioOportunidades.select_otros_activos(symbol=symbol)
                     conid = crypto[0]["idcrypto"]
 
                     # procesa_crypto(symbol, d_precio)
@@ -208,28 +204,20 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         struct["open"] = d_precio[symbol]["open"]
                         struct["peso"] = 0.0
                         struct["dgyp"] = (last - struct["open"]) * stock
-                        struct["unrealizedpnl"] = (
-                            struct["mktvalue"] - struct["costobase"]
-                        )
+                        struct["unrealizedpnl"] = struct["mktvalue"] - struct["costobase"]
                         struct["retorno"] = (
-                            struct["unrealizedpnl"] / struct["costobase"]
-                            if struct["costobase"] > 0
-                            else 0
+                            struct["unrealizedpnl"] / struct["costobase"] if struct["costobase"] > 0 else 0
                         )
 
                         # actualiza estructura positions y luego treeview para el symbol en cuestión
                         ix = self.update_symbol_en_positions(struct)
 
                         # agrega precio update a info()
-                        self.update_precio_DataHubInfo(
-                            symbol=symbol, conid=conid, precio=d_precio
-                        )
+                        self.update_precio_DataHubInfo(symbol=symbol, conid=conid, precio=d_precio)
 
                     self.WStreams.counter += 1
                     socket = "WebsocketBinanceStream_OnMessage(Crypto)"
-                    DataHub.update_self_procesos(
-                        proces="widget", tarea=socket, itera=self.WStreams.counter
-                    )
+                    DataHub.update_self_procesos(proces="widget", tarea=socket, itera=self.WStreams.counter)
 
             except Exception as e:
                 print("procesa_stream_crypto(): {}".format(e))
@@ -242,9 +230,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     if response:
                         for i, order in enumerate(response):
 
-                            found, position = buscar_ticker(
-                                self.positions, order["symbol"]
-                            )
+                            found, position = buscar_ticker(self.positions, order["symbol"])
                             lista = {
                                 "account": self.account,
                                 "conid": position["conid"],
@@ -327,9 +313,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     struct["peso"] = 0.0
                     struct["dgyp"] = change * stock
                     struct["unrealizedpnl"] = struct["mktvalue"] - struct["costobase"]
-                    struct["retorno"] = (
-                        (struct["unrealizedpnl"] / costo) if costo > 0 else 0
-                    )
+                    struct["retorno"] = (struct["unrealizedpnl"] / costo) if costo > 0 else 0
 
                     # actualiza estructura positions y luego treeview para el symbol en cuestión
                     ix = self.update_symbol_en_positions(struct)
@@ -419,9 +403,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     if field_name == "dividend_yield" and isinstance(value, str):
                         try:
                             # Remover el % y convertir a float
-                            self.conid_inicio[conid][field_name] = float(
-                                value.rstrip("%")
-                            )
+                            self.conid_inicio[conid][field_name] = float(value.rstrip("%"))
                         except (ValueError, AttributeError):
                             self.conid_inicio[conid][field_name] = 0.0
                     elif is_numeric(value):
@@ -463,22 +445,16 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 # Procesar campos de texto
                 for field in STRING_FIELDS:
                     internal_name = DIVIDEND_FIELD_MAPPING.get(field, field)
-                    update_field(
-                        x_conid, internal_name, FIELD_MAP[field], convert_to_float=False
-                    )
+                    update_field(x_conid, internal_name, FIELD_MAP[field], convert_to_float=False)
 
                 # Procesar campos numéricos
                 for field in NUMERIC_FIELDS:
                     internal_name = DIVIDEND_FIELD_MAPPING.get(field, field)
-                    update_field(
-                        x_conid, internal_name, FIELD_MAP[field], convert_to_float=True
-                    )
+                    update_field(x_conid, internal_name, FIELD_MAP[field], convert_to_float=True)
 
                 # Procesar timestamp
                 timestamp = x_message["_updated"] / 1000  # Convertir a segundos
-                timestamp_str = datetime.fromtimestamp(timestamp).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
+                timestamp_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
 
                 # Preparar datos de salida
                 x_precio = self.conid_inicio[x_conid].copy()
@@ -503,18 +479,14 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                 # agrega precio info() y contabiliza DataHub
                 if n_precio:
-                    self.update_precio_DataHubInfo(
-                        symbol=symbol, conid=conid, precio=n_precio
-                    )
+                    self.update_precio_DataHubInfo(symbol=symbol, conid=conid, precio=n_precio)
                     procesa_stock(d_precio=n_precio[symbol])
 
                     # cuenta las iteraciones websocket stock
                     self.WsStock.counter += 1
 
                     socket = f"WebsocketStream_OnMessage({self.vehiculo})"
-                    DataHub.update_self_procesos(
-                        proces="widget", tarea=socket, itera=self.WsStock.counter
-                    )
+                    DataHub.update_self_procesos(proces="widget", tarea=socket, itera=self.WsStock.counter)
 
             elif not data["topic"].startswith("prefijo"):
                 # print(f"data=={data}")
@@ -541,9 +513,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 position["conid"] = struct["conid"]
                 position["open"] = struct["open"]
                 position["dgyp"] = struct["dgyp"]
-                position["gypp"] = (
-                    struct["position"] * struct["objetivo"] - struct["costobase"]
-                )
+                position["gypp"] = struct["position"] * struct["objetivo"] - struct["costobase"]
                 position["v_prc"] = 0.0
                 position["v_gan"] = 0.0
 
@@ -649,7 +619,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
             return None
 
         # Obtener mapeo código→descripción si no está cacheado
-        if not hasattr(self, '_estrategia_map') or not self._estrategia_map:
+        if not hasattr(self, "_estrategia_map") or not self._estrategia_map:
             self._estrategia_map = {}
             # Cargar estrategias de todos los vehículos relevantes
             for vehiculo in ["Balance", "Crypto"]:
@@ -672,9 +642,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 profit, costCum, lotes, sell, datos = 0.0, 0.0, 0.0, 0.0, {}
 
                 last = position["mrkprice"]
-                l_gain = DataHub.get_lotesGainLost(
-                    opcion="gain", account=self.account, symbol=symbol, last=last
-                )
+                l_gain = DataHub.get_lotesGainLost(opcion="gain", account=self.account, symbol=symbol, last=last)
 
                 if l_gain:
                     for lotes, gain in enumerate(l_gain, 1):
@@ -732,11 +700,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
             for position in self.positions:
                 symbol = position["ticket"]
 
-                if (
-                    (position["mrkprice"] > 0.000001)
-                    and (invertir > 0)
-                    and (position["position"] > 0)
-                ):
+                if (position["mrkprice"] > 0.000001) and (invertir > 0) and (position["position"] > 0):
                     stock = int(invertir / position["mrkprice"])
                     stockNew = stock + position["position"]
                     avgCost = position["costobase"] / position["position"]
@@ -746,17 +710,11 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         dividendo = position["dividendo"] / position["position"]
                     else:
                         dividendo = 0
-                    gypInicial = (
-                        position["objetivo"] - avgCost + dividendo
-                    ) * position["position"]
-                    precioNew = (
-                        position["costobase"] + stock * position["mrkprice"] + 0.4
-                    ) / stockNew
+                    gypInicial = (position["objetivo"] - avgCost + dividendo) * position["position"]
+                    precioNew = (position["costobase"] + stock * position["mrkprice"] + 0.4) / stockNew
 
                     gypPrecio = (precioNew - avgCost) / avgCost if avgCost > 0 else 0
-                    gypProyect = (
-                        position["objetivo"] - precioNew + dividendo
-                    ) * stockNew
+                    gypProyect = (position["objetivo"] - precioNew + dividendo) * stockNew
                     gainInversion = (gypProyect - gypInicial) / invertir
 
                     # ajusta calculo de la tasa nominal
@@ -768,13 +726,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     ex_dividends = position["exDividendDate"].strftime("%d-%b'%y")
 
                     datos = {}
-                    if (gypPrecio < self.sesion["gypPrecio"]) and (
-                        gainInversion < self.sesion["gainInversion"]
-                    ):
+                    if (gypPrecio < self.sesion["gypPrecio"]) and (gainInversion < self.sesion["gainInversion"]):
                         # Clasificar como "dividends" solo si dividendYield > 0
-                        BuyDividends = (
-                            "buy" if position["dividendYield"] <= 0 else "dividends"
-                        )
+                        BuyDividends = "buy" if position["dividendYield"] <= 0 else "dividends"
                         datos = {
                             BuyDividends: {
                                 "ganancia precio": gypPrecio,
@@ -840,67 +794,36 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                             w_trade = []
                             if etime > stime:
-                                w_trade = self.BClient.get_my_trades(
-                                    ticket, limit=20, startTime=stime, endTime=etime
-                                )
+                                w_trade = self.BClient.get_my_trades(ticket, limit=20, startTime=stime, endTime=etime)
                                 if w_trade:
                                     for i in range(len(w_trade)):
                                         try:
                                             registro = dict()
                                             if w_trade[i]:
 
-                                                registro.update(
-                                                    {"categoria": self.vehiculo}
-                                                )
+                                                registro.update({"categoria": self.vehiculo})
                                                 registro.update({"divisa": "USD"})
-                                                registro.update(
-                                                    {"cuenta": self.account}
-                                                )
+                                                registro.update({"cuenta": self.account})
 
                                                 qty = float(w_trade[i].get("qty", 0.0))
-                                                qty = (
-                                                    qty
-                                                    if w_trade[i]["isBuyer"]
-                                                    else -1 * qty
-                                                )
-                                                quoteqty = float(
-                                                    w_trade[i].get("quoteQty", 0.0)
-                                                )
+                                                qty = qty if w_trade[i]["isBuyer"] else -1 * qty
+                                                quoteqty = float(w_trade[i].get("quoteQty", 0.0))
                                                 registro.update({"cantidad": qty})
                                                 registro.update({"producto": quoteqty})
 
-                                                price = float(
-                                                    w_trade[i].get("price", 0.0)
-                                                )
-                                                registro.update(
-                                                    {
-                                                        "idtrans": str(
-                                                            w_trade[i].get("id")
-                                                        )
-                                                    }
-                                                )
+                                                price = float(w_trade[i].get("price", 0.0))
+                                                registro.update({"idtrans": str(w_trade[i].get("id"))})
                                                 registro.update({"preciotrans": price})
                                                 registro.update({"preciocierre": price})
 
                                                 comision = (
-                                                    float(
-                                                        w_trade[i].get(
-                                                            "commission", 0.0
-                                                        )
-                                                    )
-                                                    * registro["preciotrans"]
+                                                    float(w_trade[i].get("commission", 0.0)) * registro["preciotrans"]
                                                 )
-                                                registro.update(
-                                                    {"tarifacomision": comision}
-                                                )
+                                                registro.update({"tarifacomision": comision})
                                                 registro.update({"mtmgp": 0.00})
 
-                                                fechahora = datetime.fromtimestamp(
-                                                    w_trade[i].get("time", 0) / 1000
-                                                )
-                                                registro.update(
-                                                    {"fechahora": fechahora}
-                                                )
+                                                fechahora = datetime.fromtimestamp(w_trade[i].get("time", 0) / 1000)
+                                                registro.update({"fechahora": fechahora})
 
                                                 # valida existencia del trader
                                                 found_hashId = self.RepositorioOportunidades.get_hash_booktrading(
@@ -914,9 +837,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                                         values=registro, symbol=ticket
                                                     )
                                         except (ValueError, Exception) as error:
-                                            print(
-                                                f"Error en w_trade {i} - {w_trade[i]}: {error}"
-                                            )
+                                            print(f"Error en w_trade {i} - {w_trade[i]}: {error}")
                             # espera para no saturar la API
                             time.sleep(0.8)
 
@@ -977,18 +898,10 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                     values.update({"cuenta": rows["fiat"] + "-0001"})
                                     values.update({"fechahora": date})
                                     values.update({"idtrans": rows["advNo"]})
-                                    values.update(
-                                        {"cantidad": float(rows["takerAmount"])}
-                                    )
-                                    values.update(
-                                        {"preciotrans": float(rows["unitPrice"])}
-                                    )
-                                    values.update(
-                                        {"preciocierre": float(rows["unitPrice"])}
-                                    )
-                                    values.update(
-                                        {"producto": float(rows["totalPrice"])}
-                                    )
+                                    values.update({"cantidad": float(rows["takerAmount"])})
+                                    values.update({"preciotrans": float(rows["unitPrice"])})
+                                    values.update({"preciocierre": float(rows["unitPrice"])})
+                                    values.update({"producto": float(rows["totalPrice"])})
                                     values.update({"tarifacomision": 0.0})
                                     values.update({"gprealizadas": 0.0})
                                     values.update({"mtmgp": 0.0})
@@ -996,22 +909,16 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                     trader.append(values)
 
                     # orden de mas descendete los trader's
-                    asc_trader = sorted(
-                        trader, key=lambda x: x["fechahora"], reverse=False
-                    )
+                    asc_trader = sorted(trader, key=lambda x: x["fechahora"], reverse=False)
 
                     # valida los trader antes de insert booktrading
                     for i, registro in enumerate(asc_trader):
-                        found_hashId = (
-                            self.RepositorioOportunidades.get_hash_booktrading(
-                                accion="valida", values=registro, symbol=symbol
-                            )
+                        found_hashId = self.RepositorioOportunidades.get_hash_booktrading(
+                            accion="valida", values=registro, symbol=symbol
                         )
 
                         if not found_hashId:
-                            self.RepositorioOportunidades.insert_booktrading(
-                                values=registro, symbol=symbol
-                            )
+                            self.RepositorioOportunidades.insert_booktrading(values=registro, symbol=symbol)
 
                     return asc_trader
                 except Exception as error:
@@ -1043,9 +950,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     order["orderId"],
                     datetime.now(),
                 )
-                trader, ix = self.RepositorioOportunidades.select_order_trader(
-                    account=self.account, symbol=symbol
-                )
+                trader, ix = self.RepositorioOportunidades.select_order_trader(account=self.account, symbol=symbol)
 
                 if trader:
                     for preOrder in trader:
@@ -1081,9 +986,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 return False, id_order, clientOrderId
 
             # asocia los confirm con las Órdenes almacenadas en la tabla
-            def ubica_confirm(
-                orden=None, conid=None, orderid=None, account=None, vehiculo=None
-            ):
+            def ubica_confirm(orden=None, conid=None, orderid=None, account=None, vehiculo=None):
                 try:
                     trader, ix = self.RepositorioOportunidades.select_order_trader(
                         account=account, vehiculo=vehiculo, conid=conid
@@ -1098,10 +1001,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             and keys[ix.index("price")] == float(orden["price"])
                             and keys[ix.index("side")] in orden["orderDesc"].upper()
                             and orden["timeInForce"] == "CLOSE"
-                            and (
-                                is_null(keys[ix.index("clientOrderId")])
-                                or is_vacio(keys[ix.index("clientOrderId")])
-                            )
+                            and (is_null(keys[ix.index("clientOrderId")]) or is_vacio(keys[ix.index("clientOrderId")]))
                         ):
 
                             # obtiene los datos necesarios para establecer relación get_live_orders()
@@ -1120,10 +1020,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                             # caso que clientOrderId a la orden activa de la API
                             if is_numeric(keys[ix.index("clientOrderId")]):
-                                if (
-                                    int(keys[ix.index("clientOrderId")])
-                                    == orden["orderId"]
-                                ):
+                                if int(keys[ix.index("clientOrderId")]) == orden["orderId"]:
                                     return (
                                         True,
                                         orden["orderId"],
@@ -1231,17 +1128,13 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         values = registro.pop("simbolo")
 
                         # valida existencia del trader
-                        found_hashId = (
-                            self.RepositorioOportunidades.get_hash_booktrading(
-                                accion="valida", values=registro, symbol=simbolo
-                            )
+                        found_hashId = self.RepositorioOportunidades.get_hash_booktrading(
+                            accion="valida", values=registro, symbol=simbolo
                         )
 
                         # inserta trade en booktrading
                         if not found_hashId:
-                            self.RepositorioOportunidades.insert_booktrading(
-                                values=registro, symbol=simbolo
-                            )
+                            self.RepositorioOportunidades.insert_booktrading(values=registro, symbol=simbolo)
             except Exception as e:
                 print(f"trader_iteractive(): {e}")
 
@@ -1279,54 +1172,34 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # actualiza position
                     if position["ticket"] == asset:
 
-                        crypto, found = (
-                            self.RepositorioOportunidades.select_otros_activos(
-                                symbol=asset
-                            )
-                        )
+                        crypto, found = self.RepositorioOportunidades.select_otros_activos(symbol=asset)
                         found, self_position = buscar_ticker(self.positions, asset)
 
                         # obtiene información de dividendos
-                        (yf_activo, datos, ind_update) = self.ts_yfinance_symbol(
-                            symbol=asset, vehiculo=self.vehiculo
-                        )
+                        (yf_activo, datos, ind_update) = self.ts_yfinance_symbol(symbol=asset, vehiculo=self.vehiculo)
 
                         keys_asset = values["position"]
                         position["mrkprice"] = self_position["mrkprice"]
                         position["dgyp"] = self_position["dgyp"]
                         position["open"] = self_position["open"]
 
-                        position["position"] = (
-                            keys_asset["borrowed"] + keys_asset["netAsset"]
-                        )
+                        position["position"] = keys_asset["borrowed"] + keys_asset["netAsset"]
                         position["objetivo"] = crypto[0]["objetivo"]
                         position["empresa"] = crypto[0]["descripcion"]
-                        position["costobase"] = (
-                            crypto[0]["avgcost"] * position["position"]
-                        )
-                        position["dividendo"] = (
-                            keys_asset["rewards"] * position["mrkprice"]
-                        )
-                        position["mktvalue"] = (
-                            position["mrkprice"] * position["position"]
-                        )
+                        position["costobase"] = crypto[0]["avgcost"] * position["position"]
+                        position["dividendo"] = keys_asset["rewards"] * position["mrkprice"]
+                        position["mktvalue"] = position["mrkprice"] * position["position"]
 
-                        position["unrealizedpnl"] = (
-                            position["mktvalue"] - position["costobase"]
-                        )
+                        position["unrealizedpnl"] = position["mktvalue"] - position["costobase"]
 
                         if position["costobase"] > 0:
-                            position["retorno"] = (
-                                position["unrealizedpnl"] / position["costobase"]
-                            )
+                            position["retorno"] = position["unrealizedpnl"] / position["costobase"]
                         else:
                             position["retorno"] = 0
                         position["deuda"] = keys_asset["debit USDT"]
 
                         # rescribe el peso de la position
-                        position["peso"] = (
-                            position["costobase"] / self.update_peso_position()
-                        )
+                        position["peso"] = position["costobase"] / self.update_peso_position()
 
                         position["region"], position["country"] = "Crypto", "Crypto"
                         if "region" in yf_activo:
@@ -1342,17 +1215,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         # inserta position
                         if position["ticket"] > asset:
                             p = {}
-                            crypto, found = (
-                                self.RepositorioOportunidades.select_otros_activos(
-                                    symbol=asset
-                                )
-                            )
+                            crypto, found = self.RepositorioOportunidades.select_otros_activos(symbol=asset)
                             if not found:
-                                crypto, found = (
-                                    self.RepositorioOportunidades.insert_otros_activos(
-                                        symbol=asset
-                                    )
-                                )
+                                crypto, found = self.RepositorioOportunidades.insert_otros_activos(symbol=asset)
 
                             keys_asset = values["position"]
                             p["ticket"] = asset
@@ -1367,9 +1232,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             p["exDividendDate"] = "9999-12-31"
                             p["dividendYield"] = 0
 
-                            p["position"] = (
-                                keys_asset["borrowed"] + keys_asset["netAsset"]
-                            )
+                            p["position"] = keys_asset["borrowed"] + keys_asset["netAsset"]
                             p["objetivo"] = crypto[0]["objetivo"]
                             p["mrkprice"] = crypto[0]["avgcost"]
                             p["costobase"] = crypto[0]["avgcost"] * p["position"]
@@ -1377,11 +1240,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             p["mktvalue"] = p["mrkprice"] * p["position"]
 
                             p["unrealizedpnl"] = p["mktvalue"] - p["costobase"]
-                            p["retorno"] = (
-                                p["unrealizedpnl"] / p["costobase"]
-                                if p["costobase"] > 0
-                                else 0
-                            )
+                            p["retorno"] = p["unrealizedpnl"] / p["costobase"] if p["costobase"] > 0 else 0
                             p["deuda"] = keys_asset["debit USDT"]
                             p["open"] = 0.0
                             p["dgyp"] = 0.0
@@ -1477,11 +1336,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         if collateralAmount != 0 or totalAmount != 0:
 
                             free, lock, Rewards = 0.0, 0.0, 0.0
-                            symbol = (
-                                keys["asset"] + "USDT"
-                                if keys["asset"] != "USDT"
-                                else keys["asset"]
-                            )
+                            symbol = keys["asset"] + "USDT" if keys["asset"] != "USDT" else keys["asset"]
 
                             # sum free obtenido en spot a lo disponible en earn
                             if symbol in assets.keys():
@@ -1522,15 +1377,11 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 if response:
                     if response["total"] > 0:
                         field = response["rows"][0]
-                        assets[keys]["position"]["debit USDT"] = float(
-                            field["totalDebt"]
-                        )
+                        assets[keys]["position"]["debit USDT"] = float(field["totalDebt"])
 
         # actualiza tablas y variables globales
         def update_entorno_e_inversion():
-            positions = self.RepositorioOportunidades.select_inversion(
-                tipoin=self.vehiculo, ticket="all"
-            )
+            positions = self.RepositorioOportunidades.select_inversion(tipoin=self.vehiculo, ticket="all")
 
             self.assets, self.activos = {}, []
             for keys, value in assets.items():
@@ -1540,9 +1391,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
             # si hay position en assets e in_position != [] actualiza la tabla inversion
             if positions and self.assets:
-                out_positions = update_inversion_crypto(
-                    api=self.assets, in_positions=positions
-                )
+                out_positions = update_inversion_crypto(api=self.assets, in_positions=positions)
 
                 # self.update_self_positions(in_positions=out_positions)
                 self.RepositorioOportunidades.update_inversion(
@@ -1597,9 +1446,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         symbol = key["contractDesc"]
 
                         # obtiene información de dividendos
-                        (yf_activo, datos, ind_update) = self.ts_yfinance_symbol(
-                            symbol=symbol, vehiculo=self.vehiculo
-                        )
+                        (yf_activo, datos, ind_update) = self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
 
                         objetivo, x_open, price, empresa = 0.0, 0.0, 0.0, ""
                         sector = key["sector"] if "sector" in key else "buscar"
@@ -1612,10 +1459,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             )
 
                         price = key["mktPrice"]
-                        if (
-                            "dividendYield" in yf_activo
-                            and "trailingAnnualDividendRate" in yf_activo
-                        ):
+                        if "dividendYield" in yf_activo and "trailingAnnualDividendRate" in yf_activo:
                             dividendYield = yf_activo["dividendYield"]
                             if "previousClose" in yf_activo:
                                 price = yf_activo["previousClose"]
@@ -1633,9 +1477,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                 dividendYield = 0.0
 
                         if "exDividendDate" in yf_activo:
-                            exDividendDate = datetime.fromtimestamp(
-                                yf_activo["exDividendDate"]
-                            )
+                            exDividendDate = datetime.fromtimestamp(yf_activo["exDividendDate"])
 
                         if "open" in yf_activo:
                             x_open = yf_activo["open"] * factor
@@ -1678,30 +1520,20 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         p["position"] = key["position"]
                         p["mrkprice"] = key["mktPrice"] * factor
                         p["mktvalue"] = key["mktPrice"] * key["position"] * factor
-                        p["retorno"] = (
-                            (key["mktValue"] - p["costobase"]) / p["costobase"]
-                            if p["costobase"] > 0
-                            else 0
-                        )
+                        p["retorno"] = (key["mktValue"] - p["costobase"]) / p["costobase"] if p["costobase"] > 0 else 0
                         p["sector"] = sector
                         p["ticket"] = symbol
                         p["deuda"] = 0
                         p["conid"] = str(key["conid"])
                         p["open"] = x_open
-                        p["dgyp"] = (
-                            p["mrkprice"] - p["open"] if p["open"] > 0 else 0
-                        ) * p["position"]
+                        p["dgyp"] = (p["mrkprice"] - p["open"] if p["open"] > 0 else 0) * p["position"]
                         p["peso"] = 0
 
                         # obtiene la positions anterior, la estrategia y otros valores
                         for position in p_positions:
                             if position["ticket"] == p["ticket"]:
                                 p["estrategia"] = position["estrategia"]
-                                p["objetivo"] = (
-                                    position["objetivo"]
-                                    if p["objetivo"] == 0
-                                    else p["objetivo"]
-                                )
+                                p["objetivo"] = position["objetivo"] if p["objetivo"] == 0 else p["objetivo"]
 
                                 if "name" in key.keys():
                                     p["empresa"] = key["name"]
@@ -1738,12 +1570,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 self.summary = response
 
                 # obtiene positions a partir de API
-                cartera = self.IClient.portfolio_account_positions(
-                    account_id=self.account, page_id=0
-                )
-                in_positions = self.RepositorioOportunidades.select_inversion(
-                    tipoin=self.vehiculo, ticket="all"
-                )
+                cartera = self.IClient.portfolio_account_positions(account_id=self.account, page_id=0)
+                in_positions = self.RepositorioOportunidades.select_inversion(tipoin=self.vehiculo, ticket="all")
 
                 # actualiza inversiones globales self.assets y self.activos
                 if cartera and in_positions:
@@ -1814,9 +1642,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
             print(f"[_parse_ib_date({date_str})]: {e}")
             return None
 
-    def _validate_dividend_data_freshness(
-        self, symbol, activo, dividends_history, display_log=False
-    ):
+    def _validate_dividend_data_freshness(self, symbol, activo, dividends_history, display_log=False):
         """
         Valida que los datos de dividendos estén actualizados.
 
@@ -2040,9 +1866,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
             - Retorna información completa para análisis de rebalanceo
             """
             try:
-                ddatos, x_categoria, x_meses = self.rendimiento_dividends(
-                    activo=activo, datos=pdatos, symbol=x_symbol
-                )
+                ddatos, x_categoria, x_meses = self.rendimiento_dividends(activo=activo, datos=pdatos, symbol=x_symbol)
                 if not ddatos.empty:
                     d_json = ddatos.to_json(orient="split")
                     campos.update({"categoriaActivo": x_categoria[0]})
@@ -2059,9 +1883,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 for symbol in activos:
                     # actualiza lista
                     ticket = convierte_ticket_crypto(symbol)
-                    (yf_activo, datos, ind_update) = self.ts_yfinance_symbol(
-                        symbol=ticket, vehiculo=self.vehiculo
-                    )
+                    (yf_activo, datos, ind_update) = self.ts_yfinance_symbol(symbol=ticket, vehiculo=self.vehiculo)
 
                     # ============================================================================================================
                     # MEJORA: Procesar dividendos solo si:
@@ -2069,20 +1891,12 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # 2. Tiene información de dividendYield
                     # 3. Tiene historial de dividendos en datos
                     # ============================================================================================================
-                    if (
-                        not ind_update
-                        and ("dividendYield" in yf_activo)
-                        and ("Dividends" in datos)
-                    ):
+                    if not ind_update and ("dividendYield" in yf_activo) and ("Dividends" in datos):
                         # VALIDACIÓN: Verificar frescura de datos de dividendos
                         dividends_history = datos["Dividends"]
-                        is_valid, warning = self._validate_dividend_data_freshness(
-                            symbol, yf_activo, dividends_history
-                        )
+                        is_valid, warning = self._validate_dividend_data_freshness(symbol, yf_activo, dividends_history)
 
-                        (market, ix) = self.Market.select(
-                            account=self.account, symbol=ticket
-                        )
+                        (market, ix) = self.Market.select(account=self.account, symbol=ticket)
 
                         # obtiene información del activo usando InfoYfinance
                         # NOTA: InfoYfinance ya extrae campos clave como:
@@ -2094,9 +1908,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                         # Construye información estructurada de dividendos
                         # Llama a rendimiento_dividends() que calcula estrategia de inversión
-                        fields, categoria, meses = construct_info_dividends(
-                            ticket, yf_activo, datos, x_campos.info
-                        )
+                        fields, categoria, meses = construct_info_dividends(ticket, yf_activo, datos, x_campos.info)
 
                         columnas, values = [], []
                         for keys, info in fields.items():
@@ -2105,11 +1917,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                 columnas.append(keys)
                                 values.append(info)
                             else:
-                                info = (
-                                    info
-                                    if info not in ("Infinity", "nan", "NaN")
-                                    else 0
-                                )
+                                info = info if info not in ("Infinity", "nan", "NaN") else 0
                                 columnas.append(keys)
                                 values.append(info)
 
@@ -2153,9 +1961,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 nonlocal iteraStream
                 try:
                     while True:
-                        DataHub.update_self_procesos(
-                            proces="thread", tarea=task, itera=iteraStream
-                        )
+                        DataHub.update_self_procesos(proces="thread", tarea=task, itera=iteraStream)
                         self.schedule_WebsocketBinanceStream(limit=limit)
                         iteraStream += 1
 
@@ -2166,9 +1972,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 nonlocal iteraClient
                 try:
                     while True:
-                        DataHub.update_self_procesos(
-                            proces="thread", tarea=task, itera=iteraClient
-                        )
+                        DataHub.update_self_procesos(proces="thread", tarea=task, itera=iteraClient)
                         self.schedule_WebsocketBinanceApiClient(limit=limit)
                         iteraClient += 1
 
@@ -2219,9 +2023,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                         iteraStream += 1
                         self.WsStock.my_message = self.on_message_IBrks_websocket
-                        DataHub.update_self_procesos(
-                            proces="thread", tarea=task, itera=iteraStream
-                        )
+                        DataHub.update_self_procesos(proces="thread", tarea=task, itera=iteraStream)
                         self.WsStock.websocket_loop(limit=limit)
 
                 except Exception as e:
@@ -2234,9 +2036,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # invoca API y actualiza inversiones
                     self.carga_inversion_en_positions()
                     self.conector_api_vehiclo()
-                    print(
-                        f"Start:(run_positions({self.vehiculo},{len(self.positions)})"
-                    )
+                    print(f"Start:(run_positions({self.vehiculo},{len(self.positions)})")
 
                     # Start thread Websocket -----------------------------------------------------------------------------
                     TSocket, iteraStream = 7200, 1
@@ -2254,9 +2054,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     self.procesos.append({"widget": {socket: 0}})
 
                 else:
-                    raise ValueError(
-                        "run_stock()]: {}".format("No hay conección con IBKR's")
-                    )
+                    raise ValueError("run_stock()]: {}".format("No hay conección con IBKR's"))
             except Exception as error:
                 print("[run_stock]: {}".format(error))
 
@@ -2330,9 +2128,7 @@ class DashMain:
         self.root_note = ttk.Frame(self.root, padding=(1, 1, 1, 1), style="C.TFrame")
         self.root_note.pack(side=tk.TOP, expand=True, anchor=tk.NW)
 
-        self.nb = ttk.Notebook(
-            self.root_note, style="C.TNotebook", width=self.dw, height=self.dh
-        )
+        self.nb = ttk.Notebook(self.root_note, style="C.TNotebook", width=self.dw, height=self.dh)
         self.nb.pack(anchor="nw", pady=10, expand=True)
         self.root_note.bind("<<NotebookTabChanged>>", self.on_tab_changed)
 
@@ -2369,22 +2165,12 @@ class DashMain:
 
         # frames de Gráficos y figuras principales
         pn0 = ttk.Frame(self.root, padding=(1, 1, 1, 1), style="C.TFrame")
-        pn1 = tk.Frame(
-            self.root, bg="white", border=2
-        )  # frame desemenño ultimos 6 meses
+        pn1 = tk.Frame(self.root, bg="white", border=2)  # frame desemenño ultimos 6 meses
         pn2 = tk.Frame(self.root, bg="white", border=2)  # frame Fear and Greed
-        pn3 = tk.Frame(
-            self.root, bg="white", border=2
-        )  # frame Diversificacion por dividendos
-        pn4 = tk.Frame(
-            self.root, bg="white", border=2
-        )  # frame Diversificacion por sector
-        pn5 = tk.Frame(
-            self.root, bg="white", border=2
-        )  # frame Diversificacion por tipo de activo
-        pn6 = tk.Frame(
-            self.root, bg="white", border=2
-        )  # frame Diversificacion por region
+        pn3 = tk.Frame(self.root, bg="white", border=2)  # frame Diversificacion por dividendos
+        pn4 = tk.Frame(self.root, bg="white", border=2)  # frame Diversificacion por sector
+        pn5 = tk.Frame(self.root, bg="white", border=2)  # frame Diversificacion por tipo de activo
+        pn6 = tk.Frame(self.root, bg="white", border=2)  # frame Diversificacion por region
 
         pn0.place(x=self.df + 5, y=10)
         pn1.place(x=self.df + 5, y=190)
@@ -2482,39 +2268,19 @@ class DashMain:
         self.InvProgress.pack(side=tk.LEFT, pady=5)
 
         # áreas y figuras de gráficos principales --------------------------------------------------------------------
-        self.rg0 = Figure(
-            figsize=(2.77, 2.4), dpi=110, layout="tight"
-        )  # firgura de rendimiento ultimos 6 meses
+        self.rg0 = Figure(figsize=(2.77, 2.4), dpi=110, layout="tight")  # firgura de rendimiento ultimos 6 meses
         self.rg1 = Figure(figsize=(2.77, 2.4), dpi=110)  # figura de Fear and Greed
-        self.rg2 = Figure(
-            figsize=(5.55, 2.4), dpi=110, layout="tight"
-        )  # figura de Diversificación por dividendos
-        self.rg3 = Figure(
-            figsize=(5.75, 2.9), dpi=110, layout="tight"
-        )  # figura de Diversificación por sector
-        self.rg4 = Figure(
-            figsize=(5.75, 2.9), dpi=110, layout="tight"
-        )  # figura de Diversificación por tipo de activo
-        self.rg5 = Figure(
-            figsize=(5.75, 2.9), dpi=110, layout="tight"
-        )  # figura de Diversificación por region
+        self.rg2 = Figure(figsize=(5.55, 2.4), dpi=110, layout="tight")  # figura de Diversificación por dividendos
+        self.rg3 = Figure(figsize=(5.75, 2.9), dpi=110, layout="tight")  # figura de Diversificación por sector
+        self.rg4 = Figure(figsize=(5.75, 2.9), dpi=110, layout="tight")  # figura de Diversificación por tipo de activo
+        self.rg5 = Figure(figsize=(5.75, 2.9), dpi=110, layout="tight")  # figura de Diversificación por region
 
-        self.rv0 = FigureCanvasTkAgg(
-            self.rg0, master=pn1
-        )  # canvas de rendimiento ultimos 6 meses
+        self.rv0 = FigureCanvasTkAgg(self.rg0, master=pn1)  # canvas de rendimiento ultimos 6 meses
         self.rv1 = FigureCanvasTkAgg(self.rg1, master=pn2)  # canvas de Fear and Greed
-        self.rv2 = FigureCanvasTkAgg(
-            self.rg2, master=pn3
-        )  # canvas de Diversificación por dividendos
-        self.rv3 = FigureCanvasTkAgg(
-            self.rg3, master=pn4
-        )  # canvas de Diversificación por sector
-        self.rv4 = FigureCanvasTkAgg(
-            self.rg4, master=pn5
-        )  # canvas de Diversificación por tipo de activo
-        self.rv5 = FigureCanvasTkAgg(
-            self.rg5, master=pn6
-        )  # canvas de Diversificación por region
+        self.rv2 = FigureCanvasTkAgg(self.rg2, master=pn3)  # canvas de Diversificación por dividendos
+        self.rv3 = FigureCanvasTkAgg(self.rg3, master=pn4)  # canvas de Diversificación por sector
+        self.rv4 = FigureCanvasTkAgg(self.rg4, master=pn5)  # canvas de Diversificación por tipo de activo
+        self.rv5 = FigureCanvasTkAgg(self.rg5, master=pn6)  # canvas de Diversificación por region
 
         self.rg0.set_facecolor(self.colors["bgcolor"])
         self.rg0.set_facecolor(self.colors["bgcolor"])
@@ -2664,25 +2430,19 @@ class DashMain:
 
             per = costo / unprofit if unprofit > 0 else 0
 
-            self.crypto.set_header_panel(
-                Dgyp=dgyp, Nav=nav, Unpyl=unpyl, Unprofit=unprofit, Per=per
-            )
+            self.crypto.set_header_panel(Dgyp=dgyp, Nav=nav, Unpyl=unpyl, Unprofit=unprofit, Per=per)
             self.crypto.header_panel()
 
         try:
             cb = BB().spot
-            self.crypto = WidgetVehiculo(
-                master=self.win1, account=account, vehiculo=vehiculo
-            )
+            self.crypto = WidgetVehiculo(master=self.win1, account=account, vehiculo=vehiculo)
 
             if cb.check_binance_connection():
 
                 self.crypto_ts = DatosVehivulo(account=account, vehiculo=vehiculo)
                 self.crypto_ts.run()
 
-                self.procesos.append(
-                    {"widget": {"update_widget(Crypto)": self.it_crypto}}
-                )
+                self.procesos.append({"widget": {"update_widget(Crypto)": self.it_crypto}})
 
                 # información para widgetCrypto
                 self.crypto.positions = self.crypto_ts.positions
@@ -2730,17 +2490,16 @@ class DashMain:
 
         try:
             ib = IB()
-            self.stock = WidgetVehiculo(
-                master=self.win0, account=account, vehiculo=vehiculo
-            )
+            # ib.ensure_connection()
+            ib.start_tickle(interval=30, datahub=DataHub)
+
+            self.stock = WidgetVehiculo(master=self.win0, account=account, vehiculo=vehiculo)
 
             if ib.is_localhost():
                 self.stock_ts = DatosVehivulo(account=account, vehiculo=vehiculo)
                 self.stock_ts.run()
 
-                self.procesos.append(
-                    {"widget": {"update_widget(Stock)": self.it_stock}}
-                )
+                self.procesos.append({"widget": {"update_widget(Stock)": self.it_stock}})
 
                 # información para widgetCrypto
                 self.stock.positions = self.stock_ts.positions
@@ -2771,12 +2530,12 @@ class DashMain:
 
         def mostrar_asistente():
             """Callback para mostrar el chatbot"""
-            if hasattr(self, 'chatbot') and self.chatbot:
+            if hasattr(self, "chatbot") and self.chatbot:
                 self.chatbot.deiconify()
 
         def mostrar_boton():
             """Callback para mostrar el botón flotante"""
-            if hasattr(self, 'boton_flotante') and self.boton_flotante:
+            if hasattr(self, "boton_flotante") and self.boton_flotante:
                 self.boton_flotante.deiconify()
 
         try:
@@ -2798,7 +2557,7 @@ class DashMain:
         # Inicializar monitores de modelos IA después de que chatbot esté disponible
         # Los monitores están en la clase system_status, pasamos el chatbot como parámetro
         try:
-            if hasattr(self, 'system') and self.chatbot is not None:
+            if hasattr(self, "system") and self.chatbot is not None:
                 self.system.sell_ia_monitor(chatbot=self.chatbot)
                 self.system.buy_ia_monitor(chatbot=self.chatbot)
         except Exception:
@@ -2817,9 +2576,7 @@ class DashMain:
 
                 self.it_crypto += 1
                 self.crypto.header_panel()
-                DataHub.update_self_procesos(
-                    proces="widget", tarea="update_widget(Crypto)", itera=self.it_crypto
-                )
+                DataHub.update_self_procesos(proces="widget", tarea="update_widget(Crypto)", itera=self.it_crypto)
 
                 self.crypto.update_panelVehiculo(orden=self.crypto.orden)
 
@@ -2831,9 +2588,7 @@ class DashMain:
                 self.stock.summary = self.stock_ts.summary
 
                 self.stock.header_panel()
-                DataHub.update_self_procesos(
-                    proces="widget", tarea="update_widget(Stock)", itera=self.it_stock
-                )
+                DataHub.update_self_procesos(proces="widget", tarea="update_widget(Stock)", itera=self.it_stock)
 
                 self.stock.update_panelVehiculo(orden=self.stock.orden)
                 # self.stock.schedule_order_remote()
@@ -2841,9 +2596,7 @@ class DashMain:
             # actualiza cada 1/2'' segundos
             # Verificar si debemos continuar ejecutando
             if self.is_running:
-                after_id = self.root.after(
-                    500, lambda: self.update_widget(vehiculo=vehiculo)
-                )
+                after_id = self.root.after(500, lambda: self.update_widget(vehiculo=vehiculo))
                 self.after_ids.append(after_id)
             # DataHub.manager_after._safe(
             #    500, lambda: self.update_widget(vehiculo=vehiculo), name="update_widget"
@@ -2957,9 +2710,7 @@ class DashMain:
                     account = values[fields.index("account")]
 
                     # ejecuta API y actualiza order_trader
-                    response = self.crypto_ts.BClient.get_cancel_order(
-                        symbol=symbol, orderId=orderId
-                    )
+                    response = self.crypto_ts.BClient.get_cancel_order(symbol=symbol, orderId=orderId)
                     if response:
                         timestamp = response["transactTime"] / 1000.0
                         stamp = datetime.fromtimestamp(timestamp)
@@ -2980,9 +2731,7 @@ class DashMain:
                     # ejecuta API y actualiza order_trader
                     # response = self.stock_ts.IClient.delete_order(account_id=account, customer_order_id=orderId)
 
-                    response = self.stock_ts.IClient.deleteorder(
-                        account_id=account, customer_order_id=orderId
-                    )
+                    response = self.stock_ts.IClient.deleteorder(account_id=account, customer_order_id=orderId)
 
                     if response:
                         timestamp = response["transactTime"] / 1000.0
@@ -3074,9 +2823,7 @@ class DashMain:
                 "del",
             ]
             heard = ttk.Treeview(win1, columns=cols, height=1, style="TFrame")
-            tree = ttk.Treeview(
-                win2, columns=cols, height=18, style="TFrame", show="tree"
-            )
+            tree = ttk.Treeview(win2, columns=cols, height=18, style="TFrame", show="tree")
 
             config_treeview_ordenes(tree, heard)
 
@@ -3173,12 +2920,8 @@ class DashMain:
             try:
 
                 # if symbol in self.stock_ts.info:
-                activo, datos, update = self.crypto_ts.ts_yfinance_symbol(
-                    symbol=symbol, vehiculo="Stock"
-                )
-                self.crypto_ts.rendimiento_dividends(
-                    fg=rg, activo=activo, datos=datos, symbol=symbol, plot="yes"
-                )
+                activo, datos, update = self.crypto_ts.ts_yfinance_symbol(symbol=symbol, vehiculo="Stock")
+                self.crypto_ts.rendimiento_dividends(fg=rg, activo=activo, datos=datos, symbol=symbol, plot="yes")
                 rv.draw()
 
                 # resultados del simbolo
@@ -3187,13 +2930,9 @@ class DashMain:
                 growth = (final - inicial) / inicial
                 analisis = {
                     "symbol": symbol,
-                    "Precio": "{:>10.2f}".format(inicial)
-                    + " - "
-                    + "{:>10.2f}".format(final),
+                    "Precio": "{:>10.2f}".format(inicial) + " - " + "{:>10.2f}".format(final),
                     "Growth": "{:>10.2%}".format(growth),
-                    "Dividend Yield": "{:>10.2%}".format(
-                        activo.get("dividendYield", 0)
-                    ),
+                    "Dividend Yield": "{:>10.2%}".format(activo.get("dividendYield", 0)),
                     "Dividend Rate": "{:>10.2f}".format(activo.get("dividendRate", 0)),
                     "P/E Ratio": "{:>10.2f}".format(activo.get("trailingPE", 0)),
                     "Beta": "{:>10.2f}".format(activo.get("beta", 0)),
@@ -3206,9 +2945,7 @@ class DashMain:
                         bg=self.bgcolor,
                         font=("Arial", 9, "bold"),
                     )
-                    lbv = tk.Label(
-                        windows, text=str(value), bg=self.bgcolor, font=("Arial", 9)
-                    )
+                    lbv = tk.Label(windows, text=str(value), bg=self.bgcolor, font=("Arial", 9))
                     lbv.grid(row=i + 1, column=1, padx=5, pady=1, sticky=W)
                     lbl.grid(row=i + 1, column=0, padx=5, pady=1, sticky=W)
 
@@ -3248,9 +2985,7 @@ class DashMain:
         # selecciona y clasifica detalle por symbol y dividendos
         def detalle_dividendos(meses):
             book, date = {}, datetime.now().month
-            positions = self.PlanInversion.select_inversion(
-                tipoin="Stock", ticket="all"
-            )
+            positions = self.PlanInversion.select_inversion(tipoin="Stock", ticket="all")
             for position in positions:
                 symbol = convierte_ticket_crypto(position["ticket"])
                 (market, ix) = self.Market.select(account="U4214563", symbol=symbol)
@@ -3262,17 +2997,11 @@ class DashMain:
                     fecha = market[0][ix.index("exDividendDate")]
                     trallingAnual = market[0][ix.index("trailingAnnualDividendRate", 0)]
 
-                    exdiv = (
-                        fecha.strftime("%d-%b")
-                        if fecha and fecha.month == date
-                        else " "
-                    )
+                    exdiv = fecha.strftime("%d-%b") if fecha and fecha.month == date else " "
                     avgcost = position["costobase"] / position["position"]
 
                     dividends = [0] * 12
-                    a_meses = (
-                        meses if string is None or string == "" else string.split(",")
-                    )
+                    a_meses = meses if string is None or string == "" else string.split(",")
 
                     # calcula la cantidad de pagos - filtrar cadenas vacías
                     distribuir = [s.strip()[:3] for s in a_meses if s.strip()]
@@ -3303,9 +3032,7 @@ class DashMain:
         # selecciona y clasifica detalle por symbol y sector
         def detalle_sector(meses):
             book, date = {}, datetime.now().month
-            positions = self.PlanInversion.select_inversion(
-                tipoin="Stock", ticket="all"
-            )
+            positions = self.PlanInversion.select_inversion(tipoin="Stock", ticket="all")
             orden = [{"Sector": "sector"}, "DES"]
             cartera = sort_positions(positions, orden)
 
@@ -3321,18 +3048,12 @@ class DashMain:
                     fecha = market[0][ix.index("exDividendDate")]
                     trallingAnual = market[0][ix.index("trailingAnnualDividendRate", 0)]
 
-                    exdiv = (
-                        fecha.strftime("%d-%b")
-                        if fecha and fecha.month == date
-                        else " "
-                    )
+                    exdiv = fecha.strftime("%d-%b") if fecha and fecha.month == date else " "
                     avgcost = position["costobase"] / position["position"]
 
                     # Solo calcular dividendos si ha pagado en el último año
                     if trallingAnual > 0:
-                        a_meses = (
-                            meses if string is None or string == "" else string.split(",")
-                        )
+                        a_meses = meses if string is None or string == "" else string.split(",")
 
                         # calcula la cantidad de pagos - filtrar cadenas vacías
                         distribuir = [s.strip()[:3] for s in a_meses if s.strip()]
@@ -3367,9 +3088,7 @@ class DashMain:
         # selecciona y clasifica detalle por symbol y tipo activo
         def detalle_activo(meses):
             book, date = {}, datetime.now().month
-            positions = self.PlanInversion.select_inversion(
-                tipoin="activo", ticket="all"
-            )
+            positions = self.PlanInversion.select_inversion(tipoin="activo", ticket="all")
 
             orden = [{"Activo": "tipoActivo"}, "DES"]
             cartera = sort_positions(positions, orden)
@@ -3384,16 +3103,10 @@ class DashMain:
                     div = market[0][ix.index("dividendRate")]
                     string = market[0][ix.index("monthDividendsPay")]
                     fecha = market[0][ix.index("exDividendDate")]
-                    exdiv = (
-                        fecha.strftime("%d-%b")
-                        if fecha and fecha.month == date
-                        else " "
-                    )
+                    exdiv = fecha.strftime("%d-%b") if fecha and fecha.month == date else " "
                     avgcost = position["costobase"] / position["position"]
 
-                    a_meses = (
-                        meses if string is None or string == "" else string.split(",")
-                    )
+                    a_meses = meses if string is None or string == "" else string.split(",")
 
                     # calcula la cantidad de pagos - filtrar cadenas vacías
                     distribuir = [s.strip()[:3] for s in a_meses if s.strip()]
@@ -3479,11 +3192,7 @@ class DashMain:
                 for symbol, activo in book.items():
                     t_symbol, total = [""] * 12, 0.0
                     for i in range(12):
-                        t_symbol[i] = (
-                            "{:4.1f}".format(activo["dividends"][i])
-                            if activo["dividends"][i] > 0
-                            else ""
-                        )
+                        t_symbol[i] = "{:4.1f}".format(activo["dividends"][i]) if activo["dividends"][i] > 0 else ""
                         resumen_mes[i] += activo["dividends"][i]
 
                     total_row = "{:4.1f}".format(sum(activo["dividends"]))
@@ -3570,11 +3279,7 @@ class DashMain:
 
                     t_symbol, total = [""] * 12, 0.0
                     for i in range(12):
-                        t_symbol[i] = (
-                            "{:4.1f}".format(activo["dividends"][i])
-                            if activo["dividends"][i] > 0
-                            else ""
-                        )
+                        t_symbol[i] = "{:4.1f}".format(activo["dividends"][i]) if activo["dividends"][i] > 0 else ""
                         resumen_mes[i] += activo["dividends"][i]
 
                     if min_base > activo["costobase"]:
@@ -3662,11 +3367,7 @@ class DashMain:
 
                     t_symbol, total = [""] * 12, 0.0
                     for i in range(12):
-                        t_symbol[i] = (
-                            "{:4.1f}".format(activo["dividends"][i])
-                            if activo["dividends"][i] > 0
-                            else ""
-                        )
+                        t_symbol[i] = "{:4.1f}".format(activo["dividends"][i]) if activo["dividends"][i] > 0 else ""
                         resumen_mes[i] += activo["dividends"][i]
 
                     if min_base > activo["costobase"]:
@@ -3721,12 +3422,8 @@ class DashMain:
             rnb.grab_set()
             rnb.protocol("WM_DELETE_WINDOW", eexit)
 
-            frm1 = ttk.Frame(
-                rnb, padding=(2, 10, 2, 2), style="C.TFrame", width=600, height=300
-            )
-            frm2 = ttk.Frame(
-                rnb, padding=(2, 10, 2, 2), style="C.TFrame", width=600, height=200
-            )
+            frm1 = ttk.Frame(rnb, padding=(2, 10, 2, 2), style="C.TFrame", width=600, height=300)
+            frm2 = ttk.Frame(rnb, padding=(2, 10, 2, 2), style="C.TFrame", width=600, height=200)
 
             fr20 = ttk.Frame(frm2, padding=(0, 0, 0, 0), style="C.TFrame")
             fr21 = ttk.Frame(frm2, padding=(0, 0, 0, 0))
@@ -3831,9 +3528,7 @@ class DashMain:
             "legend": "outside upper right",
             "aspect": 0.30,
         }
-        DataHub.manager_buysell["activos"] = grupo_activos(
-            fg=self.rg4, parm=parm, strategy=xestrategia
-        )
+        DataHub.manager_buysell["activos"] = grupo_activos(fg=self.rg4, parm=parm, strategy=xestrategia)
         self.rv4.draw()
 
         # Diversificación vs. región
@@ -3843,9 +3538,7 @@ class DashMain:
             "legend": "outside upper right",
             "aspect": 0.30,
         }
-        DataHub.manager_buysell["region"] = grupo_region(
-            fg=self.rg5, strategy=xestrategia, parm=parm
-        )
+        DataHub.manager_buysell["region"] = grupo_region(fg=self.rg5, strategy=xestrategia, parm=parm)
         self.rv5.draw()
 
         # mantiene actualizado los graficos cada 20m o 1200.000ms
@@ -3889,26 +3582,12 @@ class DashMain:
 
                 for session in sessions:
                     # Formatear fechas
-                    fesesion_str = (
-                        session["fesesion"].strftime("%Y-%m-%d %H:%M")
-                        if session.get("fesesion")
-                        else ""
-                    )
-                    fiscalYear_str = (
-                        session["fiscalYear"].strftime("%Y-%m-%d")
-                        if session.get("fiscalYear")
-                        else ""
-                    )
-                    fefund_str = (
-                        session["fefund"].strftime("%Y-%m-%d")
-                        if session.get("fefund")
-                        else ""
-                    )
+                    fesesion_str = session["fesesion"].strftime("%Y-%m-%d %H:%M") if session.get("fesesion") else ""
+                    fiscalYear_str = session["fiscalYear"].strftime("%Y-%m-%d") if session.get("fiscalYear") else ""
+                    fefund_str = session["fefund"].strftime("%Y-%m-%d") if session.get("fefund") else ""
 
                     # Mostrar estrella si es cuenta principal
-                    idcuenta_principal_str = (
-                        "⭐" if session.get("Idcuenta_principal", False) else ""
-                    )
+                    idcuenta_principal_str = "⭐" if session.get("Idcuenta_principal", False) else ""
 
                     # Solo incluir campos visibles (sin id, orcartera, xstrategy, userapi, userpass, private_key, public_key)
                     row_values = [
@@ -3927,9 +3606,7 @@ class DashMain:
 
             except Exception as e:
                 print(f"[refresh_sessions()]: {e}")
-                MyMessageBox(session_window).showerror(
-                    "Error", f"Error al cargar sesiones: {str(e)}"
-                )
+                MyMessageBox(session_window).showerror("Error", f"Error al cargar sesiones: {str(e)}")
 
         def on_double_click(event):
             """Maneja doble-click en fila para abrir editor"""
@@ -3980,24 +3657,16 @@ class DashMain:
 
                     if index < len(sessions):
                         session = sessions[index]
-                        success = BDsystem.delete_sesion(
-                            session["id"], session["vehiculo"]
-                        )
+                        success = BDsystem.delete_sesion(session["id"], session["vehiculo"])
 
                         if success:
-                            MyMessageBox(session_window).showinfo(
-                                "Éxito", "Sesión eliminada correctamente"
-                            )
+                            MyMessageBox(session_window).showinfo("Éxito", "Sesión eliminada correctamente")
                             refresh_sessions()
                         else:
-                            MyMessageBox(session_window).showerror(
-                                "Error", "No se pudo eliminar la sesión"
-                            )
+                            MyMessageBox(session_window).showerror("Error", "No se pudo eliminar la sesión")
             except Exception as e:
                 print(f"[on_delete_click()]: {e}")
-                MyMessageBox(session_window).showerror(
-                    "Error", f"Error al eliminar sesión: {str(e)}"
-                )
+                MyMessageBox(session_window).showerror("Error", f"Error al eliminar sesión: {str(e)}")
 
         def on_envs_click():
             """
@@ -4072,49 +3741,21 @@ class DashMain:
                         "bgcolor": entry_bgcolor.get().strip(),
                         "cgcolor": entry_cgcolor.get().strip(),
                         "cchart": cchart_data,
-                        "display": (
-                            entry_display.get().strip()
-                            if entry_display.get().strip()
-                            else None
-                        ),
-                        "max_points": (
-                            int(entry_max_points.get().strip())
-                            if entry_max_points.get().strip()
-                            else 40
-                        ),
-                        "interval": (
-                            int(entry_interval.get().strip())
-                            if entry_interval.get().strip()
-                            else 1
-                        ),
-                        "CpuLock": (
-                            entry_cpulock.get().strip()
-                            if entry_cpulock.get().strip()
-                            else None
-                        ),
-                        "MinProfit": (
-                            float(entry_minprofit.get().strip())
-                            if entry_minprofit.get().strip()
-                            else 80.0
-                        ),
+                        "display": (entry_display.get().strip() if entry_display.get().strip() else None),
+                        "max_points": (int(entry_max_points.get().strip()) if entry_max_points.get().strip() else 40),
+                        "interval": (int(entry_interval.get().strip()) if entry_interval.get().strip() else 1),
+                        "CpuLock": (entry_cpulock.get().strip() if entry_cpulock.get().strip() else None),
+                        "MinProfit": (float(entry_minprofit.get().strip()) if entry_minprofit.get().strip() else 80.0),
                         "Toleranciasell": (
-                            float(entry_toleranciasell.get().strip())
-                            if entry_toleranciasell.get().strip()
-                            else 0.10
+                            float(entry_toleranciasell.get().strip()) if entry_toleranciasell.get().strip() else 0.10
                         ),
-                        "MaxRoi": (
-                            float(entry_maxroi.get().strip())
-                            if entry_maxroi.get().strip()
-                            else 0.09
-                        ),
+                        "MaxRoi": (float(entry_maxroi.get().strip()) if entry_maxroi.get().strip() else 0.09),
                         "InicioInversior": entry_inicioinversior.get().strip(),
                         "ib_gateway_host": entry_ib_gateway_host.get().strip(),
                         "ib_gateway_port": entry_ib_gateway_port.get().strip(),
                         # Parámetros Modelo IA Sell
                         "ia_umbral_venta": (
-                            float(entry_umbral_venta.get().strip())
-                            if entry_umbral_venta.get().strip()
-                            else 0.65
+                            float(entry_umbral_venta.get().strip()) if entry_umbral_venta.get().strip() else 0.65
                         ),
                         "ia_umbral_observacion": (
                             float(entry_umbral_observacion.get().strip())
@@ -4122,9 +3763,7 @@ class DashMain:
                             else 0.35
                         ),
                         "ia_modelo_name": (
-                            entry_modelo_name.get().strip()
-                            if entry_modelo_name.get().strip()
-                            else "modelo_sellv01"
+                            entry_modelo_name.get().strip() if entry_modelo_name.get().strip() else "modelo_sellv01"
                         ),
                     }
 
@@ -4149,9 +3788,7 @@ class DashMain:
                     }
 
                     # Actualizar registro en BD
-                    success = BDsystem.update_sesion(
-                        session_data["id"], session_data["vehiculo"], update_values
-                    )
+                    success = BDsystem.update_sesion(session_data["id"], session_data["vehiculo"], update_values)
 
                     if success:
                         # Actualizar DataHub si se editó la sesión "DataHub"
@@ -4159,14 +3796,11 @@ class DashMain:
 
                         # Obtener sesión DataHub para actualizar variables globales
                         try:
-                            datahub_session = BDsystem.get_sesion_by_vehiculo(
-                                vehiculo="DataHub"
-                            )
+                            datahub_session = BDsystem.get_sesion_by_vehiculo(vehiculo="DataHub")
 
                             # Si se editó la sesión DataHub o existe una sesión DataHub, actualizar
                             if datahub_session and (
-                                vehiculo_editado == "DataHub"
-                                or datahub_session["id"] == session_data["id"]
+                                vehiculo_editado == "DataHub" or datahub_session["id"] == session_data["id"]
                             ):
                                 # Actualizar variables de DataHub en memoria
                                 DataHub.bgcolor = envs_config["bgcolor"]
@@ -4202,9 +3836,7 @@ class DashMain:
                         )
                         envs_window.destroy()
                     else:
-                        MyMessageBox(envs_window).showerror(
-                            "Error", "No se pudo actualizar la configuración"
-                        )
+                        MyMessageBox(envs_window).showerror("Error", "No se pudo actualizar la configuración")
 
                 except ValueError as ve:
                     MyMessageBox(envs_window).showerror(
@@ -4215,9 +3847,7 @@ class DashMain:
                     print(f"[save_envs()]: {e}")
 
                     traceback.print_exc()
-                    MyMessageBox(envs_window).showerror(
-                        "Error", f"Error al guardar configuración: {str(e)}"
-                    )
+                    MyMessageBox(envs_window).showerror("Error", f"Error al guardar configuración: {str(e)}")
 
             def eexit():
                 """Cierra ventana de edición"""
@@ -4225,17 +3855,13 @@ class DashMain:
 
             # Crear ventana modal
             envs_window = tk.Toplevel(session_window)
-            envs_window.title(
-                f"Variables de Entorno - {session_data.get('vehiculo', 'N/A')}"
-            )
+            envs_window.title(f"Variables de Entorno - {session_data.get('vehiculo', 'N/A')}")
 
             # Posicionar a la derecha de la ventana de sesiones (igual que editor)
             session_x = session_window.winfo_x()
             session_y = session_window.winfo_y()
             session_width = session_window.winfo_width()
-            envs_window.geometry(
-                f"700x700+{session_x + session_width + 10}+{session_y}"
-            )
+            envs_window.geometry(f"700x700+{session_x + session_width + 10}+{session_y}")
 
             envs_window.resizable(False, False)
             envs_window.config(bg=self.colors["bgcolor"])
@@ -4252,13 +3878,9 @@ class DashMain:
                     envs_config = json.loads(userapi_bytes.decode("utf-8"))
                 else:
                     # Si no hay configuración, cargar desde sesión DataHub
-                    datahub_session = BDsystem.get_sesion_by_vehiculo(
-                        vehiculo="DataHub"
-                    )
+                    datahub_session = BDsystem.get_sesion_by_vehiculo(vehiculo="DataHub")
                     if datahub_session and datahub_session.get("userapi"):
-                        envs_config = json.loads(
-                            datahub_session["userapi"].decode("utf-8")
-                        )
+                        envs_config = json.loads(datahub_session["userapi"].decode("utf-8"))
                     else:
                         # Error: DataHub debe existir y tener configuración
                         MyMessageBox(session_window).showerror(
@@ -4276,9 +3898,7 @@ class DashMain:
 
             # Crear canvas scrollable (igual que editor de sesiones)
             canvas = tk.Canvas(envs_window, bg=self.colors["bgcolor"])
-            scrollbar = ttk.Scrollbar(
-                envs_window, orient="vertical", command=canvas.yview
-            )
+            scrollbar = ttk.Scrollbar(envs_window, orient="vertical", command=canvas.yview)
             scrollable_frame = tk.Frame(canvas, bg=self.colors["bgcolor"])
 
             scrollable_frame.bind(
@@ -4351,9 +3971,7 @@ class DashMain:
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
             entry_inicioinversior = tk.Entry(scrollable_frame, width=50)
-            entry_inicioinversior.insert(
-                0, envs_config.get("InicioInversior", "2020-07-31")
-            )
+            entry_inicioinversior.insert(0, envs_config.get("InicioInversior", "2020-07-31"))
             entry_inicioinversior.grid(row=row, column=1, padx=10, pady=5)
             row += 1
 
@@ -4366,9 +3984,7 @@ class DashMain:
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
             entry_ib_gateway_host = tk.Entry(scrollable_frame, width=50)
-            entry_ib_gateway_host.insert(
-                0, envs_config.get("ib_gateway_host", "https://localhost")
-            )
+            entry_ib_gateway_host.insert(0, envs_config.get("ib_gateway_host", "https://localhost"))
             entry_ib_gateway_host.grid(row=row, column=1, padx=10, pady=5)
             row += 1
 
@@ -4664,23 +4280,17 @@ class DashMain:
                     # Convertir fechas a formato apropiado
                     try:
                         if values["fesesion"]:
-                            values["fesesion"] = datetime.strptime(
-                                values["fesesion"], "%Y-%m-%d %H:%M:%S"
-                            )
+                            values["fesesion"] = datetime.strptime(values["fesesion"], "%Y-%m-%d %H:%M:%S")
                         else:
                             values["fesesion"] = None
 
                         if values["fiscalYear"]:
-                            values["fiscalYear"] = datetime.strptime(
-                                values["fiscalYear"], "%Y-%m-%d"
-                            ).date()
+                            values["fiscalYear"] = datetime.strptime(values["fiscalYear"], "%Y-%m-%d").date()
                         else:
                             values["fiscalYear"] = None
 
                         if values["fefund"]:
-                            values["fefund"] = datetime.strptime(
-                                values["fefund"], "%Y-%m-%d"
-                            ).date()
+                            values["fefund"] = datetime.strptime(values["fefund"], "%Y-%m-%d").date()
                         else:
                             values["fefund"] = None
                     except ValueError as ve:
@@ -4691,20 +4301,14 @@ class DashMain:
 
                     # Convertir Pinvertir a int
                     try:
-                        values["Pinvertir"] = (
-                            int(values["Pinvertir"]) if values["Pinvertir"] else 0
-                        )
+                        values["Pinvertir"] = int(values["Pinvertir"]) if values["Pinvertir"] else 0
                     except ValueError:
-                        MyMessageBox(session_window).showerror(
-                            "Error de Validación", "Pinvertir debe ser un número"
-                        )
+                        MyMessageBox(session_window).showerror("Error de Validación", "Pinvertir debe ser un número")
                         return
 
                     # Convertir gypPrecio a float
                     try:
-                        values["gypPrecio"] = (
-                            float(values["gypPrecio"]) if values["gypPrecio"] else 0.0
-                        )
+                        values["gypPrecio"] = float(values["gypPrecio"]) if values["gypPrecio"] else 0.0
                     except ValueError:
                         MyMessageBox(session_window).showerror(
                             "Error de Validación",
@@ -4714,11 +4318,7 @@ class DashMain:
 
                     # Convertir gainInversion a float
                     try:
-                        values["gainInversion"] = (
-                            float(values["gainInversion"])
-                            if values["gainInversion"]
-                            else 0.0
-                        )
+                        values["gainInversion"] = float(values["gainInversion"]) if values["gainInversion"] else 0.0
                     except ValueError:
                         MyMessageBox(session_window).showerror(
                             "Error de Validación",
@@ -4730,37 +4330,21 @@ class DashMain:
                     try:
                         values["port"] = int(values["port"]) if values["port"] else None
                     except ValueError:
-                        MyMessageBox(session_window).showerror(
-                            "Error de Validación", "Port debe ser un número entero"
-                        )
+                        MyMessageBox(session_window).showerror("Error de Validación", "Port debe ser un número entero")
                         return
 
                     # Validar rango de port
-                    if values["port"] is not None and (
-                        values["port"] < 1 or values["port"] > 65535
-                    ):
-                        MyMessageBox(session_window).showerror(
-                            "Error de Validación", "Port debe estar entre 1 y 65535"
-                        )
+                    if values["port"] is not None and (values["port"] < 1 or values["port"] > 65535):
+                        MyMessageBox(session_window).showerror("Error de Validación", "Port debe estar entre 1 y 65535")
                         return
 
                     # Guardar en BD
                     if edit_mode:
-                        success = BDsystem.update_sesion(
-                            session_data["id"], session_data["vehiculo"], values
-                        )
-                        msg = (
-                            "Sesión actualizada correctamente"
-                            if success
-                            else "No se pudo actualizar la sesión"
-                        )
+                        success = BDsystem.update_sesion(session_data["id"], session_data["vehiculo"], values)
+                        msg = "Sesión actualizada correctamente" if success else "No se pudo actualizar la sesión"
                     else:
                         success = BDsystem.insert_sesion(values)
-                        msg = (
-                            "Sesión creada correctamente"
-                            if success
-                            else "No se pudo crear la sesión"
-                        )
+                        msg = "Sesión creada correctamente" if success else "No se pudo crear la sesión"
 
                     if success:
                         MyMessageBox(session_window).showinfo("Éxito", msg)
@@ -4770,9 +4354,7 @@ class DashMain:
                         MyMessageBox(session_window).showerror("Error", msg)
                 except Exception as e:
                     print(f"[save_session()]: {e}")
-                    MyMessageBox(session_window).showerror(
-                        "Error", f"Error al guardar sesión: {str(e)}"
-                    )
+                    MyMessageBox(session_window).showerror("Error", f"Error al guardar sesión: {str(e)}")
 
             def import_blob_file(text_widget):
                 """Abre diálogo para importar archivo a campo BLOB"""
@@ -4791,9 +4373,7 @@ class DashMain:
                             text_widget.delete("1.0", tk.END)
                             text_widget.insert("1.0", content)
                 except Exception as e:
-                    MyMessageBox(session_window).showerror(
-                        "Error", f"Error al importar archivo: {str(e)}"
-                    )
+                    MyMessageBox(session_window).showerror("Error", f"Error al importar archivo: {str(e)}")
 
             def cancel_edit():
                 """Cierra editor sin guardar"""
@@ -4808,9 +4388,7 @@ class DashMain:
             session_x = session_window.winfo_x()
             session_y = session_window.winfo_y()
             session_width = session_window.winfo_width()
-            editor_window.geometry(
-                f"700x700+{session_x + session_width + 10}+{session_y}"
-            )
+            editor_window.geometry(f"700x700+{session_x + session_width + 10}+{session_y}")
 
             editor_window.resizable(False, False)
             editor_window.config(bg=self.colors["bgcolor"])
@@ -4819,9 +4397,7 @@ class DashMain:
 
             # Crear canvas scrollable
             canvas = tk.Canvas(editor_window, bg=self.colors["bgcolor"])
-            scrollbar = ttk.Scrollbar(
-                editor_window, orient="vertical", command=canvas.yview
-            )
+            scrollbar = ttk.Scrollbar(editor_window, orient="vertical", command=canvas.yview)
             scrollable_frame = ttk.Frame(canvas, style="C.TFrame")
 
             scrollable_frame.bind(
@@ -4899,9 +4475,7 @@ class DashMain:
                     if value:
                         if field_name == "fesesion" and hasattr(value, "strftime"):
                             entry.insert(0, value.strftime("%Y-%m-%d %H:%M:%S"))
-                        elif field_name in ["fiscalYear", "fefund"] and hasattr(
-                            value, "strftime"
-                        ):
+                        elif field_name in ["fiscalYear", "fefund"] and hasattr(value, "strftime"):
                             entry.insert(0, value.strftime("%Y-%m-%d"))
                         else:
                             entry.insert(0, str(value))
@@ -5060,14 +4634,10 @@ class DashMain:
             btn_frame = tk.Frame(scrollable_frame, bg=self.colors["bgcolor"])
             btn_frame.grid(row=row, column=0, columnspan=2, pady=20)
 
-            save_btn = tk.Button(
-                btn_frame, text="Guardar", width=10, command=save_session
-            )
+            save_btn = tk.Button(btn_frame, text="Guardar", width=10, command=save_session)
             save_btn.pack(side=tk.LEFT, padx=10)
 
-            cancel_btn = tk.Button(
-                btn_frame, text="Cancel", width=10, command=cancel_edit
-            )
+            cancel_btn = tk.Button(btn_frame, text="Cancel", width=10, command=cancel_edit)
             cancel_btn.pack(side=tk.LEFT, padx=10)
 
             # Empaquetar canvas y scrollbar
@@ -5100,41 +4670,27 @@ class DashMain:
             window_height = min(550, 30 + height * 25)
             x_position = 300
             y_position = 110
-            session_window.geometry(
-                f"{window_width}x{window_height}+{x_position}+{y_position}"
-            )
+            session_window.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
             session_window.config(bg=self.colors["bgcolor"])
             session_window.resizable(True, True)
 
             # Panel de control con botones
-            control_frame = ttk.Frame(
-                session_window, style="C.TFrame", padding=(10, 10)
-            )
+            control_frame = ttk.Frame(session_window, style="C.TFrame", padding=(10, 10))
             control_frame.pack(side=tk.BOTTOM, fill=tk.X)
 
-            add_btn = tk.Button(
-                control_frame, text="Agregar", width=10, command=on_add_click
-            )
+            add_btn = tk.Button(control_frame, text="Agregar", width=10, command=on_add_click)
             add_btn.pack(side=tk.LEFT, padx=5)
 
-            delete_btn = tk.Button(
-                control_frame, text="Eliminar", width=10, command=on_delete_click
-            )
+            delete_btn = tk.Button(control_frame, text="Eliminar", width=10, command=on_delete_click)
             delete_btn.pack(side=tk.LEFT, padx=5)
 
-            refresh_btn = tk.Button(
-                control_frame, text="Refrescar", width=10, command=refresh_sessions
-            )
+            refresh_btn = tk.Button(control_frame, text="Refrescar", width=10, command=refresh_sessions)
             refresh_btn.pack(side=tk.LEFT, padx=5)
 
-            envs_btn = tk.Button(
-                control_frame, text="Envs", width=10, command=on_envs_click
-            )
+            envs_btn = tk.Button(control_frame, text="Envs", width=10, command=on_envs_click)
             envs_btn.pack(side=tk.LEFT, padx=5)
 
-            cancel_btn = tk.Button(
-                control_frame, text="Cancel", width=10, command=eexit
-            )
+            cancel_btn = tk.Button(control_frame, text="Cancel", width=10, command=eexit)
             cancel_btn.pack(side=tk.LEFT, padx=5)
 
             # Frame para TreeView
@@ -5188,9 +4744,7 @@ class DashMain:
             refresh_sessions()
         except Exception as e:
             print(f"[setup()]: {e}")
-            MyMessageBox(session_window).showerror(
-                "Error", f"Error al abrir gestor de sesiones: {str(e)}"
-            )
+            MyMessageBox(session_window).showerror("Error", f"Error al abrir gestor de sesiones: {str(e)}")
 
     """ Cierra la aplicación de forma ordenada"""
 
@@ -5256,9 +4810,7 @@ class DashMain:
     """ toma limites de barraProgress"""
 
     def get_limite_inversion(self):
-        traz = self.PlanInversion.select_trazaplan(
-            idcuenta=self.sesion_stock["idcuenta"]
-        )
+        traz = self.PlanInversion.select_trazaplan(idcuenta=self.sesion_stock["idcuenta"])
         if traz:
             for tkey in traz:
                 if tkey.get("status") == "Ejecucion":
@@ -5292,8 +4844,8 @@ class DashMain:
 
             if abs(ganancias_dia) < limit_gyp:
                 _mul = 1
-            elif abs(ganancias_dia) >= limit_gyp:
-                _mul = int(abs(ganancias_dia / limit_gyp))
+            elif abs(ganancias_dia) > limit_gyp:
+                _mul = round(abs(ganancias_dia / limit_gyp), 1)
 
             low_limit_gyp = (_inf * _mul) * limit_gyp
             high_limit_gyp = _mul * limit_gyp
@@ -5348,23 +4900,17 @@ class DashMain:
             self.start_stock(account=self.sesion_stock["idcuenta"], vehiculo="Stock")
 
         # inicia otros modulos ---------------------------------------------------------------------------
-        self.gestion = GestionInversion(
-            parent=self.root, master=self.win3, colores=self.colors
-        )
+        self.gestion = GestionInversion(parent=self.root, master=self.win3, colores=self.colors)
         self.gestion.pack()
 
         # define widget principales FCI-------------------------------------------------------------------
         self.sesion_FCI = self.PlanInversion.get_sesion_by_vehiculo("SANT.ARS")
-        self.fci = ArsFondosInversion(
-            parent=self.root, master=self.win4, colores=self.colors
-        )
+        self.fci = ArsFondosInversion(parent=self.root, master=self.win4, colores=self.colors)
         self.fci.pack()
 
         self.system = system_status(master=self.win5, colores=self.colors)
 
-        self.screener = Screener(
-            master=self.win2, account=self.sesion_stock["idcuenta"], colors=self.colors
-        )
+        self.screener = Screener(master=self.win2, account=self.sesion_stock["idcuenta"], colors=self.colors)
         self.screener.pack()
 
         # Start ayudante y agentes del sistema------------------------------------------------------------
@@ -5374,7 +4920,6 @@ class DashMain:
         self.actualizar_totales_inversiones()
 
         self.root.mainloop()
-
 
 
 if __name__ == "__main__":

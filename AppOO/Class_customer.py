@@ -187,9 +187,13 @@ class DataHub:
     # ========================================================================================================
     # GRUPO 3: PARÁMETROS DE TRADING (Cargable desde DB)
     # ========================================================================================================
+    # Sell
     MinProfit = envs_config["MinProfit"] or 50
     Toleranciasell = envs_config["Toleranciasell"] or 0.10
     MaxRoi = envs_config["MaxRoi"] or 0.09
+    # Buy
+    MinGananciaPrecio = envs_config.get("MinGananciaPrecio") or 0.05  # 5% mínimo de ganancia precio
+    MinScoreBuy = envs_config.get("MinScoreBuy") or 0.5  # Score mínimo para Buy
 
     InicioInversior = envs_config["InicioInversior"]
     ib_gateway_host = envs_config["ib_gateway_host"]
@@ -260,6 +264,7 @@ class DataHub:
         "tipo",  # buy o dividends
         "score",
         "monto_sugerido",
+        "pinvertir",
         "ganancia_precio",
         "ganancia_inversion",
         "cantidad_buy",
@@ -327,7 +332,8 @@ class DataHub:
         "Comentarios": "comentarios",
     }
     max_mensajes = 5
-    min_tiempo = 300
+    min_tiempo = 300  # segundos entre mensajes Sell (5 min)
+    min_tiempo_buy = 300  # segundos entre mensajes Buy (5 min)
 
     # Fechas y procesos batch
     now = datetime.now()
@@ -420,6 +426,13 @@ class DataHub:
 
             if "MaxRoi" in envs_config:
                 DataHub.MaxRoi = float(envs_config["MaxRoi"])
+
+            # Buy parameters
+            if "MinGananciaPrecio" in envs_config:
+                DataHub.MinGananciaPrecio = float(envs_config["MinGananciaPrecio"])
+
+            if "MinScoreBuy" in envs_config:
+                DataHub.MinScoreBuy = float(envs_config["MinScoreBuy"])
 
             if "InicioInversior" in envs_config:
                 # Convertir string a date
@@ -579,6 +592,7 @@ class DataHub:
                             monto_sugerido = item.get("monto_sugerido", 0)
                             if monto_sugerido == 0:
                                 monto_sugerido = item.get("impacto", {}).get("gap_valor_total", 0)
+                            pinvertir = item.get("pinvertir", 0)
 
                             # Filtrar sin score o monto
                             if score <= 0 or monto_sugerido <= 0:
@@ -594,6 +608,7 @@ class DataHub:
                                     tipo,
                                     score,
                                     monto_sugerido,
+                                    pinvertir,
                                     buy_data.get("ganancia precio", 0),
                                     buy_data.get("ganancia inversión", 0),
                                     buy_data.get("cantidad buy", 0),

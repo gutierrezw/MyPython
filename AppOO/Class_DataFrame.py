@@ -65,6 +65,7 @@ class DataFrameCache:
         """
         self.cache = TTLCache(maxsize=maxsize, ttl=ttl)
         self.GetCounter = 0
+
         # Asigna Nombre Logging
         self.logger = logging.getLogger("DataFrameCache")
         self.logger.warning("✅ Cache DataFrame inicializado correctamente.")
