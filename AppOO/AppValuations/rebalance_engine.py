@@ -351,8 +351,9 @@ class MetodoEngine:
             if vehiculo_activo != self.vehiculo:
                 continue
 
-            # Obtener region del activo y normalizarla
-            region = data.get("region")
+            # Obtener country del activo (campo correcto usado en grupo_region)
+            # Fallback a "region" por compatibilidad
+            region = data.get("country") or data.get("region")
 
             # Normalizar región (misma lógica que grupo_region)
             if not region or region in ("null", "None", ""):
@@ -790,15 +791,19 @@ class RebalanceEngine(MetodoEngine):
     # Helpers
     # =========================
     def _extract_metadata(self, info_symbol: Dict) -> Dict:
-        # Normalizar región para consistencia con grupo_region()
-        region = info_symbol.get("region")
+        # Obtener country (campo correcto usado en grupo_region), fallback a region
+        region = info_symbol.get("country") or info_symbol.get("region")
 
-        # Para vehículo Crypto, forzar región="Crypto" para coincidir con gráficos
-        if self.vehiculo == "Crypto":
-            region = "Crypto"
+        # Normalizar región para consistencia con grupo_region()
+        if not region or region in ("null", "None", ""):
+            region = "NotCountry"
         elif region == "US":
             region = "United States"
         elif region == "Digital":
+            region = "Crypto"
+
+        # Para vehículo Crypto, forzar región="Crypto" para coincidir con gráficos
+        if self.vehiculo == "Crypto":
             region = "Crypto"
 
         return {
