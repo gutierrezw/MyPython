@@ -42,6 +42,7 @@ from Modulos_python import (
     TTLCache,
     HTTPError,
     textwrap,
+    traceback,
 )
 from API_vehiculos import BB
 
@@ -311,11 +312,31 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
             pdatos = get_klines_info(symbol=ticket, period=period, desde=desde, hasta=hasta)
             return activo, pdatos
 
-        # exclusivo para FCi Argentina, obtiene data desde Diaaria_CNV
-        elif vehiculo == "BBVA.ARS":
+        # exclusivo para FCI Argentina, obtiene data desde Diaria_CNV
+        elif vehiculo in ["BBVA.ARS", "SANT.ARS"]:
             Otr = PlanInversion()
-            activo = {}
             pdatos = Otr.get_yf_CNV(symbol=ticket, start=desde, end=hasta)
+
+            # Obtener metadatos del fondo desde BD (otros_activos)
+            activo_bd, found = Otr.select_otros_activos(symbol=ticket)
+            if found and activo_bd:
+                activo = {
+                    "shortName": activo_bd[0].get("descripcion", ticket),
+                    "symbol": ticket,
+                    "country": "Argentina",
+                    "region": "AS",
+                    "sector": "Fondo Inversión",
+                    "industry": "Mutual Fund",
+                    "currency": activo_bd[0].get("base_asset", "ARS"),
+                    "quoteType": "MUTUALFUND",
+                    "marketCap": None,
+                    "dividendYield": 0,
+                    "fiftyTwoWeekLow": pdatos["Low"].min() if not pdatos.empty else None,
+                    "fiftyTwoWeekHigh": pdatos["High"].max() if not pdatos.empty else None,
+                }
+            else:
+                activo = {}
+
             return activo, pdatos
 
         # esta opción para obtener solo info()
@@ -1090,11 +1111,12 @@ def chart_symbol(fg=None, datos=None, keys=None):
                 scale_width_adjustment=dict(ohlc=1.5, lines=0.45, volume=0.8),
             )
 
-            # draw() de texto fibonacci
-            fdesde = pdatos.index.get_loc(f_desde)
-            l_ix = len(pdatos.index)
-            ndesde = fdesde + int((l_ix - fdesde) / 2)
-            ax = nivel_fib(ax, ndesde, x_alcista, x_bajista, x_long)
+            # draw() de texto fibonacci (solo si está activo)
+            if keys.get("fibonacci", True):
+                fdesde = pdatos.index.get_loc(f_desde)
+                l_ix = len(pdatos.index)
+                ndesde = fdesde + int((l_ix - fdesde) / 2)
+                ax = nivel_fib(ax, ndesde, x_alcista, x_bajista, x_long)
 
         if p_tipo == "line":
             mpf.plot(
@@ -1153,15 +1175,24 @@ def chart_symbol(fg=None, datos=None, keys=None):
         periodo = keys["periodo"]
         tipo = keys["tipo"]
 
-        # prepara Dataframe() de entrada
-        ohlcv_dict = {
-            "Open": "first",
-            "High": "max",
-            "Low": "min",
-            "Close": "last",
-            "Volume": "sum",
-        }
-        pdatos = datos.resample(periodo).agg(ohlcv_dict)
+        # prepara Dataframe() de entrada - resample OHLCV
+        # Elimina columnas duplicadas si existen (toma la primera)
+        datos = datos.loc[:, ~datos.columns.duplicated()]
+
+        # Resample cada columna por separado para evitar problemas de compatibilidad
+        resampled = datos.resample(periodo)
+        pdatos = pd.DataFrame()
+        pdatos["Open"] = resampled["Open"].apply(lambda x: x.iloc[0] if len(x) > 0 else None)
+        pdatos["High"] = resampled["High"].max()
+        pdatos["Low"] = resampled["Low"].min()
+        pdatos["Close"] = resampled["Close"].apply(lambda x: x.iloc[-1] if len(x) > 0 else None)
+        pdatos["Volume"] = resampled["Volume"].sum()
+        pdatos = pdatos.dropna()
+
+        # Validar que hay datos suficientes para graficar
+        if pdatos.empty or len(pdatos) < 10:
+            print(f"[chart_symbol()]: Datos insuficientes para graficar: {len(pdatos)} filas (mínimo 10)")
+            return None
 
         pclose = pdatos["Close"]
         vmax: object = pdatos["High"].max()
@@ -1225,8 +1256,9 @@ def chart_symbol(fg=None, datos=None, keys=None):
         fg.suptitle(titulo, color=keys["tcolor"], fontsize="medium")
 
         return fg
-    except Exception as error:
-        print("[chart_symbol()]: {}".format(error))
+    except Exception as e:
+        print("[chart_symbol()]: {}".format(e))
+        traceback.print_exc()
 
 
 # gráfico indicador de miedo

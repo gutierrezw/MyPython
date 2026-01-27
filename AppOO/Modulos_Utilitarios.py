@@ -649,27 +649,33 @@ def get_highs_lows(symbol: str, df=None) -> dict:
         if df.empty:
             return highs_lows
 
-        # 52 semanas (365 días)
-        timestamp = pd.Timestamp(today - timedelta(days=365))
-        timestamp = timestamp.tz_localize("UTC").tz_convert("America/New_York")
+        # Detectar si el índice tiene timezone (yfinance) o no (CNV/FCI)
+        index_has_tz = df.index.tz is not None
 
+        def make_timestamp(days_ago):
+            """Crea timestamp compatible con el índice del DataFrame"""
+            ts = pd.Timestamp(today - timedelta(days=days_ago))
+            if index_has_tz:
+                # Para datos con timezone (yfinance Stock/Crypto)
+                ts = ts.tz_localize("UTC").tz_convert("America/New_York")
+            return ts
+
+        # 52 semanas (365 días)
+        timestamp = make_timestamp(365)
         periodo_52_sem = df.loc[df.index >= timestamp]
         if not periodo_52_sem.empty:
             highs_lows["52_semanas_max"] = float(periodo_52_sem["High"].max())
             highs_lows["52_semanas_min"] = float(periodo_52_sem["Low"].min())
 
         # 26 semanas (182 días)
-        timestamp = pd.Timestamp(today - timedelta(days=182))
-        timestamp = timestamp.tz_localize("UTC").tz_convert("America/New_York")
-
+        timestamp = make_timestamp(182)
         periodo_26_sem = df.loc[df.index >= timestamp]
         if not periodo_26_sem.empty:
             highs_lows["26_semanas_max"] = float(periodo_26_sem["High"].max())
             highs_lows["26_semanas_min"] = float(periodo_26_sem["Low"].min())
 
         # 13 semanas (91 días)
-        timestamp = pd.Timestamp(today - timedelta(days=91))
-        timestamp = timestamp.tz_localize("UTC").tz_convert("America/New_York")
+        timestamp = make_timestamp(91)
         periodo_13_sem = df.loc[df.index >= timestamp]
         if not periodo_13_sem.empty:
             highs_lows["13_semanas_max"] = float(periodo_13_sem["High"].max())
