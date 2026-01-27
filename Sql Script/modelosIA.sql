@@ -1,0 +1,1 @@
+SELECT * FROM bdinv.modelos_ia;

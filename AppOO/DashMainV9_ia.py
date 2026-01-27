@@ -63,7 +63,6 @@ from Modulos_python import (
     ticker,
     filedialog,
     traceback,
-    colormaps,
 )
 from Class_FondosInversion import ArsFondosInversion
 from Class_Screener import Screener
@@ -126,33 +125,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
             interval_sec=1,
             func=self.schedule_order_remote,
         )
-
-    """ Actualiza el diccionario DataHub.info[symbol] con el precio recibido"""
-
-    def update_precio_DataHubInfo(self, symbol=None, conid=None, precio=None):
-        with DataHub.lockInfo:
-            if symbol in self.info.keys():
-                self.info[symbol].update(
-                    {
-                        "conid": conid,
-                        "account": self.account,
-                        "vehiculo": self.vehiculo,
-                        "websocket": precio[symbol],
-                    }
-                )
-
-            elif symbol is not None:
-                if symbol not in self.info.keys():
-                    self.info.update(
-                        {
-                            symbol: {
-                                "conid": conid,
-                                "account": self.account,
-                                "vehiculo": self.vehiculo,
-                                "websocket": precio[symbol],
-                            }
-                        }
-                    )
 
     """ temporal para unificar parametros de entrada"""
 

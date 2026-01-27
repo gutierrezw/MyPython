@@ -109,11 +109,7 @@ class BDsystem:  # -------------------------------------------------------------
             if not result:
                 return None
 
-            return {
-                'ticket': result[0],
-                'vehiculo': result[1],
-                'Pinvertir': result[2]
-            }
+            return {"ticket": result[0], "vehiculo": result[1], "Pinvertir": result[2]}
         except Exception as error:
             print(f"[Mysql::get_vehiculo_by_ticket()]: {error}")
             return None
@@ -124,9 +120,7 @@ class BDsystem:  # -------------------------------------------------------------
                 conn.close()
 
     @staticmethod
-    def update_sesion_fecha_orden(
-        vehiculo: str, fesesion: datetime, orcartera: str
-    ) -> bool:
+    def update_sesion_fecha_orden(vehiculo: str, fesesion: datetime, orcartera: str) -> bool:
         """
         Actualiza fesesion y orcartera de una sesión.
 
@@ -286,7 +280,9 @@ class BDsystem:  # -------------------------------------------------------------
         try:
             conn = BDsystem.connect_dbase("select.all_sesion", False)
             cursor = conn.cursor()
-            sql = """SELECT * FROM sesion WHERE vehiculo != "DataHub"  ORDER BY Idcuenta_principal DESC, fiscalYear ASC"""
+            sql = (
+                """SELECT * FROM sesion WHERE vehiculo != "DataHub"  ORDER BY Idcuenta_principal DESC, fiscalYear ASC"""
+            )
             cursor.execute(sql)
             rows = cursor.fetchall()
             columns = [desc[0] for desc in cursor.description]
@@ -468,8 +464,14 @@ class BDsystem:  # -------------------------------------------------------------
                 conn.close()
 
     @staticmethod
-    def insert_modelo_ia(modelo: str, nombre: str, paramts: bytes = None,
-                         documents: bytes = None, tipo_modelo: str = None, define_modelo: str = None) -> bool:
+    def insert_modelo_ia(
+        modelo: str,
+        nombre: str,
+        paramts: bytes = None,
+        documents: bytes = None,
+        tipo_modelo: str = None,
+        define_modelo: str = None,
+    ) -> bool:
         """
         Inserta un nuevo modelo IA.
 
@@ -504,8 +506,14 @@ class BDsystem:  # -------------------------------------------------------------
             return False
 
     @staticmethod
-    def update_modelo_ia(modelo: str, nombre: str = None, paramts: bytes = None,
-                         documents: bytes = None, define_modelo: str = None, tipo_modelo: str = None) -> bool:
+    def update_modelo_ia(
+        modelo: str,
+        nombre: str = None,
+        paramts: bytes = None,
+        documents: bytes = None,
+        define_modelo: str = None,
+        tipo_modelo: str = None,
+    ) -> bool:
         """
         Actualiza un modelo IA existente.
 
@@ -589,9 +597,7 @@ class BDsystem:  # -------------------------------------------------------------
             return False
 
 
-class IPerformance(
-    BDsystem
-):  # ------------------------------------------------------------------------------------
+class IPerformance(BDsystem):  # ------------------------------------------------------------------------------------
     """
     clase para manejar: select, insert y update sobre Diaria y Performa_inversion."""
 
@@ -602,9 +608,7 @@ class IPerformance(
         conn = BDsystem.connect_dbase(tabla, display=self.display)
         return conn
 
-    def select_performa_inversion(
-        self, account=None, vehiculo=None, accion=None, referencia=None
-    ):
+    def select_performa_inversion(self, account=None, vehiculo=None, accion=None, referencia=None):
         """
         @param account: id cuenta de inversion
         @param vehiculo: tipo de inversión acciones, Crypto
@@ -689,9 +693,7 @@ class IPerformance(
             valuesins.append(datetime.now())
 
             valuesupd = tuple(valuesins)
-            qry += " timestamp) VALUES ({});".format(
-                ",".join("%s" for _ in range(len(valuesins)))
-            )
+            qry += " timestamp) VALUES ({});".format(",".join("%s" for _ in range(len(valuesins))))
             cursor.execute(qry, valuesupd)
 
             conn.commit()
@@ -700,9 +702,7 @@ class IPerformance(
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: insert_performa_inversion()]: {}".format(error))
 
-    def select_diaria_performance(
-        self, accion=None, account=None, date=None, symbol=None
-    ):
+    def select_diaria_performance(self, accion=None, account=None, date=None, symbol=None):
         """
         @param accion: parametro indicativo para seleccionar last o firth de la diaria
         @param account: id de cuenta inversionista
@@ -778,22 +778,16 @@ class IPerformance(
                 valuesins.append(vals)
 
             valuesins.append(symbol)
-            qry += "symbol) VALUES ({});".format(
-                ",".join("%s" for _ in range(len(valuesins)))
-            )
+            qry += "symbol) VALUES ({});".format(",".join("%s" for _ in range(len(valuesins))))
             cursor.execute(qry, tuple(valuesins))
         except (Exception, EncodingWarning, connect.Error) as error:
-            print(
-                f"Mysql:: insert_diaria_performance()]: {error} {qry}={tuple(valuesins)}"
-            )
+            print(f"Mysql:: insert_diaria_performance()]: {error} {qry}={tuple(valuesins)}")
         finally:
             conn.commit()
             cursor.close()
 
 
-class DiariaCNV(
-    BDsystem
-):  # --------------------------------------------------------------------------------------
+class DiariaCNV(BDsystem):  # --------------------------------------------------------------------------------------
     """
     clase para manejar operaciones: select, insert y update sobre tabla diaria_CNV."""
 
@@ -874,9 +868,7 @@ class DiariaCNV(
                         valuesins.append(vals)
 
                 valuesins.append(symbol)
-                qry += "codCAFCI) VALUES ({});".format(
-                    ",".join("'%s'" for _ in range(len(valuesins)))
-                )
+                qry += "codCAFCI) VALUES ({});".format(",".join("'%s'" for _ in range(len(valuesins))))
                 cursor.execute(qry % tuple(valuesins))
                 conn.commit()
                 cursor.close()
@@ -913,9 +905,7 @@ class DiariaCNV(
             print("[Mysql:: update_diaria_CNV()]: {}".format(error))
 
 
-class EstrategiaInversion(
-    BDsystem
-):  # ------------------------------------------------------------------------------
+class EstrategiaInversion(BDsystem):  # ------------------------------------------------------------------------------
     """
     clase para manejar operaciones: select, insert, read y update sobre tabla Estrategia.
     """
@@ -1030,7 +1020,7 @@ class EstrategiaInversion(
                     for fila in sql:
                         xlis.append(fila[0] + " - " + fila[1])
 
-                if accion in  ("Select", "vehiculo"):
+                if accion in ("Select", "vehiculo"):
                     for fila in sql:
                         x = dict(zip(columnas, fila))
                         xlis.append(x)
@@ -1040,9 +1030,7 @@ class EstrategiaInversion(
             print("[Mysql:: Estrategia.Select()]: {}".format(error))
 
 
-class MarketScreen(
-    BDsystem
-):  # -------------------------------------------------------------------------------------
+class MarketScreen(BDsystem):  # -------------------------------------------------------------------------------------
     """
     clase para manejar operaciones: select, insert y update sobre tabla Market."""
 
@@ -1053,9 +1041,7 @@ class MarketScreen(
         conn = BDsystem.connect_dbase(tabla, display=self.display)
         return conn
 
-    def select(
-        self, account=None, tipo=None, symbol=None, country=None, sector=None, name=None
-    ):
+    def select(self, account=None, tipo=None, symbol=None, country=None, sector=None, name=None):
         """@param account: id de cuenta inversionista
         @param tipo: tipo de inversion: Dividends y crecimiento
         @param symbol: activo a consultar
@@ -1080,34 +1066,17 @@ class MarketScreen(
                 cursor.execute(qry % (account, key.upper(), symbol.upper()))
                 sql = cursor.fetchall()
 
-            if (
-                is_none(symbol)
-                and is_none(name)
-                and is_none(country)
-                and is_none(sector)
-            ):
+            if is_none(symbol) and is_none(name) and is_none(country) and is_none(sector):
                 qry = """SELECT  * FROM market WHERE account= '%s' AND tipo = '%s';"""
                 cursor.execute(qry % (account, tipo))
                 sql = cursor.fetchall()
 
-            if (
-                is_none(symbol)
-                and is_none(name)
-                and not is_none(country)
-                and is_none(sector)
-            ):
-                qry = (
-                    """SELECT  * FROM market WHERE account= '%s' AND country = '%s';"""
-                )
+            if is_none(symbol) and is_none(name) and not is_none(country) and is_none(sector):
+                qry = """SELECT  * FROM market WHERE account= '%s' AND country = '%s';"""
                 cursor.execute(qry % (account, country))
                 sql = cursor.fetchall()
 
-            if (
-                is_none(symbol)
-                and is_none(name)
-                and is_none(country)
-                and not is_none(sector)
-            ):
+            if is_none(symbol) and is_none(name) and is_none(country) and not is_none(sector):
                 qry = """SELECT  * FROM market WHERE account= '%s' AND sector = '%s';"""
                 cursor.execute(qry % (account, sector))
                 sql = cursor.fetchall()
@@ -1153,9 +1122,7 @@ class MarketScreen(
             listvalues.append(symbol)
             valuesins = tuple(listvalues)
             # Usar parametrización segura sin comillas - el driver maneja NULL correctamente
-            qry += "timestamp, symbol) VALUES ({});".format(
-                ", ".join("%s" for _ in range(len(valuesins)))
-            )
+            qry += "timestamp, symbol) VALUES ({});".format(", ".join("%s" for _ in range(len(valuesins))))
             cursor.execute(qry, valuesins)  # Parametrización segura
             conn.commit()
         except (Exception, EncodingWarning, connect.Error) as error:
@@ -1198,9 +1165,7 @@ class MarketScreen(
             print("[Mysql::insert_market()]: {}".format(error))
 
 
-class PlanInversion(
-    BDsystem
-):  # ------------------------------------------------------------------------------------
+class PlanInversion(BDsystem):  # ------------------------------------------------------------------------------------
     """
     clase para manejar operaciones: select, insert y update sobre tabla Plan, TrazaPlan y VariablesPlan.
     """
@@ -1271,17 +1236,11 @@ class PlanInversion(
                     campos["trendimiento"] = 0.0
 
                     if key["tinversion"] > 0:
-                        campos["efectividad"] = (
-                            key["tinversion"] - key["vision"]
-                        ) / key["vision"]
-                        campos["trendimiento"] = (
-                            key["dividendo"] + key["ccapital"]
-                        ) / key["tinversion"]
+                        campos["efectividad"] = (key["tinversion"] - key["vision"]) / key["vision"]
+                        campos["trendimiento"] = (key["dividendo"] + key["ccapital"]) / key["tinversion"]
 
                     inversion = int(inversion / 2)
-                    self.update_trazaplan_inversion(
-                        idcuenta=idcuenta, meta=key["meta"], values=campos
-                    )
+                    self.update_trazaplan_inversion(idcuenta=idcuenta, meta=key["meta"], values=campos)
 
         try:
             conn = self._conectar(tabla="update.trazaplan")
@@ -1450,9 +1409,7 @@ class PlanInversion(
                         qry += key
 
             valuesins = tuple(listvalues)
-            qry += ") VALUES ({});".format(
-                ",".join("%s" for _ in range(len(valuesins)))
-            )
+            qry += ") VALUES ({});".format(",".join("%s" for _ in range(len(valuesins))))
             cursor.execute(qry, valuesins)
 
             conn.commit()
@@ -1470,9 +1427,7 @@ class PlanInversion(
 
             # valida que extracto a ingresar sea consecutivo al ultimo extracto
             if uextract and bool(values):
-                if valida_meses_consecutivos(
-                    inicio=uextract[0]["extracto"], fin=values["extracto"]
-                ):
+                if valida_meses_consecutivos(inicio=uextract[0]["extracto"], fin=values["extracto"]):
                     insert_account_exists()
             else:
                 # caso cuando la account no tenga extractos previos
@@ -1613,11 +1568,7 @@ class PlanInversion(
                 valuesupd = tuple(xlistvalues)
                 cursor.execute(qry % valuesupd)
             except Exception as e:
-                print(
-                    "[update_inversion.update({})]: {} - {}={}".format(
-                        vehiculo, e, qry, valuesupd
-                    )
-                )
+                print("[update_inversion.update({})]: {} - {}={}".format(vehiculo, e, qry, valuesupd))
 
         def insert(keys, ticket):
             try:
@@ -1627,11 +1578,7 @@ class PlanInversion(
                                                             mrkprice, position, sector, exDividendDate, factor_cambio,
                                                             divisa, tipoinv, useraccount, region, country"""
                     fectime = datetime.now()
-                    exdiv = (
-                        keys["exDividendDate"]
-                        if "exDividendDate" in keys
-                        else "9999-12-31"
-                    )
+                    exdiv = keys["exDividendDate"] if "exDividendDate" in keys else "9999-12-31"
                     factor = keys["factor_cambio"] if "factor_cambio" in keys else 1
                     divisa = keys["divisa"] if "divisa" in keys else "USD"
                     region = keys["region"] if "region" in keys else ""
@@ -1659,9 +1606,7 @@ class PlanInversion(
                     ]
 
                     valuesins = tuple(ylistvalues)
-                    qry += ", timestamp) VALUES ({});".format(
-                        ",".join("%s" for _ in range(len(valuesins)))
-                    )
+                    qry += ", timestamp) VALUES ({});".format(",".join("%s" for _ in range(len(valuesins))))
                     cursor.execute(qry, valuesins)
 
             except Exception as e:
@@ -1688,9 +1633,7 @@ class PlanInversion(
             cursor = conn.cursor()
 
             # recupera cartera actual
-            cartera = self.select_inversion(
-                account=account, tipoin=vehiculo, ticket="update"
-            )
+            cartera = self.select_inversion(account=account, tipoin=vehiculo, ticket="update")
 
             # enumera new positions para el apareamiento
             orden = [{"ticket": "ticket"}, "ASC"]
@@ -1874,9 +1817,7 @@ class PlanInversion(
             print("[Mysql:: update_otros_activos()]: {}".format(error))
 
     # get info from en formato yfinance into otros_activos
-    def get_yf_CNV(
-        self, symbol: str, start: Optional[str] = None, end: Optional[str] = None
-    ):
+    def get_yf_CNV(self, symbol: str, start: Optional[str] = None, end: Optional[str] = None):
         """
         Simula la función yf.download, extrayendo datos de rendimiento y volumen
         calculado de la tabla 'diaria_cnv' de MySQL.
@@ -1969,16 +1910,8 @@ class PlanInversion(
 
                 ticket = yf.Ticker(symbol.replace("USDT", "-USD"))
                 name = ticket.info["name"] if "name" in ticket.info else " "
-                avg = (
-                    ticket.info["previousClose"]
-                    if "previousClose" in ticket.info
-                    else 0
-                )
-                h52w = (
-                    ticket.info["fiftyTwoWeekHigh"]
-                    if "fiftyTwoWeekHigh" in ticket.info
-                    else 0
-                )
+                avg = ticket.info["previousClose"] if "previousClose" in ticket.info else 0
+                h52w = ticket.info["fiftyTwoWeekHigh"] if "fiftyTwoWeekHigh" in ticket.info else 0
 
                 qry = "INSERT INTO otros_activos ("
 
@@ -2000,9 +1933,7 @@ class PlanInversion(
                     valuesins.append(vals)
 
                 valuesins.append(symbol)
-                qry += "symbol) VALUES ({});".format(
-                    ",".join("%s" for _ in range(len(valuesins)))
-                )
+                qry += "symbol) VALUES ({});".format(",".join("%s" for _ in range(len(valuesins))))
                 cursor.execute(qry, tuple(valuesins))
                 xlis.append(values)
 
@@ -2038,9 +1969,7 @@ class PlanInversion(
                     valuesins.append(vals)
 
                 valuesins.append(symbol)
-                qry += "ticket) VALUES ({});".format(
-                    ",".join("'%s'" for _ in range(len(valuesins)))
-                )
+                qry += "ticket) VALUES ({});".format(",".join("'%s'" for _ in range(len(valuesins))))
                 cursor.execute(qry, tuple(valuesins))
 
             conn.commit()
@@ -2072,9 +2001,7 @@ class PlanInversion(
         return found, ix
 
 
-class RepositorioOportunidadesBuySell(
-    PlanInversion
-):  # -------------------------------------------------------------
+class RepositorioOportunidadesBuySell(PlanInversion):  # -------------------------------------------------------------
     """
     -- Class de oportunidades generadas, acciones y trading realziados."""
 
@@ -2131,23 +2058,17 @@ class RepositorioOportunidadesBuySell(
             conn.commit()
 
     @staticmethod
-    def generar_hash_id(
-        account, symbol, option, fecha=None, tipo=None, subtipo=None, recomendado=None
-    ):
+    def generar_hash_id(account, symbol, option, fecha=None, tipo=None, subtipo=None, recomendado=None):
         try:
             date = fecha if fecha is not None else datetime.now().strftime("%Y-%m-%d")
-            hash_id = (
-                f"{account}_{symbol}_{option}_{date}_{tipo}_{subtipo}_{recomendado}"
-            )
+            hash_id = f"{account}_{symbol}_{option}_{date}_{tipo}_{subtipo}_{recomendado}"
             return hashlib.md5(hash_id.encode()).hexdigest()
 
         except (Exception, EncodingWarning, connect.Error) as e:
             print(f"evaluar_generar_hash_id(): {e}")
 
     # Verifica si ya existe una oportunidad con tolerancia en el ROI
-    def ya_existe_con_tolerancia(
-        self, symbol, option, fecha, nuevo_roi, tolerancia=0.10
-    ):
+    def ya_existe_con_tolerancia(self, symbol, option, fecha, nuevo_roi, tolerancia=0.10):
         try:
             sql = """
                 SELECT json_detalle->>'$.roi' AS roi
@@ -2165,15 +2086,11 @@ class RepositorioOportunidadesBuySell(
                 # Si hay un resultado, verifica la tolerancia del ROI
                 if resultado and resultado[0]:
                     roi_existente = float(resultado[0])
-                    diferencia = abs(nuevo_roi - roi_existente) / max(
-                        abs(roi_existente), 1e-6
-                    )
+                    diferencia = abs(nuevo_roi - roi_existente) / max(abs(roi_existente), 1e-6)
                     return diferencia <= tolerancia
                 return False
         except (Exception, EncodingWarning, connect.Error) as error:
-            print(
-                f"[Mysql:: RepositorioOportunidadesBuySell.ya_existe_con_tolerancia(): {error}]"
-            )
+            print(f"[Mysql:: RepositorioOportunidadesBuySell.ya_existe_con_tolerancia(): {error}]")
 
     # Detalle de oportunidad de venta
     def detalle_OportunidadSell(self, origen, grafico_url=None, row=None):
@@ -2336,9 +2253,7 @@ class RepositorioOportunidadesBuySell(
             return False
 
     # update de una oportunidad existente
-    def actualizar_oportunidad(
-        self, hash_id=None, estado=None, origen=None, tipo=None, subtipo=None, row=None
-    ):
+    def actualizar_oportunidad(self, hash_id=None, estado=None, origen=None, tipo=None, subtipo=None, row=None):
         try:
             # caso de actualización con hash_id (actualiza oportunidad específica)
             if hash_id is not None:
@@ -2386,14 +2301,10 @@ class RepositorioOportunidadesBuySell(
                 return True if rows_afectadas > 0 else False
 
         except (Exception, EncodingWarning, connect.Error) as error:
-            print(
-                f"[Mysql:: RepositorioOportunidadesBuySell.actualizar_oportunidad(): {error}]"
-            )
+            print(f"[Mysql:: RepositorioOportunidadesBuySell.actualizar_oportunidad(): {error}]")
 
     # update de una oportunidad de compra existente
-    def actualizar_oportunidad_buy(
-        self, hash_id=None, estado=None, origen=None, tipo=None, subtipo=None, row=None
-    ):
+    def actualizar_oportunidad_buy(self, hash_id=None, estado=None, origen=None, tipo=None, subtipo=None, row=None):
         try:
             # caso de actualización con hash_id (actualiza oportunidad específica)
             if hash_id is not None:
@@ -2440,9 +2351,7 @@ class RepositorioOportunidadesBuySell(
                 return True if rows_afectadas > 0 else False
 
         except (Exception, EncodingWarning, connect.Error) as error:
-            print(
-                f"[Mysql:: RepositorioOportunidadesBuySell.actualizar_oportunidad_buy(): {error}]"
-            )
+            print(f"[Mysql:: RepositorioOportunidadesBuySell.actualizar_oportunidad_buy(): {error}]")
 
     # establec enlace entre oportunidad y buySell
     def registrar_venta(self, recom_id, precio_venta, ganancia_real, comentario=""):
@@ -2492,9 +2401,7 @@ class RepositorioOportunidadesBuySell(
                 cursor.execute(sql, (recomendado, estado, razon, recomendado, hash_id))
                 conn.commit()
         except (Exception, EncodingWarning, connect.Error) as error:
-            print(
-                f"[Mysql:: RepositorioOportunidadesBuySell.marcar_oportunidad(): {error}]"
-            )
+            print(f"[Mysql:: RepositorioOportunidadesBuySell.marcar_oportunidad(): {error}]")
 
     def obtener_no_enviadas(self, limite=15):
         try:
@@ -2512,9 +2419,7 @@ class RepositorioOportunidadesBuySell(
 
                 return cursor.fetchall(), ix
         except (Exception, EncodingWarning, connect.Error) as error:
-            print(
-                f"[Mysql:: RepositorioOportunidadesBuySell.obtener_no_enviadas(): {error}]"
-            )
+            print(f"[Mysql:: RepositorioOportunidadesBuySell.obtener_no_enviadas(): {error}]")
 
     def marcar_como_enviada(self, hash_id):
         try:
@@ -2524,9 +2429,7 @@ class RepositorioOportunidadesBuySell(
                 cursor.execute(sql, (hash_id,))
                 conn.commit()
         except (Exception, EncodingWarning, connect.Error) as error:
-            print(
-                f"[Mysql:: RepositorioOportunidadesBuySell.marcar_como_enviada(): {error}]"
-            )
+            print(f"[Mysql:: RepositorioOportunidadesBuySell.marcar_como_enviada(): {error}]")
 
     # return: lista de registros seleccionados
     def select_booktrading(
@@ -2744,26 +2647,19 @@ class RepositorioOportunidadesBuySell(
 
                         # condicion que deja pasar las posiciones liquidadas más recientes (10 días atrás)
                         if (row[ix.index("cantidad")] > 0.0001) or (
-                            row[ix.index("cantidad")] <= 0
-                            and row[ix.index("fechahora")].date() > desde.date()
+                            row[ix.index("cantidad")] <= 0 and row[ix.index("fechahora")].date() > desde.date()
                         ):
 
                             if inicio_qry:
-                                concatena = (
-                                    """ AND ((simbolo, fechahora) = ('%s', '%s')"""
-                                    % (
-                                        row[ix.index("simbolo")],
-                                        row[ix.index("fechahora")],
-                                    )
+                                concatena = """ AND ((simbolo, fechahora) = ('%s', '%s')""" % (
+                                    row[ix.index("simbolo")],
+                                    row[ix.index("fechahora")],
                                 )
                                 inicio_qry = False
                             else:
-                                concatena = (
-                                    """ OR (simbolo, fechahora) = ('%s', '%s')"""
-                                    % (
-                                        row[ix.index("simbolo")],
-                                        row[ix.index("fechahora")],
-                                    )
+                                concatena = """ OR (simbolo, fechahora) = ('%s', '%s')""" % (
+                                    row[ix.index("simbolo")],
+                                    row[ix.index("fechahora")],
                                 )
                             qry += concatena
 
@@ -2836,9 +2732,7 @@ class RepositorioOportunidadesBuySell(
                 upd = """UPDATE booktrading SET activa = '%s', sell = '%s', updateStamp = '%s' 
                         WHERE cuenta = '%s' AND divisa = '%s' AND simbolo = '%s' and idtrans = '%s';"""
 
-                u_cursor.execute(
-                    upd % (activa, sell, update, idcuenta, divisa, ticket, id_trans)
-                )
+                u_cursor.execute(upd % (activa, sell, update, idcuenta, divisa, ticket, id_trans))
                 u_conn.commit()
             except (Exception, EncodingWarning, connect.Error) as e:
                 print("[Mysql:: update_indicador_activa()]: {}".format(e))
@@ -2898,9 +2792,7 @@ class RepositorioOportunidadesBuySell(
         # Objetivo es dejar solo como activa la venta más reciente
         def update_codigo_sell(id_trader=None, update=None):
             try:
-                (book, iy) = self.select_booktrading(
-                    accion="select*", account=account, idivisa=idivisa, symbol=symbol
-                )
+                (book, iy) = self.select_booktrading(accion="select*", account=account, idivisa=idivisa, symbol=symbol)
                 ebook = enumerate(book)
 
                 eof_book, read = next(ebook, (None, None))
@@ -2939,9 +2831,7 @@ class RepositorioOportunidadesBuySell(
             categoria = values["categoria"]
 
             # crea hashID y valida su existencia
-            found_hash = self.get_hash_booktrading(
-                accion="valida", values=values, symbol=symbol
-            )
+            found_hash = self.get_hash_booktrading(accion="valida", values=values, symbol=symbol)
             if found_hash:
                 return
 
@@ -2952,9 +2842,7 @@ class RepositorioOportunidadesBuySell(
             nw_producto, ubasico, ustock = 0.0, 0.0, 0.0
             usec, uid, position = 0.0, 0.0, 0.0
 
-            utrading, ix = self.select_booktrading(
-                accion="last", account=account, idivisa=idivisa, symbol=symbol
-            )
+            utrading, ix = self.select_booktrading(accion="last", account=account, idivisa=idivisa, symbol=symbol)
             if utrading:
                 nw_producto = utrading[0]["basico"] * utrading[0]["stock"]
                 costo_avg = utrading[0]["basico"]
@@ -2967,9 +2855,7 @@ class RepositorioOportunidadesBuySell(
             if inversion:
                 position = inversion[0]["position"] if inversion else 0
                 costo_avg = (
-                    inversion[0]["costobase"] * inversion[0]["factor_cambio"] / position
-                    if position > 0
-                    else ubasico
+                    inversion[0]["costobase"] * inversion[0]["factor_cambio"] / position if position > 0 else ubasico
                 )
 
             stock = ustock + values["cantidad"]
@@ -2978,11 +2864,7 @@ class RepositorioOportunidadesBuySell(
             if values["cantidad"] > 0:
 
                 # obtener basico y recalcular el nuevo producto de utrading entre el nuevo stock
-                basico = (
-                    values["preciotrans"] * values["cantidad"]
-                    + values["tarifacomision"]
-                    + nw_producto
-                ) / stock
+                basico = (values["preciotrans"] * values["cantidad"] + values["tarifacomision"] + nw_producto) / stock
                 gpreal = 0.0
                 codigo = "O"
                 mtmgp = 0.00
@@ -2995,9 +2877,7 @@ class RepositorioOportunidadesBuySell(
                 codigo = "C"
 
                 # rutina para marcar como iactiva='N'
-                importe = maximiza_ganancias_corto_plazo(
-                    values["cantidad"], values["fechahora"]
-                )
+                importe = maximiza_ganancias_corto_plazo(values["cantidad"], values["fechahora"])
 
                 gpreal = values["producto"] - (importe + values["tarifacomision"])
                 mtmgp = gpreal / abs(values["cantidad"])
@@ -3025,9 +2905,7 @@ class RepositorioOportunidadesBuySell(
                 valuesins.append(vals)
 
             valuesins.append(symbol)
-            qry += "simbolo) VALUES ({});".format(
-                ",".join("%s" for _ in range(len(valuesins)))
-            )
+            qry += "simbolo) VALUES ({});".format(",".join("%s" for _ in range(len(valuesins))))
             cursor.execute(qry, tuple(valuesins))
             conn.commit()
             cursor.close()
@@ -3050,9 +2928,7 @@ class RepositorioOportunidadesBuySell(
         try:
             inicio, ifecha = {}, datetime.now()
             for ticket in list_asset:
-                (utrading, ix) = self.select_booktrading(
-                    accion="low", account=account, idivisa=idivisa, symbol=ticket
-                )
+                (utrading, ix) = self.select_booktrading(accion="low", account=account, idivisa=idivisa, symbol=ticket)
                 if utrading:
                     if ifecha > utrading[0]["fechahora"]:
                         ifecha = utrading[0]["fechahora"]
@@ -3079,9 +2955,7 @@ class RepositorioOportunidadesBuySell(
                 valuesins.append(vals)
 
             valuesins.append(symbol)
-            qry += "symbol) VALUES ({});".format(
-                ",".join("%s" for _ in range(len(valuesins)))
-            )
+            qry += "symbol) VALUES ({});".format(",".join("%s" for _ in range(len(valuesins))))
             cursor.execute(qry, tuple(valuesins))
             conn.commit()
             cursor.close()
