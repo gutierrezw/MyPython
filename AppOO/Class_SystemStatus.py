@@ -636,6 +636,62 @@ class system_status(tk.Frame):
         """
 
         #   FUNCIONALIDAD PRINCIPAL
+        def get_cache_preview(key, value):
+            """Genera un preview descriptivo del contenido del cache."""
+            tipo = type(value).__name__
+            preview = ""
+
+            try:
+                if isinstance(value, pd.DataFrame):
+                    # DataFrame: mostrar filas y columnas clave
+                    rows = len(value)
+                    cols = len(value.columns)
+                    preview = f"{rows:,} filas, {cols} cols"
+
+                    # Si tiene columna Symbol, mostrar algunos símbolos
+                    if "Symbol" in value.columns:
+                        symbols = value["Symbol"].dropna().unique()[:3]
+                        if len(symbols) > 0:
+                            sym_str = ", ".join(str(s) for s in symbols)
+                            if len(value["Symbol"].dropna().unique()) > 3:
+                                sym_str += f"... +{len(value['Symbol'].dropna().unique())-3}"
+                            preview = f"{sym_str} | {preview}"
+                    elif "symbol" in value.columns:
+                        symbols = value["symbol"].dropna().unique()[:3]
+                        if len(symbols) > 0:
+                            sym_str = ", ".join(str(s) for s in symbols)
+                            if len(value["symbol"].dropna().unique()) > 3:
+                                sym_str += f"... +{len(value['symbol'].dropna().unique())-3}"
+                            preview = f"{sym_str} | {preview}"
+                    # Si la key parece un símbolo
+                    elif key.isupper() or key.endswith("_pd"):
+                        preview = f"🔹 {preview}"
+
+                elif isinstance(value, dict):
+                    # Diccionario: mostrar algunas claves
+                    keys_list = list(value.keys())[:3]
+                    preview = f"{len(value)} claves: {', '.join(str(k) for k in keys_list)}"
+                    if len(value) > 3:
+                        preview += "..."
+
+                elif isinstance(value, (list, tuple)):
+                    # Lista/Tupla: mostrar cantidad y primeros elementos
+                    preview = f"{len(value)} items"
+                    if len(value) > 0 and len(value) <= 5:
+                        items_str = ", ".join(str(i)[:15] for i in value[:3])
+                        preview = f"{items_str}"
+                        if len(value) > 3:
+                            preview += "..."
+                else:
+                    # Otros tipos: mostrar valor truncado
+                    val_str = str(value)[:50]
+                    preview = val_str + "..." if len(str(value)) > 50 else val_str
+
+            except Exception:
+                preview = tipo
+
+            return preview
+
         def refresh_cache_list():
             """Recarga la lista de claves desde el cache."""
             try:
@@ -645,6 +701,7 @@ class system_status(tk.Frame):
 
                 # Contador de elementos
                 total_items = 0
+                first_item_id = None
 
                 # Insertar items del cache
                 for k, v in CacheHut.cache.items():
@@ -672,13 +729,20 @@ class system_status(tk.Frame):
                     else:
                         icon = "📦"
 
-                    lista.insert(
+                    # Obtener preview descriptivo del contenido
+                    preview = get_cache_preview(k, v)
+
+                    item_id = lista.insert(
                         "",
                         tk.END,
                         text=f"{icon} {k}",
-                        values=(tipo, size_str),
+                        values=(tipo, size_str, preview),
                         tags=("item",),
                     )
+
+                    # Guardar primer item para auto-selección
+                    if first_item_id is None:
+                        first_item_id = item_id
                     total_items += 1
 
                 # Actualizar header con contador
@@ -687,6 +751,18 @@ class system_status(tk.Frame):
                 # Si no hay items
                 if total_items == 0:
                     lista.insert("", "end", text="(Vacío - sin datos en cache)", tags=("empty",))
+                    # Limpiar y mostrar mensaje en detalle
+                    for item in detalle.get_children():
+                        detalle.delete(item)
+                    detalle.insert("", "end", text="📭 Cache vacío", tags=("info",))
+                    detalle.insert("", "end", text="No hay datos almacenados en cache", tags=("summary",))
+                elif first_item_id:
+                    # Auto-seleccionar y mostrar primer item
+                    lista.selection_set(first_item_id)
+                    lista.focus(first_item_id)
+                    item_text = lista.item(first_item_id, "text")
+                    key = item_text.split(" ", 1)[1] if " " in item_text else item_text
+                    display_cache_detail(key)
 
             except Exception as e:
                 print(f"[refresh_cache_list()]: {e}")
@@ -898,17 +974,19 @@ class system_status(tk.Frame):
             frame_top.pack(side=tk.TOP, fill=tk.X)
 
             # Crear TreeViews para lista y detalle
-            lista = ttk.Treeview(frame_top, columns=("tipo", "tamaño"), height=14, style="TFrame")
+            lista = ttk.Treeview(frame_top, columns=("tipo", "tamaño", "preview"), height=14, style="TFrame")
             detalle = ttk.Treeview(frame_top, height=16, style="TFrame")
 
             # Configurar headers y columnas de lista
             lista.heading("#0", text="Cache Keys")
             lista.heading("tipo", text="Tipo")
             lista.heading("tamaño", text="Tamaño")
+            lista.heading("preview", text="Contenido")
 
-            lista.column("#0", width=200, minwidth=150)
-            lista.column("tipo", width=100, minwidth=80)
-            lista.column("tamaño", width=80, minwidth=60)
+            lista.column("#0", width=180, minwidth=120)
+            lista.column("tipo", width=80, minwidth=60)
+            lista.column("tamaño", width=60, minwidth=50)
+            lista.column("preview", width=220, minwidth=150)
 
             # Configurar header de detalle
             detalle.heading("#0", text="Información Detallada")
@@ -941,23 +1019,20 @@ class system_status(tk.Frame):
 
             ttk.Button(frame_btn, text="Refrescar", width=10, command=refresh_cache_list).pack(side=tk.LEFT, padx=5)
             ttk.Button(frame_btn, text="Eliminar", width=10, command=remove_selected_key).pack(side=tk.LEFT, padx=5)
+            ttk.Button(
+                frame_btn,
+                text="Modelo",
+                width=10,
+                command=lambda: self._documentar_estructura("Cache"),
+            ).pack(side=tk.LEFT, padx=5)
 
             # --- Bind eventos ---
             lista.bind("<Double-Button-1>", on_double_click)
             lista.bind("<<TreeviewSelect>>", on_item_selected)
 
-            # Mostrar mensaje inicial en detalle
-            detalle.insert("", "end", text="👈 Selecciona un item de la izquierda", tags=("info",))
-            detalle.insert("", "end", text="para ver su información detallada", tags=("info",))
-            detalle.insert("", "end", text="", tags=("spacer",))
-            detalle.insert(
-                "",
-                "end",
-                text="💡 Click simple o doble click para ver detalles",
-                tags=("summary",),
-            )
-
             # --- Carga inicial y auto-refresh ---
+            # El mensaje inicial se muestra solo si no hay datos
+            # refresh_cache_list() auto-selecciona el primer item si existe
             refresh_cache_list()
             auto_refresh()
         except Exception as e:
@@ -3403,15 +3478,15 @@ class system_status(tk.Frame):
             traceback.print_exc()
 
     # ============================================================================
-    # Documentación de Estructuras (DataHub, BuySell, Rebalanceo)
+    # Documentación de Estructuras (DataHub, BuySell, Rebalanceo, Cache)
     # ============================================================================
     def _documentar_estructura(self, nombre_estructura="DataHub"):
         """
-        Función para documentar estructuras del sistema (DataHub, BuySell, Rebalanceo).
+        Función para documentar estructuras del sistema.
         Permite cargar, editar y guardar documentación técnica.
 
         Args:
-            nombre_estructura: "DataHub", "BuySell" o "Rebalanceo"
+            nombre_estructura: "DataHub", "BuySell", "Rebalanceo" o "Cache"
         """
 
         def guardar():

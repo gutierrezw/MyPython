@@ -21,7 +21,6 @@ from Modulos_python import (
     colormaps,
     mdates,
     mpatches,
-    messagebox,
     dtime,
     schedule,
     os,
@@ -680,145 +679,152 @@ class DataHub:
             print("[get_info_symbols_gain()]: {}".format(e))
 
     # recorre booktrading() para mostrar lotes  del symbol
-    def get_lotesGainLost(opcion=None, account=None, symbol=None, last=0):
+    def get_lotesGainLost(opcion=None, account=None, symbol=None, divisa="USD", last=0):
         def lotesGain(book=None, ix=None, last=0):
-            l_gain = []
-            # enumera book, hace primera lectura e inicializa variables
-            pbook, gain = enumerate(book), []
-            eof_pbook, recd = next(pbook, (None, None))
+            try:
+                l_gain = []
+                # enumera book, hace primera lectura e inicializa variables
+                pbook, gain = enumerate(book), []
+                eof_pbook, recd = next(pbook, (None, None))
 
-            while eof_pbook is not None:
+                while eof_pbook is not None:
 
-                x_stock, x_costo, lotes = 0.0, 0.0, 0
-                pkey = str(recd[ix.index("preciotrans")])
-                fkey = recd[ix.index("fechahora")].strftime("%Y-%m-%d")
-                key = f"{pkey}{fkey}"
+                    x_stock, x_costo, lotes = 0.0, 0.0, 0
+                    pkey = str(recd[ix.index("preciotrans")])
+                    fkey = recd[ix.index("fechahora")].strftime("%Y-%m-%d")
+                    key = f"{pkey}{fkey}"
 
-                while (eof_pbook is not None) and (key == f"{pkey}{fkey}"):
+                    while (eof_pbook is not None) and (key == f"{pkey}{fkey}"):
 
-                    prec = recd[ix.index("preciotrans")]
-                    cant = recd[ix.index("cantidad")]
-                    cost = prec * cant + recd[ix.index("tarifacomision")]
-                    fechahora = recd[ix.index("fechahora")]
+                        prec = recd[ix.index("preciotrans")]
+                        cant = recd[ix.index("cantidad")]
+                        cost = prec * cant + recd[ix.index("tarifacomision")]
+                        fechahora = recd[ix.index("fechahora")]
 
-                    x_costo += cost
-                    x_stock += cant
+                        x_costo += cost
+                        x_stock += cant
 
-                    eof_pbook, recd = next(pbook, (None, None))
-                    if eof_pbook is not None:
-                        pkey = str(recd[ix.index("preciotrans")])
-                        fkey = recd[ix.index("fechahora")].strftime("%Y-%m-%d")
+                        eof_pbook, recd = next(pbook, (None, None))
+                        if eof_pbook is not None:
+                            pkey = str(recd[ix.index("preciotrans")])
+                            fkey = recd[ix.index("fechahora")].strftime("%Y-%m-%d")
 
-                gyp = last * x_stock - x_costo
-                if gyp > 0:
-                    lotes += 1
-                    roi = (gyp / x_costo) if x_costo > 0 else 0
-                    gain.append(
-                        {
-                            "symbol": symbol,
-                            "last": last,
-                            "fechahora": fechahora.date(),
-                            "precio": prec,
-                            "cantidad": x_stock,
-                            "roi": roi,
-                            "gyp": gyp,
-                            "costo lote": x_costo,
-                            "Nro.Lote": lotes,
-                        }
-                    )
+                    gyp = last * x_stock - x_costo
+                    if gyp > 0:
+                        lotes += 1
+                        roi = (gyp / x_costo) if x_costo > 0 else 0
+                        gain.append(
+                            {
+                                "symbol": symbol,
+                                "last": last,
+                                "fechahora": fechahora.date(),
+                                "precio": prec,
+                                "cantidad": x_stock,
+                                "roi": roi,
+                                "gyp": gyp,
+                                "costo lote": x_costo,
+                                "Nro.Lote": lotes,
+                            }
+                        )
 
-            # ordena DESC lista de lotes ganadores y asigna acum=0
-            l_gain = sorted(gain, key=lambda x: x["Nro.Lote"], reverse=False)
-            return l_gain
+                # ordena DESC lista de lotes ganadores y asigna acum=0
+                l_gain = sorted(gain, key=lambda x: x["Nro.Lote"], reverse=False)
+                return l_gain
+            except Exception as e:
+                print(f"lotesGain: {e}")
+                traceback.print_exc()
 
         def lotesGainLost(book=None, ix=None, last=0):
-            pbook = enumerate(book)
-            eof_pbook, recd = next(pbook, (None, None))
+            try:
+                pbook = enumerate(book)
+                eof_pbook, recd = next(pbook, (None, None))
 
-            a_gain, a_lost, c_gain, c_lost, p_gain, p_lost = [], [], 0.0, 0.0, 0.0, 0.0
-            x_profit, lote_profit, lotes_lost, x_cantidad = 0.0, 0.0, 0.0, 0.0
+                a_gain, a_lost, c_gain, c_lost, p_gain, p_lost = [], [], 0.0, 0.0, 0.0, 0.0
+                x_profit, lote_profit, lotes_lost, x_cantidad = 0.0, 0.0, 0.0, 0.0
 
-            while eof_pbook is not None:
+                while eof_pbook is not None:
 
-                prec, x_stock, x_costo = 0.0, 0.0, 0.0
+                    prec, x_stock, x_costo = 0.0, 0.0, 0.0
 
-                pkey = str(recd[ix.index("preciotrans")])
-                fkey = recd[ix.index("fechahora")].strftime("%Y-%m-%d")
-                key = f"{pkey}{fkey}"
+                    pkey = str(recd[ix.index("preciotrans")])
+                    fkey = recd[ix.index("fechahora")].strftime("%Y-%m-%d")
+                    key = f"{pkey}{fkey}"
 
-                while (eof_pbook is not None) and (key == f"{pkey}{fkey}"):
+                    while (eof_pbook is not None) and (key == f"{pkey}{fkey}"):
 
-                    prec = recd[ix.index("preciotrans")]
-                    cant = recd[ix.index("cantidad")]
-                    cost = prec * cant + recd[ix.index("tarifacomision")]
-                    fechahora = recd[ix.index("fechahora")]
+                        prec = recd[ix.index("preciotrans")]
+                        cant = recd[ix.index("cantidad")]
+                        cost = prec * cant + recd[ix.index("tarifacomision")]
+                        fechahora = recd[ix.index("fechahora")]
 
-                    x_costo += cost
-                    x_stock += cant
+                        x_costo += cost
+                        x_stock += cant
 
-                    eof_pbook, recd = next(pbook, (None, None))
-                    if eof_pbook is not None:
-                        pkey = str(recd[ix.index("preciotrans")])
-                        fkey = recd[ix.index("fechahora")].strftime("%Y-%m-%d")
+                        eof_pbook, recd = next(pbook, (None, None))
+                        if eof_pbook is not None:
+                            pkey = str(recd[ix.index("preciotrans")])
+                            fkey = recd[ix.index("fechahora")].strftime("%Y-%m-%d")
 
-                gyp = (last - prec) * x_stock
+                    gyp = (last - prec) * x_stock
 
-                # acumula lotes con ganancias
-                if gyp >= 0:
-                    x_profit += gyp
-                    lote_profit += 1
-                    x_cantidad += x_stock
+                    # acumula lotes con ganancias
+                    if gyp >= 0:
+                        x_profit += gyp
+                        lote_profit += 1
+                        x_cantidad += x_stock
 
-                    c_gain += x_costo
-                    p_gain += gyp
-                    roi = (p_gain / c_gain) if c_gain > 0 else 0
+                        c_gain += x_costo
+                        p_gain += gyp
+                        roi = (p_gain / c_gain) if c_gain > 0 else 0
 
-                    a_gain.append(
-                        {
-                            "precio": prec,
-                            "costo": x_costo,
-                            "cantidad": x_stock,
-                            "gyp": gyp,
-                            "roi": roi,
-                            "fecha": fechahora.date(),
-                            "Nro.Lote": lote_profit,
-                        }
-                    )
+                        a_gain.append(
+                            {
+                                "precio": prec,
+                                "costo": x_costo,
+                                "cantidad": x_stock,
+                                "gyp": gyp,
+                                "roi": roi,
+                                "fecha": fechahora.date(),
+                                "Nro.Lote": lote_profit,
+                            }
+                        )
 
-                # acumula lotes con perdidas
-                elif gyp < 0:
-                    c_lost += prec * cant
-                    p_lost += gyp
-                    lotes_lost += 1
-                    roi = (p_lost / c_lost) if c_lost > 0 else 0
-                    a_lost.append(
-                        {
-                            "precio": prec,
-                            "costo": x_costo,
-                            "cantidad": x_stock,
-                            "gyp": gyp,
-                            "roi": roi,
-                            "fecha": fechahora.date(),
-                            "Nro.Lote": lotes_lost,
-                        }
-                    )
+                    # acumula lotes con perdidas
+                    elif gyp < 0:
+                        c_lost += prec * cant
+                        p_lost += gyp
+                        lotes_lost += 1
+                        roi = (p_lost / c_lost) if c_lost > 0 else 0
+                        a_lost.append(
+                            {
+                                "precio": prec,
+                                "costo": x_costo,
+                                "cantidad": x_stock,
+                                "gyp": gyp,
+                                "roi": roi,
+                                "fecha": fechahora.date(),
+                                "Nro.Lote": lotes_lost,
+                            }
+                        )
 
-            # eof_pbbok()
-            ResumLotes = {
-                "book": (book, ix),
-                "last": last,
-                "profit": x_profit,
-                "gain lotes": lote_profit,
-                "total lotes": lote_profit + lotes_lost,
-                "cantidad": x_cantidad,
-            }
-            return ResumLotes, a_gain, a_lost
+                # eof_pbbok()
+                ResumLotes = {
+                    "book": (book, ix),
+                    "last": last,
+                    "profit": x_profit,
+                    "gain lotes": lote_profit,
+                    "total lotes": lote_profit + lotes_lost,
+                    "cantidad": x_cantidad,
+                }
+                return ResumLotes, a_gain, a_lost
+            except Exception as e:
+                print(f"lotesGainLost: {e}")
+                traceback.print_exc()
 
         try:
             book, ix = DataHub.RepositorioOportunidades.select_booktrading(
-                accion="select*", account=account, symbol=symbol
+                accion="select*", account=account, idivisa=divisa, symbol=symbol
             )
-
             # Elimina registros con 'codigo' == 'C' del book
             book = [row for row in book if row[ix.index("codigo")] != "C"]
 
@@ -827,9 +833,9 @@ class DataHub:
                     return lotesGain(book, ix, last)
                 elif opcion == "ambos":
                     return lotesGainLost(book, ix, last)
-
         except Exception as e:
             print(f"get_lotesGainLost: {e}")
+            traceback.print_exc()
 
     # optimiza venta de lotes para la gain de capital
     def maximiza_sell_lotes(account=None, symbol=None, last=None, c_sell=None, position=None, costobase=None):
@@ -1527,8 +1533,8 @@ class MyOrders:
         def cash_redeem():
             try:
                 self.crypto_earn_rescate(symbol="USDT001", amount=20)
-            except (Exception, ValueError) as error:
-                print("cash_redeem({}): {}".format(self.vehiculo, error))
+            except (Exception, ValueError) as e:
+                print("cash_redeem({}): {}".format(self.vehiculo, e))
 
         def update_windows():
             try:
@@ -1536,8 +1542,8 @@ class MyOrders:
 
                 # actualiza cada 0.5" segundos
                 self.orderActivas.after(500, update_windows)
-            except (Exception, ValueError) as error:
-                print("update_windows({}): {}".format(self.vehiculo, error))
+            except (Exception, ValueError) as e:
+                print("update_windows({}): {}".format(self.vehiculo, e))
 
         def on_swicth_sumit(estado):
             if estado:
@@ -1789,6 +1795,7 @@ class TickerInfo(MyOrders):
                         position["nivelIA"],
                         position["region"],
                         position["country"],
+                        position["divisa"],
                     )
         except Exception as e:
             print("[carga_inversion_en_positions()]: {}".format(e))
@@ -1824,6 +1831,7 @@ class TickerInfo(MyOrders):
         nivelIA,
         region,
         country,
+        divisa,
     ):
         try:
             position = {
@@ -1855,6 +1863,7 @@ class TickerInfo(MyOrders):
                 "nivelIA": nivelIA,
                 "region": region,
                 "country": country,
+                "divisa": divisa,
             }
             self.positions.append(position)
         except Exception as e:
@@ -1937,6 +1946,32 @@ class TickerInfo(MyOrders):
         except Exception as e:
             print("[ts_yfinance_symbol()]: {}".format(e), symbol)
             return {}, pd.DataFrame(), False
+
+    # Actualiza el diccionario DataHub.info[symbol] con el precio recibido
+    def update_precio_DataHubInfo(self, symbol=None, conid=None, precio=None):
+        with DataHub.lockInfo:
+            if symbol in self.info.keys():
+                self.info[symbol].update(
+                    {
+                        "conid": conid,
+                        "account": self.account,
+                        "vehiculo": self.vehiculo,
+                        "websocket": precio[symbol],
+                    }
+                )
+
+            elif symbol is not None:
+                if symbol not in self.info.keys():
+                    self.info.update(
+                        {
+                            symbol: {
+                                "conid": conid,
+                                "account": self.account,
+                                "vehiculo": self.vehiculo,
+                                "websocket": precio[symbol],
+                            }
+                        }
+                    )
 
     # define estrategia por dividendos
     def rendimiento_dividends(self, fg=None, activo=None, datos=None, symbol=None, plot="no", period="5y"):
@@ -3281,8 +3316,8 @@ class WidgetVehiculo(TickerInfo):
                     update_items_dash()
                     break
                 i += 1
-        except Exception as error:
-            print("[update_widget_treeview()]: {}".format(error))
+        except Exception as e:
+            print("[update_widget_treeview()]: {}".format(e))
 
     def update_panelVehiculo(self, orden=None):
         try:
@@ -3290,11 +3325,11 @@ class WidgetVehiculo(TickerInfo):
             for position in positions:
                 symbol = position["ticket"]
                 self.update_widget_treeview(symbol=symbol, position=position)
-        except Exception as error:
-            print("[update_panelVehiculo()]: {}".format(error))
+        except Exception as e:
+            print("[update_panelVehiculo()]: {}".format(e))
 
     # obtiene lotes fiscales
-    def get_lotes_fiscales(self, account=None, symbol=None, last=None):
+    def get_lotes_fiscales(self, account=None, symbol=None, divisa="USD", last=None):
         try:
             elimina = [
                 "id",
@@ -3317,7 +3352,7 @@ class WidgetVehiculo(TickerInfo):
             ]
 
             ResumLotes, a_gain, a_lost = DataHub.get_lotesGainLost(
-                opcion="ambos", account=account, symbol=symbol, last=last
+                opcion="ambos", account=account, symbol=symbol, divisa=divisa, last=last
             )
             (book, ix) = ResumLotes["book"]
 
@@ -3330,8 +3365,9 @@ class WidgetVehiculo(TickerInfo):
                 self.gchar["booktrading"] = frame_book.copy()
 
             return ResumLotes, a_gain, a_lost
-        except (Exception, Exception) as error:
-            print(f"get_lotes_fiscales(): {error}")
+        except Exception as e:
+            print(f"get_lotes_fiscales(): {e}")
+            traceback.print_exc()
 
     # despliega ventanas de estrategia y analisis de activo
     def window_estrategia(self, analisis=True):
@@ -3416,14 +3452,23 @@ class WidgetVehiculo(TickerInfo):
                 }
                 self.graph_performace_portafolio(fg=fg3, data=ddatos, parm=parm)
                 cv3.draw()
-            except Exception as error:
-                print("[window_analisis()]: {}".format(error))
+            except Exception as e:
+                print("[window_analisis()]: {}".format(e))
 
-        # encapsula llamado chart_symbol()
-        def chart_setup(periodo, tipo, accion):
+        # encapsula llamado chart_symbol() gwi0001
+        def chart_setup(periodo, tipo, accion, toggle_fib=False):
             try:
+                # toggle fibonacci si se solicita
+                if toggle_fib:
+                    self.gchar["fibonacci"] = not self.gchar.get("fibonacci", True)
+
                 # busca datos yf.download si activo tiene dividendos (stock)
-                vehiculo = "hist" if self.vehiculo == "Stock" else "download"
+                if self.vehiculo == "Stock":
+                    vehiculo = "hist"
+                elif self.vehiculo == "Crypto":
+                    vehiculo = "download"
+                else:
+                    vehiculo = self.vehiculo
 
                 (activo, pdatos, update) = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=vehiculo)
                 self.gchar["periodo"] = periodo if accion == "p" else self.gchar["periodo"]
@@ -3431,8 +3476,9 @@ class WidgetVehiculo(TickerInfo):
 
                 chart_symbol(fg=fg, datos=pdatos, keys=self.gchar)
                 cv.draw()
-            except Exception as error:
-                print("[chart_setup()]: {}".format(error))
+            except Exception as e:
+                print("[chart_setup()]: {}".format(e))
+                traceback.print_exc()
 
         # lista lotes fiscales (compras y book)
         def list_fiscales(lote=None, a_gain=[], a_lost=[], last=None):
@@ -3640,14 +3686,14 @@ class WidgetVehiculo(TickerInfo):
                     )
 
                 update_totales_lotes()
-            except Exception as error:
-                print("[list_fiscales()]: {}".format(error))
+            except Exception as e:
+                print("[list_fiscales()]: {}".format(e))
 
         try:
             # define windows de estrategia
             self.rnb = tk.Toplevel()
             title = "Grafico " + self.symbol
-            dimension = "%dx%d+%d+%d" % (620, 665, self.df - 5, 65)
+            dimension = "%dx%d+%d+%d" % (610, 665, self.df - 5, 65)
             self.rnb.geometry(dimension)
             self.rnb.resizable(False, False)
             self.rnb.attributes("-toolwindow", 1)
@@ -3709,12 +3755,14 @@ class WidgetVehiculo(TickerInfo):
             # inicia variables
             gtipo, gperiodo, position = "candle", "ME", None
             AGain, ALost = [], []
+            self.gchar["fibonacci"] = True
 
             # obtiene position para symbol y sus lotes fiscales
             if self.positions:
                 found, position = buscar_ticker(self.positions, self.symbol)
                 if position:
                     self.gchar["unrealizedpnl"] = position["unrealizedpnl"]
+                    self.gchar["fibonacci"] = True
                     self.gchar["costobase"] = position["costobase"]
                     self.gchar["position"] = True
                     self.gchar["objetivo"] = position["objetivo"]
@@ -3722,6 +3770,7 @@ class WidgetVehiculo(TickerInfo):
                     self.gchar["avgCost"] = position["costobase"] / position["position"]
                     self.gchar["account"] = position["useraccount"]
                     self.gchar["mkPrice"] = position["mrkprice"]
+                    self.gchar["divisa"] = position["divisa"]
                     self.gchar["ticket"] = position["ticket"]
                     self.gchar["stock"] = position["position"]
                     self.gchar["conid"] = position["conid"]
@@ -3731,6 +3780,7 @@ class WidgetVehiculo(TickerInfo):
                     (ResumLotes, AGain, ALost) = self.get_lotes_fiscales(
                         account=self.gchar["account"],
                         symbol=self.gchar["ticket"],
+                        divisa=self.gchar["divisa"],
                         last=self.gchar["mkPrice"],
                     )
 
@@ -3762,6 +3812,17 @@ class WidgetVehiculo(TickerInfo):
                 command=lambda: eexit(),
             )
 
+            # bottom de gráfica fibonacci ---------------------------------------------------------------------------
+            imagen_tk = BDsystem.select_image(idd=104, size=(16, 16))
+            gt0 = tk.Button(
+                win21,
+                image=imagen_tk,
+                bg=self.bgcolor,
+                relief=tk.FLAT,
+                command=lambda: chart_setup(gperiodo, self.gchar["tipo"], "t", toggle_fib=True),
+            )
+            gt0.imagen = imagen_tk
+
             # bottom de gráfica de velas ---------------------------------------------------------------------------
             imagen_tk = BDsystem.select_image(idd=100, size=(16, 16))
             gt1 = tk.Button(
@@ -3790,6 +3851,8 @@ class WidgetVehiculo(TickerInfo):
 
             gt1.pack(side=tk.RIGHT, anchor=tk.E, padx=1)
             gt2.pack(side=tk.RIGHT, anchor=tk.E)
+            gt0.pack(side=tk.RIGHT, anchor=tk.E)
+
             bt4.pack(side=tk.RIGHT, anchor=tk.E)
             bt3.pack(side=tk.RIGHT, anchor=tk.E)
             bt2.pack(side=tk.RIGHT, anchor=tk.E)
@@ -3814,6 +3877,7 @@ class WidgetVehiculo(TickerInfo):
                 window_analisis()
         except Exception as e:
             print(f"[window_estrategia()]: {e}")
+            traceback.print_exc()
 
     # módulo principal para realizar BUY/SELL
     def trader_lotes_fiscales(self, option=None, parm=None):
@@ -3936,7 +4000,7 @@ class WidgetVehiculo(TickerInfo):
                     tags=("symbol",),
                 )
 
-                # detalla lotes ganadores -- gwi001
+                # detalla lotes ganadores --
                 ventas = DataHub.maximiza_sell_lotes(
                     account=self.account,
                     symbol=value["symbol"],
@@ -5023,8 +5087,8 @@ class MyWebsocket:
                 else:
                     raise ValueError("La lista  self.idsymbol está vacía. No se puede continuar.")
 
-            except Exception as error:
-                print("[subscribe_stock()]: {}".format(error))
+            except Exception as e:
+                print("[subscribe_stock()]: {}".format(e))
 
         def update_subscribe(new_idsymbol):
             try:

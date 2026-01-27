@@ -14,7 +14,7 @@ from Modulos_python import (
     traceback,
 )
 from Modulos_Mysql import RepositorioOportunidadesBuySell, DiariaCNV
-from Class_customer import WidgetVehiculo, DataHub
+from Class_customer import WidgetVehiculo, TickerInfo, DataHub
 from Modulos_Utilitarios import delete_file, buscar_ticker, define_FileCache, is_numeric
 from Modulos_Comunes import diaria_book_performance, proceso_update_performance
 from download_cnv_selenium import descargar_cnv_hoy
@@ -57,9 +57,8 @@ class ArsFondosInversion(tk.Frame):
         self.get_tasa_cambio_USDT(fiat="ARS")
 
         # carga y actualiza panel treeview ------------------------------------------------------------------------
-        self.ars = WidgetVehiculo(
-            master=self.root, account="BBVA0001", vehiculo=self.vehiculo
-        )
+        self.ars = WidgetVehiculo(master=self.root, account="BBVA0001", vehiculo=self.vehiculo)
+        self.cus = TickerInfo(account="BBVA0001", vehiculo=self.vehiculo)
 
         self.ars.carga_inversion_en_positions()
         self.update_panel_fci()
@@ -121,10 +120,8 @@ class ArsFondosInversion(tk.Frame):
                     }
                 }
 
-                # agrega precio update a info() -- revisar como agrego esto
-                # self.update_precio_DataHubInfo(
-                #    symbol=symbol, conid=conid, precio=d_precio
-                # )
+                activo, datos, ind_update = self.cus.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
+                self.cus.update_precio_DataHubInfo(symbol=symbol, conid=conid, precio=d_precio)
 
             per = costo / unprofit if unprofit > 0 else 0
             self.ars.set_header_panel(
@@ -163,14 +160,10 @@ class ArsFondosInversion(tk.Frame):
         ruta = Path(p_path)
         archivos = []
         if prefijo is not None:
-            archivos = [
-                f for f in ruta.iterdir() if f.is_file() and f.name.startswith(prefijo)
-            ]
+            archivos = [f for f in ruta.iterdir() if f.is_file() and f.name.startswith(prefijo)]
 
         if sufijo is not None:
-            archivos = [
-                f for f in ruta.iterdir() if f.is_file() and f.name.endswith(sufijo)
-            ]
+            archivos = [f for f in ruta.iterdir() if f.is_file() and f.name.endswith(sufijo)]
 
         if not archivos:
             return None
@@ -232,9 +225,7 @@ class ArsFondosInversion(tk.Frame):
                 "AU": "Calificado",
             }
 
-            diaria_CNV = self.obtener_archivo_mas_reciente(
-                p_path=self.path, sufijo=self.aliasExcel.get("CNV")
-            )
+            diaria_CNV = self.obtener_archivo_mas_reciente(p_path=self.path, sufijo=self.aliasExcel.get("CNV"))
             if diaria_CNV is not None:
                 # convierte Excel CNV en Dataframe standard / selection entidades de inversión
                 try:
@@ -261,10 +252,8 @@ class ArsFondosInversion(tk.Frame):
                     for keys in df_fci.itertuples():
                         try:
                             # valida existencia del fondo en cartera
-                            activo, found = (
-                                self.RepositorioOportunidades.select_otros_activos(
-                                    idSymbol=keys.Código_CAFCI
-                                )
+                            activo, found = self.RepositorioOportunidades.select_otros_activos(
+                                idSymbol=keys.Código_CAFCI
                             )
                             if not found:
                                 self.CNVDiaria.append(
@@ -294,9 +283,7 @@ class ArsFondosInversion(tk.Frame):
                             values.update({"variacion60dias": keys.var_60d})
                             values.update({"variacion90dias": keys.var_90d})
                             values.update({"patrimonioActual": keys.Patrimonio_actual})
-                            values.update(
-                                {"patrimonioAnterior": keys.Patrimonio_anterior}
-                            )
+                            values.update({"patrimonioAnterior": keys.Patrimonio_anterior})
                             values.update({"marketShare": keys.Market_Share})
                             values.update({"sociedadDepositaria": keys.Soc_Depositaria})
                             values.update({"codigoCNV": keys.Codigo_CNV})
@@ -320,9 +307,7 @@ class ArsFondosInversion(tk.Frame):
             p = {}
 
             # obtiene costo promedio
-            activo, found = self.RepositorioOportunidades.select_otros_activos(
-                symbol=ticket
-            )
+            activo, found = self.RepositorioOportunidades.select_otros_activos(symbol=ticket)
 
             # obtiene precio de mercado
             conid = activo[0]["idcrypto"]
@@ -344,17 +329,11 @@ class ArsFondosInversion(tk.Frame):
             p["objetivo"] = 0
             p["position"] = last[0]["stock"]
             p["mrkprice"] = (
-                (cnv[ix.index("valorActual")] / 1000 / last[0]["factor_cambio"])
-                if last[0]["factor_cambio"] > 0
-                else 0
+                (cnv[ix.index("valorActual")] / 1000 / last[0]["factor_cambio"]) if last[0]["factor_cambio"] > 0 else 0
             )
 
             p["mktvalue"] = p["mrkprice"] * last[0]["stock"]
-            p["retorno"] = (
-                (p["mktvalue"] - p["costobase"]) / p["costobase"]
-                if p["costobase"] > 0
-                else 0
-            )
+            p["retorno"] = (p["mktvalue"] - p["costobase"]) / p["costobase"] if p["costobase"] > 0 else 0
             p["empresa"] = activo[0]["descripcion"]
             p["nivelIA"] = "02"
             p["country"] = "Argentina"
@@ -376,22 +355,18 @@ class ArsFondosInversion(tk.Frame):
             p["dgyp"] = p["mrkprice"] - p["open"]
 
             return p
-        except (EncodingWarning, Exception) as error:
-            print("struct_positions_fci(): {}".format(error))
+        except (EncodingWarning, Exception) as e:
+            print("struct_positions_fci(): {}".format(e))
 
     # update self.ars.positions
     def update_FCI_en_positions(self):
         try:
-            in_positions = self.RepositorioOportunidades.select_inversion(
-                tipoin=self.vehiculo, ticket="all"
-            )
+            in_positions = self.RepositorioOportunidades.select_inversion(tipoin=self.vehiculo, ticket="all")
             iupdate = False
 
             for account in self.account_fci:
                 positions = []
-                activo, found = self.RepositorioOportunidades.select_otros_activos(
-                    symbol="all", account=account
-                )
+                activo, found = self.RepositorioOportunidades.select_otros_activos(symbol="all", account=account)
 
                 for keys in activo:
                     symbol = keys["symbol"]
@@ -404,9 +379,7 @@ class ArsFondosInversion(tk.Frame):
 
                     # valida que position sea mayor que el umbral
                     if abs(last_trader[0]["stock"]) > 0.01:
-                        datos = self.struct_positions_fci(
-                            symbol, in_positions, last_trader
-                        )
+                        datos = self.struct_positions_fci(symbol, in_positions, last_trader)
                         positions.append(datos)
 
                 # actualiza tabla de inversiones con última información de la API
@@ -417,12 +390,10 @@ class ArsFondosInversion(tk.Frame):
                     iupdate = True
 
             # re-escribe self.position en moneda base para que se muestre en widget
-            out_positions = self.RepositorioOportunidades.select_inversion(
-                tipoin=self.vehiculo, ticket="all"
-            )
+            out_positions = self.RepositorioOportunidades.select_inversion(tipoin=self.vehiculo, ticket="all")
             self.ars.positions = copy.deepcopy(out_positions)
-        except (EncodingWarning, Exception) as error:
-            print("update_FCI_en_positions(): {}".format(error))
+        except (EncodingWarning, Exception) as e:
+            print("update_FCI_en_positions(): {}".format(e))
 
     # carga en booktrading operaciones de FCI
     def load_positions_FCI(self):
@@ -445,35 +416,27 @@ class ArsFondosInversion(tk.Frame):
 
                     symbol = values["symbol"]
                     if keySymbol != symbol:
-                        last_trader, ix = (
-                            self.RepositorioOportunidades.select_booktrading(
-                                accion="last",
-                                account=self.account_bbva,
-                                idivisa="ARS",
-                                symbol=symbol,
-                            )
+                        last_trader, ix = self.RepositorioOportunidades.select_booktrading(
+                            accion="last",
+                            account=self.account_bbva,
+                            idivisa="ARS",
+                            symbol=symbol,
                         )
-                        last_date = (
-                            last_trader[0]["fechahora"]
-                            if last_trader
-                            else datetime(2000, 1, 1)
-                        )
+                        last_date = last_trader[0]["fechahora"] if last_trader else datetime(2000, 1, 1)
 
                         keySymbol = symbol
 
                     # inserta trader mayores a last_trader
                     if last_date < values["fechahora"]:
                         values.pop("symbol")
-                        self.RepositorioOportunidades.insert_booktrading(
-                            values, symbol=symbol
-                        )
+                        self.RepositorioOportunidades.insert_booktrading(values, symbol=symbol)
 
                     eof_book, values = next(ebook, (None, None))
 
                 # elimina archivo procesado
                 delete_file(ruta=self.archivo, display=True)
-            except Exception as error:
-                print(f"[insert_values_in_booktrading()]: {error}")
+            except Exception as e:
+                print(f"[insert_values_in_booktrading()]: {e}")
 
         def fci_BBVA():
             try:
@@ -501,19 +464,13 @@ class ArsFondosInversion(tk.Frame):
                     if rows["Moneda"] == "$":
                         values = {}
                         codigo = "O" if rows["Tipo"] == "Suscripción" else "C"
-                        activo, found = (
-                            self.RepositorioOportunidades.select_otros_activos(
-                                symbol=rows["Descripción de Especie"]
-                            )
+                        activo, found = self.RepositorioOportunidades.select_otros_activos(
+                            symbol=rows["Descripción de Especie"]
                         )
                         if found:
-                            cantidad = self.string_float(s=rows["Cantidad (VN)"]) * (
-                                1 if codigo == "O" else -1
-                            )
+                            cantidad = self.string_float(s=rows["Cantidad (VN)"]) * (1 if codigo == "O" else -1)
                             fecha = datetime.strptime(rows["Fecha"], "%d/%m/%Y")
-                            tasa_cambio = self.get_tasa_cambio_USDT(
-                                fiat="ARS", date=fecha.date()
-                            )
+                            tasa_cambio = self.get_tasa_cambio_USDT(fiat="ARS", date=fecha.date())
 
                             values.update({"categoria": self.vehiculo})
                             values.update({"divisa": "ARS"})
@@ -521,15 +478,9 @@ class ArsFondosInversion(tk.Frame):
                             values.update({"fechahora": fecha})
                             values.update({"idtrans": rows["Operación"]})
                             values.update({"cantidad": cantidad})
-                            values.update(
-                                {"preciotrans": self.string_float(s=rows["Precio"])}
-                            )
-                            values.update(
-                                {"preciocierre": self.string_float(s=rows["Precio"])}
-                            )
-                            values.update(
-                                {"producto": self.string_float(s=rows["Monto Neto"])}
-                            )
+                            values.update({"preciotrans": self.string_float(s=rows["Precio"])})
+                            values.update({"preciocierre": self.string_float(s=rows["Precio"])})
+                            values.update({"producto": self.string_float(s=rows["Monto Neto"])})
                             values.update({"tarifacomision": 0.0})
                             values.update({"gprealizadas": 0.0})
                             values.update({"mtmgp": 0.0})
@@ -540,8 +491,8 @@ class ArsFondosInversion(tk.Frame):
 
                 # insert booktradin
                 insert_values_in_booktrading(trader)
-            except Exception as error:
-                print(f"[fci_BBVA()]: {error}")
+            except Exception as e:
+                print(f"[fci_BBVA()]: {e}")
 
         def fci_santander():
             try:
@@ -557,9 +508,7 @@ class ArsFondosInversion(tk.Frame):
                     "J": "Importe",
                 }
 
-                df = pd.read_excel(
-                    self.archivo, skiprows=2, header=0, names=list(columns.values())
-                )
+                df = pd.read_excel(self.archivo, skiprows=2, header=0, names=list(columns.values()))
                 cond1 = df[columns["F"]] == "Inversión"
                 cond2 = df[columns["F"]] == "Rescate"
                 df_santa = df[cond1 | cond2]
@@ -571,34 +520,18 @@ class ArsFondosInversion(tk.Frame):
                 for i, rows in enumerate(santa_ord):
 
                     values = {}
-                    ValorCuotaParte = self.string_float(
-                        s=rows["Valor_cuotaparte"], tipo="$.,"
-                    )
-                    CuotaParte = self.string_float(
-                        s=rows["Cantidad_cuotapartes"], tipo=".,"
-                    )
+                    ValorCuotaParte = self.string_float(s=rows["Valor_cuotaparte"], tipo="$.,")
+                    CuotaParte = self.string_float(s=rows["Cantidad_cuotapartes"], tipo=".,")
                     if ValorCuotaParte > 0:
                         codigo = "O" if rows["Movimiento"] == "Inversión" else "C"
-                        activo, found = (
-                            self.RepositorioOportunidades.select_otros_activos(
-                                symbol=rows["Fondo"]
-                            )
-                        )
+                        activo, found = self.RepositorioOportunidades.select_otros_activos(symbol=rows["Fondo"])
 
                         if not found:
-                            activo, found = (
-                                self.RepositorioOportunidades.insert_otros_activos(
-                                    symbol=rows["Fondo"]
-                                )
-                            )
+                            activo, found = self.RepositorioOportunidades.insert_otros_activos(symbol=rows["Fondo"])
                         if found:
                             cantidad = CuotaParte * (1 if codigo == "O" else -1)
-                            fecha = datetime.strptime(
-                                rows["Fecha_liquidación"], "%d/%m/%Y"
-                            )
-                            tasa_cambio = self.get_tasa_cambio_USDT(
-                                fiat="ARS", date=fecha.date()
-                            )
+                            fecha = datetime.strptime(rows["Fecha_liquidación"], "%d/%m/%Y")
+                            tasa_cambio = self.get_tasa_cambio_USDT(fiat="ARS", date=fecha.date())
                             producto = ValorCuotaParte * CuotaParte
                             values.update({"categoria": self.vehiculo})
                             values.update({"divisa": "ARS"})
@@ -619,23 +552,19 @@ class ArsFondosInversion(tk.Frame):
 
                 # valida e inserta booktrading
                 insert_values_in_booktrading(trader)
-            except Exception as error:
-                print(f"[fci_santander()]: {error}")
+            except Exception as e:
+                print(f"[fci_santander()]: {e}")
 
         try:
             # carga información BBVA
-            self.archivo = self.obtener_archivo_mas_reciente(
-                p_path=self.path, prefijo=self.aliasExcel.get("BBVA")
-            )
+            self.archivo = self.obtener_archivo_mas_reciente(p_path=self.path, prefijo=self.aliasExcel.get("BBVA"))
             if self.archivo is not None:
                 fci_BBVA()
                 self.update_FCI_en_positions()
                 return self.account_bbva
 
             # carga información santander
-            self.archivo = self.obtener_archivo_mas_reciente(
-                p_path=self.path, prefijo=self.aliasExcel.get("SANT")
-            )
+            self.archivo = self.obtener_archivo_mas_reciente(p_path=self.path, prefijo=self.aliasExcel.get("SANT"))
             if self.archivo is not None:
                 fci_santander()
                 self.update_FCI_en_positions()
@@ -692,23 +621,17 @@ class ArsFondosInversion(tk.Frame):
         # carga ultima tasa USDT
         self.get_tasa_cambio_USDT(fiat="ARS")
 
-        bbva = self.obtener_archivo_mas_reciente(
-            p_path=self.path, prefijo=self.aliasExcel.get("BBVA")
-        )
+        bbva = self.obtener_archivo_mas_reciente(p_path=self.path, prefijo=self.aliasExcel.get("BBVA"))
         if bbva is not None:
             existe = True
 
         # santa = self.obtener_archivo_mas_reciente(p_path=self.path, prefijo='últimos movimientos Superfondos')
-        santa = self.obtener_archivo_mas_reciente(
-            p_path=self.path, prefijo=self.aliasExcel.get("SANT")
-        )
+        santa = self.obtener_archivo_mas_reciente(p_path=self.path, prefijo=self.aliasExcel.get("SANT"))
 
         if santa is not None:
             existe = True
 
-        diaria = self.obtener_archivo_mas_reciente(
-            p_path=self.path, sufijo=self.aliasExcel.get("CNV")
-        )
+        diaria = self.obtener_archivo_mas_reciente(p_path=self.path, sufijo=self.aliasExcel.get("CNV"))
         if diaria is not None:
             # laod diaria, actualiza panel y no forza actualzaición de peformance
             self.load_diaria_CNV()
@@ -727,9 +650,7 @@ class ArsFondosInversion(tk.Frame):
         if account:
             # for account in self.account_fci:
             t_wait, update = DataHub.last_process[self.vehiculo], False
-            update = diaria_book_performance(
-                account=account, vehiculo=self.vehiculo, proces=t_wait
-            )
+            update = diaria_book_performance(account=account, vehiculo=self.vehiculo, proces=t_wait)
 
             # si actualizó tabla diaria, calcula proxima fecha de update
             if update:
@@ -777,9 +698,7 @@ class ArsFondosInversion(tk.Frame):
                     self.schedule_diaria_performace(account)
 
                 self.counter += 1
-                DataHub.update_self_procesos(
-                    proces="thread", tarea=task, itera=self.counter
-                )
+                DataHub.update_self_procesos(proces="thread", tarea=task, itera=self.counter)
                 threading.Event().wait(90)
 
         try:
@@ -814,9 +733,7 @@ def app():
     root.geometry(dimension)
     root.config(bg=colors["bgcolor"])
     style = ttk.Style(root)
-    style.configure(
-        "TFrame", font=("Courier", 8), foreground="white", background="black"
-    )
+    style.configure("TFrame", font=("Courier", 8), foreground="white", background="black")
     dpn = ttk.Frame(root, style="TFrame", width=colors["df"], height=700)
     dpn.pack()
 
