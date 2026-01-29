@@ -1059,6 +1059,7 @@ class MyOrders:
                 return response, enviada, values
             except Exception as e:
                 print(f"place_OrderStock(): {e}")
+                return {}, {}, {}
 
         # place order Crypto
         def place_OrderCrypto(pedido):
@@ -1098,6 +1099,7 @@ class MyOrders:
                 return response, enviada, values
             except Exception as e:
                 print(f"place_OrderCrypto(): {e}")
+                return {}, {}, {}
 
         try:
             if vehiculo == "Stock":
@@ -1683,6 +1685,7 @@ class MyOrders:
             update_windows()
         except (TypeError, Exception, ValueError) as e:
             print(f"WindowsBuySell_trader({self.vehiculo}): {e}")
+            traceback.print_exc()
 
     # verificar parameters order vehiculo ---------------------------------------------------------------------------
     def valida_orden_vehiculo(self, option=None):
@@ -2351,6 +2354,7 @@ class TickerInfo(MyOrders):
                     DataHub.QremoteOrder._complete(future, resp)
         except Exception as e:
             print(f"schedule_order_remote(): {e}")
+            traceback.print_exc()
 
     # trades del vehículo y procede con update booktrading e inversión
     def schedule_diario(self):
@@ -2790,6 +2794,27 @@ class WidgetVehiculo(TickerInfo):
         self.op2.grid(row=2, column=0, padx=15, pady=7)
         self.op3.grid(row=1, column=1, padx=15, pady=7)
         self.op0.grid(row=0, column=0, pady=0, columnspan=3)
+
+        # Opción de compra de símbolo nuevo (solo si id_transaccion está activo)
+        btn_state = tk.NORMAL if self.sesion.get("id_transaccion", False) else tk.DISABLED
+        entry_state = "normal" if self.sesion.get("id_transaccion", False) else "disabled"
+
+        frame_buy_new = tk.Frame(wi41, bg=self.colors["bgcolor"])
+        frame_buy_new.grid(row=2, column=1, padx=10, pady=10)
+
+        self.entry_new_symbol = tk.Entry(frame_buy_new, width=12, state=entry_state, font=("Arial", 10))
+        self.entry_new_symbol.pack(side=tk.LEFT, padx=5)
+
+        self.btn_buy_new = tk.Button(
+            frame_buy_new,
+            text="BUY",
+            width=6,
+            bg="green",
+            fg="white",
+            state=btn_state,
+            command=lambda: self.comprar_simbolo_nuevo(),
+        )
+        self.btn_buy_new.pack(side=tk.LEFT, padx=5)
 
         # crear treeview ----------------------------------------------------------------------------------------------
         top = tk.Frame(win2)
@@ -3385,7 +3410,7 @@ class WidgetVehiculo(TickerInfo):
                 self.rns = tk.Toplevel()
 
                 x_title = "Análisis " + self.symbol
-                x_dimension = "%dx%d+%d+%d" % (self.max_dw - 10, 220, 0, 775)
+                x_dimension = "%dx%d+%d+%d" % (self.max_dw - 13, 220, 0, 775)
                 self.rns.geometry(x_dimension)
                 self.rns.resizable(False, False)
                 self.rns.attributes("-toolwindow", 1)
@@ -3460,7 +3485,7 @@ class WidgetVehiculo(TickerInfo):
             try:
                 # toggle fibonacci si se solicita
                 if toggle_fib:
-                    self.gchar["fibonacci"] = not self.gchar.get("fibonacci", True)
+                    self.gchar["fibonacci"] = not self.gchar.get("fibonacci", False)
 
                 # busca datos yf.download si activo tiene dividendos (stock)
                 if self.vehiculo == "Stock":
@@ -3536,6 +3561,7 @@ class WidgetVehiculo(TickerInfo):
                         "Cum Trader",
                         "Cum. UnP&L",
                         "Cum. CostB",
+                        "Cum Total",
                         "%ROI",
                         "UnP&L",
                     ]
@@ -3547,6 +3573,7 @@ class WidgetVehiculo(TickerInfo):
                         "acum",
                         "gyp",
                         "cost",
+                        "total",
                         "bene",
                         "GPa",
                     ]
@@ -3584,6 +3611,7 @@ class WidgetVehiculo(TickerInfo):
                 tree, heard = treeview_lotes()
 
                 # por bof() agrega last price del symbol (base cálculo de los lotes)
+                cum_total = self.gchar["unrealizedpnl"] + self.gchar["costobase"]
                 bof = heard.insert(
                     "",
                     "0",
@@ -3595,6 +3623,7 @@ class WidgetVehiculo(TickerInfo):
                         "{:>+10.5f}".format(self.gchar["stock"]),
                         "{:>10.2f}$".format(self.gchar["unrealizedpnl"]),
                         "{:>10.2f}$".format(self.gchar["costobase"]),
+                        "{:>10.2f}$".format(cum_total),
                         "{:>+10.2%}".format(self.gchar["retorno"]),
                         "",
                     ),
@@ -3609,9 +3638,10 @@ class WidgetVehiculo(TickerInfo):
                         "",
                         "",
                         "{:>10.5f}".format(0),
+                        "{:>10.2f}".format(0),
+                        "{:>10.2f}".format(0),
+                        "{:>10.2f}".format(0),
                         "{:>+10.2%}".format(0),
-                        "{:>+10.2%}".format(0),
-                        "{:>10.0f}".format(0),
                         "",
                     ),
                 )
@@ -3624,9 +3654,10 @@ class WidgetVehiculo(TickerInfo):
                         "",
                         "",
                         "{:>10.5f}".format(0),
+                        "{:>10.2f}".format(0),
+                        "{:>10.2f}".format(0),
+                        "{:>10.2f}".format(0),
                         "{:>+10.2%}".format(0),
-                        "{:>+10.2%}".format(0),
-                        "{:>10.0f}".format(0),
                         "",
                     ),
                 )
@@ -3640,6 +3671,7 @@ class WidgetVehiculo(TickerInfo):
                     c_acum += value["cantidad"]
                     costo += value["costo"]
                     roi = (p_acum / costo) if costo > 0 else 0
+                    total = p_acum + costo
 
                     items = tree.insert(
                         gain,
@@ -3652,6 +3684,7 @@ class WidgetVehiculo(TickerInfo):
                             "{:>+10.5f}".format(c_acum),
                             "{:>10.2f}".format(p_acum),
                             "{:>10.2f}".format(costo),
+                            "{:>10.2f}".format(total),
                             "{:>+10.2%}".format(roi),
                             "{:>10.2f}".format(value["gyp"]),
                         ),
@@ -3667,6 +3700,7 @@ class WidgetVehiculo(TickerInfo):
                     c_acum += value["cantidad"]
                     costo += value["costo"]
                     roi = (p_acum / costo) if costo > 0 else 0
+                    total = p_acum + costo
 
                     items = tree.insert(
                         lost,
@@ -3679,6 +3713,7 @@ class WidgetVehiculo(TickerInfo):
                             "{:>+10.5f}".format(c_acum),
                             "{:>10.2f}".format(p_acum),
                             "{:>10.2f}".format(costo),
+                            "{:>10.2f}".format(total),
                             "{:>+10.2%}".format(roi),
                             "{:>10.2f}".format(value["gyp"]),
                         ),
@@ -3693,7 +3728,7 @@ class WidgetVehiculo(TickerInfo):
             # define windows de estrategia
             self.rnb = tk.Toplevel()
             title = "Grafico " + self.symbol
-            dimension = "%dx%d+%d+%d" % (610, 665, self.df - 5, 65)
+            dimension = "%dx%d+%d+%d" % (607, 665, self.df - 0, 65)
             self.rnb.geometry(dimension)
             self.rnb.resizable(False, False)
             self.rnb.attributes("-toolwindow", 1)
@@ -3755,14 +3790,14 @@ class WidgetVehiculo(TickerInfo):
             # inicia variables
             gtipo, gperiodo, position = "candle", "ME", None
             AGain, ALost = [], []
-            self.gchar["fibonacci"] = True
+            self.gchar["fibonacci"] = False
 
             # obtiene position para symbol y sus lotes fiscales
             if self.positions:
                 found, position = buscar_ticker(self.positions, self.symbol)
                 if position:
                     self.gchar["unrealizedpnl"] = position["unrealizedpnl"]
-                    self.gchar["fibonacci"] = True
+                    self.gchar["fibonacci"] = False
                     self.gchar["costobase"] = position["costobase"]
                     self.gchar["position"] = True
                     self.gchar["objetivo"] = position["objetivo"]
@@ -3786,13 +3821,15 @@ class WidgetVehiculo(TickerInfo):
 
                     book, ix = ResumLotes.get("book")
 
-            # bottom de buy y sell
+            # bottom de buy y sell (habilitados solo si id_transaccion está activo)
+            btn_state = tk.NORMAL if self.sesion.get("id_transaccion", False) else tk.DISABLED
             ft1 = tk.Button(
                 win20,
                 text="BUY",
                 width=8,
                 bg="blue",
                 fg="white",
+                state=btn_state,
                 command=lambda: self.trader_lotes_fiscales(option="BUY", parm=self.gchar),
             )
             ft2 = tk.Button(
@@ -3801,6 +3838,7 @@ class WidgetVehiculo(TickerInfo):
                 width=8,
                 bg="red",
                 fg="white",
+                state=btn_state,
                 command=lambda: self.trader_lotes_fiscales(option="SELL", parm=self.gchar),
             )
             ft3 = tk.Button(
@@ -4761,6 +4799,54 @@ class WidgetVehiculo(TickerInfo):
 
         except Exception as e:
             print(f"[run_gráficos()]: {e}")
+
+    def comprar_simbolo_nuevo(self):
+        """Abre ventana de compra para un símbolo que no está en la cartera"""
+        symbol = self.entry_new_symbol.get().strip().upper()
+
+        if not symbol:
+            MyMessageBox().showinfo(title="Compra", message="Ingrese símbolo")
+            return
+
+        precio = 0.0
+        conid = None
+
+        try:
+            if self.vehiculo == "Crypto":
+                # Busca precio en Binance
+                resp = self.BClient.ticker_price(symbol=symbol)
+                if resp and "price" in resp:
+                    precio = float(resp["price"])
+                else:
+                    MyMessageBox().showinfo(title="Compra", message=f"Símbolo {symbol} no encontrado")
+                    return
+            else:
+                # Busca en Interactive Brokers (Stock)
+                resp = self.IClient.symbol_search(symbol=symbol)
+                if resp and len(resp) > 0:
+                    conid = resp[0].get("conid")
+                else:
+                    MyMessageBox().showinfo(title="Compra", message=f"Símbolo {symbol} no encontrado")
+                    return
+
+        except Exception as e:
+            print(f"[comprar_simbolo_nuevo]: Error buscando {symbol}: {e}")
+            MyMessageBox().showinfo(title="Compra", message=f"Error: {symbol} no válido")
+            return
+
+        # Configura el símbolo para la compra
+        self.symbol = symbol
+        self.gchar["ticket"] = symbol
+        self.gchar["position"] = False
+        self.gchar["objetivo"] = 0.0
+        self.gchar["avgCost"] = 0.0
+        self.gchar["mkPrice"] = precio
+        self.gchar["stock"] = 0.0
+        if conid:
+            self.gchar["conid"] = conid
+
+        # Abre ventana de trading para el nuevo símbolo
+        self.trader_lotes_fiscales(option="BUY", parm=self.gchar)
 
 
 # Class para el manejo de treeview
