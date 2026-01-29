@@ -308,8 +308,9 @@ class BDsystem:  # -------------------------------------------------------------
             sql = """INSERT INTO sesion
                      (vehiculo, fesesion, iduser, idcuenta, orcartera, fiscalYear,
                       fefund, Pinvertir, xstrategy, userapi, userpass,
-                      private_key, public_key, port)
-                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                      private_key, public_key, port,
+                      id_transaccion, load_csv, gypPrecio, gainInversion)
+                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
 
             data = (
                 values.get("vehiculo"),
@@ -326,6 +327,10 @@ class BDsystem:  # -------------------------------------------------------------
                 values.get("private_key"),
                 values.get("public_key"),
                 values.get("port"),
+                values.get("id_transaccion", False),
+                values.get("load_csv", False),
+                values.get("gypPrecio"),
+                values.get("gainInversion"),
             )
 
             cursor.execute(sql, data)
@@ -347,7 +352,8 @@ class BDsystem:  # -------------------------------------------------------------
             sql = """UPDATE sesion SET
                      fesesion=%s, iduser=%s, idcuenta=%s, orcartera=%s,
                      fiscalYear=%s, fefund=%s, Pinvertir=%s, xstrategy=%s,
-                     userapi=%s, userpass=%s, private_key=%s, public_key=%s, port=%s
+                     userapi=%s, userpass=%s, private_key=%s, public_key=%s, port=%s,
+                     id_transaccion=%s, load_csv=%s, gypPrecio=%s, gainInversion=%s
                      WHERE id=%s AND vehiculo=%s"""
 
             data = (
@@ -364,6 +370,10 @@ class BDsystem:  # -------------------------------------------------------------
                 values.get("private_key"),
                 values.get("public_key"),
                 values.get("port"),
+                values.get("id_transaccion", False),
+                values.get("load_csv", False),
+                values.get("gypPrecio"),
+                values.get("gainInversion"),
                 session_id,
                 vehiculo,
             )
