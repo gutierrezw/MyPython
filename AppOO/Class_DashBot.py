@@ -538,21 +538,30 @@ class Telegram:
 
     def put_order_stockTelegram(self, op, ix):
         try:
-            # extrea información de la oportunidad
+            # extrae información de la oportunidad
             detalle = json.loads(op[ix.index("json_detalle")])
             symbol = op[ix.index("symbol")]
             account = op[ix.index("account")]
             vehiculo = op[ix.index("vehiculo")]
             hash_id = op[ix.index("hash_id")]
             idd = op[ix.index("conid")]
-            last = op[ix.index("mrkprice")]
+            last = op[ix.index("mrkprice")] or 0.0
+            tipo_op = op[ix.index("tipo")]  # 'sell' o 'buy'
             Stock = TickerInfo(account=account, vehiculo=vehiculo)
 
             # crea instancia de MyOrders para colocar orden
             qty, tip, tim = Stock.params_order(vehiculo=vehiculo, elementos=0)
 
-            opt, qty = "SELL", detalle.get("cantidad_sell")
-            PriceOportunidad = detalle.get("price_market")
+            # determina operación y cantidad según tipo
+            if tipo_op == "sell":
+                opt = "SELL"
+                qty = detalle.get("cantidad_sell", 0)
+            else:
+                opt = "BUY"
+                qty = detalle.get("cantidad_buy", 0)
+
+            # determina precio (maneja None)
+            PriceOportunidad = detalle.get("price_market") or 0.0
             prc = PriceOportunidad if PriceOportunidad > last else last
 
             # crea la orden en formato diccionario
@@ -570,7 +579,8 @@ class Telegram:
             response = DataHub.QremoteOrder[vehiculo]._request(trama)
             return response, symbol
         except Exception as e:
-            print(f"put_order_stockTelegram(): Error: {e}")
+            self.logger.error(f"put_order_stockTelegram(): {e}\n{traceback.format_exc()}")
+            return {}, None
 
     # enlace con TickerInfo() para colocar orders
     def put_order_aprovate_telegram(self, hash_id):
@@ -590,17 +600,21 @@ class Telegram:
                 pass
 
             # marca oportunidad como aprobada si la orden fue aceptada
+            razon = "Aprobada desde Telegram"
+            razon += "." if oportunidad[ix.index("origen")] == "system" else " (IA)"
+
             if values.get("status") in ("Submitted", "PreSubmitted", "FILLED"):
                 self.RepositorioOportunidades.marcar_oportunidad(
                     hash_id,
                     recomendado=1,
                     estado="ejecutada",
-                    razon="Aprobada desde Telegram (IA)",
+                    razon=razon,
                 )
 
             return values, symbol
         except Exception as e:
-            print(f"put_order_aprovate_telegram(): Error: {e}")
+            self.logger.error(f"put_order_aprovate_telegram(): {e}\n{traceback.format_exc()}")
+            return {}, None
 
     # Maneja los callbacks de los botones de aprobación/rechazo
     async def handle_callback(self, update, context):
@@ -615,12 +629,15 @@ class Telegram:
             # solicita put Order & wait response de ManagerOrderQueue
             if accion == "aprobar":
                 response, symbol = self.put_order_aprovate_telegram(hash_id=args[0])
-                if response:
-                    # message = f"✅ Oportunidad procesada :{response['status']}\n"
-                    message = f"✅ Oportunidad procesada :{"pendinete response['status']"}\n"
-                    message += f"Symbol {symbol}: @price {round(0, 4)}"
-                if not response:
-                    message = f"⚠️ Error al colocar la orden. {symbol}"
+
+                if response and response.get("status"):
+                    status = response.get("status", "Pendiente")
+                    price = response.get("price", 0)
+                    message = f"✅ Oportunidad procesada: {status}\n"
+                    message += f"Symbol {symbol}: @price {round(price, 4) if price else 0}"
+                else:
+                    message = f"⚠️ Sin servicio de broker.\n"
+                    message += f"Symbol: {symbol or 'N/A'}\nVerifique conexión IB Gateway."
 
                 await query.edit_message_text(message)
 
@@ -670,7 +687,7 @@ class Telegram:
                 await self.list_orders_exec(chat_id=update.effective_chat.id)
 
         except Exception as e:
-            print(f"handle_callback(): Error: {e}")
+            self.logger.error(f"handle_callback(): {e}\n{traceback.format_exc()}")
 
     # delete message puntual
     async def _delete_message_hash(self, message):

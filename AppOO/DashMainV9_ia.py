@@ -4213,6 +4213,7 @@ class DashMain:
                         "orcartera": entry_orcartera.get().strip(),
                         "fiscalYear": entry_fiscalYear.get().strip(),
                         "Idcuenta_principal": var_idcuenta_principal.get(),
+                        "id_transaccion": var_id_transaccion.get(),
                         "load_csv": var_load_csv.get(),
                         "fefund": entry_fefund.get().strip(),
                         "Pinvertir": entry_Pinvertir.get().strip(),
@@ -4419,6 +4420,7 @@ class DashMain:
             entry_orcartera = None
             entry_fiscalYear = None
             var_idcuenta_principal = None
+            var_id_transaccion = None
             var_load_csv = None
             entry_fefund = None
             entry_Pinvertir = None
@@ -4497,7 +4499,32 @@ class DashMain:
                         is_principal = session_data.get("Idcuenta_principal", False)
                         var_idcuenta_principal.set(is_principal)
 
-                    # Agregar campo load_csv (booleano editable) justo después de Idcuenta_principal
+                    # Agregar campo id_transaccion (booleano) - indica si transacciona en línea
+                    row += 1
+                    label_transaccion = tk.Label(
+                        scrollable_frame,
+                        text="🔄 Transacción Online:",
+                        bg=self.colors["bgcolor"],
+                        fg="white",
+                        anchor="w",
+                    )
+                    label_transaccion.grid(row=row, column=0, sticky="w", padx=10, pady=5)
+
+                    var_id_transaccion = tk.BooleanVar(value=False)
+                    check_transaccion = tk.Checkbutton(
+                        scrollable_frame,
+                        variable=var_id_transaccion,
+                        state="normal",  # Editable
+                        bg=self.colors["bgcolor"],
+                    )
+                    check_transaccion.grid(row=row, column=1, sticky="w", padx=10, pady=5)
+
+                    # Poblar con datos existentes si está en modo edición
+                    if edit_mode and session_data:
+                        transaccion_value = session_data.get("id_transaccion", False)
+                        var_id_transaccion.set(transaccion_value)
+
+                    # Agregar campo load_csv (booleano editable) justo después de id_transaccion
                     row += 1
                     label_load_csv = tk.Label(
                         scrollable_frame,
