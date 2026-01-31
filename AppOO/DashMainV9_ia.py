@@ -1404,132 +1404,134 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 for key in p_cartera:
 
                     symbol = key["contractDesc"]
+
+                    # descarta symbolos migrados (split)
                     if symbol.endswith(".OLD"):
-                        pass
-                    else:
-                        # encuentra factor de conversión para las positions que no están USD
-                        p, exDividendDate, dividendYield, dividendo = (
-                            {},
+                        continue
+
+                    # encuentra factor de conversión para las positions que no están USD
+                    p, exDividendDate, dividendYield, dividendo = (
+                        {},
+                        "9999-12-31",
+                        0.0,
+                        0.0,
+                    )
+                    factor = self.currency[key["currency"]]
+                    symbol = key["contractDesc"]
+
+                    # obtiene información de dividendos
+                    (yf_activo, datos, ind_update) = self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
+
+                    objetivo, x_open, price, empresa = 0.0, 0.0, 0.0, ""
+                    sector = key["sector"] if "sector" in key else "buscar"
+
+                    if yf_activo:
+                        dividendo, dividendYield, exDividendDate = (
+                            0.0,
+                            0.0,
                             "9999-12-31",
-                            0.0,
-                            0.0,
                         )
-                        factor = self.currency[key["currency"]]
-                        symbol = key["contractDesc"]
 
-                        # obtiene información de dividendos
-                        (yf_activo, datos, ind_update) = self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
+                    price = key["mktPrice"]
+                    if "dividendYield" in yf_activo and "trailingAnnualDividendRate" in yf_activo:
+                        dividendYield = yf_activo["dividendYield"]
+                        if "previousClose" in yf_activo:
+                            price = yf_activo["previousClose"]
 
-                        objetivo, x_open, price, empresa = 0.0, 0.0, 0.0, ""
-                        sector = key["sector"] if "sector" in key else "buscar"
+                        # si ha pagado dividndo en los ultimos 12 meses
+                        if yf_activo.get("trailingAnnualDividendRate") > 0:
+                            dividendo = price * dividendYield / 100
 
-                        if yf_activo:
-                            dividendo, dividendYield, exDividendDate = (
-                                0.0,
-                                0.0,
-                                "9999-12-31",
-                            )
-
-                        price = key["mktPrice"]
-                        if "dividendYield" in yf_activo and "trailingAnnualDividendRate" in yf_activo:
-                            dividendYield = yf_activo["dividendYield"]
-                            if "previousClose" in yf_activo:
-                                price = yf_activo["previousClose"]
-
-                            # si ha pagado dividndo en los ultimos 12 meses
-                            if yf_activo.get("trailingAnnualDividendRate") > 0:
-                                dividendo = price * dividendYield / 100
-
-                                # ultima instaancia -- para obtener el dividendo
-                                if "dividendRate" in yf_activo:
-                                    dividendo = yf_activo["dividendRate"]
-                            else:
-                                # Si no ha pagado dividendos en últimos 12 meses, resetear ambos valores
-                                dividendo = 0.0
-                                dividendYield = 0.0
-
-                        if "exDividendDate" in yf_activo:
-                            exDividendDate = datetime.fromtimestamp(yf_activo["exDividendDate"])
-
-                        if "open" in yf_activo:
-                            x_open = yf_activo["open"] * factor
-
-                        # fija precio objetivo
-                        if "targetMeanPrice" in yf_activo:
-                            objetivo = yf_activo["targetMeanPrice"]
-                        elif "targetHighPrice" in yf_activo:
-                            objetivo = yf_activo["targetHighPrice"]
-                        elif "targetLowPrice" in yf_activo:
-                            objetivo = yf_activo["targetLowPrice"]
-                        elif "fiftyTwoWeekHigh" in yf_activo:
-                            objetivo = yf_activo["fiftyTwoWeekHigh"]
-
-                        # asegura un sector, para los activos
-                        if "sector" in yf_activo:
-                            sector = yf_activo["sector"]
-                            if is_vacio(sector) or is_null(sector):
-                                sector = sectores(symbol=symbol)
+                            # ultima instaancia -- para obtener el dividendo
+                            if "dividendRate" in yf_activo:
+                                dividendo = yf_activo["dividendRate"]
                         else:
+                            # Si no ha pagado dividendos en últimos 12 meses, resetear ambos valores
+                            dividendo = 0.0
+                            dividendYield = 0.0
+
+                    if "exDividendDate" in yf_activo:
+                        exDividendDate = datetime.fromtimestamp(yf_activo["exDividendDate"])
+
+                    if "open" in yf_activo:
+                        x_open = yf_activo["open"] * factor
+
+                    # fija precio objetivo
+                    if "targetMeanPrice" in yf_activo:
+                        objetivo = yf_activo["targetMeanPrice"]
+                    elif "targetHighPrice" in yf_activo:
+                        objetivo = yf_activo["targetHighPrice"]
+                    elif "targetLowPrice" in yf_activo:
+                        objetivo = yf_activo["targetLowPrice"]
+                    elif "fiftyTwoWeekHigh" in yf_activo:
+                        objetivo = yf_activo["fiftyTwoWeekHigh"]
+
+                    # asegura un sector, para los activos
+                    if "sector" in yf_activo:
+                        sector = yf_activo["sector"]
+                        if is_vacio(sector) or is_null(sector):
                             sector = sectores(symbol=symbol)
+                    else:
+                        sector = sectores(symbol=symbol)
 
-                        if "longName" in yf_activo:
-                            empresa = yf_activo["longName"]
+                    if "longName" in yf_activo:
+                        empresa = yf_activo["longName"]
 
-                        p["region"], p["country"] = "Global", "US"
-                        if "region" in yf_activo:
-                            p["region"] = yf_activo["region"]
-                        if "country" in yf_activo:
-                            p["country"] = yf_activo["country"]
+                    p["region"], p["country"] = "Global", "US"
+                    if "region" in yf_activo:
+                        p["region"] = yf_activo["region"]
+                    if "country" in yf_activo:
+                        p["country"] = yf_activo["country"]
 
-                        p["unrealizedpnl"] = key["unrealizedPnl"]
-                        p["exDividendDate"] = exDividendDate
-                        p["dividendYield"] = dividendYield
-                        p["estrategia"] = "P02"
-                        p["empresa"] = key["name"] if "name" in key else empresa
-                        p["dividendo"] = dividendo * factor
-                        p["costobase"] = key["avgCost"] * key["position"] * factor
-                        p["objetivo"] = objetivo * factor
-                        p["position"] = key["position"]
-                        p["mrkprice"] = key["mktPrice"] * factor
-                        p["mktvalue"] = key["mktPrice"] * key["position"] * factor
-                        p["retorno"] = (key["mktValue"] - p["costobase"]) / p["costobase"] if p["costobase"] > 0 else 0
-                        p["sector"] = sector
-                        p["ticket"] = symbol
-                        p["deuda"] = 0
-                        p["conid"] = str(key["conid"])
-                        p["open"] = x_open
-                        p["dgyp"] = (p["mrkprice"] - p["open"] if p["open"] > 0 else 0) * p["position"]
-                        p["peso"] = 0
+                    p["unrealizedpnl"] = key["unrealizedPnl"]
+                    p["exDividendDate"] = exDividendDate
+                    p["dividendYield"] = dividendYield
+                    p["estrategia"] = "P02"
+                    p["empresa"] = key["name"] if "name" in key else empresa
+                    p["dividendo"] = dividendo * factor
+                    p["costobase"] = key["avgCost"] * key["position"] * factor
+                    p["objetivo"] = objetivo * factor
+                    p["position"] = key["position"]
+                    p["mrkprice"] = key["mktPrice"] * factor
+                    p["mktvalue"] = key["mktPrice"] * key["position"] * factor
+                    p["retorno"] = (key["mktValue"] - p["costobase"]) / p["costobase"] if p["costobase"] > 0 else 0
+                    p["sector"] = sector
+                    p["ticket"] = symbol
+                    p["deuda"] = 0
+                    p["conid"] = str(key["conid"])
+                    p["open"] = x_open
+                    p["dgyp"] = (p["mrkprice"] - p["open"] if p["open"] > 0 else 0) * p["position"]
+                    p["peso"] = 0
 
-                        # obtiene la positions anterior, la estrategia y otros valores
-                        for position in p_positions:
-                            if position["ticket"] == p["ticket"]:
-                                p["estrategia"] = position["estrategia"]
-                                p["objetivo"] = position["objetivo"] if p["objetivo"] == 0 else p["objetivo"]
+                    # obtiene la positions anterior, la estrategia y otros valores
+                    for position in p_positions:
+                        if position["ticket"] == p["ticket"]:
+                            p["estrategia"] = position["estrategia"]
+                            p["objetivo"] = position["objetivo"] if p["objetivo"] == 0 else p["objetivo"]
 
-                                if "name" in key.keys():
-                                    p["empresa"] = key["name"]
-                                else:
-                                    p["empresa"] = position["empresa"]
+                            if "name" in key.keys():
+                                p["empresa"] = key["name"]
+                            else:
+                                p["empresa"] = position["empresa"]
 
-                                break
+                            break
 
-                        # actualiza variables de la clase
-                        self.assets.update(
-                            {
-                                p["conid"]: {
-                                    "symbol": symbol,
-                                    "position": p["position"],
-                                    "costobase": p["costobase"],
-                                    "unrealizedpnl": p["unrealizedpnl"],
-                                    "last": p["mrkprice"],
-                                    "amount_div": p["dividendo"],
-                                    "objetivo": p["objetivo"],
-                                }
+                    # actualiza variables de la clase
+                    self.assets.update(
+                        {
+                            p["conid"]: {
+                                "symbol": symbol,
+                                "position": p["position"],
+                                "costobase": p["costobase"],
+                                "unrealizedpnl": p["unrealizedpnl"],
+                                "last": p["mrkprice"],
+                                "amount_div": p["dividendo"],
+                                "objetivo": p["objetivo"],
                             }
-                        )
-                        self.activos.append(p["conid"])
-                        x_positions.append(p)
+                        }
+                    )
+                    self.activos.append(p["conid"])
+                    x_positions.append(p)
                 return x_positions
             except Exception as e:
                 print("update_inversion_stock(): {}".format(e))
