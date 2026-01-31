@@ -267,6 +267,7 @@ class Debugging:
         # Suprimir warnings molestos de librerías externas
         warnings.filterwarnings("ignore", category=UserWarning, module="urllib3")
         warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
+        warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
         warnings.filterwarnings("ignore", category=FutureWarning)
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -321,6 +322,11 @@ class Debugging:
         # manager logging
         self.logger.update({"ClassMoodeloIA": logging.getLogger("ClassMoodeloIA")})
         self.logger["ClassMoodeloIA"].setLevel(logging.WARNING)
+
+        # manager logging sklearn (captura warnings de cross-validation, etc.)
+        logging.captureWarnings(True)
+        self.logger.update({"py.warnings": logging.getLogger("py.warnings")})
+        self.logger["py.warnings"].setLevel(logging.WARNING)
 
         # manager logging
         self.logger.update({"ClassMyOrders": logging.getLogger("ClassMyOrders")})
