@@ -904,6 +904,27 @@ class IB(IBClient):
             urllib.parse.urljoin(self.ib_gateway_path, self.api_version) + r"portal/" + endpoint
         )
 
+    def _get_conid(self, symbol: str) -> int:
+        """
+        Obtiene el conid (Contract ID) y otros datos dado un ticker/symbol.
+
+        NAME: symbol
+        DESC: Ticker del instrumento (ej: AAPL, MSFT)
+        TYPE: String
+        """
+        try:
+            # define request components
+            endpoint = r"/iserver/secdef/search"
+            req_type = "GET"
+
+            params = {"symbol": symbol}
+
+            content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
+
+            return content
+        except Exception as e:
+            self.logger.exception(f"_get_conid(): Error obteniendo conid para {symbol} {e}")
+
     # gwi001
     def _make_request(
         self,

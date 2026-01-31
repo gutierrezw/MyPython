@@ -1116,7 +1116,7 @@ class MyOrders:
                     f"""
                         ====================================
                         put_completa_orden({self.vehiculo}):
-                        ====================================  
+                        ====================================
                         Remote_order  : {remote}
                         Simutale_order: {self.simulation}
                         Order.........: {pedido}
@@ -1126,6 +1126,18 @@ class MyOrders:
                         """
                 )
             )
+
+            # Si es orden BUY exitosa, verifica si es activo nuevo para agregarlo al panel
+            if values and values.get("side") == "BUY":
+                found, _ = buscar_ticker(self.positions, symbol)
+                if not found:
+                    # Activo nuevo: agregar al panel WidgetVehiculo
+                    precio = float(values.get("price", 0))
+                    cantidad = float(values.get("quantity", 0))
+                    costo = precio * cantidad
+                    conid = values.get("conid")
+                    self.agregar_nuevo_activo(symbol, conid, precio, cantidad, costo)
+
             return values
         except Exception as e:
             print(f"put_completa_orden(): {e}")
@@ -1620,10 +1632,27 @@ class MyOrders:
             bt3.grid(row=2, column=1, padx=0)
 
             # BID, ASK y precio de trader --------------------------------------------------
+            def calcular_precio_medio():
+                """Calcula precio medio entre bid y ask y lo pone en entry_prc"""
+                try:
+                    bid_text = self.bid.cget("text").replace("Bid", "").strip()
+                    ask_text = self.ask.cget("text").replace("Ask", "").strip()
+                    bid_val = float(bid_text) if bid_text else 0
+                    ask_val = float(ask_text) if ask_text else 0
+                    if bid_val > 0 and ask_val > 0:
+                        medio = (bid_val + ask_val) / 2
+                        # Redondea a 2 decimales para cumplir PRICE_FILTER de Binance
+                        self.entry_prc.set(f"{medio:.2f}")
+                except Exception:
+                    pass
+
             bid = "Bid {:>10.6f}".format(0)
             self.bid = tk.Button(win1, text=bid, width=15, bg="gray", fg="white")
             ask = "Ask {:>10.6f}".format(0)
             self.ask = tk.Button(win1, text=ask, width=15, bg="gray", fg="white")
+
+            # Botón para calcular precio medio
+            btn_medio = tk.Button(win1, text="↔", width=2, bg="cyan", fg="black", command=calcular_precio_medio)
 
             # Entry de tipo de Orden ---------------------------------------------------------------------------------------------
             s_tip = items[0]
@@ -1640,10 +1669,11 @@ class MyOrders:
             lbx.bind("<<ListboxSelect>>", on_select_tip)
 
             self.bid.grid(row=1, column=2, sticky=E)
-            bt4.grid(row=2, column=2, sticky=E)
+            btn_medio.grid(row=1, column=3, padx=2)
+            self.ask.grid(row=1, column=4, sticky=W)
 
-            self.ask.grid(row=1, column=3, sticky=E)
-            bt5.grid(row=2, column=3, sticky=W)
+            bt4.grid(row=2, column=2, sticky=E)
+            bt5.grid(row=2, column=3, columnspan=2, sticky=W)
 
             # timeInForce --------------------------------------------------------------------------------------------------------
             bt6 = tk.Label(win1, text=tif[0], bg="gray", fg="white")
@@ -2341,9 +2371,14 @@ class TickerInfo(MyOrders):
                     # libera recursos y entrega response
                     DataHub.QremoteOrder[self.vehiculo]._complete(future, resp)
 
-                elif vehiculo == vehiculo:
-                    response = self.crypto_ts.put_completa_orden(
-                        account=account, vehiculo=vehiculo, pedido=pedido, remote=True
+                elif vehiculo == "Crypto":
+                    response = self.put_completa_orden(
+                        account=account,
+                        vehiculo=vehiculo,
+                        symbol=symbol,
+                        pedido=pedido,
+                        hash_id_Op=hash_id,
+                        remote=True,
                     )
                     resp = {
                         "values": response,
@@ -2351,7 +2386,7 @@ class TickerInfo(MyOrders):
                     }
 
                     # libera recursos y entrega response
-                    DataHub.QremoteOrder._complete(future, resp)
+                    DataHub.QremoteOrder[self.vehiculo]._complete(future, resp)
         except Exception as e:
             print(f"schedule_order_remote(): {e}")
             traceback.print_exc()
@@ -2569,6 +2604,7 @@ class TickerInfo(MyOrders):
 class WidgetVehiculo(TickerInfo):
     def __init__(self, master, account, vehiculo):
         TickerInfo.__init__(self, account=account, vehiculo=vehiculo)  # Inicializa los atributos de TickerInfo
+        self.master = master
 
         self.index = {
             "Ticket": "ticket",
@@ -2795,21 +2831,22 @@ class WidgetVehiculo(TickerInfo):
         self.op3.grid(row=1, column=1, padx=15, pady=7)
         self.op0.grid(row=0, column=0, pady=0, columnspan=3)
 
-        # Opción de compra de símbolo nuevo (solo si id_transaccion está activo)
+        # Opción de compra de símbolo nuevo (solo si id_transaccion está activo) ---------------------------------------
         btn_state = tk.NORMAL if self.sesion.get("id_transaccion", False) else tk.DISABLED
         entry_state = "normal" if self.sesion.get("id_transaccion", False) else "disabled"
 
-        frame_buy_new = tk.Frame(wi41, bg=self.colors["bgcolor"])
-        frame_buy_new.grid(row=2, column=1, padx=10, pady=10)
+        frame_buy_new = tk.Frame(wi41, bg=self.colors["bgcolor"], width=175, height=40)
+        frame_buy_new.grid(row=2, column=1, padx=15, pady=7)
+        frame_buy_new.pack_propagate(False)
 
-        self.entry_new_symbol = tk.Entry(frame_buy_new, width=12, state=entry_state, font=("Arial", 10))
-        self.entry_new_symbol.pack(side=tk.LEFT, padx=5)
+        self.entry_new_symbol = tk.Entry(frame_buy_new, width=13, state=entry_state, font=("Arial", 8))
+        self.entry_new_symbol.pack(side=tk.LEFT, padx=5, pady=10)
 
         self.btn_buy_new = tk.Button(
             frame_buy_new,
             text="BUY",
-            width=6,
-            bg="green",
+            width=8,
+            bg="blue",
             fg="white",
             state=btn_state,
             command=lambda: self.comprar_simbolo_nuevo(),
@@ -3311,6 +3348,73 @@ class WidgetVehiculo(TickerInfo):
 
         except Exception as e:
             print("[inicio_widget_treeview()]: {}".format(e))
+
+    def agregar_nuevo_activo(self, symbol, conid, precio, cantidad, costo):
+        """Agrega un nuevo activo comprado al panel de posiciones"""
+        try:
+            # Crea estructura de position para el nuevo activo
+            position = {
+                "ticket": symbol,
+                "conid": conid,
+                "useraccount": self.account,
+                "estrategia": "",
+                "empresa": symbol,
+                "peso": 0.0,
+                "mrkprice": precio,
+                "open": precio,
+                "costobase": costo,
+                "position": cantidad,
+                "unrealizedpnl": 0.0,
+                "dividendo": 0.0,
+                "dividendYield": 0.0,
+                "exDividendDate": None,
+                "objetivo": 0.0,
+                "deuda": precio,
+                "retorno": 0.0,
+                "fealta": None,
+                "febaja": None,
+                "iactiva": "Y",
+                "tipoinv": self.vehiculo,
+                "sector": "",
+                "dgyp": 0,
+                "mktvalue": costo,
+                "factor_cambio": 1.0,
+                "nivelIA": 0,
+                "region": "",
+                "country": "",
+                "divisa": "USD",
+            }
+
+            # Agrega a self.positions
+            self.positions.append(position)
+
+            # Inserta en treeview
+            i = len(self.positions) - 1
+            data = self.struct_datos(position)
+            for idx, tree in enumerate(self.m_tree):
+                sty = self.create_styles(i, idx, data, "rows")
+                data_string = self.display_format(tipo="rows", data=data)
+                tree.insert(
+                    parent="",
+                    index=tk.END,
+                    text="",
+                    values=(data_string[idx],),
+                    tags=(sty,),
+                )
+
+            # Actualiza totales
+            total = self.header_total_positions(self.positions)
+            for idx, tree in enumerate(self.m_heard):
+                sty = self.create_styles(0, idx, total, "total")
+                data_string = self.display_format(tipo="total", data=total)
+                tree.item(0, values=(data_string[idx],), tags=(sty,))
+
+            # Agrega a self.info para websocket
+            self.info[symbol] = {"position": position}
+
+            print(f"[agregar_nuevo_activo]: {symbol} agregado al panel")
+        except Exception as e:
+            print(f"[agregar_nuevo_activo()]: {e}")
 
     # mantiene actualizada información positions en self_treeview (panel)
     def update_widget_treeview(self, symbol=None, position=None):
@@ -3943,8 +4047,10 @@ class WidgetVehiculo(TickerInfo):
         symbol, ws, sell = self.gchar["ticket"], {}, {}
 
         if symbol is not None:
-            ws = self.info[symbol]["websocket"] if "websocket" in self.info[symbol].keys() else {}
-            sell = self.info[symbol]["sell"] if "sell" in self.info[symbol].keys() else {}
+            # Verifica si el símbolo existe en self.info
+            if symbol in self.info:
+                ws = self.info[symbol].get("websocket", {})
+                sell = self.info[symbol].get("sell", {})
 
             if ws:
                 bid = ws["bid"]
@@ -3954,6 +4060,19 @@ class WidgetVehiculo(TickerInfo):
 
                 s_ask = "Ask {:>10.6f}".format(ask)
                 self.ask.config(text=s_ask)
+            else:
+                # Símbolo nuevo sin websocket - obtiene precio directo
+                if self.vehiculo == "Crypto":
+                    try:
+                        resp = self.BClient.ticker_price(symbol=symbol)
+                        if resp and "price" in resp:
+                            precio = float(resp["price"])
+                            s_bid = "Bid {:>10.6f}".format(precio)
+                            s_ask = "Ask {:>10.6f}".format(precio)
+                            self.bid.config(text=s_bid)
+                            self.ask.config(text=s_ask)
+                    except Exception:
+                        pass
 
             if sell:
                 disponible = sell["disponible"]
@@ -4805,48 +4924,61 @@ class WidgetVehiculo(TickerInfo):
         symbol = self.entry_new_symbol.get().strip().upper()
 
         if not symbol:
-            MyMessageBox().showinfo(title="Compra", message="Ingrese símbolo")
+            MyMessageBox(self.master).showinfo(
+                title="Buy - New symbol", message="Debe ingresar el símbolo que desea Buy"
+            )
             return
 
         precio = 0.0
         conid = None
 
         try:
+
+            # obtiene conid desde tabla otros_activos
             if self.vehiculo == "Crypto":
-                # Busca precio en Binance
                 resp = self.BClient.ticker_price(symbol=symbol)
                 if resp and "price" in resp:
                     precio = float(resp["price"])
+                    crypto, found = self.RepositorioOportunidades.select_otros_activos(symbol=symbol)
+                    conid = crypto[0]["idcrypto"] if found else None
+
                 else:
-                    MyMessageBox().showinfo(title="Compra", message=f"Símbolo {symbol} no encontrado")
+                    MyMessageBox(self.master).showinfo(
+                        title="Buy - New symbol",
+                        message=f"Símbolo {symbol} no encontrado en los activos {self.vehiculo}",
+                    )
                     return
-            else:
-                # Busca en Interactive Brokers (Stock)
-                resp = self.IClient.symbol_search(symbol=symbol)
+
+            # Busca en Interactive Brokers (Stock)
+            elif self.vehiculo == "Strock":
+                resp = self.IClient._get_conid(symbol=symbol)
+                print(f"_get_conid(): {resp}")
                 if resp and len(resp) > 0:
                     conid = resp[0].get("conid")
                 else:
-                    MyMessageBox().showinfo(title="Compra", message=f"Símbolo {symbol} no encontrado")
+                    MyMessageBox(self.master).showinfo(
+                        title="Buy - New symbol",
+                        message=f"Símbolo {symbol} no encontrado en los activos {self.vehiculo}",
+                    )
                     return
 
         except Exception as e:
-            print(f"[comprar_simbolo_nuevo]: Error buscando {symbol}: {e}")
-            MyMessageBox().showinfo(title="Compra", message=f"Error: {symbol} no válido")
+            MyMessageBox(self.master).showinfo(title="Buy - New symbol", message=f"Error: {symbol} no válido")
             return
 
         # Configura el símbolo para la compra
-        self.symbol = symbol
-        self.gchar["ticket"] = symbol
-        self.gchar["position"] = False
-        self.gchar["objetivo"] = 0.0
-        self.gchar["avgCost"] = 0.0
-        self.gchar["mkPrice"] = precio
-        self.gchar["stock"] = 0.0
         if conid:
+            self.symbol = symbol
+            self.gchar["ticket"] = symbol
+            self.gchar["position"] = False
+            self.gchar["objetivo"] = 0.0
+            self.gchar["avgCost"] = 0.0
+            self.gchar["mkPrice"] = precio
+            self.gchar["stock"] = 0.0
             self.gchar["conid"] = conid
 
-        # Abre ventana de trading para el nuevo símbolo
-        self.trader_lotes_fiscales(option="BUY", parm=self.gchar)
+            # Abre ventana de trading para el nuevo símbolo
+            self.trader_lotes_fiscales(option="BUY", parm=self.gchar)
 
 
 # Class para el manejo de treeview

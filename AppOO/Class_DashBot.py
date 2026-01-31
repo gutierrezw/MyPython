@@ -582,22 +582,76 @@ class Telegram:
             self.logger.error(f"put_order_stockTelegram(): {e}\n{traceback.format_exc()}")
             return {}, None
 
+    def put_order_cryptoTelegram(self, op, ix):
+        """Procesa orden de Crypto desde Telegram usando Binance API"""
+        try:
+            # extrae información de la oportunidad
+            detalle = json.loads(op[ix.index("json_detalle")])
+            symbol = op[ix.index("symbol")]
+            account = op[ix.index("account")]
+            vehiculo = op[ix.index("vehiculo")]
+            hash_id = op[ix.index("hash_id")]
+            last = op[ix.index("mrkprice")] or 0.0
+            tipo_op = op[ix.index("tipo")]  # 'sell' o 'buy'
+
+            # obtiene conid desde tabla otros_activos
+            crypto, found = self.RepositorioOportunidades.select_otros_activos(symbol=symbol)
+            conid = crypto[0]["idcrypto"] if found else None
+
+            # crea instancia de TickerInfo para Crypto
+            Crypto = TickerInfo(account=account, vehiculo=vehiculo)
+
+            # obtiene parámetros de orden
+            qty, tip, tim = Crypto.params_order(vehiculo=vehiculo, elementos=0)
+
+            # determina operación y cantidad según tipo
+            if tipo_op == "sell":
+                opt = "SELL"
+                qty = detalle.get("cantidad_sell", 0)
+            else:
+                opt = "BUY"
+                qty = detalle.get("cantidad_buy", 0)
+
+            # determina precio (maneja None)
+            PriceOportunidad = detalle.get("price_market") or 0.0
+            prc = PriceOportunidad if PriceOportunidad > last else last
+
+            # crea la orden en formato Crypto
+            order = Crypto.format_orden(vehiculo, symbol, conid, tip, prc, opt, tim, qty)
+
+            trama = {
+                "account": account,
+                "vehiculo": vehiculo,
+                "symbol": symbol,
+                "pedido": order,
+                "hash_id_Op": hash_id,
+            }
+
+            # encola la orden para ser procesada por ManagerOrderQueue
+            response = DataHub.QremoteOrder[vehiculo]._request(trama)
+            return response, symbol
+        except Exception as e:
+            self.logger.error(f"put_order_cryptoTelegram(): {e}\n{traceback.format_exc()}")
+            return {}, None
+
     # enlace con TickerInfo() para colocar orders
     def put_order_aprovate_telegram(self, hash_id):
         try:
-            values, symbol = {}, None
+            values, symbol, vehiculo = {}, None, None
 
             # recupera info() de Oportunidad sell
             oportunidad, ix = self.RepositorioOportunidades.obtener_id_por_hash(hash_id=hash_id)
 
             if not oportunidad:
-                return {}, None
+                return {}, None, None
 
-            elif oportunidad[ix.index("vehiculo")] == "Stock":
+            vehiculo = oportunidad[ix.index("vehiculo")]
+
+            if vehiculo == "Stock":
                 values, symbol = self.put_order_stockTelegram(oportunidad, ix)
 
-            elif oportunidad[ix.index("vehiculo")] == "Crypto":
-                pass
+            elif vehiculo == "Crypto":
+                values, symbol = self.put_order_cryptoTelegram(oportunidad, ix)
 
             # marca oportunidad como aprobada si la orden fue aceptada
             razon = "Aprobada desde Telegram"
@@ -611,10 +665,10 @@ class Telegram:
                     razon=razon,
                 )
 
-            return values, symbol
+            return values, symbol, vehiculo
         except Exception as e:
             self.logger.error(f"put_order_aprovate_telegram(): {e}\n{traceback.format_exc()}")
-            return {}, None
+            return {}, None, None
 
     # Maneja los callbacks de los botones de aprobación/rechazo
     async def handle_callback(self, update, context):
@@ -628,7 +682,7 @@ class Telegram:
 
             # solicita put Order & wait response de ManagerOrderQueue
             if accion == "aprobar":
-                response, symbol = self.put_order_aprovate_telegram(hash_id=args[0])
+                response, symbol, vehiculo = self.put_order_aprovate_telegram(hash_id=args[0])
 
                 if response and response.get("status"):
                     status = response.get("status", "Pendiente")
@@ -636,8 +690,9 @@ class Telegram:
                     message = f"✅ Oportunidad procesada: {status}\n"
                     message += f"Symbol {symbol}: @price {round(price, 4) if price else 0}"
                 else:
+                    broker = "IB Gateway" if vehiculo == "Stock" else "Binance API"
                     message = f"⚠️ Sin servicio de broker.\n"
-                    message += f"Symbol: {symbol or 'N/A'}\nVerifique conexión IB Gateway."
+                    message += f"Symbol: {symbol or 'N/A'}\nVerifique conexión {broker}."
 
                 await query.edit_message_text(message)
 
