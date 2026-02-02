@@ -1,7 +1,11 @@
-SELECT * FROM bdinv.order_trader
--- where vehiculo = 'Crypto';
-where conid = '143628768818544279';
+SELECT * FROM bdinv.order_trader;
 
--- Update
-update bdinv.order_trader set conid = CONV(substr(SHA2(symbol, 256),1,15), 16, 10)
-where account = "B0000001";commit;
+
+SELECT vehiculo, status, count(*) 
+FROM bdinv.order_trader
+group by vehiculo, status;
+
+
+-- ALTER TABLE order_trader
+-- ADD CONSTRAINT chk_intent
+-- CHECK (intent IN ('ENTRY','TP1','TP2','EXIT'));
