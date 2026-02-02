@@ -89,12 +89,14 @@ class ArsFondosInversion(tk.Frame):
             hoy = datetime.now()
             tasa_cambio = self.get_tasa_cambio_USDT(fiat="ARS", date=hoy.date())
 
+            self.cus.positions = self.ars.positions
             for keys in self.ars.positions:
                 keys["factor_cambio"] = tasa_cambio
                 keys["mrkprice"] = keys["mrkprice"] * keys["factor_cambio"]
                 keys["mktvalue"] = keys["mrkprice"] * keys["position"]
                 keys["costobase"] = keys["costobase"] * keys["factor_cambio"]
                 keys["unrealizedpnl"] = keys["unrealizedpnl"] * keys["factor_cambio"]
+                keys["open"] = keys["open"] * keys["factor_cambio"]
                 keys["dgyp"] = keys["dgyp"] * keys["factor_cambio"]
                 fecha = keys["exDividendDate"].strftime("%d-%b-%Y")
 
@@ -120,6 +122,7 @@ class ArsFondosInversion(tk.Frame):
                     }
                 }
 
+                # actualiza DataHub.info()
                 activo, datos, ind_update = self.cus.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
                 self.cus.update_precio_DataHubInfo(symbol=symbol, conid=conid, precio=d_precio)
 
@@ -135,6 +138,10 @@ class ArsFondosInversion(tk.Frame):
 
         # convierte a pesos y muestra positions
         change_a_ARS()
+
+        # ejecuta servicios de Trading
+        self.cus.oportunidades_buy()
+        self.cus.oportunidades_sell()
         self.ars.header_panel()
 
     # manipula campos numeric para convertir a float
@@ -718,7 +725,7 @@ def app():
     bgcolor = DataHub.bgcolor
     cgcolor = DataHub.cgcolor
     cchart = DataHub.cchart
-    colors = DataHub.colors
+    colors = DataHub.colorsk0
     dw = DataHub.colors.get("dw")
     dh = DataHub.colors.get("dh")
     df = DataHub.colors.get("df")

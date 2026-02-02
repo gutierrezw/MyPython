@@ -355,11 +355,13 @@ class Debugging:
             log_create = self.log_file + "log_even"
             log_delete = self.log_file + "log_old"
 
-        ipath = os.getcwd()
-        lpath = "..\\logs\\"
-        self.loggerName = lpath + log_create
-        self.spath = ipath + "\\tmp\\"
-        delete_rpath = lpath + log_delete
+        # Ruta absoluta basada en ubicación del archivo, no del directorio de trabajo
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        lpath = os.path.join(script_dir, "..", "logs")
+        os.makedirs(lpath, exist_ok=True)
+        self.loggerName = os.path.join(lpath, log_create)
+        self.spath = os.path.join(script_dir, "tmp")
+        delete_rpath = os.path.join(lpath, log_delete)
 
         # Elimina log anterior
         delete_file(ruta=delete_rpath, display=False)
