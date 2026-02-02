@@ -18,6 +18,20 @@ from Modulos_python import (
 )
 
 
+def format_financiero(width=0, importe=0, divisa="USD"):
+    # Mapa de Versalitas
+    small_caps = {"A": "ᴀ", "R": "ʀ", "S": "ꜱ", "V": "ᴠ", "E": "ᴇ", "U": "ᴜ", "D": "ᴅ"}
+    divisa_pro = "".join(small_caps.get(c, c) for c in divisa.upper())
+
+    # Primero formateamos el número con su coma
+    formateado = "{:.0f}".format(importe)
+
+    # Luego unimos con la divisa y aplicamos el ancho total al string resultante
+    string_final = f"{formateado} {divisa_pro}"
+
+    return "{:>{}s}".format(string_final, width)
+
+
 def is_null(s):
     """Valida si el parametro contingent valor Null o espacios"""
 
@@ -249,9 +263,7 @@ def convierte_ticket_crypto(s: str) -> str:
     ticket = ticket.replace(" CRYPTO", "-USD")
 
     # conversion temporal para los symbol IBKR's no están yfinance
-    ticket = (
-        ticket if ticket not in conversion_yfinance else conversion_yfinance[ticket]
-    )
+    ticket = ticket if ticket not in conversion_yfinance else conversion_yfinance[ticket]
     return ticket
 
 
@@ -555,30 +567,14 @@ def get_indicadores(symbol=None, datos=None):
                     continue
 
                 df_resampled["rsi"] = RSIIndicator(close=df_resampled["Close"]).rsi()
-                df_resampled["EMA020"] = EMAIndicator(
-                    close=df_resampled["Close"], window=20
-                ).ema_indicator()
-                df_resampled["EMA050"] = EMAIndicator(
-                    close=df_resampled["Close"], window=50
-                ).ema_indicator()
-                df_resampled["EMA100"] = EMAIndicator(
-                    close=df_resampled["Close"], window=100
-                ).ema_indicator()
-                df_resampled["EMA200"] = EMAIndicator(
-                    close=df_resampled["Close"], window=200
-                ).ema_indicator()
-                df_resampled["EMA009"] = EMAIndicator(
-                    close=df_resampled["Close"], window=9
-                ).ema_indicator()
-                df_resampled["EMA021"] = EMAIndicator(
-                    close=df_resampled["Close"], window=21
-                ).ema_indicator()
-                df_resampled["EMA055"] = EMAIndicator(
-                    close=df_resampled["Close"], window=55
-                ).ema_indicator()
-                df_resampled["EMA144"] = EMAIndicator(
-                    close=df_resampled["Close"], window=144
-                ).ema_indicator()
+                df_resampled["EMA020"] = EMAIndicator(close=df_resampled["Close"], window=20).ema_indicator()
+                df_resampled["EMA050"] = EMAIndicator(close=df_resampled["Close"], window=50).ema_indicator()
+                df_resampled["EMA100"] = EMAIndicator(close=df_resampled["Close"], window=100).ema_indicator()
+                df_resampled["EMA200"] = EMAIndicator(close=df_resampled["Close"], window=200).ema_indicator()
+                df_resampled["EMA009"] = EMAIndicator(close=df_resampled["Close"], window=9).ema_indicator()
+                df_resampled["EMA021"] = EMAIndicator(close=df_resampled["Close"], window=21).ema_indicator()
+                df_resampled["EMA055"] = EMAIndicator(close=df_resampled["Close"], window=55).ema_indicator()
+                df_resampled["EMA144"] = EMAIndicator(close=df_resampled["Close"], window=144).ema_indicator()
                 df_resampled["macd"] = MACD(close=df_resampled["Close"]).macd()
 
                 # Calcular máximos y mínimos y retroceso fibonacci
@@ -624,12 +620,8 @@ def get_indicadores(symbol=None, datos=None):
                         "tendencia_bajista": x_bajista,
                     },
                     "macd": float(round(ultima["macd"], 7)),
-                    MaximoMInimos[nombre_temp][0]: highs_lows[
-                        MaximoMInimos[nombre_temp][0]
-                    ],  # Maximo
-                    MaximoMInimos[nombre_temp][1]: highs_lows[
-                        MaximoMInimos[nombre_temp][1]
-                    ],  # Minimo
+                    MaximoMInimos[nombre_temp][0]: highs_lows[MaximoMInimos[nombre_temp][0]],  # Maximo
+                    MaximoMInimos[nombre_temp][1]: highs_lows[MaximoMInimos[nombre_temp][1]],  # Minimo
                     "precio_calculo": float(round(ultima["Close"], 7)),
                 }
             except (EncodingWarning, Exception) as e:
@@ -695,24 +687,16 @@ def style_app(main=None) -> object:
     style = ttk.Style(main)
 
     # TFrame
-    style.configure(
-        "TFrame", font=("Courier", 8), foreground="white", background="black"
-    )
+    style.configure("TFrame", font=("Courier", 8), foreground="white", background="black")
     style.map(
         "TFrame",
         background=[("selected", "lightblue")],  # Fondo de selección
         foreground=[("selected", "black")],
     )  # Texto de selección
 
-    style.configure(
-        "B.TFrame", font=("Courier", 8), foreground="black", background="black"
-    )
-    style.configure(
-        "C.TFrame", font=("Courier", 8), foreground="white", background="DarkCyan"
-    )
-    style.configure(
-        "W.TFrame", font=("Courier", 8), foreground="black", background="white"
-    )
+    style.configure("B.TFrame", font=("Courier", 8), foreground="black", background="black")
+    style.configure("C.TFrame", font=("Courier", 8), foreground="white", background="DarkCyan")
+    style.configure("W.TFrame", font=("Courier", 8), foreground="black", background="white")
     style.configure("R.TFrame", font=("Courier", 8), background="red")
 
     # Button
@@ -723,34 +707,21 @@ def style_app(main=None) -> object:
     # TNoteBook
     style.configure("TNotebook", background="DarkCyan", borderwidth=1)
     style.configure("TNotebook.Tab", background="DarkCyan", foreground="black")
-    style.configure("I.TNotebook.Tab", 
-                background="lightcoral",   # Color de fondo cuando NO está seleccionada
-                foreground="white"         # Color del texto
+    style.configure(
+        "I.TNotebook.Tab",
+        background="lightcoral",  # Color de fondo cuando NO está seleccionada
+        foreground="white",  # Color del texto
     )
 
-    style.configure(
-        "Custom.TNotebook.Tab", background="lightblue", font=("Arial", 10, "bold")
-    )
+    style.configure("Custom.TNotebook.Tab", background="lightblue", font=("Arial", 10, "bold"))
 
     # TLabel
-    style.configure(
-        "TLabel", font=("Courier", 8), foreground="white", background="black"
-    )
-    style.configure(
-        "C.TLabel", font=("Courier", 8), foreground="white", background="DarkCyan"
-    )
-    style.configure(
-        "Br.TLabel", font=("Courier", 8), foreground="black", background="red3"
-    )
-    style.configure(
-        "Bg.TLabel", font=("Courier", 8), foreground="black", background="green2"
-    )
-    style.configure(
-        "Wr.TLabel", font=("Courier", 8), foreground="White", background="firebrick4"
-    )
-    style.configure(
-        "Wg.TLabel", font=("Courier", 8), foreground="White", background="dark green"
-    )
+    style.configure("TLabel", font=("Courier", 8), foreground="white", background="black")
+    style.configure("C.TLabel", font=("Courier", 8), foreground="white", background="DarkCyan")
+    style.configure("Br.TLabel", font=("Courier", 8), foreground="black", background="red3")
+    style.configure("Bg.TLabel", font=("Courier", 8), foreground="black", background="green2")
+    style.configure("Wr.TLabel", font=("Courier", 8), foreground="White", background="firebrick4")
+    style.configure("Wg.TLabel", font=("Courier", 8), foreground="White", background="dark green")
     # (C.TScrollbar)
     style.configure(
         "C.TScrollbar",
@@ -777,23 +748,15 @@ def style_app(main=None) -> object:
     )
 
     # B.Heading
-    style.configure(
-        "B.Heading", font=("Arial", 10, "bold"), background="blue", foreground="white"
-    )
+    style.configure("B.Heading", font=("Arial", 10, "bold"), background="blue", foreground="white")
 
     # R.Heading
-    style.configure(
-        "R.Heading", font=("Arial", 10, "bold"), background="red", foreground="white"
-    )
+    style.configure("R.Heading", font=("Arial", 10, "bold"), background="red", foreground="white")
     # G.Heading
-    style.configure(
-        "G.Heading", font=("Arial", 10, "bold"), background="green", foreground="white"
-    )
+    style.configure("G.Heading", font=("Arial", 10, "bold"), background="green", foreground="white")
 
     # (TRadiobutton)
-    style.configure(
-        "C.TRadiobutton", background="DarkCyan", foreground="black", font=("Courier", 8)
-    )
+    style.configure("C.TRadiobutton", background="DarkCyan", foreground="black", font=("Courier", 8))
 
     # (TCheckbutton)
     # style.configure("T.TCheckbutton", font=("Helvetica", 10), foreground="gray")

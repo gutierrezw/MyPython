@@ -24,6 +24,7 @@ from Modulos_python import (
     dtime,
     schedule,
     os,
+    subprocess,
     csv,
     ast,
     json,
@@ -42,6 +43,7 @@ from Modulos_Utilitarios import (
     porcentaje,
     vehiculo_parm,
     buscar_ticker,
+    format_financiero,
     E,
     W,
     get_indicadores,
@@ -62,10 +64,12 @@ from Class_DataFrame import (
 )
 from Modulos_Mysql import (
     PlanInversion,
+    EstrategiaInversion,
     RepositorioOportunidadesBuySell,
     MarketScreen,
     BDsystem,
 )
+from Class_Analisis import AnalisisFCI, AnalisisCrypto, AnalisisStock
 from AppValuations.rebalance_engine import RebalanceEngine
 from API_vehiculos import BB, IB, WebsocketBinanceStreams, WebsocketBinanceApiClient
 
@@ -667,6 +671,8 @@ class DataHub:
                                 "position": value["sell"]["position"],
                                 "costobase": value["sell"]["costobase"],
                                 "disponible": value["sell"]["disponible"],
+                                "divisa": value["sell"]["divisa"],
+                                "factor": value["sell"]["factor"],
                                 "datos_tecnicos": datos_tecnicos,
                             }
                         )
@@ -690,11 +696,15 @@ class DataHub:
                 while eof_pbook is not None:
 
                     x_stock, x_costo, lotes = 0.0, 0.0, 0
+                    factor, divisa = 0.0, "USD"
                     pkey = str(recd[ix.index("preciotrans")])
                     fkey = recd[ix.index("fechahora")].strftime("%Y-%m-%d")
                     key = f"{pkey}{fkey}"
 
                     while (eof_pbook is not None) and (key == f"{pkey}{fkey}"):
+
+                        factor = recd[ix.index("factor_cambio")]
+                        divisa = recd[ix.index("divisa")]
 
                         prec = recd[ix.index("preciotrans")]
                         cant = recd[ix.index("cantidad")]
@@ -724,6 +734,8 @@ class DataHub:
                                 "gyp": gyp,
                                 "costo lote": x_costo,
                                 "Nro.Lote": lotes,
+                                "divisa": divisa,
+                                "factar_cambio": factor,
                             }
                         )
 
@@ -745,12 +757,16 @@ class DataHub:
                 while eof_pbook is not None:
 
                     prec, x_stock, x_costo = 0.0, 0.0, 0.0
+                    factor, divisa = 0.0, "USD"
 
                     pkey = str(recd[ix.index("preciotrans")])
                     fkey = recd[ix.index("fechahora")].strftime("%Y-%m-%d")
                     key = f"{pkey}{fkey}"
 
                     while (eof_pbook is not None) and (key == f"{pkey}{fkey}"):
+
+                        factor = recd[ix.index("factor_cambio")]
+                        divisa = recd[ix.index("divisa")]
 
                         prec = recd[ix.index("preciotrans")]
                         cant = recd[ix.index("cantidad")]
@@ -786,6 +802,8 @@ class DataHub:
                                 "roi": roi,
                                 "fecha": fechahora.date(),
                                 "Nro.Lote": lote_profit,
+                                "divisa": divisa,
+                                "factar_cambio": factor,
                             }
                         )
 
@@ -804,6 +822,8 @@ class DataHub:
                                 "roi": roi,
                                 "fecha": fechahora.date(),
                                 "Nro.Lote": lotes_lost,
+                                "divisa": divisa,
+                                "factar_cambio": factor,
                             }
                         )
 
@@ -2599,6 +2619,198 @@ class TickerInfo(MyOrders):
         self.WsClient.my_allOrders(assets=self.activos, limit=10, sleep=1)
         self.WsClient.counter = 1
 
+    # =========================================================================================
+    # Bloque para manejar Sell y Bull de activos
+    # =========================================================================================
+    def ts_oportunidades_symbol(self, symbol, datos=None):
+        """almacena en ts_yfinance_symbol information de buy y sell"""
+        try:
+            d_buy, d_sell, d_dividends = {}, {}, {}
+
+            # caso actualiza oportunidades sobre info()
+            if symbol in self.info.keys():
+                if datos is not None:
+                    if "sell" in datos.keys():
+                        self.info[symbol]["sell"] = datos["sell"]
+
+                    elif "buy" in datos.keys():
+                        self.info[symbol]["buy"] = datos["buy"]
+
+                    elif "dividends" in datos.keys():
+                        self.info[symbol]["dividends"] = datos["dividends"]
+
+            # siempre return ultima info()
+            if symbol in self.info.keys():
+
+                if "buy" in self.info[symbol].keys():
+                    d_buy = self.info[symbol]["buy"]
+
+                elif "sell" in self.info[symbol].keys():
+                    d_sell = self.info[symbol]["sell"]
+
+                elif "dividends" in self.info[symbol].keys():
+                    d_dividends = self.info[symbol]["dividends"]
+                    return d_buy, d_dividends
+
+            return d_buy, d_sell
+        except Exception as e:
+            print("[ts_oportunidades_symbol()]: {}".format(e))
+
+    def _get_estrategia_descripcion(self, codigo_estrategia):
+        """Convierte código de estrategia (P01, P02, P03, C01, etc.) a su descripción para el rebalanceo."""
+        if not codigo_estrategia:
+            return None
+
+        # Obtener mapeo código→descripción si no está cacheado
+        if not hasattr(self, "_estrategia_map") or not self._estrategia_map:
+            self._estrategia_map = {}
+            # Cargar estrategias de todos los vehículos relevantes
+            for vehiculo in ["Balance", "Crypto"]:
+                result = EstrategiaInversion().select(accion="vehiculo", ivehiculo=vehiculo)
+                if result:
+                    for row in result:
+                        codigo = row.get("estrategia")
+                        descripcion = row.get("descripcion")
+                        if codigo and descripcion:
+                            self._estrategia_map[codigo] = descripcion
+
+        # Retornar descripción si existe, sino el código original
+        return self._estrategia_map.get(codigo_estrategia, codigo_estrategia)
+
+    # recorre positions para actualizar oportunidades Sell general"""
+    def oportunidades_sell(self):
+        def obtiene_lotes(symbol=None, divisa="USD"):
+            nonlocal datos
+            try:
+
+                profit, costCum, lotes, sell, datos = 0.0, 0.0, 0.0, 0.0, {}
+
+                last = position["mrkprice"]
+                l_gain = DataHub.get_lotesGainLost(
+                    opcion="gain", account=self.account, symbol=symbol, divisa=divisa, last=last
+                )
+
+                if l_gain:
+                    for lotes, gain in enumerate(l_gain, 1):
+                        profit += gain["gyp"]
+                        costCum += gain["costo lote"]
+                        sell += gain["cantidad"]
+
+                    disponible = sell
+                    if self.vehiculo == "Crypto":
+                        if symbol in self.assets:
+                            max_sell = self.assets[symbol]["position"]["netAsset"]
+                            disponible = max_sell if sell > max_sell else sell
+
+                    roi = (profit / costCum) if costCum > 0 else 0
+                    datos = {
+                        "sell": {
+                            "profit": profit,
+                            "cantidad lotes": lotes,
+                            "cantidad sell": sell,
+                            "last": last,
+                            "costoCum": costCum,
+                            "roi": roi,
+                            "costobase": position["costobase"],
+                            "position": position["position"],
+                            "disponible": disponible,
+                            "divisa": position["divisa"],
+                            "factor": position["factor_cambio"],
+                        }
+                    }
+                return datos
+            except Exception as error:
+                print("[obtiene_lotes()]: {}".format(error))
+
+        try:
+            for position in self.positions:
+                symbol = position["ticket"]
+                datos = obtiene_lotes(symbol=symbol, divisa=position["divisa"])
+
+                # actualiza metadata del activo para el rebalanceo
+                if symbol in self.info:
+                    self.info[symbol]["sector"] = position.get("sector")
+                    self.info[symbol]["region"] = position.get("region")
+                    self.info[symbol]["costobase"] = position.get("costobase", 0)
+                    # Convertir código de estrategia a descripción para que coincida con grupo_activos()
+                    self.info[symbol]["asset_type"] = self._get_estrategia_descripcion(position.get("estrategia"))
+
+                # actualiza en diccionario self.info()
+                (d_buy, d_sell) = self.ts_oportunidades_symbol(symbol, datos)
+        except Exception as e:
+            print("[oportunidades_sell()]: {}".format(e))
+
+    # recorre positions para actualizar oportunidades buy general"""
+    def oportunidades_buy(self):
+        try:
+            invertir = self.sesion["Pinvertir"]
+            for position in self.positions:
+                symbol = position["ticket"]
+
+                if (position["mrkprice"] > 0.000001) and (invertir > 0) and (position["position"] > 0):
+                    stock = int(invertir / position["mrkprice"])
+                    stockNew = stock + position["position"]
+                    avgCost = position["costobase"] / position["position"]
+
+                    # Solo usar dividendo si dividendYield > 0 (activo paga dividendos actualmente)
+                    if position["dividendYield"] > 0 and position["dividendo"] > 0:
+                        dividendo = position["dividendo"] / position["position"]
+                    else:
+                        dividendo = 0
+                    gypInicial = (position["objetivo"] - avgCost + dividendo) * position["position"]
+                    precioNew = (position["costobase"] + stock * position["mrkprice"] + 0.4) / stockNew
+
+                    gypPrecio = (precioNew - avgCost) / avgCost if avgCost > 0 else 0
+                    gypProyect = (position["objetivo"] - precioNew + dividendo) * stockNew
+                    gainInversion = (gypProyect - gypInicial) / invertir
+
+                    # ajusta calculo de la tasa nominal
+                    if self.vehiculo == "Stock":
+                        tasa_nominal = position["dividendYield"] / 100
+                    else:
+                        tasa_nominal = position["dividendo"] / position["costobase"]
+
+                    ex_dividends = (
+                        position["exDividendDate"].strftime("%d-%b'%y") if position["exDividendDate"] else "N/A"
+                    )
+
+                    datos = {}
+                    if (gypPrecio < self.sesion["gypPrecio"]) and (gainInversion < self.sesion["gainInversion"]):
+                        # Clasificar como "dividends" solo si dividendYield > 0
+                        BuyDividends = "buy" if position["dividendYield"] <= 0 else "dividends"
+                        datos = {
+                            BuyDividends: {
+                                "ganancia precio": gypPrecio,
+                                "ganancia inversión": gainInversion,
+                                "cantidad buy": stock,
+                                "last": position["mrkprice"],
+                                "avgcost": avgCost,
+                                "cantidad post": stockNew,
+                                "avgCost post": precioNew,
+                                "retorno post": gypProyect,
+                                "objetivo": position["objetivo"],
+                                "dividendYield": tasa_nominal,
+                                "exDividendDate": ex_dividends,
+                                "pre dividendos": position["dividendo"] if position["dividendYield"] > 0 else 0,
+                                "post dividendos": dividendo * stockNew,
+                                "pre costobase": position["costobase"],
+                                "post costobase": precioNew * stockNew,
+                            }
+                        }
+
+                    # actualiza metadata del activo para el rebalanceo
+                    if symbol in self.info:
+                        self.info[symbol]["sector"] = position.get("sector")
+                        self.info[symbol]["region"] = position.get("region")
+                        self.info[symbol]["costobase"] = position.get("costobase", 0)
+                        # Convertir código de estrategia a descripción para que coincida con grupo_activos()
+                        self.info[symbol]["asset_type"] = self._get_estrategia_descripcion(position.get("estrategia"))
+
+                    # actualiza en diccionario self.info()
+                    (d_buy, d_dividend) = self.ts_oportunidades_symbol(symbol, datos)
+        except Exception as e:
+            print("[oportunidades_buy()]: {}".format(e))
+
 
 # class para visualizar del vehiculo
 class WidgetVehiculo(TickerInfo):
@@ -2833,13 +3045,13 @@ class WidgetVehiculo(TickerInfo):
 
         # Opción de compra de símbolo nuevo (solo si id_transaccion está activo) ---------------------------------------
         btn_state = tk.NORMAL if self.sesion.get("id_transaccion", False) else tk.DISABLED
-        entry_state = "normal" if self.sesion.get("id_transaccion", False) else "disabled"
+        entry_state = tk.NORMAL if self.sesion.get("id_transaccion", False) else tk.DISABLED
 
         frame_buy_new = tk.Frame(wi41, bg=self.colors["bgcolor"], width=175, height=40)
         frame_buy_new.grid(row=2, column=1, padx=15, pady=7)
         frame_buy_new.pack_propagate(False)
 
-        self.entry_new_symbol = tk.Entry(frame_buy_new, width=13, state=entry_state, font=("Arial", 8))
+        self.entry_new_symbol = tk.Entry(frame_buy_new, width=14, state=entry_state, font=("Arial", 8))
         self.entry_new_symbol.pack(side=tk.LEFT, padx=5, pady=10)
 
         self.btn_buy_new = tk.Button(
@@ -2852,6 +3064,20 @@ class WidgetVehiculo(TickerInfo):
             command=lambda: self.comprar_simbolo_nuevo(),
         )
         self.btn_buy_new.pack(side=tk.LEFT, padx=5)
+
+        # Botón de Análisis por vehículo ------------------------------------------------------------------------------
+        self.btn_analisis = tk.Button(
+            wi41,
+            text=f"ANÁLISIS de rendimiento: {self.vehiculo}",
+            width=24,
+            bg="purple",
+            fg="white",
+            wraplength=170,
+            justify="left",
+            font=("Arial", 9, "bold"),
+            command=lambda: self.abrir_analisis_vehiculo(),
+        )
+        self.btn_analisis.grid(row=3, column=0, padx=15, pady=7)
 
         # crear treeview ----------------------------------------------------------------------------------------------
         top = tk.Frame(win2)
@@ -3350,9 +3576,16 @@ class WidgetVehiculo(TickerInfo):
             print("[inicio_widget_treeview()]: {}".format(e))
 
     def agregar_nuevo_activo(self, symbol, conid, precio, cantidad, costo):
-        """Agrega un nuevo activo comprado al panel de posiciones"""
+        """Agrega un nuevo activo comprado al panel de posiciones.
+        Solo agrega si el símbolo ya existe en inversiones (aparición orgánica)."""
         try:
-            # Crea estructura de position para el nuevo activo
+            # Verificar si existe en inversiones - SOLO agregar si existe
+            existe = self.PlanInversion.select_inversion(tipoin=self.vehiculo, ticket=symbol)
+            if not existe:
+                # No existe en inversiones aún, no agregar al panel
+                return
+
+            # Si existe en inversiones, continuar agregando al panel
             position = {
                 "ticket": symbol,
                 "conid": conid,
@@ -3412,7 +3645,14 @@ class WidgetVehiculo(TickerInfo):
             # Agrega a self.info para websocket
             self.info[symbol] = {"position": position}
 
-            print(f"[agregar_nuevo_activo]: {symbol} agregado al panel")
+            # Actualizar lista de símbolos para websocket y suscribir
+            if self.vehiculo == "Crypto":
+                if symbol not in self.activos:
+                    self.activos.append(symbol)
+            elif self.vehiculo == "Stock":
+                if hasattr(self, "idsymbol") and conid and str(conid) not in self.idsymbol:
+                    self.idsymbol.append(str(conid))
+
         except Exception as e:
             print(f"[agregar_nuevo_activo()]: {e}")
 
@@ -3497,6 +3737,8 @@ class WidgetVehiculo(TickerInfo):
         except Exception as e:
             print(f"get_lotes_fiscales(): {e}")
             traceback.print_exc()
+            # Retornar valores por defecto para evitar TypeError al desempaquetar
+            return {"book": ([], [])}, 0, 0
 
     # despliega ventanas de estrategia y analisis de activo
     def window_estrategia(self, analisis=True):
@@ -4088,8 +4330,11 @@ class WidgetVehiculo(TickerInfo):
                 # recupera profit que este  self.info[*]['sell']
                 if "sell" in value and tipo == "sell":
                     if "profit" in value["sell"]:
-                        if value["sell"]["profit"] > DataHub.MinProfit:
-                            total += value["sell"]["profit"]
+
+                        # recupera tasa de cambio para divisa distinta a USD
+                        importe = value["sell"]["profit"] / value["sell"]["factor"]
+                        if importe > DataHub.MinProfit:
+                            total += importe
                             cantidad += value["sell"]["cantidad lotes"]
 
                 # recupera proyección de ganancias que este self.info[*]['buy/dividends']
@@ -4106,6 +4351,42 @@ class WidgetVehiculo(TickerInfo):
             return total, cantidad
         except Exception as e:
             print("[total_gain()]: {}".format(e))
+
+    # Abre ventana de análisis según el vehículo
+    def abrir_analisis_vehiculo(self):
+        """Abre ventana de análisis usando la clase correspondiente al vehículo"""
+        try:
+            # Seleccionar clase de análisis según vehículo
+            if self.vehiculo == "BBVA.ARS":
+                analisis = AnalisisFCI(
+                    master=self.master,
+                    info=self.info,
+                    repositorio=self.PlanInversion,
+                    colors=self.colors,
+                    vehiculo=self.vehiculo,
+                )
+            elif self.vehiculo == "Crypto":
+                analisis = AnalisisCrypto(
+                    master=self.master,
+                    info=self.info,
+                    repositorio=self.PlanInversion,
+                    colors=self.colors,
+                    vehiculo=self.vehiculo,
+                )
+            else:  # Stock y otros
+                analisis = AnalisisStock(
+                    master=self.master,
+                    info=self.info,
+                    repositorio=self.PlanInversion,
+                    colors=self.colors,
+                    vehiculo=self.vehiculo,
+                )
+
+            analisis.mostrar_ventana()
+
+        except Exception as e:
+            print(f"[abrir_analisis_vehiculo]: {e}")
+            traceback.print_exc()
 
     # TopWindow() para ts_oportunidades_symbol y sus posibles ventas de lotes fiscales
     def oportunidad_gain_capital(self):
@@ -4134,13 +4415,15 @@ class WidgetVehiculo(TickerInfo):
                     continue
 
                 # acumula para los profit > DataHub.MinProfit
-                acum += value["profit"]
+                acum += value["profit"] / value["factor"]
+                importe = format_financiero(width=10, importe=value["profit"], divisa=value["divisa"])
+
                 activo = tree.insert(
                     "",
                     "end",
                     text=value["symbol"],
                     values=(
-                        "{:>10.0f}".format(value["profit"]),
+                        importe,
                         "{:>10.0f}".format(acum),
                         "{:>10.0f}".format(value["cantidad lotes"]),
                         "{:>10.5f}".format(value["last"]),
@@ -4273,10 +4556,11 @@ class WidgetVehiculo(TickerInfo):
             tree.tag_configure("sell", background=self.cgcolor, foreground="cyan")
             tree.bind("<Double-1>", seleccionar_item)
 
-            tree.column("#0", width=80, minwidth=60)
+            tree.column("#0", width=90, minwidth=90)
             tree.heading("#0", text="Symbol")
             for j, key in enumerate(fields):
-                tree.column(key, width=82, minwidth=82, anchor="e")
+                ancho = 89 if key == "gyp" else 82
+                tree.column(key, width=ancho, minwidth=ancho, anchor="e")
                 tree.heading(key, text=heard[j])
 
             tree.pack(fill=tk.X, anchor=tk.E)
@@ -4925,7 +5209,7 @@ class WidgetVehiculo(TickerInfo):
 
         if not symbol:
             MyMessageBox(self.master).showinfo(
-                title="Buy - New symbol", message="Debe ingresar el símbolo que desea Buy"
+                title="Buy - New symbol", message="Debe ingresar el símbolo que desea comprar"
             )
             return
 
@@ -4936,9 +5220,9 @@ class WidgetVehiculo(TickerInfo):
 
             # obtiene conid desde tabla otros_activos
             if self.vehiculo == "Crypto":
-                resp = self.BClient.ticker_price(symbol=symbol)
-                if resp and "price" in resp:
-                    precio = float(resp["price"])
+                response = self.BClient.ticker_price(symbol=symbol)
+                if response and "price" in response:
+                    precio = float(response["price"])
                     crypto, found = self.RepositorioOportunidades.select_otros_activos(symbol=symbol)
                     conid = crypto[0]["idcrypto"] if found else None
 
@@ -4950,12 +5234,16 @@ class WidgetVehiculo(TickerInfo):
                     return
 
             # Busca en Interactive Brokers (Stock)
-            elif self.vehiculo == "Strock":
-                resp = self.IClient._get_conid(symbol=symbol)
-                print(f"_get_conid(): {resp}")
-                if resp and len(resp) > 0:
-                    conid = resp[0].get("conid")
-                else:
+            elif self.vehiculo == "Stock":
+                response = self.IClient._get_symbol(symbol=symbol, secType="STK")
+                if response:
+                    conid = response.get("conid")
+
+                    if not response.get("market_data"):
+                        precio = float(response["market_data"]["31"])
+
+                # Valida resposne o que tenga last market
+                if not response or response.get("market_data"):
                     MyMessageBox(self.master).showinfo(
                         title="Buy - New symbol",
                         message=f"Símbolo {symbol} no encontrado en los activos {self.vehiculo}",
@@ -4964,6 +5252,7 @@ class WidgetVehiculo(TickerInfo):
 
         except Exception as e:
             MyMessageBox(self.master).showinfo(title="Buy - New symbol", message=f"Error: {symbol} no válido")
+            traceback.print_exc()
             return
 
         # Configura el símbolo para la compra
@@ -4980,7 +5269,14 @@ class WidgetVehiculo(TickerInfo):
             # Abre ventana de trading para el nuevo símbolo
             self.trader_lotes_fiscales(option="BUY", parm=self.gchar)
 
+        # inicializa variable de entrada
+        self.entry_new_symbol.delete(0, tk.END)
 
+
+# =================================================================================================
+#  Helper
+#
+# =================================================================================================
 # Class para el manejo de treeview
 class CustomTreeview:
     def __init__(

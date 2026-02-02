@@ -1693,7 +1693,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: update_inversion({})]: {}".format(vehiculo, error))
 
-    def get_totales_inversiones(self):
+    def get_totales_inversiones(self, vehiculo=None):
         """
         Obtiene los totales consolidados de todas las inversiones activas.
         @return: dict con total_costo_base, total_mercado, total_ganancia_dia, total_unrealized_pnl
@@ -1708,10 +1708,17 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                         SUM(dgyp) as total_ganancia_dia,
                         SUM(unrealizedpnl) as total_unrealized_pnl
                      FROM inversion
-                     WHERE iactiva = 'Y';"""
+                     WHERE iactiva = 'Y'"""
 
-            cursor.execute(qry)
-            result = cursor.fetchone()
+            if vehiculo is None:
+                qry += ";"
+                cursor.execute(qry)
+                result = cursor.fetchone()
+
+            elif vehiculo is not None:
+                qury += " AND tipoinv = %s;"
+                cursor.execute(qry, vehiculo)
+                result = cursor.fetchone()
 
             cursor.close()
             conn.close()
@@ -1739,6 +1746,52 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 "total_ganancia_dia": 0.0,
                 "total_unrealized_pnl": 0.0,
             }
+
+    def get_totales_otros_activos(self, vehiculo=None):
+        """
+        Obtiene los totales consolidados de todas las inversiones activas asociada al vehiculo y otros activos.
+        @return: dict con total_costo_base, total_mercado, total_ganancia_dia, total_unrealized_pnl
+        """
+        try:
+            conn = self._conectar(tabla="select.inversion")
+            cursor = conn.cursor()
+
+            qry = """SELECT
+                        O.symbol as symbol,
+                        O.descripcion as asset,
+                        I.position as posicion,
+                        I.costobase as total_costo_base,
+                        (I.mrkprice * I.position) as total_mercado,
+                        (I.dgyp) as total_ganancia_dia,
+                        (I.unrealizedpnl) as total_unrealized_pnl
+                     FROM inversion I, otros_activos O
+                     WHERE I.iactiva = 'Y'
+                     AND   I.ticket = O.symbol"""
+
+            if vehiculo is None:
+                qry += ";"
+
+                cursor.execute(qry)
+                result = cursor.fetchone()
+
+            elif vehiculo is not None:
+                qry += " AND I.tipoinv = %s;"
+                cursor.execute(qry, (vehiculo,))
+                result = cursor.fetchall()
+
+            cursor.close()
+            conn.close()
+
+            if result:
+                ix = [columna[0] for columna in cursor.description]
+                lista = []
+                for keys in result:
+                    lista.append(dict(zip(ix, keys)))
+
+                return lista
+        except (Exception, EncodingWarning, connect.Error) as error:
+            print("[Mysql:: get_totales_otros_activos()]: {}".format(error))
+            return []
 
     def select_otros_activos(
         self,

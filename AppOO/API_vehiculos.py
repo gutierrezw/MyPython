@@ -904,7 +904,7 @@ class IB(IBClient):
             urllib.parse.urljoin(self.ib_gateway_path, self.api_version) + r"portal/" + endpoint
         )
 
-    def _get_conid(self, symbol: str) -> int:
+    def _get_conid(self, symbol: str, secType="STK") -> int:
         """
         Obtiene el conid (Contract ID) y otros datos dado un ticker/symbol.
 
@@ -917,13 +917,157 @@ class IB(IBClient):
             endpoint = r"/iserver/secdef/search"
             req_type = "GET"
 
-            params = {"symbol": symbol}
+            params = {"symbol": symbol, "name": False, "secType": secType}
 
             content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
             return content
         except Exception as e:
             self.logger.exception(f"_get_conid(): Error obteniendo conid para {symbol} {e}")
+
+    @staticmethod
+    def _prepare_arguments_list(parameter_list: List[str]) -> str:
+        """Prepares the arguments for the request.
+
+        Some endpoints can take multiple values for a parameter, this
+        method takes that list and creates a valid string that can be
+        used in an API request. The list can have either one index or
+        multiple indexes.
+
+        Arguments:r
+        ----
+        parameter_list {List} -- A list of paramater values assigned to an argument.
+
+        Usage:
+        ----
+            >>> SessionObject._prepare_arguments_list(parameter_list=['MSFT','SQ'])
+
+        Returns:
+        ----
+        {str} -- The joined list.
+
+        """
+
+        # validate it's a list.
+        if type(parameter_list) is list:
+            # specify the delimiter and join the list.
+            delimiter = ","
+            parameter_list = delimiter.join(parameter_list)
+
+        return parameter_list
+
+    def _get_marketData(self, conids: List[str], since: str, fields: List[str]) -> Dict:
+        """
+        Get Market Data for the given conid(s). The end-point will return by
+        default bid, ask, last, change, change pct, close, listing exchange.
+        See response fields for a list of available fields that can be request
+        via fields argument. The endpoint /iserver/accounts should be called
+        prior to /iserver/marketdata/snapshot. To receive all available fields
+        the /snapshot endpoint will need to be called several times.
+
+        NAME: conid
+        DESC: The list of contract IDs you wish to pull current quotes for.
+        TYPE: List<String>
+
+        NAME: since
+        DESC: Time period since which updates are required.
+              Uses epoch time with milliseconds.
+        TYPE: String
+
+        NAME: fields
+        DESC: List of fields you wish to retrieve for each quote.
+        TYPE: List<String>
+        """
+
+        # define request components
+        endpoint = "iserver/marketdata/snapshot"
+        req_type = "GET"
+
+        # join the two list arguments so they are both a single string.
+        conids_joined = self._prepare_arguments_list(parameter_list=conids)
+
+        if fields is not None:
+            fields_joined = ",".join(str(n) for n in fields)
+        else:
+            fields_joined = ""
+
+        # define the parameters
+        if since is None:
+            params = {"conids": conids_joined, "fields": fields_joined}
+        else:
+            params = {"conids": conids_joined, "since": since, "fields": fields_joined}
+
+        content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
+
+        return content
+
+    def _get_symbol(self, symbol: str, secType: str = "STK", fields: List[str] = None) -> Dict:
+        """
+        Obtiene información de mercado para un symbol dado.
+        Primero obtiene el conid y luego consulta marketData.
+
+        NAME: symbol
+        DESC: Ticker del instrumento (ej: AAPL, MSFT)
+        TYPE: String
+
+        NAME: secType
+        DESC: Tipo de seguridad (STK, OPT, FUT, etc.)
+        TYPE: String
+
+        NAME: fields
+        DESC: Lista de campos a obtener del market data
+        TYPE: List<String>
+
+        Returns:
+            Dict con información del symbol incluyendo market data
+        """
+        try:
+            # 1. Obtener conid desde el symbol
+            conid_data = self._get_conid(symbol=symbol, secType=secType)
+
+            if not conid_data or len(conid_data) == 0:
+                self.logger.warning(f"_get_symbol(): No se encontró conid para {symbol}")
+                return None
+
+            # Extraer el conid del primer resultado
+            conid = []
+            conid.append(str(conid_data[0].get("conid", "")))
+
+            if not conid:
+                self.logger.warning(f"_get_symbol(): conid vacío para {symbol}")
+                return None
+
+            # 2. Obtener market data usando el conid
+            FIELD_MAP = {
+                "last": "31",
+                "change": "82",
+                "bid": "84",
+                "ask": "86",
+                "open": "7295",
+                "close": "7296",
+                "high": "70",
+                "low": "71",
+            }
+
+            fields = list(FIELD_MAP.values())
+            market_data = self._get_marketData(conids=conid, since=None, fields=fields)
+
+            if not market_data or len(market_data) == 0:
+                self.logger.warning(f"_get_symbol(): No se obtuvo marketData para {symbol} (conid: {conid})")
+                return {"symbol": symbol, "conid": conid[0], "market_data": None}
+
+            # 3. Combinar información
+            result = {
+                "symbol": symbol,
+                "conid": conid[0],
+                "market_data": market_data[0] if isinstance(market_data, list) else market_data,
+            }
+
+            return result
+
+        except Exception as e:
+            self.logger.exception(f"_get_symbol(): Error obteniendo datos para {symbol}: {e}")
+            return None
 
     # gwi001
     def _make_request(

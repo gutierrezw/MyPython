@@ -587,9 +587,9 @@ class system_status(tk.Frame):
             lista.bind("<Double-Button-1>", on_double_click)
 
             # --- Scrollbars ---
-            hsb = ttk.Scrollbar(detalle, orient=tk.HORIZONTAL, command=detalle.xview)
-            detalle.configure(xscroll=hsb.set)
-            hsb.pack(side=tk.BOTTOM, fill=tk.X)
+            # hsb = ttk.Scrollbar(detalle, orient=tk.HORIZONTAL, command=detalle.xview)
+            # detalle.configure(xscroll=hsb.set)
+            # hsb.pack(side=tk.BOTTOM, fill=tk.X)
 
             # inicia insert de lista
             lastClose = ": Close Market(last) "
