@@ -69,6 +69,7 @@ from Class_Screener import Screener
 from Class_DashBot import AsistenteChatbot
 from Class_IA_modelos import ModeloOportunidadesSell
 from Class_SystemStatus import system_status
+from Class_BotCryptoUI import BotCryptoUI
 
 
 # class para manipular vehiculo
@@ -1946,10 +1947,18 @@ class DashMain:
         self.nb.add(self.win4, text="Ars            ")
         self.nb.add(self.win7, text="Ves            ", state="disabled")
         self.nb.add(self.win8, text="Crowfonding    ", state="disabled")
-        self.nb.add(self.win6, text="BotCrypto      ", state="disabled")
+        self.nb.add(self.win6, text="BotCrypto      ")
         self.nb.add(self.win2, text="Screener       ")
         self.nb.add(self.win3, text="Gestión        ")
         self.nb.add(self.win5, text="System         ")
+
+        # Inicializar UI del Bot Crypto
+        self.bot_crypto_ui = BotCryptoUI(
+            parent=self.win6,
+            colors=self.colors,
+            repositorio=self.RepositorioOportunidades,
+        )
+        self.bot_crypto_ui.inicializar()
 
         # frames de Gráficos y figuras principales
         pn0 = ttk.Frame(self.root, padding=(1, 1, 1, 1), style="C.TFrame")
@@ -4069,9 +4078,16 @@ class DashMain:
                     # Convertir fechas a formato apropiado
                     try:
                         if values["fesesion"]:
-                            values["fesesion"] = datetime.strptime(values["fesesion"], "%Y-%m-%d %H:%M:%S")
+                            # Intentar formato completo, si falla usar solo fecha con hora actual
+                            try:
+                                values["fesesion"] = datetime.strptime(values["fesesion"], "%Y-%m-%d %H:%M:%S")
+                            except ValueError:
+                                # Solo fecha: agregar hora actual
+                                fecha = datetime.strptime(values["fesesion"], "%Y-%m-%d")
+                                now = datetime.now()
+                                values["fesesion"] = fecha.replace(hour=now.hour, minute=now.minute, second=now.second)
                         else:
-                            values["fesesion"] = None
+                            values["fesesion"] = datetime.now()  # Default: fecha/hora actual
 
                         if values["fiscalYear"]:
                             values["fiscalYear"] = datetime.strptime(values["fiscalYear"], "%Y-%m-%d").date()
@@ -4205,7 +4221,7 @@ class DashMain:
                 (
                     "vehiculo",
                     "Vehículo (char 10):",
-                    "disabled" if not edit_mode else "normal",
+                    "disabled" if edit_mode else "normal",
                 ),
                 ("fesesion", "Fecha Sesión (YYYY-MM-DD HH:MM:SS):", "normal"),
                 ("iduser", "ID Usuario (char 10):", "normal"),
@@ -4214,12 +4230,12 @@ class DashMain:
                 (
                     "fiscalYear",
                     "Año Fiscal (YYYY-MM-DD):",
-                    "disabled",
+                    "normal",
                 ),
                 (
                     "fefund",
                     "Fecha Fundación (YYYY-MM-DD):",
-                    "disabled" if not edit_mode else "normal",
+                    "disabled" if edit_mode else "normal",
                 ),
                 ("Pinvertir", "Monto a Invertir (int):", "normal"),
                 ("gypPrecio", "Gyp Precio (float):", "normal"),

@@ -1139,8 +1139,8 @@ class GestionInversion(tk.Frame):
             ]
         )
 
-        idatos["dividendos"] = 0
-        idatos["navcierre"] = 0
+        idatos["dividendos"] = idatos["dividends"]
+        idatos["navcierre"] = idatos["value"]
         idatos["Date"] = pd.to_datetime(idatos["fechaclose"])
 
         idatos.set_index("Date", inplace=True)
@@ -1203,7 +1203,7 @@ class GestionInversion(tk.Frame):
         resumen.index = pd.to_datetime(resumen.index)
 
         # se construye saldo al final de cada mes
-        resumen["navcierre"] = resumen["costo_base"] + resumen["beneficios"] - resumen["costos"]
+        # resumen["navcierre"] = resumen["costo_base"] + resumen["beneficios"] - resumen["costos"]
         # Creamos con importe inicial para cada mes
         # resumen['cierreanterior'] = resumen['navcierre'].shift(1)
 

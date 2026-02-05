@@ -94,6 +94,25 @@ class TradingBotSpot:
             "stop_loss": self.state["stop_loss"],
         }
 
+    def get_indicators(self) -> dict:
+        """
+        Retorna indicadores técnicos para la UI.
+        """
+        if self.df is None or len(self.df) < 2:
+            return {}
+
+        try:
+            return {
+                "rsi": float(self.df["rsi"].iloc[-1]) if "rsi" in self.df.columns else None,
+                "macd": float(self.df["macd"].iloc[-1]) if "macd" in self.df.columns else None,
+                "macd_signal": float(self.df["macd_signal"].iloc[-1]) if "macd_signal" in self.df.columns else None,
+                "ema_fast": float(self.df["ema_fast"].iloc[-1]) if "ema_fast" in self.df.columns else None,
+                "ema_slow": float(self.df["ema_slow"].iloc[-1]) if "ema_slow" in self.df.columns else None,
+                "last_price": self._last_price(),
+            }
+        except Exception:
+            return {}
+
     # =========================
     # ESTRATEGIA (PRIVADO)
     # =========================
