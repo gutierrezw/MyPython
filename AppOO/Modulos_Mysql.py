@@ -1758,12 +1758,15 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
 
             qry = """SELECT
                         O.symbol as symbol,
+                        I.conid,
                         O.descripcion as asset,
                         I.position as posicion,
                         I.costobase as total_costo_base,
                         (I.mrkprice * I.position) as total_mercado,
                         (I.dgyp) as total_ganancia_dia,
-                        (I.unrealizedpnl) as total_unrealized_pnl
+                        (I.unrealizedpnl) as total_unrealized_pnl,
+                        I.divisa as divisa,
+                        I.factor_cambio as tasa
                      FROM inversion I, otros_activos O
                      WHERE I.iactiva = 'Y'
                      AND   I.ticket = O.symbol"""

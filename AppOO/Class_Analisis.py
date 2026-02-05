@@ -41,7 +41,7 @@ class AnalisisBase:
     # Colores estilo Variables de Entorno
     BG_COLOR = "DarkCyan"
     CG_COLOR = "black"
-    ENTRY_BG = "#90EE90"  # LightGreen (más claro para mejor lectura)
+    ENTRY_BG = "#244D03"  # LightGreen (más claro para mejor lectura)
     LABEL_FG = "yellow"
     VALUE_FG = "black"  # Negro para mejor lectura sobre fondo verde
 
@@ -162,7 +162,7 @@ class AnalisisBase:
         ).grid(row=row, column=0, columnspan=2, sticky="w", padx=5, pady=(15, 5))
         return row + 1
 
-    def crear_campo(self, parent, label, valor, row, width=45, fg_valor=None):
+    def crear_campo(self, parent, label, valor, row, width=45, fg_valor=None, bg_valor=None):
         """
         Crea un campo label + entry readonly.
 
@@ -178,11 +178,12 @@ class AnalisisBase:
             int: Siguiente fila disponible
         """
         fg_valor = fg_valor or self.VALUE_FG
+        bg_valor = bg_valor or self.BG_COLOR
         tk.Label(
             parent,
             text=label,
-            bg=self.BG_COLOR,
-            fg=self.VALUE_FG,
+            bg=bg_valor,
+            fg=fg_valor,
             font=("Segoe UI", 9),
             anchor="w",
         ).grid(row=row, column=0, sticky="w", padx=10, pady=3)
@@ -196,7 +197,7 @@ class AnalisisBase:
     def obtener_color_ganancia(self, valor):
         """Retorna color según ganancia/pérdida"""
         if valor > 0:
-            return "lime"
+            return "green"
         elif valor < 0:
             return "red"
         return self.VALUE_FG
@@ -549,29 +550,35 @@ class AnalisisFCI(AnalisisBase):
         row = 0
 
         # ========== RESUMEN DE CARTERA ==========
-        row = self.crear_seccion(frame, f"Resumen Vehiculo: {self.vehiculo}", row)
+        divisa = resumen.get("divisa", "USD")
+        factor = resumen.get("factor_cambio", 1.0)
+        sfx = f" ({divisa})" if divisa and str(divisa).upper() != "USD" else ""
+
+        row = self.crear_seccion(frame, f"Resumen: {self.vehiculo}", row)
         row = self.crear_campo(frame, "Fecha:", datetime.now().strftime("%Y-%m-%d %H:%M"), row)
         row = self.crear_campo(frame, "Total Fondos:", resumen["total_activos"], row)
-        row = self.crear_campo(frame, "Costo Base:", f"${resumen['total_costo']:,.2f}", row)
-        row = self.crear_campo(frame, "Valor Actual:", f"${resumen['total_valor']:,.2f}", row)
+        if sfx:
+            row = self.crear_campo(frame, "Tipo de Cambio:", f"{factor:,.2f}", row)
+        row = self.crear_campo(frame, f"Costo Base{sfx}:", f"${resumen['total_costo']:,.2f}", row)
+        row = self.crear_campo(frame, f"Valor Actual{sfx}:", f"${resumen['total_valor']:,.2f}", row)
 
         color_gan = self.obtener_color_ganancia(resumen["total_ganancia"])
         row = self.crear_campo(
             frame,
-            "Ganancia Total:",
+            f"Ganancia Total{sfx}:",
             f"${resumen['total_ganancia']:,.2f} ({resumen['ganancia_pct']:+.2f}%)",
             row,
             fg_valor=color_gan,
         )
 
-        # ========== GRÁFICOS TOP 5 (Ganadores y Perdedores lado a lado) ==========
+        # ========== GRÁFICOS TOP 5 (Ganadores y Perdedores - todos los FCIs) ==========
         row = self.crear_seccion(frame, "Gráficos Top 5:", row)
-        if not self.df_lotes.empty:
+        if not self.df_ultimo.empty and "variacion" in self.df_ultimo.columns:
             row = self.crear_grafico_top5_dual(
                 parent=frame,
-                df=self.df_lotes,
+                df=self.df_ultimo,
                 columna_nombre="fondo",
-                columna_valor="ganancia_pct",
+                columna_valor="variacion",
                 row=row,
             )
 
@@ -667,121 +674,45 @@ class AnalisisFCI(AnalisisBase):
             return 0
 
     def obtener_lotes_desde_info(self):
-        """Obtiene lotes fiscales desde self.info (DataHub.info)"""
+        """Obtiene lotes fiscales desde query get_totales_otros_activos()"""
         try:
             lotes = []
 
-            # Obtener mapeo symbol -> nombre_fondo desde otros_activos
-            activos = self.repositorio.get_totales_otros_activos(vehiculo=self.vehiculo)
+            # Obtener datos directamente del query (ya tiene todo lo necesario)
+            positions = self.repositorio.get_totales_otros_activos(vehiculo=self.vehiculo)
 
-            mapeo_nombres = {}
-            if activos:
-                for activo in activos:
-                    sym = activo.get("symbol", "")
-                    nombre = activo.get("asset", sym)
-                    mapeo_nombres[sym] = nombre
+            if positions:
+                for position in positions:
+                    costo_base = float(position.get("total_costo_base", 0))
+                    valor_actual = float(position.get("total_mercado", 0))
+                    ganancia_abs = float(position.get("total_unrealized_pnl", 0))
 
-            for symbol, data in self.info.items():
-                if symbol == "TimeDataHub" or not isinstance(data, dict):
-                    continue
+                    # Calcular porcentaje de ganancia
+                    ganancia_pct = 0
+                    if costo_base > 0:
+                        ganancia_pct = ((valor_actual / costo_base) - 1) * 100
 
-                position = data.get("position", {})
-                if not position:
-                    continue
+                    lote = {
+                        "symbol": position.get("symbol", ""),
+                        "fondo": position.get("asset", ""),
+                        "cantidad": float(position.get("posicion", 0)),
+                        "costo_base": costo_base,
+                        "valor_actual": valor_actual,
+                        "ganancia_abs": ganancia_abs,
+                        "ganancia_pct": ganancia_pct,
+                        "ganancia_dia": float(position.get("total_ganancia_dia", 0)),
+                        "divisa": str(position.get("divisa", "USD")),
+                        "factor_cambio": float(position.get("tasa", 1)),
+                    }
 
-                # Buscar nombre del fondo en el mapeo, fallback a position["empresa"] o symbol
-                nombre_fondo = mapeo_nombres.get(symbol, position.get("empresa", symbol))
-                conid = position.get("conid")
-
-                # Construir registro de lote
-                lote = {
-                    "symbol": symbol,
-                    "fondo": nombre_fondo,
-                    "codCAFCI": conid,
-                    "cantidad": float(position.get("position", 0)),
-                    "costo_base": float(position.get("costobase", 0)),
-                    "precio_actual": float(position.get("mrkprice", 0)),
-                    "valor_actual": 0,
-                    "ganancia_abs": 0,
-                    "ganancia_pct": 0,
-                }
-
-                # Calcular valor y ganancia
-                if lote["cantidad"] > 0 and lote["precio_actual"] > 0:
-                    lote["valor_actual"] = lote["cantidad"] * lote["precio_actual"]
-                    if lote["costo_base"] > 0:
-                        lote["ganancia_abs"] = lote["valor_actual"] - lote["costo_base"]
-                        lote["ganancia_pct"] = ((lote["valor_actual"] / lote["costo_base"]) - 1) * 100
-
-                if lote["cantidad"] > 0:
-                    lotes.append(lote)
+                    if lote["cantidad"] > 0:
+                        lotes.append(lote)
 
             self.df_lotes = pd.DataFrame(lotes)
             return len(self.df_lotes)
         except Exception as e:
             print(f"[obtener_lotes_desde_info]: {e}")
             return 0
-
-    def _cargar_lotes_desde_bd(self):
-        """Carga lotes fiscales directamente desde la base de datos"""
-        try:
-            conn = BDsystem.connect_dbase("select.booktrading", False)
-            query = """
-                SELECT
-                    O.idcrypto as codCAFCI,
-                    O.descripcion as fondo,
-                    I.position,
-                    I.mrkprice,
-                    I.costobase as costo_inversion,
-                    I.unrealizedpnl
-                FROM bdinv.inversion I
-                JOIN bdinv.otros_activos O ON O.symbol = I.ticket
-                WHERE I.tipoinv = 'BBVA.ARS'
-                AND I.iactiva = 'Y'
-                AND I.position > 0
-            """
-            df_pos = pd.read_sql(query, conn)
-            conn.close()
-
-            if df_pos.empty:
-                return []
-
-            # Obtener precios actuales desde diaria_cnv
-            precios = {}
-            if not self.df_ultimo.empty:
-                precios = (self.df_ultimo.set_index("codCAFCI")["valorActual"] / 1000).to_dict()
-
-            lotes = []
-            for _, row in df_pos.iterrows():
-                cod_cafci = row.get("codCAFCI")
-                precio_actual = precios.get(cod_cafci, row.get("mrkprice", 0))
-
-                lote = {
-                    "symbol": cod_cafci or row.get("fondo", ""),
-                    "fondo": row.get("fondo", ""),
-                    "codCAFCI": cod_cafci,
-                    "cantidad": float(row.get("position", 0)),
-                    "costo_base": float(row.get("costo_inversion", 0)),
-                    "precio_actual": float(precio_actual) if precio_actual else 0,
-                    "valor_actual": 0,
-                    "ganancia_abs": 0,
-                    "ganancia_pct": 0,
-                }
-
-                # Calcular valor y ganancia
-                if lote["cantidad"] > 0 and lote["precio_actual"] > 0:
-                    lote["valor_actual"] = lote["cantidad"] * lote["precio_actual"]
-                    if lote["costo_base"] > 0:
-                        lote["ganancia_abs"] = lote["valor_actual"] - lote["costo_base"]
-                        lote["ganancia_pct"] = ((lote["valor_actual"] / lote["costo_base"]) - 1) * 100
-
-                if lote["cantidad"] > 0:
-                    lotes.append(lote)
-
-            return lotes
-        except Exception as e:
-            print(f"[_cargar_lotes_desde_bd]: {e}")
-            return []
 
     def calcular_metricas_fondo(self, grupo):
         """Calcula métricas de riesgo y momentum para cada fondo"""
@@ -956,6 +887,8 @@ class AnalisisFCI(AnalisisBase):
                 "total_valor": 0,
                 "total_ganancia": 0,
                 "ganancia_pct": 0,
+                "divisa": "USD",
+                "factor_cambio": 1.0,
             }
 
         total_costo = self.df_lotes["costo_base"].sum()
@@ -963,12 +896,18 @@ class AnalisisFCI(AnalisisBase):
         total_ganancia = self.df_lotes["ganancia_abs"].sum()
         ganancia_pct = ((total_valor / total_costo) - 1) * 100 if total_costo > 0 else 0
 
+        # Divisa y factor de cambio
+        divisa = self.df_lotes["divisa"].iloc[0] if "divisa" in self.df_lotes.columns else "USD"
+        factor_cambio = self.df_lotes["factor_cambio"].iloc[0] if "factor_cambio" in self.df_lotes.columns else 1.0
+
         return {
             "total_activos": len(self.df_lotes),
             "total_costo": total_costo,
             "total_valor": total_valor,
             "total_ganancia": total_ganancia,
             "ganancia_pct": ganancia_pct,
+            "divisa": divisa,
+            "factor_cambio": factor_cambio,
         }
 
 
