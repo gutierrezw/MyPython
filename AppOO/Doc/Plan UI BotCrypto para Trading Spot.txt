@@ -1,0 +1,151 @@
+Plan: UI BotCrypto para Trading Spot Binance
+Objetivo
+Construir la UI para la pestaña BotCrypto (win6) en DashMainV9 con:
+
+Canvas scrollable con grid de 3 frames por fila (uno por símbolo)
+Panel de control del BotManager en la parte superior
+Integración con Class_tradingBot.py existente
+Configuración Definida
+Cuenta: B0000002 (separada del trading manual)
+Capital: Desde BD sesión (tabla sesion vehiculo="BotCrypto")
+Símbolos: Desde otros_activos WHERE cuenta='B0000002'
+Intervalo: Configurable desde UI (1m, 5m, 15m, 1h)
+Data Feed: WebSocket Binance (SpotWebsocketStreamClient)
+Servicios Existentes a Reutilizar
+Servicio	Ubicación	Uso
+DataHub.info	Class_customer.py	Datos tiempo real
+DataHub.QremoteOrder["Crypto"]	Class_customer.py	Cola de órdenes
+get_klines_info()	Class_DataFrame.py:404	Histórico Binance
+BB / MySpot	API_vehiculos.py:35	Cliente Binance
+SpotWebsocketStreamClient	API_vehiculos.py:11	WebSocket klines
+select_otros_activos()	Modulos_Mysql.py:1796	Símbolos del bot
+Canvas scrollable	Class_Analisis.py:100-116	Patrón UI
+Arquitectura UI
+
++------------------------------------------------------------------+
+|                    PANEL CONTROL MANAGER                          |
+| [▶ START] [⏹ STOP]  Status: ●RUNNING   Capital: 1000 USDT        |
+| Intervalo: [5m ▼]   Activos: 6   Trades: 3   PnL: +2.5%          |
++------------------------------------------------------------------+
+|                      CANVAS SCROLLABLE                            |
+|  +------------------+ +------------------+ +------------------+   |
+|  |   BTCUSDT        | |   ETHUSDT        | |   BNBUSDT        |   |
+|  |   Price: 45000   | |   Price: 2800    | |   Price: 320     |   |
+|  |   RSI: 42 ▲      | |   RSI: 38 ▲      | |   RSI: 55 ▼      |   |
+|  |   MACD: ▲        | |   MACD: ▲        | |   MACD: ▼        |   |
+|  |   Estado: LONG   | |   Estado: FLAT   | |   Estado: FLAT   |   |
+|  |   Entry: 44500   | |   Entry: --      | |   Entry: --      |   |
+|  |   TP1:✓ TP2:○    | |   TP1:○ TP2:○    | |   TP1:○ TP2:○    |   |
+|  |   PnL: +1.2%     | |   PnL: --        | |   PnL: --        |   |
+|  |  [▶][⏹][📊]     | |  [▶][⏹][📊]     | |  [▶][⏹][📊]     |   |
+|  +------------------+ +------------------+ +------------------+   |
+|  (más filas con scroll vertical...)                              |
++------------------------------------------------------------------+
+Archivos a Crear/Modificar
+1. CREAR: Class_BotCryptoUI.py
+
+class BotCryptoUI:
+    """UI principal para pestaña BotCrypto"""
+    def __init__(self, parent, colors, repositorio):
+        self.parent = parent  # win6
+        self.colors = colors
+        self.repositorio = repositorio
+        self.widgets = {}     # symbol -> WidgetBotSymbol
+        self.bot_manager = None
+
+    def inicializar(self):
+        self._crear_panel_control()
+        self._crear_canvas_scrollable()
+        self._cargar_simbolos()
+        self._iniciar_websocket()
+
+    def _crear_panel_control(self):
+        # Frame superior con botones START/STOP, combo intervalo, labels status
+
+    def _crear_canvas_scrollable(self):
+        # Patrón de Class_Analisis.py:100-116
+
+    def _cargar_simbolos(self):
+        # select_otros_activos(symbol="all", account="B0000002")
+        # Crear WidgetBotSymbol por cada símbolo en grid 3xN
+
+    def _iniciar_websocket(self):
+        # SpotWebsocketStreamClient para klines de todos los símbolos
+
+class WidgetBotSymbol:
+    """Frame individual por símbolo"""
+    def __init__(self, parent, symbol, colors):
+        self.symbol = symbol
+        self.bot = None  # TradingBotSpot instance
+
+    def crear_ui(self):
+        # Labels: precio, RSI, MACD, estado, entry, TP1/TP2, PnL
+        # Botones: start, stop, chart
+
+    def update(self, data):
+        # Actualiza labels con datos del bot
+2. MODIFICAR: Class_tradingBot.py
+Agregar a TradingBotSpot:
+
+
+def get_indicators(self) -> dict:
+    """Retorna indicadores para UI"""
+    if self.df is None:
+        return {}
+    return {
+        "rsi": self.df["rsi"].iloc[-1],
+        "macd": self.df["macd"].iloc[-1],
+        "macd_signal": self.df["macd_signal"].iloc[-1],
+        "ema_fast": self.df["ema_fast"].iloc[-1],
+        "ema_slow": self.df["ema_slow"].iloc[-1],
+        "last_price": self._last_price(),
+    }
+3. MODIFICAR: DashMainV9_ia.py
+En __init__ después de crear win6:
+
+
+from Class_BotCryptoUI import BotCryptoUI
+self.bot_crypto_ui = BotCryptoUI(self.win6, self.colors, self.RepositorioOportunidades)
+self.bot_crypto_ui.inicializar()
+4. MODIFICAR: Modulos_Mysql.py (si es necesario)
+Agregar sesión para BotCrypto en tabla sesion:
+
+vehiculo: "BotCrypto"
+userapi: JSON con configuración (capital, risk_per_trade, etc.)
+Flujo de Datos
+
+1. Inicio
+   └─> select_otros_activos(account="B0000002") → lista símbolos
+   └─> Crear TradingBotSpot por cada símbolo
+   └─> Iniciar WebSocket klines
+
+2. WebSocket recibe vela cerrada
+   └─> BotManager.on_market_data(symbol, candle)
+   └─> TradingBotSpot.on_market_data(candle)
+   └─> TradingBotSpot.evaluate() → BUY/SELL/HOLD
+   └─> Si BUY/SELL → ejecutar orden via MySpot
+
+3. UI Update (cada 1 segundo)
+   └─> Para cada widget:
+       └─> bot.get_public_state()
+       └─> bot.get_indicators()
+       └─> widget.update(data)
+Verificación
+Ejecutar DashMainV9 y navegar a pestaña BotCrypto
+Verificar que se cargan los símbolos de cuenta B0000002
+Verificar que el WebSocket conecta y actualiza precios
+Verificar grid 3 columnas con scroll
+Probar START/STOP individual y global
+Verificar que las órdenes se envían correctamente
+User approved the plan
+Plan aprobado. Creo el todo list y empiezo la implementación:
+
+Update Todos
+
+Crear Class_BotCryptoUI.py con BotCryptoUI y WidgetBotSymbol
+
+Modificar Class_tradingBot.py - agregar get_indicators()
+
+Modificar DashMainV9_ia.py - instanciar BotCryptoUI en win6
+
+Configurar sesión BotCrypto en BD
