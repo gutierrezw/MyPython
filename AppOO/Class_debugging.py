@@ -340,6 +340,16 @@ class Debugging:
         self.logger.update({"ClassAgenteIA": logging.getLogger("ClassAgenteIA")})
         self.logger["ClassAgenteIA"].setLevel(logging.WARNING)
 
+        # manager logging BotCrypto (Class_vehiculo.py)
+        self.logger.update({"BinanceClient": logging.getLogger("BinanceClient")})
+        self.logger["BinanceClient"].setLevel(logging.WARNING)
+
+        self.logger.update({"BinanceSpot": logging.getLogger("BinanceSpot")})
+        self.logger["BinanceSpot"].setLevel(logging.WARNING)
+
+        self.logger.update({"BotCryptoUI": logging.getLogger("BotCryptoUI")})
+        self.logger["BotCryptoUI"].setLevel(logging.WARNING)
+
     def handled_CacheLogger_name(self):
         """
         Captura manejo de cache y filename para logger
