@@ -1945,9 +1945,9 @@ class DashMain:
         self.nb.add(self.win1, text="Crypto         ")
         self.nb.add(self.win0, text="Stock          ")
         self.nb.add(self.win4, text="Ars            ")
+        self.nb.add(self.win6, text="BotCrypto      ")
         self.nb.add(self.win7, text="Ves            ", state="disabled")
         self.nb.add(self.win8, text="Crowfonding    ", state="disabled")
-        self.nb.add(self.win6, text="BotCrypto      ")
         self.nb.add(self.win2, text="Screener       ")
         self.nb.add(self.win3, text="Gestión        ")
         self.nb.add(self.win5, text="System         ")
@@ -3582,6 +3582,7 @@ class DashMain:
                         "private_key": session_data.get("private_key"),
                         "public_key": session_data.get("public_key"),
                         "port": session_data.get("port"),
+                        "environment": session_data.get("environment"),
                     }
 
                     # Actualizar registro en BD
@@ -4066,6 +4067,7 @@ class DashMain:
                             else None
                         ),
                         "port": entry_port.get().strip(),
+                        "environment": entry_environment.get().strip() if entry_environment else None,
                     }
 
                     # Validación de campos requeridos
@@ -4242,6 +4244,7 @@ class DashMain:
                 ("gainInversion", "Gain Inversión (float):", "normal"),
                 ("xstrategy", "Estrategia (char 60):", "normal"),
                 ("port", "Puerto (int 1-65535):", "normal"),
+                ("environment", "Environment (TESTNET|PRODUCTION):", "normal"),
             ]
 
             # Crear widgets de entrada
@@ -4260,6 +4263,7 @@ class DashMain:
             entry_gainInversion = None
             entry_xstrategy = None
             entry_port = None
+            entry_environment = None
 
             for field_name, label_text, state in fields_config:
                 label = tk.Label(
@@ -4393,6 +4397,8 @@ class DashMain:
                     entry_xstrategy = entry
                 elif field_name == "port":
                     entry_port = entry
+                elif field_name == "environment":
+                    entry_environment = entry
 
                 row += 1
 
@@ -4606,6 +4612,13 @@ class DashMain:
         # Cerrar figuras de matplotlib si existen
         try:
             plt.close("all")
+        except:
+            pass
+
+        # Detener WebSocket de BotCrypto
+        try:
+            if hasattr(self, "bot_crypto_ui") and self.bot_crypto_ui:
+                self.bot_crypto_ui._detener_websocket()
         except:
             pass
 
