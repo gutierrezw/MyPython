@@ -1941,7 +1941,11 @@ class TickerInfo(MyOrders):
             return indicadores, info_lotsize
 
         try:
-            (activos, datos) = get_yfinance(ticket=symbol, vehiculo=vehiculo)
+            result = get_yfinance(ticket=symbol, vehiculo=vehiculo)
+            if result is None:
+                return {}, pd.DataFrame(), False
+
+            (activos, datos) = result
 
             # Crear clave de cache
             key_cache = (symbol, vehiculo)

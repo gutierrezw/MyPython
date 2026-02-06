@@ -120,14 +120,14 @@ class BDsystem:  # -------------------------------------------------------------
                 conn.close()
 
     @staticmethod
-    def update_sesion_fecha_orden(vehiculo: str, fesesion: datetime, orcartera: str) -> bool:
+    def update_sesion_fecha_orden(vehiculo: str, fesesion, orcartera: str) -> bool:
         """
         Actualiza fesesion y orcartera de una sesión.
 
         Args:
-            vehiculo: Tipo de vehículo (Stock, Crypto, etc.)
+            vehiculo: Tipo de vehículo (Stock, Crypto, BotCrypto, etc.)
             fesesion: Fecha de sesión
-            orcartera: Orden de cartera en formato JSON
+            orcartera: Orden de cartera
 
         Returns:
             bool: True si actualización exitosa, False en caso contrario
@@ -142,6 +142,36 @@ class BDsystem:  # -------------------------------------------------------------
             return True
         except Exception as error:
             print(f"[Mysql::update_sesion_fecha_orden()]: {error}")
+            conn.rollback()
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def update_sesion_environment(vehiculo: str, environment: str) -> bool:
+        """
+        Actualiza el campo environment de una sesión.
+
+        Args:
+            vehiculo: Tipo de vehículo (BotCrypto, Crypto, etc.)
+            environment: Ambiente (TESTNET | PRODUCTION)
+
+        Returns:
+            bool: True si actualización exitosa, False en caso contrario
+        """
+        sql = "UPDATE sesion SET environment=%s WHERE vehiculo=%s"
+        conn = BDsystem.connect_dbase("Environment.Update", False)
+
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, (environment, vehiculo))
+            conn.commit()
+            return True
+        except Exception as error:
+            print(f"[Mysql::update_sesion_environment()]: {error}")
             conn.rollback()
             return False
         finally:
@@ -307,10 +337,10 @@ class BDsystem:  # -------------------------------------------------------------
 
             sql = """INSERT INTO sesion
                      (vehiculo, fesesion, iduser, idcuenta, orcartera, fiscalYear,
-                      fefund, Pinvertir, xstrategy, userapi, userpass,
+                      fefund, Pinvertir, xstrategy, environment, userapi, userpass,
                       private_key, public_key, port,
                       id_transaccion, load_csv, gypPrecio, gainInversion)
-                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
 
             data = (
                 values.get("vehiculo"),
@@ -322,6 +352,7 @@ class BDsystem:  # -------------------------------------------------------------
                 values.get("fefund"),
                 values.get("Pinvertir"),
                 values.get("xstrategy"),
+                values.get("environment"),
                 values.get("userapi"),
                 values.get("userpass"),
                 values.get("private_key"),
@@ -352,7 +383,8 @@ class BDsystem:  # -------------------------------------------------------------
             sql = """UPDATE sesion SET
                      fesesion=%s, iduser=%s, idcuenta=%s, orcartera=%s,
                      fiscalYear=%s, fefund=%s, Pinvertir=%s, xstrategy=%s,
-                     userapi=%s, userpass=%s, private_key=%s, public_key=%s, port=%s,
+                     environment=%s, userapi=%s, userpass=%s, private_key=%s,
+                     public_key=%s, port=%s,
                      id_transaccion=%s, load_csv=%s, gypPrecio=%s, gainInversion=%s
                      WHERE id=%s AND vehiculo=%s"""
 
@@ -365,6 +397,7 @@ class BDsystem:  # -------------------------------------------------------------
                 values.get("fefund"),
                 values.get("Pinvertir"),
                 values.get("xstrategy"),
+                values.get("environment"),
                 values.get("userapi"),
                 values.get("userpass"),
                 values.get("private_key"),
@@ -1952,9 +1985,10 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             print(f"get_yf_CNV(): {e}")
             return pd.DataFrame()  # Devolver DataFrame vacío en caso de error
 
-    def insert_otros_activos(self, symbol=None, values=None):
+    def insert_otros_activos(self, symbol=None, values=None, cuenta="B0000001"):
         """
         @param symbol: ticket a consultar en crypto
+        @param cuenta: cuenta destino (default B0000001, BotCrypto usa B0000002)
         @return: agrega symbol en tabla otros_activos."""
         try:
             conn = self._conectar(tabla="insert.otros_activos")
@@ -1972,6 +2006,10 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             )
             row, found = self.select_otros_activos(symbol=symbol)
 
+            # Si existe pero en otra cuenta, permitir insertar para esta cuenta
+            if found and row and row[0].get("cuenta") != cuenta:
+                found = False
+
             if not found:
 
                 ticket = yf.Ticker(symbol.replace("USDT", "-USD"))
@@ -1985,7 +2023,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 conidHex = hashlib.sha256(symbol.encode("utf-8")).hexdigest()
                 conid = int(conidHex[:15], 16)
 
-                values.update({"cuenta": "B0000001"})
+                values.update({"cuenta": cuenta})
                 values.update({"idcrypto": conid})
                 values.update({"descripcion": name})
                 values.update({"base_asset": symbol.replace("USDT", "")})
