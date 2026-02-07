@@ -24,11 +24,12 @@ from Modulos_python import (
     RSIIndicator,
     EMAIndicator,
     MACD,
+    Figure,
+    FigureCanvasTkAgg,
 )
-from Modulos_Mysql import BDsystem
+from Modulos_Mysql import BDsystem, PlanInversion
 from Class_vehiculo import BinanceClient, BinanceStreamClient
-from Class_customer import DataHub
-from Class_DataFrame import get_klines_info
+from Class_customer import DataHub, MyMessageBox
 import logging
 
 
@@ -78,29 +79,56 @@ class TradingBotSpot:
         """
         self._update_dataframe(candle)
 
+    def _evaluate_buy_conditions(self):
+        rsi = self.df["rsi"].iloc[-1]
+        macd = self.df["macd"].iloc[-1]
+        macd_signal = self.df["macd_signal"].iloc[-1]
+        ema_fast = self.df["ema_fast"].iloc[-1]
+        ema_slow = self.df["ema_slow"].iloc[-1]
+        price = self.df["Close"].iloc[-1]
+
+        conditions = {
+            "trend_ok": {
+                "value": macd > macd_signal and ema_fast > ema_slow,
+                "detail": f"MACD {macd:.6f} > {macd_signal:.6f} " f"AND EMAf {ema_fast:.6f} > EMAs {ema_slow:.6f}",
+            },
+            "rsi_ok": {
+                "value": rsi < self.strategy_cfg["rsi_sell"],
+                "detail": f"RSI {rsi:.2f} < {self.strategy_cfg['rsi_sell']}",
+            },
+            "price_ok": {"value": price > ema_fast, "detail": f"Price {price:.6f} > EMAf {ema_fast:.6f}"},
+        }
+
+        return conditions
+
     def evaluate(self) -> str:
         """
         Decide acción a tomar.
         Retorna: BUY | TP1 | TP2 | EXIT | HOLD
         """
+        conditions = {}
         if not self._is_in_position():
+
+            # agrega mas información sobre la decisisón
+            conditions = self._evaluate_buy_conditions()
+
             if self._should_buy():
-                return "BUY"
-            return "HOLD"
+                return "BUY", conditions
+            return "HOLD", conditions
 
         # Ya en posición
         price = self._last_price()
 
         if not self.state["tp1_done"] and self._should_take_tp1(price):
-            return "TP1"
+            return "TP1", conditions
 
         if not self.state["tp2_done"] and self._should_take_tp2(price):
-            return "TP2"
+            return "TP2", conditions
 
         if self._should_exit(price):
-            return "EXIT"
+            return "EXIT", conditions
 
-        return "HOLD"
+        return "HOLD", conditions
 
     def on_order_update(self, execution_report: dict) -> None:
         """
@@ -152,9 +180,20 @@ class TradingBotSpot:
             return {}
 
     # =========================
-    # ESTRATEGIA (PRIVADO)
+    # ESTRATEGIA (PRIVADO)   gwi001
     # =========================
     def _should_buy(self) -> bool:
+        """RSI
+        ┌───────────────────┐
+        │ <35  | 35–65 | >65│
+        └───────────────────┘
+            │       │      ✖
+            │       │
+        trend_ok   trend_ok
+        price_ok   price_ok
+            │       │
+        BUY     BUY"""
+
         if self.df is None or len(self.df) < 50:
             return False
 
@@ -163,8 +202,20 @@ class TradingBotSpot:
         macd_signal = self.df["macd_signal"].iloc[-1]
         ema_fast = self.df["ema_fast"].iloc[-1]
         ema_slow = self.df["ema_slow"].iloc[-1]
+        price = self.df["Close"].iloc[-1]
 
-        return rsi < self.strategy_cfg["rsi_buy"] and macd > macd_signal and ema_fast > ema_slow
+        # Confirmación de tendencia o giro alcista
+        trend_ok = macd > macd_signal and ema_fast > ema_slow
+
+        # Zona operable (evita sobrecompra)
+        rsi_ok = rsi < self.strategy_cfg["rsi_sell"]
+
+        # El precio confirma movimiento a favor
+        price_ok = price > ema_fast
+
+        ok = trend_ok and rsi_ok and price_ok
+
+        return ok
 
     def _should_exit(self, price: float) -> bool:
         # Stop loss
@@ -496,7 +547,10 @@ class BotManager:
         self.logger.info(f"{bot.symbol}: BUY qty={qty} price={price:.4f} capital={capital:.2f}")
 
         order = self.spot_client.get_new_order(
-            symbol=bot.symbol, side="BUY", type="MARKET", quantity=qty,
+            symbol=bot.symbol,
+            side="BUY",
+            type="MARKET",
+            quantity=qty,
         )
 
         if not order:
@@ -523,7 +577,10 @@ class BotManager:
         self.logger.info(f"{bot.symbol}: {intent} SELL qty={qty}")
 
         order = self.spot_client.get_new_order(
-            symbol=bot.symbol, side="SELL", type="MARKET", quantity=qty,
+            symbol=bot.symbol,
+            side="SELL",
+            type="MARKET",
+            quantity=qty,
         )
 
         if not order:
@@ -554,7 +611,10 @@ class BotManager:
         self.logger.info(f"{bot.symbol}: EXIT SELL qty={qty}")
 
         order = self.spot_client.get_new_order(
-            symbol=bot.symbol, side="SELL", type="MARKET", quantity=qty,
+            symbol=bot.symbol,
+            side="SELL",
+            type="MARKET",
+            quantity=qty,
         )
 
         if not order:
@@ -578,8 +638,8 @@ class BotCryptoUI:
     # Configuración
     ACCOUNT = "B0000002"
     COLUMNS = 3
-    WIDGET_WIDTH = 280
-    WIDGET_HEIGHT = 220
+    WIDGET_WIDTH = 300
+    WIDGET_HEIGHT = 294
 
     def __init__(self, parent, colors, repositorio):
         """
@@ -588,10 +648,15 @@ class BotCryptoUI:
             colors: Diccionario de colores de la app
             repositorio: RepositorioOportunidadesBuySell
         """
-        self.parent = parent
         self.colors = colors
         self.repositorio = repositorio
         self.logger = logging.getLogger("BotCryptoUI")
+
+        # Frame principales
+        self.right = ttk.Frame(parent, padding=(3, 5, 1, 1), style="C.TFrame", height=600)  # bot
+        self.left = ttk.Frame(parent, padding=(3, 5, 1, 1), style="B.TFrame")  # control grafico
+        self.left.pack(side=tk.LEFT)
+        self.right.pack(fill=tk.BOTH, expand=True)
 
         # Estado
         self.widgets = {}  # symbol -> WidgetBotSymbol
@@ -600,8 +665,8 @@ class BotCryptoUI:
         self.interval = "5m"
 
         # Config desde BD (incluye env)
+        self.env = None
         self.config = self._cargar_config()
-        self.env = self.config.get("env", "TESTNET")
 
         # Managers
         self.order_manager = None
@@ -625,9 +690,11 @@ class BotCryptoUI:
 
     def _cargar_config(self):
         """
-        Carga configuración desde tabla sesion vehiculo=BotCrypto.
-        - userapi (JSON): capital, risk, tp, rsi, etc.
-        - environment: ambiente (TESTNET | PRODUCTION)
+        Carga configuración del bot con valores por defecto.
+        El ambiente (TESTNET/PRODUCTION) se lee de la columna 'environment' en sesion.
+
+        Nota: userapi/userpass contienen credenciales API de Binance,
+        NO configuración del bot. La config del bot usa defaults.
         """
         config = {
             "capital": 100.0,
@@ -645,25 +712,29 @@ class BotCryptoUI:
         try:
             sesion = BDsystem.get_sesion_by_vehiculo("BotCrypto")
 
-            # Config JSON desde userapi
-            if sesion and sesion.get("userapi"):
-                user_config = json.loads(sesion["userapi"].decode("utf-8"))
-                config.update(user_config)
-
-            # Ambiente desde environment
+            # Ambiente desde columna environment
             if sesion:
                 db_env = (sesion.get("environment") or "").strip().upper()
                 if db_env in ("TESTNET", "PRODUCTION"):
                     config["env"] = db_env
 
+                    self.logger.warning(f"✅ Ambiente '{db_env}', inicializado correctamente")
+                    config = json.loads(sesion.get("private_key"))
+                    self.env = sesion.get("environment", "TESTNET")
+                    self.ACCOUNT = sesion.get("idcuenta")
+
+                else:
+                    self.logger.warning(f"Ambiente no válido en BD: '{db_env}', usando TESTNET")
+
         except Exception as e:
-            self.logger.warning(f"Config BotCrypto no encontrada: {e}")
+            self.logger.warning(f"Error leyendo sesion BotCrypto: {e}")
 
         return config
 
     def inicializar(self):
         """Inicializa la UI completa"""
         try:
+            self._crear_graficos()
             self._crear_panel_control()
             self._crear_canvas_scrollable()
             self._cargar_simbolos()
@@ -673,11 +744,43 @@ class BotCryptoUI:
             traceback.print_exc()
 
     # =========================================
+    # PANEL DE GRAFICOS gwi001
+    # =========================================
+    def _crear_graficos(self):
+        """Crea el panel ladetral derecho controles graficos"""
+
+        top = ttk.Frame(self.left, padding=(1, 1, 1, 1), style="C.TFrame")  # Imagen derecha superior
+        bot = ttk.Frame(self.left, padding=(1, 1, 1, 1), style="C.TFrame")  # Imagen derecha superior
+        cen = ttk.Frame(self.left, padding=(1, 1, 1, 1), style="C.TFrame")  # Imagen derecha superior
+        top.pack(side=tk.TOP)
+        bot.pack(side=tk.BOTTOM)
+        cen.pack(side=tk.LEFT)
+
+        fg0 = Figure(figsize=(2.9, 2.04), dpi=110, layout="tight")
+        fg0.set_facecolor(self.colors["cgcolor"])
+        cv0 = FigureCanvasTkAgg(fg0, master=top)
+        cv0.draw()
+        cv0.get_tk_widget().pack()
+
+        fg1 = Figure(figsize=(2.9, 2.04), dpi=110, layout="tight")
+        fg1.set_facecolor(self.colors["cgcolor"])
+        cv1 = FigureCanvasTkAgg(fg1, master=cen)
+        cv1.draw()
+        cv1.get_tk_widget().pack()
+
+        fg2 = Figure(figsize=(2.9, 2.04), dpi=110, layout="tight")
+        fg2.set_facecolor(self.colors["cgcolor"])
+        cv2 = FigureCanvasTkAgg(fg2, master=bot)
+        cv2.draw()
+        cv2.get_tk_widget().pack()
+
+    # =========================================
     # PANEL DE CONTROL
     # =========================================
     def _crear_panel_control(self):
         """Crea el panel superior con controles globales"""
-        panel = tk.Frame(self.parent, bg=self.colors["cgcolor"], height=80)
+
+        panel = tk.Frame(self.right, bg=self.colors["cgcolor"], height=80)
         panel.pack(fill=tk.X, padx=5, pady=5)
         panel.pack_propagate(False)
 
@@ -709,6 +812,18 @@ class BotCryptoUI:
         )
         btn_stop.pack(side=tk.LEFT, padx=5)
 
+        # Botón Refresh config
+        btn_refresh = tk.Button(
+            row1,
+            text="REFRESH",
+            bg="#607D8B",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            width=10,
+            command=self._on_refresh_config,
+        )
+        btn_refresh.pack(side=tk.LEFT, padx=5)
+
         # Status
         tk.Label(row1, text="Status:", bg=self.colors["cgcolor"], fg="white").pack(side=tk.LEFT, padx=(20, 5))
         self.lbl_status = tk.Label(
@@ -720,7 +835,7 @@ class BotCryptoUI:
         )
         self.lbl_status.pack(side=tk.LEFT)
 
-        # Capital
+        # Capital (configurado)
         tk.Label(row1, text="Capital:", bg=self.colors["cgcolor"], fg="white").pack(side=tk.LEFT, padx=(30, 5))
         self.lbl_capital = tk.Label(
             row1,
@@ -731,13 +846,24 @@ class BotCryptoUI:
         )
         self.lbl_capital.pack(side=tk.LEFT)
 
+        # Saldo real (Binance)
+        tk.Label(row1, text="Saldo:", bg=self.colors["cgcolor"], fg="white").pack(side=tk.LEFT, padx=(20, 5))
+        self.lbl_saldo = tk.Label(
+            row1,
+            text="-- USDT",
+            bg=self.colors["cgcolor"],
+            fg="yellow",
+            font=("Arial", 10, "bold"),
+        )
+        self.lbl_saldo.pack(side=tk.LEFT)
+
         # Fila 2: Intervalo y métricas
         row2 = tk.Frame(panel, bg=self.colors["cgcolor"])
         row2.pack(fill=tk.X, pady=2)
 
         # Selector de ambiente
         tk.Label(row2, text="Env:", bg=self.colors["cgcolor"], fg="white").pack(side=tk.LEFT, padx=5)
-        self.combo_env = ttk.Combobox(row2, values=["TESTNET", "PRODUCTION"], width=12, state="readonly")
+        self.combo_env = ttk.Combobox(row2, values=["TESTNET", "PRODUCTION"], width=12, state="disable")
         self.combo_env.set(self.env)
         self.combo_env.pack(side=tk.LEFT, padx=5)
         self.combo_env.bind("<<ComboboxSelected>>", self._on_env_change)
@@ -781,7 +907,7 @@ class BotCryptoUI:
     def _crear_canvas_scrollable(self):
         """Crea el canvas con scroll para los widgets de símbolos"""
         # Container
-        container = tk.Frame(self.parent, bg=self.colors["bgcolor"])
+        container = tk.Frame(self.right, bg=self.colors["bgcolor"])
         container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Canvas
@@ -865,7 +991,10 @@ class BotCryptoUI:
             on_stop=lambda s=symbol: self._on_stop_symbol(s),
             on_chart=lambda s=symbol: self._on_show_chart(s),
             on_test_buy=lambda s=symbol: self._on_test_buy(s),
+            on_delete=lambda s=symbol: self._on_delete_symbol(s),
             env=self.env,
+            widget_width=self.WIDGET_WIDTH,
+            widget_height=self.WIDGET_HEIGHT,
         )
         widget.crear_ui()
         widget.frame.grid(row=row, column=col, padx=5, pady=5, sticky="nw")
@@ -898,7 +1027,12 @@ class BotCryptoUI:
                 capital_manager=self.capital_manager,
             )
 
-            self.logger.info(f"Managers inicializados: env={self.env}, capital={capital}, base_url={self.binance_client.urls['base_url']}")
+            self.logger.info(
+                f"Managers inicializados: env={self.env}, capital={capital}, base_url={self.binance_client.urls['base_url']}"
+            )
+
+            # Mostrar saldo inicial de Binance
+            self._actualizar_saldo()
 
         except Exception as e:
             self.logger.error(f"Error inicializando managers: {e}")
@@ -936,7 +1070,7 @@ class BotCryptoUI:
                 DataHub.update_self_procesos(proces="thread", tarea=stream, itera=self.ws_stream_itera)
 
             self.logger.warning(
-                f"✅ [BotCryptoUI] WebSocket inicializado correctamente | env={self.env} | symbols={len(symbols)} | itera={self.ws_stream_itera}"
+                f"✅ WebSocket inicializado correctamente | env={self.env} | symbols={len(symbols)} | itera={self.ws_stream_itera}"
             )
 
             # Suscribir a klines del intervalo seleccionado
@@ -991,19 +1125,19 @@ class BotCryptoUI:
             self.logger.error(f"Error procesando WS message: {e}")
 
     def _evaluar_bot(self, symbol, candle):
-        """Evalúa el bot para un símbolo"""
+        """Evalúa el bot para un símbolo"""  # gwi001
         try:
             bot = self.bots.get(symbol)
             if not bot:
                 return
 
             bot.on_market_data(candle)
-            action = bot.evaluate()
+            action, conditions = bot.evaluate()
 
             # Actualizar widget con estado
             state = bot.get_public_state()
             indicators = bot.get_indicators()
-            self.widgets[symbol].update_state(state, indicators)
+            self.widgets[symbol].update_state(state, indicators, conditions)
 
             # Ejecutar orden via bot_manager
             if action != "HOLD" and self.bot_manager:
@@ -1011,7 +1145,7 @@ class BotCryptoUI:
                 self.bot_manager.execute_action(bot, action)
 
         except Exception as e:
-            self.logger.error(f"Error evaluando bot {symbol}: {e}")
+            self.logger.error(f"_evaluar_bot(): Error evaluando bot {symbol}: {e}")
 
     # =========================================
     # EVENT HANDLERS
@@ -1068,6 +1202,58 @@ class BotCryptoUI:
         # TODO: Abrir ventana de análisis
         self.logger.info(f"Mostrar chart para {symbol}")
 
+    def _on_delete_symbol(self, symbol):
+        """Elimina un símbolo del panel y de la BD"""
+        # Confirmar eliminación
+        respuesta = MyMessageBox(self.right).askquestion(
+            "Eliminar símbolo",
+            f"¿Eliminar {symbol} del panel?\n\nEsto detendrá el bot y eliminará el símbolo de la lista.",
+        )
+        if respuesta != "yes":
+            return
+
+        try:
+            # 1. Detener bot si está corriendo
+            if symbol in self.bots:
+                del self.bots[symbol]
+                self.logger.info(f"{symbol}: Bot detenido")
+
+            # 2. Eliminar de BotManager
+            if self.bot_manager and symbol in self.bot_manager.bots:
+                del self.bot_manager.bots[symbol]
+                if symbol in self.bot_manager.lot_sizes:
+                    del self.bot_manager.lot_sizes[symbol]
+
+            # 3. Eliminar de la BD
+            try:
+                PlanInversion().delete_otros_activos(symbol=symbol, cuenta=self.ACCOUNT)
+                self.logger.info(f"{symbol}: Eliminado de BD")
+            except Exception as e:
+                self.logger.error(f"Error eliminando {symbol} de BD: {e}")
+
+            # 4. Destruir widget
+            if symbol in self.widgets:
+                self.widgets[symbol].frame.destroy()
+                del self.widgets[symbol]
+
+            # 5. Reorganizar grid
+            self._reorganizar_grid()
+
+            # 6. Actualizar contador
+            self.lbl_activos.config(text=str(len(self.widgets)))
+            self.logger.info(f"{symbol}: Eliminado del panel")
+
+        except Exception as e:
+            self.logger.error(f"Error eliminando {symbol}: {e}")
+
+    def _reorganizar_grid(self):
+        """Reorganiza los widgets en el grid después de eliminar uno"""
+        symbols = list(self.widgets.keys())
+        for idx, symbol in enumerate(symbols):
+            row = idx // self.COLUMNS
+            col = idx % self.COLUMNS
+            self.widgets[symbol].frame.grid(row=row, column=col, padx=5, pady=5, sticky="nw")
+
     def _on_test_buy(self, symbol):
         """Ejecuta orden de prueba en TESTNET. Compra mínima del símbolo."""
         if self.env != "TESTNET":
@@ -1091,7 +1277,10 @@ class BotCryptoUI:
             self.logger.info(f"TEST BUY {symbol}: qty={min_qty} (minQty)")
 
             order = self.spot_client.get_new_order(
-                symbol=symbol, side="BUY", type="MARKET", quantity=min_qty,
+                symbol=symbol,
+                side="BUY",
+                type="MARKET",
+                quantity=min_qty,
             )
 
             if order:
@@ -1112,6 +1301,59 @@ class BotCryptoUI:
             widget = self.widgets.get(symbol)
             if widget:
                 widget.lbl_estado.config(text=f"ERROR: {e}", fg="red")
+
+    def _obtener_saldo_usdt(self):
+        """Obtiene el saldo libre de USDT desde Binance"""
+        try:
+            if not self.spot_client:
+                return None
+            account = self.spot_client.account_spot()
+            if account and "balances" in account:
+                for balance in account["balances"]:
+                    if balance["asset"] == "USDT":
+                        return float(balance["free"])
+            return None
+        except Exception as e:
+            self.logger.error(f"Error obteniendo saldo USDT: {e}")
+            return None
+
+    def _actualizar_saldo(self):
+        """Actualiza el label de saldo con el balance real de Binance"""
+        saldo = self._obtener_saldo_usdt()
+        if saldo is not None:
+            self.lbl_saldo.config(text=f"{saldo:.2f} USDT")
+            self.logger.info(f"Saldo USDT actualizado: {saldo:.2f}")
+        else:
+            self.lbl_saldo.config(text="-- USDT")
+
+    def _on_refresh_config(self):
+        """Recarga la configuración desde la BD y actualiza la UI"""
+        try:
+            old_capital = self.config.get("capital", 0)
+            self.config = self._cargar_config()
+            new_capital = self.config.get("capital", 0)
+
+            # Actualizar label de capital
+            self.lbl_capital.config(text=f"{new_capital:.2f} USDT")
+
+            # Actualizar CapitalManager si existe
+            if self.capital_manager:
+                self.capital_manager.capital_total = new_capital
+                self.logger.info(f"CapitalManager actualizado: {new_capital:.2f} USDT")
+
+            # Actualizar combo de ambiente si cambió
+            if self.env:
+                self.combo_env.set(self.env)
+
+            # Actualizar saldo desde Binance
+            self._actualizar_saldo()
+
+            self.logger.warning(
+                f"🔄 Config recargada: capital {old_capital:.2f} → {new_capital:.2f} USDT | env={self.env}"
+            )
+
+        except Exception as e:
+            self.logger.error(f"Error recargando config: {e}")
 
     def _on_env_change(self, event):
         """Cambia el ambiente (TESTNET / PRODUCTION) y persiste en BD"""
@@ -1145,12 +1387,12 @@ class BotCryptoUI:
 
     def _on_add_symbol(self):
         """Abre diálogo para agregar nuevo símbolo al BotCrypto"""
-        dialog = tk.Toplevel(self.parent)
+        dialog = tk.Toplevel(self.right)
         dialog.title("Agregar Símbolo - BotCrypto")
         dialog.geometry("360x180")
         dialog.resizable(False, False)
         dialog.config(bg=self.colors["bgcolor"])
-        dialog.transient(self.parent)
+        dialog.transient(self.right)
         dialog.grab_set()
 
         tk.Label(
@@ -1243,7 +1485,21 @@ class BotCryptoUI:
 
                     self._crear_widget_simbolo(symbol, activo, row, col)
                     self.lbl_activos.config(text=str(len(self.widgets)))
-                    print(f"[BotCryptoUI] Símbolo {symbol} agregado OK | widgets={len(self.widgets)}")
+
+                    # Si el bot está corriendo, crear bot y suscribir al WebSocket
+                    if self.running:
+                        self._crear_bot(symbol)
+                        self.widgets[symbol].set_running(True)
+
+                        # Suscribir al WebSocket
+                        if self.ws_client:
+                            stream = f"{symbol.lower()}@kline_{self.interval}"
+                            self.ws_client.subscribe(stream=stream)
+                            self.logger.info(f"Símbolo {symbol} suscrito al WebSocket: {stream}")
+
+                    self.logger.warning(
+                        f"Símbolo {symbol} agregado OK | widgets={len(self.widgets)} | running={self.running}"
+                    )
                     dialog.destroy()
                 else:
                     lbl_status.config(text="Error: símbolo no encontrado después de insertar", fg="red")
@@ -1281,6 +1537,13 @@ class BotCryptoUI:
                 "tp2_size": self.config.get("tp2_size", 0.33),
             }
 
+            # valida symbol
+            if symbol in self.bots:
+                return
+
+            # =============================
+            # 1. Crear bot lógico
+            # =============================
             bot = TradingBotSpot(
                 symbol=symbol,
                 interval=self.interval,
@@ -1290,8 +1553,8 @@ class BotCryptoUI:
                 order_manager=self.order_manager,
             )
 
-            # Cargar datos históricos
-            self._cargar_historico(bot, symbol)
+            # Cargar datos históricos (usa el cliente del ambiente correcto)
+            self._cargar_historico(bot, symbol, limit=500)
 
             self.bots[symbol] = bot
 
@@ -1302,14 +1565,49 @@ class BotCryptoUI:
         except Exception as e:
             self.logger.error(f"Error creando bot para {symbol}: {e}")
 
-    def _cargar_historico(self, bot, symbol):
-        """Carga datos históricos para el bot"""
+    def _cargar_historico(self, bot, symbol, limit=500):
+        """
+        Carga datos históricos para el bot usando el cliente correcto (TESTNET/PRODUCTION).
+
+        Args:
+            bot: TradingBotSpot instance
+            symbol: Par de trading (ej: ADAUSDT)
+            limit: Cantidad de velas a cargar (default: 500)
+        """
         try:
-            # Obtener klines históricos
-            df = get_klines_info(symbol=symbol, period="30d", interval=self.interval)
+            if not self.spot_client:
+                self.logger.error(f"_cargar_historico: spot_client no inicializado")
+                return
+
+            # Usar el cliente Spot que respeta el ambiente (TESTNET/PRODUCTION)
+            klines = self.spot_client.klines(symbol=symbol, interval=self.interval, limit=limit)
+
+            if not klines:
+                self.logger.warning(f"_cargar_historico: No hay datos para {symbol}")
+                return
+
+            # Convertir a DataFrame
+            from datetime import datetime
+
+            df = pd.DataFrame(
+                [
+                    {
+                        "Date": datetime.fromtimestamp(k[0] / 1000),
+                        "Open": float(k[1]),
+                        "High": float(k[2]),
+                        "Low": float(k[3]),
+                        "Close": float(k[4]),
+                        "Volume": float(k[5]),
+                    }
+                    for k in klines
+                ]
+            )
+
             if df is not None and not df.empty:
                 bot.df = df
                 bot.calcular_indicadores()
+                self.logger.info(f"_cargar_historico: {symbol} cargado OK | {len(df)} velas | env={self.env}")
+
         except Exception as e:
             self.logger.error(f"Error cargando histórico {symbol}: {e}")
 
@@ -1323,7 +1621,22 @@ class WidgetBotSymbol:
     Incluye precio, indicadores, estado y controles.
     """
 
-    def __init__(self, parent, symbol, activo, colors, config, on_start, on_stop, on_chart, on_test_buy=None, env="TESTNET"):
+    def __init__(
+        self,
+        parent,
+        symbol,
+        activo,
+        colors,
+        config,
+        on_start,
+        on_stop,
+        on_chart,
+        on_test_buy=None,
+        on_delete=None,
+        env="TESTNET",
+        widget_width=280,
+        widget_height=220,
+    ):
         self.parent = parent
         self.symbol = symbol
         self.activo = activo
@@ -1333,7 +1646,10 @@ class WidgetBotSymbol:
         self.on_stop = on_stop
         self.on_chart = on_chart
         self.on_test_buy = on_test_buy
+        self.on_delete = on_delete
         self.env = env
+        self.widget_width = widget_width
+        self.widget_height = widget_height
 
         self.frame = None
         self.running = False
@@ -1347,6 +1663,9 @@ class WidgetBotSymbol:
         self.lbl_tp = None
         self.lbl_pnl = None
         self.lbl_status_indicator = None
+        self.lbl_trendok = None
+        self.lbl_rsiok = None
+        self.lbl_priceok = None
         self.btn_test_buy = None
 
     def crear_ui(self):
@@ -1355,8 +1674,8 @@ class WidgetBotSymbol:
         self.frame = tk.Frame(
             self.parent,
             bg=self.colors["cgcolor"],
-            width=280,
-            height=220,
+            width=self.widget_width,
+            height=self.widget_height,
             relief=tk.RIDGE,
             borderwidth=2,
         )
@@ -1365,6 +1684,20 @@ class WidgetBotSymbol:
         # Header con símbolo
         header = tk.Frame(self.frame, bg="#2a4a5a")
         header.pack(fill=tk.X)
+
+        # Botón X para eliminar (primero para que quede a la derecha)
+        if self.on_delete:
+            btn_delete = tk.Button(
+                header,
+                text="X",
+                bg="#c62828",
+                fg="white",
+                font=("Arial", 8, "bold"),
+                width=2,
+                relief=tk.FLAT,
+                command=self.on_delete,
+            )
+            btn_delete.pack(side=tk.RIGHT, padx=2, pady=2)
 
         # Indicador de status
         self.lbl_status_indicator = tk.Label(header, text="●", bg="#2a4a5a", fg="gray", font=("Arial", 12))
@@ -1405,6 +1738,20 @@ class WidgetBotSymbol:
         self._crear_label_row(content, "TP:", "lbl_tp", row)
         row += 1
         self._crear_label_row(content, "PnL:", "lbl_pnl", row)
+
+        # ─────────────────────────────────────────────────────────────
+        # Línea separadora: Condiciones de compra
+        # ─────────────────────────────────────────────────────────────
+        row += 1
+        separator = tk.Frame(content, bg="gray", height=1)
+        separator.grid(row=row, column=0, columnspan=2, sticky="ew", pady=5)
+
+        row += 1
+        self._crear_label_row(content, "Trend:", "lbl_trendok", row, font_size=7)
+        row += 1
+        self._crear_label_row(content, "RSI:", "lbl_rsiok", row, font_size=7)
+        row += 1
+        self._crear_label_row(content, "Price:", "lbl_priceok", row, font_size=7)
 
         # Botones
         btn_frame = tk.Frame(self.frame, bg=self.colors["cgcolor"])
@@ -1450,14 +1797,14 @@ class WidgetBotSymbol:
         )
         self.btn_test_buy.pack(side=tk.RIGHT, padx=2)
 
-    def _crear_label_row(self, parent, label_text, attr_name, row):
+    def _crear_label_row(self, parent, label_text, attr_name, row, font_size=9):
         """Crea una fila con label y valor"""
         tk.Label(
             parent,
             text=label_text,
             bg=self.colors["cgcolor"],
             fg="gray",
-            font=("Arial", 9),
+            font=("Arial", font_size),
             anchor="w",
             width=8,
         ).grid(row=row, column=0, sticky="w")
@@ -1467,7 +1814,7 @@ class WidgetBotSymbol:
             text="--",
             bg=self.colors["cgcolor"],
             fg="white",
-            font=("Arial", 9),
+            font=("Arial", font_size),
             anchor="w",
         )
         lbl_value.grid(row=row, column=1, sticky="w")
@@ -1477,7 +1824,7 @@ class WidgetBotSymbol:
         """Actualiza el precio"""
         self.lbl_price.config(text=f"{price:.4f}")
 
-    def update_state(self, state, indicators):
+    def update_state(self, state, indicators, conditions):
         """Actualiza el estado y los indicadores"""
         # RSI
         rsi = indicators.get("rsi")
@@ -1516,6 +1863,34 @@ class WidgetBotSymbol:
             self.lbl_pnl.config(text=f"{pnl_pct:+.2f}%", fg=color)
         else:
             self.lbl_pnl.config(text="--", fg="white")
+
+        # ─────────────────────────────────────────────────────────────
+        # Condiciones de compra (siempre visibles)
+        # ─────────────────────────────────────────────────────────────
+        if conditions:
+            # Trend: MACD > Signal AND EMA_fast > EMA_slow
+            trend_ok = conditions.get("trend_ok", {})
+            trend_val = trend_ok.get("value", False)
+            trend_detail = trend_ok.get("detail", "--")
+            trend_icon = "✓" if trend_val else "✗"
+            trend_color = "lime" if trend_val else "red"
+            self.lbl_trendok.config(text=f"{trend_icon} {trend_detail}", fg=trend_color)
+
+            # RSI: RSI < rsi_sell (zona operable, evita sobrecompra)
+            rsi_ok = conditions.get("rsi_ok", {})
+            rsi_val = rsi_ok.get("value", False)
+            rsi_detail = rsi_ok.get("detail", "--")
+            rsi_icon = "✓" if rsi_val else "✗"
+            rsi_color = "lime" if rsi_val else "red"
+            self.lbl_rsiok.config(text=f"{rsi_icon} {rsi_detail}", fg=rsi_color)
+
+            # Price: Precio > EMA_fast (confirma movimiento a favor)
+            price_ok = conditions.get("price_ok", {})
+            price_val = price_ok.get("value", False)
+            price_detail = price_ok.get("detail", "--")
+            price_icon = "✓" if price_val else "✗"
+            price_color = "lime" if price_val else "red"
+            self.lbl_priceok.config(text=f"{price_icon} {price_detail}", fg=price_color)
 
     def set_running(self, running):
         """Actualiza el indicador de running"""

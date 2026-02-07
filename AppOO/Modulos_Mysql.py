@@ -1915,6 +1915,33 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: update_otros_activos()]: {}".format(error))
 
+    def delete_otros_activos(self, symbol=None, cuenta=None):
+        """
+        Elimina un registro de la tabla otros_activos.
+        @param symbol: símbolo a eliminar
+        @param cuenta: cuenta específica (opcional)
+        @return: True si se eliminó correctamente
+        """
+        try:
+            conn = self._conectar(tabla="delete.otros_activos")
+            cursor = conn.cursor()
+
+            if cuenta:
+                qry = "DELETE FROM otros_activos WHERE symbol = %s AND cuenta = %s;"
+                cursor.execute(qry, (symbol, cuenta))
+            else:
+                qry = "DELETE FROM otros_activos WHERE symbol = %s;"
+                cursor.execute(qry, (symbol,))
+
+            conn.commit()
+            deleted = cursor.rowcount > 0
+            cursor.close()
+            conn.close()
+            return deleted
+        except (Exception, EncodingWarning, connect.Error) as error:
+            print("[Mysql:: delete_otros_activos()]: {}".format(error))
+            return False
+
     # get info from en formato yfinance into otros_activos
     def get_yf_CNV(self, symbol: str, start: Optional[str] = None, end: Optional[str] = None):
         """
