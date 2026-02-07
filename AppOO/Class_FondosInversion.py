@@ -50,6 +50,7 @@ class ArsFondosInversion(tk.Frame):
 
         self.sesion = self.ClassCNV.get_sesion_by_vehiculo("SANT.ARS")
         self.account_sant = self.sesion["idcuenta"]
+        self.accounTitulo = self.sesion["xstrategy"]
         self.currency = {}
         self.counter = 1
 
@@ -518,7 +519,9 @@ class ArsFondosInversion(tk.Frame):
                 df = pd.read_excel(self.archivo, skiprows=2, header=0, names=list(columns.values()))
                 cond1 = df[columns["F"]] == "Inversión"
                 cond2 = df[columns["F"]] == "Rescate"
-                df_santa = df[cond1 | cond2]
+                cond3 = df[columns["F"]] == "Transferencia - origen"
+                cond4 = df[columns["F"]] == "Transferencia - destino"
+                df_santa = df[cond1 | cond2 | cond3 | cond4]
 
                 santa = df_santa.to_dict(orient="records")
                 santa_ord = sorted(santa, key=lambda x: x["Fecha_liquidación"])
@@ -526,11 +529,27 @@ class ArsFondosInversion(tk.Frame):
                 trader = []
                 for i, rows in enumerate(santa_ord):
 
+                    # acepta solo Cuenta Títulos  inicada en sesison
+                    if rows["Cuenta Títulos"] != self.accounTitulo:
+                        continue
+
                     values = {}
                     ValorCuotaParte = self.string_float(s=rows["Valor_cuotaparte"], tipo="$.,")
                     CuotaParte = self.string_float(s=rows["Cantidad_cuotapartes"], tipo=".,")
                     if ValorCuotaParte > 0:
-                        codigo = "O" if rows["Movimiento"] == "Inversión" else "C"
+
+                        # Evalua tipos de movimientos espardos
+                        if rows["Movimiento"] == "Inversión":
+                            codigo = "O"
+                        elif rows["Movimiento"] == "Rescate":
+                            codigo = "C"
+                        elif rows["Movimiento"] == "Transferencia - origen":
+                            codigo = "C"
+                        elif rows["Movimiento"] == "Transferencia - destino":
+                            codigo = "O"
+                        else:
+                            continue
+
                         activo, found = self.RepositorioOportunidades.select_otros_activos(symbol=rows["Fondo"])
 
                         if not found:

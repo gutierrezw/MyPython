@@ -183,7 +183,6 @@ class AnalisisBase:
             parent,
             text=label,
             bg=bg_valor,
-            fg=fg_valor,
             font=("Segoe UI", 9),
             anchor="w",
         ).grid(row=row, column=0, sticky="w", padx=10, pady=3)
@@ -227,17 +226,20 @@ class AnalisisBase:
         else:
             top5 = df.nsmallest(5, columna_valor)
 
-        nombres = [str(n)[:15] for n in top5[columna_nombre].values]
+        nombres = [str(n) for n in top5[columna_nombre].values]
         valores = top5[columna_valor].values
 
         # Crear figura
-        fig = Figure(figsize=(5.5, 2.2), dpi=100)
-        fig.patch.set_facecolor(self.CG_COLOR)
-        ax = fig.add_subplot(111)
+        fg = Figure(figsize=(5.2, 2.0), dpi=100)
+        fg.patch.set_facecolor(self.CG_COLOR)
+        fg.suptitle(titulo, fontsize=10, color="white")
+        fg.subplots_adjust(left=0.35)
+
+        ax = fg.add_subplot(111)
         ax.set_facecolor(self.CG_COLOR)
 
         # Colores de barras según valor
-        colores = ["#00FF00" if v > 0 else "#FF4444" for v in valores]
+        colores = ["#024E02" if v > 0 else "#FF4444" for v in valores]
 
         # Barras horizontales
         bars = ax.barh(nombres[::-1], valores[::-1], color=colores[::-1], height=0.6)
@@ -246,128 +248,30 @@ class AnalisisBase:
         for bar, val in zip(bars, valores[::-1]):
             x_pos = bar.get_width()
             ax.text(
-                x_pos + (0.5 if x_pos >= 0 else -0.5),
+                x_pos + (0.05 if x_pos >= 0 else -0.05),
                 bar.get_y() + bar.get_height() / 2,
                 f"{val:+.1f}%",
                 va="center",
-                ha="left" if x_pos >= 0 else "right",
-                fontsize=8,
+                ha="right",
+                fontsize=6,
                 color="white",
             )
 
         # Estilo
-        ax.set_title(titulo, color="yellow", fontsize=10, fontweight="bold")
-        ax.tick_params(colors="white", labelsize=8)
+        ax.tick_params(colors="white", labelsize=6)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.spines["bottom"].set_color("gray")
         ax.spines["left"].set_color("gray")
         ax.axvline(x=0, color="gray", linewidth=0.5)
 
-        fig.tight_layout()
-
         # Insertar en Tkinter
         frame_grafico = tk.Frame(parent, bg=self.CG_COLOR)
         frame_grafico.grid(row=row, column=0, columnspan=2, padx=10, pady=5, sticky="w")
 
-        canvas = FigureCanvasTkAgg(fig, master=frame_grafico)
-        canvas.draw()
-        canvas.get_tk_widget().pack()
-
-        return row + 1
-
-    def crear_grafico_top5_dual(self, parent, df, columna_nombre, columna_valor, row):
-        """
-        Crea figura con 2 gráficos de barras horizontales: Ganadores y Perdedores lado a lado.
-
-        Args:
-            parent: Frame padre
-            df: DataFrame con datos
-            columna_nombre: Columna para nombres (eje Y)
-            columna_valor: Columna para valores (barras)
-            row: Fila donde ubicar
-
-        Returns:
-            int: Siguiente fila disponible
-        """
-        if df.empty:
-            return row
-
-        # Obtener Top 5 ganadores y perdedores
-        top5_ganadores = df.nlargest(5, columna_valor)
-        top5_perdedores = df.nsmallest(5, columna_valor)
-
-        # Crear figura con 2 subplots
-        fg = Figure(figsize=(5.2, 3.0), dpi=100)
-        fg.patch.set_facecolor(self.CG_COLOR)
-
-        # ========== SUBPLOT 1: GANADORES ==========
-        ax1 = fg.add_subplot(121)
-        ax1.set_facecolor(self.CG_COLOR)
-
-        nombres1 = [str(n)[:18] for n in top5_ganadores[columna_nombre].values]
-        valores1 = top5_ganadores[columna_valor].values
-        colores1 = ["#00FF00" if v > 0 else "#FF4444" for v in valores1]
-
-        bars1 = ax1.barh(nombres1[::-1], valores1[::-1], color=colores1[::-1], height=0.6)
-        for bar, val in zip(bars1, valores1[::-1]):
-            x_pos = bar.get_width()
-            ax1.text(
-                x_pos + (0.5 if x_pos >= 0 else -0.5),
-                bar.get_y() + bar.get_height() / 2,
-                f"{val:+.1f}%",
-                va="center",
-                ha="left" if x_pos >= 0 else "right",
-                fontsize=8,
-                color="white",
-            )
-
-        ax1.set_title("Top 5 Ganadores", color="#27ae60", fontsize=10, fontweight="bold")
-        ax1.tick_params(colors="white", labelsize=8)
-        ax1.spines["top"].set_visible(False)
-        ax1.spines["right"].set_visible(False)
-        ax1.spines["bottom"].set_color("gray")
-        ax1.spines["left"].set_color("gray")
-        ax1.axvline(x=0, color="gray", linewidth=0.5)
-
-        # ========== SUBPLOT 2: PERDEDORES ==========
-        ax2 = fg.add_subplot(122)
-        ax2.set_facecolor(self.CG_COLOR)
-
-        nombres2 = [str(n)[:18] for n in top5_perdedores[columna_nombre].values]
-        valores2 = top5_perdedores[columna_valor].values
-        colores2 = ["#00FF00" if v > 0 else "#FF4444" for v in valores2]
-
-        bars2 = ax2.barh(nombres2[::-1], valores2[::-1], color=colores2[::-1], height=0.6)
-        for bar, val in zip(bars2, valores2[::-1]):
-            x_pos = bar.get_width()
-            ax2.text(
-                x_pos + (0.5 if x_pos >= 0 else -0.5),
-                bar.get_y() + bar.get_height() / 2,
-                f"{val:+.1f}%",
-                va="center",
-                ha="left" if x_pos >= 0 else "right",
-                fontsize=8,
-                color="white",
-            )
-
-        ax2.set_title("Top 5 Perdedores", color="#e74c3c", fontsize=10, fontweight="bold")
-        ax2.tick_params(colors="white", labelsize=8)
-        ax2.spines["top"].set_visible(False)
-        ax2.spines["right"].set_visible(False)
-        ax2.spines["bottom"].set_color("gray")
-        ax2.spines["left"].set_color("gray")
-        ax2.axvline(x=0, color="gray", linewidth=0.5)
-
-        fg.tight_layout()
-
-        # Insertar en Tkinter
-        frame_grafico = tk.Frame(parent, bg=self.CG_COLOR)
-        frame_grafico.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="w")
-
         canvas = FigureCanvasTkAgg(fg, master=frame_grafico)
         canvas.draw()
-        canvas.get_tk_widget().pack(padx=15)
+        canvas.get_tk_widget().pack()
 
         return row + 1
 
@@ -406,6 +310,7 @@ class AnalisisBase:
             # Crear figura
             fg = Figure(figsize=(5.2, 3.0), dpi=100)
             fg.patch.set_facecolor(self.CG_COLOR)
+
             ax = fg.add_subplot(111)
             ax.set_facecolor(self.CG_COLOR)
             p_legend = []
@@ -442,7 +347,6 @@ class AnalisisBase:
             for spine in ax.spines.values():
                 spine.set_color("gray")
 
-            fg.tight_layout()
             fg.legend(loc="outside upper left", handles=p_legend, fontsize=5)
             fg.suptitle(titulo, fontsize=10, color=color_titulo)
 
@@ -574,12 +478,24 @@ class AnalisisFCI(AnalisisBase):
         # ========== GRÁFICOS TOP 5 (Ganadores y Perdedores - todos los FCIs) ==========
         row = self.crear_seccion(frame, "Gráficos Top 5:", row)
         if not self.df_ultimo.empty and "variacion" in self.df_ultimo.columns:
-            row = self.crear_grafico_top5_dual(
+            row = self.crear_grafico_top5(
                 parent=frame,
                 df=self.df_ultimo,
                 columna_nombre="fondo",
                 columna_valor="variacion",
+                titulo="FCIs GANADORES",
                 row=row,
+                es_ganadores=True,
+            )
+
+            row = self.crear_grafico_top5(
+                parent=frame,
+                df=self.df_ultimo,
+                columna_nombre="fondo",
+                columna_valor="variacion",
+                titulo="FCIs PERDEDORES",
+                row=row,
+                es_ganadores=False,
             )
 
         # ========== GRÁFICOS EVOLUCIÓN HISTÓRICA (Rendimiento 90d) ==========
@@ -683,6 +599,7 @@ class AnalisisFCI(AnalisisBase):
 
             if positions:
                 for position in positions:
+                    factor = float(position.get("factor_cambio", 1))
                     costo_base = float(position.get("total_costo_base", 0))
                     valor_actual = float(position.get("total_mercado", 0))
                     ganancia_abs = float(position.get("total_unrealized_pnl", 0))
@@ -700,7 +617,7 @@ class AnalisisFCI(AnalisisBase):
                         "valor_actual": valor_actual,
                         "ganancia_abs": ganancia_abs,
                         "ganancia_pct": ganancia_pct,
-                        "ganancia_dia": float(position.get("total_ganancia_dia", 0)),
+                        "ganancia_dia": float(position.get("total_ganancia_dia", 0)) * factor,
                         "divisa": str(position.get("divisa", "USD")),
                         "factor_cambio": float(position.get("tasa", 1)),
                     }
@@ -891,9 +808,9 @@ class AnalisisFCI(AnalisisBase):
                 "factor_cambio": 1.0,
             }
 
-        total_costo = self.df_lotes["costo_base"].sum()
-        total_valor = self.df_lotes["valor_actual"].sum()
-        total_ganancia = self.df_lotes["ganancia_abs"].sum()
+        total_costo = (self.df_lotes["costo_base"] * self.df_lotes["factor_cambio"]).sum()
+        total_valor = (self.df_lotes["valor_actual"] * self.df_lotes["factor_cambio"]).sum()
+        total_ganancia = (self.df_lotes["ganancia_abs"] * self.df_lotes["factor_cambio"]).sum()
         ganancia_pct = ((total_valor / total_costo) - 1) * 100 if total_costo > 0 else 0
 
         # Divisa y factor de cambio
