@@ -44,7 +44,7 @@ from Modulos_python import (
     textwrap,
     traceback,
 )
-from API_vehiculos import BB
+from Class_vehiculo import BinanceClient
 
 
 import yfinance as yf
@@ -433,7 +433,7 @@ def get_klines_info(symbol=None, period="5y", interval="1d", desde=None, hasta=N
         return intervalos
 
     try:
-        bi = BB().spot
+        bi = BinanceClient().spot
 
         # controla inicio y fin
         if (desde is not None) and (hasta is not None):

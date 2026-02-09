@@ -10,7 +10,8 @@ from Class_DataFrame import (
     grupo_region,
     CacheHut,
 )
-from API_vehiculos import BB, IB
+from API_vehiculos import IB
+from Class_vehiculo import BinanceClient
 from Class_gestion import GestionInversion
 from Modulos_Mysql import (
     EstrategiaInversion,
@@ -1952,14 +1953,6 @@ class DashMain:
         self.nb.add(self.win3, text="Gestión        ")
         self.nb.add(self.win5, text="System         ")
 
-        # Inicializar UI del Bot Crypto
-        self.bot_crypto_ui = BotCryptoUI(
-            parent=self.win6,
-            colors=self.colors,
-            repositorio=self.RepositorioOportunidades,
-        )
-        self.bot_crypto_ui.inicializar()
-
         # frames de Gráficos y figuras principales
         pn0 = ttk.Frame(self.root, padding=(1, 1, 1, 1), style="C.TFrame")
         pn1 = tk.Frame(self.root, bg="white", border=2)  # frame desemenño ultimos 6 meses
@@ -2231,7 +2224,7 @@ class DashMain:
             self.crypto.header_panel()
 
         try:
-            cb = BB().spot
+            cb = BinanceClient().spot
             self.crypto = WidgetVehiculo(master=self.win1, account=account, vehiculo=vehiculo)
 
             if cb.check_binance_connection():
@@ -4531,7 +4524,7 @@ class DashMain:
             cancel_btn.pack(side=tk.LEFT, padx=5)
 
             # Frame para TreeView
-            tree_frame = ttk.Frame(session_window, style="C.TFrame")
+            tree_frame = ttk.Frame(session_window, style="B.TFrame")
             tree_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=10)
 
             # Definición de columnas (sin id, orcartera, xstrategy, userapi, userpass, private_key, public_key)
@@ -4615,10 +4608,10 @@ class DashMain:
         except:
             pass
 
-        # Detener WebSocket de BotCrypto
+        # Detener BotCrypto (flag _closing + WS + timers)
         try:
             if hasattr(self, "bot_crypto_ui") and self.bot_crypto_ui:
-                self.bot_crypto_ui._detener_websocket()
+                self.bot_crypto_ui.detener()
         except:
             pass
 
@@ -4751,6 +4744,14 @@ class DashMain:
         self.sesion_FCI = self.PlanInversion.get_sesion_by_vehiculo("SANT.ARS")
         self.fci = ArsFondosInversion(parent=self.root, master=self.win4, colores=self.colors)
         self.fci.pack()
+
+        # Inicializar UI del Bot Crypto ------------------------------------------------------------------
+        self.bot_crypto_ui = BotCryptoUI(
+            parent=self.win6,
+            colors=self.colors,
+            repositorio=self.RepositorioOportunidades,
+        )
+        self.bot_crypto_ui.inicializar()
 
         self.system = system_status(master=self.win5, colores=self.colors)
 

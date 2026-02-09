@@ -412,7 +412,7 @@ class Telegram:
                 [
                     InlineKeyboardButton("🎯 Performan", callback_data="performan"),
                     InlineKeyboardButton("🟢🔴 Orders", callback_data="OrdersExec"),
-                    InlineKeyboardButton("🔄 Reconnect", callback_data="menu_reconnet"),
+                    InlineKeyboardButton("🤖 BotTrader", callback_data="botrtrader"),
                 ],
             ]
             menu_markup = InlineKeyboardMarkup(botones)
@@ -740,6 +740,9 @@ class Telegram:
 
                 # se pasa el chat que solicitó la lista (opcional)
                 await self.list_orders_exec(chat_id=update.effective_chat.id)
+
+            elif accion == "botrtrader":
+                await self.list_positions_BotCrypto(chat_id=update.effective_chat.id)
 
         except Exception as e:
             self.logger.error(f"handle_callback(): {e}\n{traceback.format_exc()}")
@@ -1080,6 +1083,57 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             loop.run_until_complete(modulo)
 
     # Consultar y enviar por Telegram un resumen de órdenes ejecutadas.
+    async def list_positions_BotCrypto(self, chat_id=None, limit=25):
+        """
+        Consultar y enviar por Telegram un resumen de posiciones activas BotCrypto.
+        """
+        try:
+            info = DataHub.telegram_botcrypto
+            if not info:
+                await self.send_Telegram("ℹ️ BotCrypto no ha publicado datos aún.", None)
+                return
+
+            env = info.get("env", "?")
+            trades = info.get("trades", 0)
+            posiciones = info.get("posiciones", [])
+            activas = [p for p in posiciones if p["position"] == "LONG"]
+            waiting = [p for p in posiciones if p["position"] == "NONE"]
+
+            if not activas:
+                message = f"🤖 *BotTrader* ({env}) | Trades: {trades}\n"
+                message += "ℹ️ Sin posiciones abiertas\n"
+                if waiting:
+                    message += f"\n⏳ *Esperando señal:* {', '.join(p['symbol'] for p in waiting)}"
+                await self.send_Telegram(message, None)
+                return
+
+            lines = []
+            total_pnl = 0.0
+            for p in activas[:limit]:
+                emoji = "🟢" if p["pnl_pct"] >= 0 else "🔴"
+                lines.append(
+                    f"{emoji}{p['symbol']:<8} {p['price']:>9.4f} "
+                    f"{p['qty']:>8.2f} {p['pnl_pct']:>+6.2f}% ${p['pnl_usdt']:>+7.2f}"
+                )
+                total_pnl += p.get("pnl_usdt", 0)
+
+            message = f"🤖 *BotTrader* ({env}) | Trades: {trades}\n"
+            message += f"```\n"
+            message += f"{'symbol':<9} {'price':>9} {'qty':>8} {'pnl%':>7} {'pnl$':>8}\n"
+            message += f"{'-' * 54}\n"
+            message += "\n".join(lines)
+            message += f"\n{'-' * 54}\n"
+            message += f"{'Total PnL':>37} ${total_pnl:>+7.2f}"
+            message += "```"
+
+            if waiting:
+                message += f"\n⏳ *Esperando señal:* {', '.join(p['symbol'] for p in waiting)}"
+
+            await self.send_Telegram(message, None)
+        except Exception as e:
+            self.logger.error(f"list_positions_BotCrypto(): {e}")
+
+    # Consultar y enviar por Telegram un resumen de órdenes ejecutadas.
     async def list_orders_exec(self, chat_id=None, limit=25):
         """
         Consultar y enviar por Telegram un resumen de órdenes ejecutadas.
@@ -1098,7 +1152,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                         "side": trader[ix.index("side")],
                         "quantity": trader[ix.index("quantity")],
                         "price": trader[ix.index("price")],
-                        "status": trader[ix.index("status")],
+                        "status": trader[ix.index("status")][0:9],
                     }
                 )
 
@@ -1119,7 +1173,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             message = f"🟢🔴 *Trader recent (-7 days):*\n"
             message += f"```\n"
-            message += f"{'timestamp':<14} {'symbol':>7} {'side':>5} {'quantity':>7} {'price':>7} {'status':>5}\n"
+            message += f"{'timestamp':<14} {'symbol':>7} {'side':>5} {'quantity':>7} {'price':>5} {'status':>7}\n"
             message += f"{'-' * 55}\n"
             message += "\n".join(lines)
             message += "```"

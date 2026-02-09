@@ -181,6 +181,38 @@ class BDsystem:  # -------------------------------------------------------------
                 conn.close()
 
     @staticmethod
+    def update_sesion_config(vehiculo: str, config: dict) -> bool:
+        """
+        Actualiza el campo private_key (JSON config) de una sesión.
+
+        Args:
+            vehiculo: Tipo de vehículo (BotCrypto, Crypto, etc.)
+            config: Diccionario con la configuración a guardar como JSON
+
+        Returns:
+            bool: True si actualización exitosa, False en caso contrario
+        """
+        import json
+        sql = "UPDATE sesion SET private_key=%s WHERE vehiculo=%s"
+        conn = BDsystem.connect_dbase("Config.Update", False)
+
+        try:
+            cursor = conn.cursor()
+            config_json = json.dumps(config)
+            cursor.execute(sql, (config_json, vehiculo))
+            conn.commit()
+            return True
+        except Exception as error:
+            print(f"[Mysql::update_sesion_config()]: {error}")
+            conn.rollback()
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    @staticmethod
     def update_sesion_fecha_fund(vehiculo: str, fecha_fund) -> bool:
         """
         Actualiza fechaFund de una sesión.

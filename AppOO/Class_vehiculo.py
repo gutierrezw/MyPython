@@ -178,11 +178,14 @@ class BinanceSpot(Spot):
             if response:
                 for s in response["symbols"]:
                     if s["symbol"] == symbol:
+                        result = {symbol: {"minQty": 0.0, "stepSize": 0.0, "minNotional": 5.0}}
                         for filtro in s["filters"]:
                             if filtro["filterType"] == "LOT_SIZE":
-                                min_qty = float(filtro["minQty"])
-                                step_size = float(filtro["stepSize"])
-                                return {symbol: {"minQty": min_qty, "stepSize": step_size}}
+                                result[symbol]["minQty"] = float(filtro["minQty"])
+                                result[symbol]["stepSize"] = float(filtro["stepSize"])
+                            elif filtro["filterType"] == "NOTIONAL":
+                                result[symbol]["minNotional"] = float(filtro.get("minNotional", 5.0))
+                        return result
         except (ClientError, requests.exceptions.RequestException) as e:
             self.logger.error(f"get_exchange_info(): {e}")
 
@@ -206,14 +209,43 @@ class BinanceSpot(Spot):
 
         headers = {"X-MBX-APIKEY": self.api_key}
 
-        r = requests.post(self.base_url + "/api/v3/order", headers=headers, params=signed_query, timeout=5)
+        r = requests.post(self._base_url + "/api/v3/order", headers=headers, params=signed_query, timeout=5)
 
         r.raise_for_status()
         return r.json()
 
     @handle_binance_exceptions
     def get_cancel_order(self, symbol: str, orderId: int):
-        return self.cancel_order(symbol, orderId)
+        params = {
+            "symbol": symbol,
+            "orderId": orderId,
+            "timestamp": int(time.time() * 1000),
+        }
+
+        signed_query = self.signature_spot_message(params)
+
+        headers = {"X-MBX-APIKEY": self.api_key}
+
+        r = requests.delete(self.base_url + "/api/v3/order", headers=headers, params=signed_query, timeout=5)
+
+        r.raise_for_status()
+        return r.json()
+
+    @handle_binance_exceptions
+    def cancel_all_orders(self, symbol):
+        params = {
+            "symbol": symbol,
+            "timestamp": int(time.time() * 1000),
+        }
+
+        signed_query = self.signature_spot_message(params)
+
+        headers = {"X-MBX-APIKEY": self.api_key}
+
+        r = requests.delete(self.base_url + "/api/v3/openOrders", headers=headers, params=signed_query, timeout=5)
+
+        r.raise_for_status()
+        return r.json()
 
     @handle_binance_exceptions
     def get_my_trades(self, ticket: str, limit: int, startTime: int, endTime: int):
@@ -397,7 +429,7 @@ class BinanceStreamClient(SpotWebsocketStreamClient):
         ws.SUBSCRIBE()
     """
 
-    def __init__(self, env="PRODUCTION", assets=None, mensaje_callback=None):
+    def __init__(self, env="PRODUCTION", assets=None, mensaje_callback=None, on_close_callback=None):
         # Atributos ANTES de super().__init__ porque on_open se dispara dentro del constructor
         self.env = env
         self.assets = assets
@@ -406,6 +438,8 @@ class BinanceStreamClient(SpotWebsocketStreamClient):
         self.running = False
         self.logger = logging.getLogger("BinanceClient")
         self.thread_name = f"BinanceStream({env})"
+        self._on_close_callback = on_close_callback
+        self._sleep_event = threading.Event()
 
         urls = BINANCE_ENV[env]
         ws_url = urls["ws_stream"]
@@ -426,12 +460,16 @@ class BinanceStreamClient(SpotWebsocketStreamClient):
 
     def on_open(self, reason):
         self.running = True
-        self.logger.info(f"BinanceStreamClient conectado ({self.env})")
+        self.counter += 1
+        self.logger.warning(f"BinanceStreamClient conectado ({self.env}) | counter={self.counter}")
         time.sleep(2)
 
     def on_close(self, reason):
         self.running = False
-        self.logger.info(f"BinanceStreamClient cerrado ({self.env})")
+        self._sleep_event.set()  # Interrumpe websocket_loop para reconexión inmediata
+        self.logger.warning(f"BinanceStreamClient cerrado ({self.env}): {reason}")
+        if self._on_close_callback:
+            self._on_close_callback(reason)
 
     def on_error(self, code, error):
         self.logger.error(f"BinanceStreamClient error ({self.env}): {code} - {error}")
@@ -452,8 +490,9 @@ class BinanceStreamClient(SpotWebsocketStreamClient):
 
     def websocket_loop(self, limit=None, log=True):
         try:
+            self._sleep_event.clear()
             self.SUBSCRIBE()
-            time.sleep(limit)
+            self._sleep_event.wait(timeout=limit)
             self.stop()
 
             if log:
@@ -804,9 +843,7 @@ class IBGateway:
 
             status = self.is_authenticated(check=True)
             if not status.get("authenticated", False):
-                raise RuntimeError(
-                    f"Sesión IBKR no autenticada. Requiere login web en {self.ib_gateway_path}"
-                )
+                raise RuntimeError(f"Sesión IBKR no autenticada. Requiere login web en {self.ib_gateway_path}")
 
     def ib_is_connet(self) -> bool:
         """Verifica si hay conexión activa con IB."""
