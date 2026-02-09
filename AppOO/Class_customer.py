@@ -71,7 +71,8 @@ from Modulos_Mysql import (
 )
 from Class_Analisis import AnalisisFCI, AnalisisCrypto, AnalisisStock
 from AppValuations.rebalance_engine import RebalanceEngine
-from API_vehiculos import BB, IB, WebsocketBinanceStreams, WebsocketBinanceApiClient
+from API_vehiculos import IB
+from Class_vehiculo import BinanceClient, BinanceStreamClient, BinanceWSApiClient
 
 
 # class Manager para procesa ordenes remotas
@@ -213,6 +214,7 @@ class DataHub:
     manager_after = {}
     manager_buysell = {}
     rebalanceo = {}
+    telegram_botcrypto = {}
     procesos = []
     logger = {}
     orders = {}
@@ -992,7 +994,7 @@ class MyOrders:
         self.simulation = simulation
 
         # clientes de vehiculos
-        self.BClient = BB().spot
+        self.BClient = BinanceClient().spot
         self.IClient = IB()
 
         # variables de TRADER
@@ -2596,15 +2598,14 @@ class TickerInfo(MyOrders):
         if self.WStreams:
             self.WStreams.stop()
 
-        self.WStreams = WebsocketBinanceStreams(
-            stream_url="wss://stream.binance.com:9443",
+        self.WStreams = BinanceStreamClient(
+            env="PRODUCTION",
             assets=self.activos,
             mensaje_callback=self.on_message_binance_websocket,
         )
         if log and (self.WStreams.counter == 1):
-            print(f"schedule_WebsocketBinanceStream:: symbols({len(self.activos)}),{datetime.now()}")
+            self.logger.warning(f"schedule_WebsocketBinanceStream:: symbols({len(self.activos)}),{datetime.now()}")
 
-        # self.WStreams.on_open()
         self.WStreams.websocket_loop(limit=limit, log=False)
 
     # invoca allOrders websocket
@@ -2612,14 +2613,14 @@ class TickerInfo(MyOrders):
         if self.WsClient:
             self.WsClient.stop()
 
-        self.WsClient = WebsocketBinanceApiClient(
-            stream_url="wss://ws-api.binance.com:9443/ws-api/v3",
+        self.WsClient = BinanceWSApiClient(
+            env="PRODUCTION",
+            vehiculo="Crypto",
             mensaje_callback=self.on_message_binance_websocket,
         )
         if log and (self.WsClient.counter == 1):
-            print(f"schedule_WebsocketBinanceApiClient:: symbols({len(self.activos)}),{datetime.now()}")
+            self.logger.warning(f"schedule_WebsocketBinanceApiClient:: symbols({len(self.activos)}),{datetime.now()}")
 
-        # itera hasta el límit
         self.WsClient.my_allOrders(assets=self.activos, limit=10, sleep=1)
         self.WsClient.counter = 1
 

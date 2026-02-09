@@ -1,7 +1,7 @@
-from API_vehiculos import BB
+from Class_vehiculo import BinanceClient
 from Class_customer import TickerInfo
 
-ib = BB().spot
+ib = BinanceClient().spot
 Tib = TickerInfo(account='B0000001', vehiculo='Crypto', colors={})
 
 # print(ib.account_spot())
