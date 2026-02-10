@@ -153,7 +153,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     }
 
                     # obtiene conid para vehículo crypto
-                    crypto, found = self.RepositorioOportunidades.select_otros_activos(symbol=symbol)
+                    crypto, found = self.RepositorioOportunidades.select_otros_activos(
+                        account=self.account, symbol=symbol
+                    )
                     conid = crypto[0]["idcrypto"]
 
                     # procesa_crypto(symbol, d_precio)
@@ -960,7 +962,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # actualiza position
                     if position["ticket"] == asset:
 
-                        crypto, found = self.RepositorioOportunidades.select_otros_activos(symbol=asset)
+                        crypto, found = self.RepositorioOportunidades.select_otros_activos(
+                            account=self.account, symbol=asset
+                        )
                         found, self_position = buscar_ticker(self.positions, asset)
 
                         # obtiene información de dividendos

@@ -426,10 +426,30 @@ class Telegram:
     async def toggle_telegram(self):
         def polling_callbackTelegram():
             try:
-                # Usar run_polling que maneja todo el ciclo de vida
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
 
+                # Construir app en el MISMO loop que hará polling
+                self.telegram_app = ApplicationBuilder().token(self.TOKEN).build()
+
+                self.telegram_app.add_handler(CommandHandler("menu", self.handle_menu))
+                self.telegram_app.add_handler(CommandHandler("start", self.handle_segurity_message))
+                self.telegram_app.add_handler(
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_segurity_message)
+                )
+                self.telegram_app.add_handler(CallbackQueryHandler(self.handle_callback))
+
+                # Enviar mensaje de bienvenida antes de polling
+                async def _send_welcome():
+                    await self.telegram_app.initialize()
+                    self.bot = self.telegram_app.bot
+                    await self.send_Telegram(f"🏁 Bot interno iniciado session: {datetime.now()}")
+                    await self.handle_menu()
+                    await self.telegram_app.shutdown()
+
+                loop.run_until_complete(_send_welcome())
+
+                # run_polling en el mismo loop donde se creó la app
                 loop.run_until_complete(
                     self.telegram_app.run_polling(
                         allowed_updates=["message", "callback_query"],
@@ -437,7 +457,7 @@ class Telegram:
                     )
                 )
             except Exception as e:
-                print(f"polling_callbackTelegram() error: {e}")
+                self.logger.error(f"polling_callbackTelegram() error: {e}")
             finally:
                 try:
                     loop.close()
@@ -445,39 +465,9 @@ class Telegram:
                     pass
 
         try:
-            # activa mensajería Telegram
             if not self.estadoTelegram:
                 self.estadoTelegram = True
 
-                # Build the async Application
-                self.telegram_app = ApplicationBuilder().token(self.TOKEN).build()
-
-                # 🔑 Registrar el manejador para /menu
-                self.telegram_app.add_handler(CommandHandler("menu", self.handle_menu))
-
-                # 🔑 Registrar el manejador para /start
-                self.telegram_app.add_handler(CommandHandler("start", self.handle_segurity_message))
-
-                # 🔑 Registrar el manejador para CUALQUIER texto (excluyendo comandos ya manejados)
-                self.telegram_app.add_handler(
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_segurity_message)
-                )
-
-                # 🔑 Registrar el manejador para /respuestas
-                self.telegram_app.add_handler(CallbackQueryHandler(self.handle_callback))
-
-                # Inicializar bot solo para enviar mensajes iniciales
-                await self.telegram_app.initialize()
-                self.bot = self.telegram_app.bot
-
-                # Send welcome message and previous opportunities
-                await self.send_Telegram(f"🏁 Bot interno iniciado session: {datetime.now()}")
-                await self.handle_menu()
-
-                # Cerrar inicialización temporal para que run_polling lo maneje
-                await self.telegram_app.shutdown()
-
-                # inicia hilo para polling de mensajes
                 task_name = f"polling_callbackTelegram(On)"
                 DataHub.procesos.append({"thread": {task_name: 1}})
                 DataHub.manager_events.register_thread(
@@ -485,9 +475,9 @@ class Telegram:
                     target=polling_callbackTelegram,
                 )
 
-                print(f"Start: (toggle_telegram(On))")
+                self.logger.warning(f"Start: (toggle_telegram(On))")
         except Exception as e:
-            print(f"toggle_telegram(): {e}")
+            self.logger.error(f"toggle_telegram(): {e}")
             traceback.print_exc()
 
     def _activar_telegram(self):

@@ -1003,23 +1003,241 @@ class BotCryptoUI:
         bot.pack(side=tk.BOTTOM)
         cen.pack(side=tk.LEFT)
 
-        fg0 = Figure(figsize=(2.9, 2.04), dpi=110, layout="tight")
+        fg0 = Figure(figsize=(2.9, 1.9), dpi=110, layout="tight")
         fg0.set_facecolor(self.colors["cgcolor"])
         cv0 = FigureCanvasTkAgg(fg0, master=top)
         cv0.draw()
         cv0.get_tk_widget().pack()
 
-        fg1 = Figure(figsize=(2.9, 2.04), dpi=110, layout="tight")
+        fg1 = Figure(figsize=(2.9, 1.9), dpi=110, layout="tight")
         fg1.set_facecolor(self.colors["cgcolor"])
         cv1 = FigureCanvasTkAgg(fg1, master=cen)
         cv1.draw()
         cv1.get_tk_widget().pack()
 
-        fg2 = Figure(figsize=(2.9, 2.04), dpi=110, layout="tight")
-        fg2.set_facecolor(self.colors["cgcolor"])
-        cv2 = FigureCanvasTkAgg(fg2, master=bot)
-        cv2.draw()
-        cv2.get_tk_widget().pack()
+        self._crear_panel_capital(bot)
+
+    def _crear_panel_capital(self, parent):
+        """Crea panel de resumen Capital & Riesgo en el espacio inferior izquierdo"""
+        bg = self.colors["cgcolor"]
+        fg = self.colors["fgcolor"]
+
+        frame = tk.Frame(parent, bg=bg, width=319, height=250)
+        frame.pack(fill=tk.BOTH, expand=True)
+        frame.pack_propagate(False)
+
+        # Título
+        tk.Label(frame, text="CAPITAL & RIESGO", bg=bg, fg=self.colors["bgcolor"], font=("Arial", 9, "bold")).pack(
+            anchor="w", padx=5, pady=(4, 2)
+        )
+
+        sep = tk.Frame(frame, bg="gray30", height=1)
+        sep.pack(fill=tk.X, padx=5)
+
+        # Sección capital
+        cap_frame = tk.Frame(frame, bg=bg)
+        cap_frame.pack(fill=tk.X, padx=5, pady=2)
+
+        self._cap_labels = {}
+        for key, label in [
+            ("capital", "Capital"),
+            ("reservado", "Reservado"),
+            ("disponible", "Disponible"),
+            ("risk", "Risk/Trade"),
+        ]:
+            row = tk.Frame(cap_frame, bg=bg)
+            row.pack(fill=tk.X)
+            tk.Label(row, text=f"{label}:", bg=bg, fg="gray70", font=("Arial", 8), anchor="w", width=12).pack(
+                side=tk.LEFT
+            )
+            lbl = tk.Label(row, text="--", bg=bg, fg=fg, font=("Arial", 8, "bold"), anchor="e", width=14)
+            lbl.pack(side=tk.RIGHT)
+            self._cap_labels[key] = lbl
+
+        # Separador
+        sep2 = tk.Frame(frame, bg="gray30", height=1)
+        sep2.pack(fill=tk.X, padx=5, pady=2)
+
+        # Footer fijo (PnL + Posiciones) - empacar ANTES del canvas para reservar espacio
+        footer = tk.Frame(frame, bg=bg)
+        footer.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Posiciones con scroll - ocupa espacio restante
+        self._pos_canvas = tk.Canvas(frame, bg=bg, highlightthickness=0)
+        pos_scrollbar = tk.Scrollbar(frame, orient=tk.VERTICAL, command=self._pos_canvas.yview)
+        self._pos_frame = tk.Frame(self._pos_canvas, bg=bg)
+
+        self._pos_frame.bind(
+            "<Configure>", lambda e: self._pos_canvas.configure(scrollregion=self._pos_canvas.bbox("all"))
+        )
+        self._pos_canvas.create_window((0, 0), window=self._pos_frame, anchor="nw", tags="pos_window")
+        self._pos_canvas.configure(yscrollcommand=pos_scrollbar.set)
+
+        # Mousewheel scroll
+        def _on_mousewheel(event):
+            self._pos_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        self._pos_canvas.bind("<MouseWheel>", _on_mousewheel)
+        self._pos_frame.bind("<MouseWheel>", _on_mousewheel)
+        self._on_pos_mousewheel = _on_mousewheel  # Guardar ref para bindear hijos dinámicos
+
+        pos_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self._pos_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+
+        self._pos_labels = {}
+
+        sep3 = tk.Frame(footer, bg="gray30", height=1)
+        sep3.pack(fill=tk.X, padx=5, pady=2)
+
+        # PnL Total
+        pnl_row = tk.Frame(footer, bg=bg)
+        pnl_row.pack(fill=tk.X, padx=5)
+        tk.Label(pnl_row, text="PnL Total:", bg=bg, fg="gray70", font=("Arial", 8), anchor="w", width=12).pack(
+            side=tk.LEFT
+        )
+        self._lbl_pnl_total = tk.Label(
+            pnl_row, text="$0.00", bg=bg, fg="lime", font=("Arial", 8, "bold"), anchor="e", width=14
+        )
+        self._lbl_pnl_total.pack(side=tk.RIGHT)
+
+        # Posiciones activas / total
+        count_row = tk.Frame(footer, bg=bg)
+        count_row.pack(fill=tk.X, padx=5)
+        tk.Label(count_row, text="Posiciones:", bg=bg, fg="gray70", font=("Arial", 8), anchor="w", width=12).pack(
+            side=tk.LEFT
+        )
+        self._lbl_pos_count = tk.Label(
+            count_row, text="0/0", bg=bg, fg=fg, font=("Arial", 8, "bold"), anchor="e", width=14
+        )
+        self._lbl_pos_count.pack(side=tk.RIGHT)
+
+        # Pérdida por SL individual
+        sl_row = tk.Frame(footer, bg=bg)
+        sl_row.pack(fill=tk.X, padx=5)
+        tk.Label(sl_row, text="SL/Trade:", bg=bg, fg="gray70", font=("Arial", 8), anchor="w", width=12).pack(
+            side=tk.LEFT
+        )
+        self._lbl_sl_trade = tk.Label(
+            sl_row, text="--", bg=bg, fg="orange", font=("Arial", 8, "bold"), anchor="e", width=14
+        )
+        self._lbl_sl_trade.pack(side=tk.RIGHT)
+
+        # Pérdida máxima
+        max_row = tk.Frame(footer, bg=bg)
+        max_row.pack(fill=tk.X, padx=5)
+        tk.Label(max_row, text="Max Loss:", bg=bg, fg="gray70", font=("Arial", 8), anchor="w", width=12).pack(
+            side=tk.LEFT
+        )
+        self._lbl_max_loss = tk.Label(
+            max_row, text="--", bg=bg, fg="red", font=("Arial", 8, "bold"), anchor="e", width=14
+        )
+        self._lbl_max_loss.pack(side=tk.RIGHT)
+
+    def _actualizar_panel_capital(self):
+        """Actualiza el panel de capital con datos en tiempo real"""
+        try:
+            if not hasattr(self, "_cap_labels"):
+                return
+
+            bg = self.colors["cgcolor"]
+            fg = self.colors["fgcolor"]
+
+            # Capital
+            capital = self.config.get("capital", 0)
+            reservado = self.capital_manager.capital_reservado if self.capital_manager else 0
+            disponible = self.capital_manager.get_available_capital() if self.capital_manager else 0
+            risk_pct = self.config.get("risk_per_trade", 0.02) * 100
+
+            self._cap_labels["capital"].config(text=f"${capital:.2f}")
+            self._cap_labels["reservado"].config(text=f"${reservado:.2f}")
+            self._cap_labels["disponible"].config(text=f"${disponible:.2f}", fg="lime" if disponible > 0 else "red")
+            self._cap_labels["risk"].config(text=f"{risk_pct:.0f}%")
+
+            # Limpiar posiciones previas
+            for w in self._pos_frame.winfo_children():
+                w.destroy()
+
+            # Posiciones por símbolo
+            total_pnl = 0.0
+            activas = 0
+
+            for symbol, bot in self.bots.items():
+                state = bot.get_public_state()
+                position = state.get("position", "NONE")
+                row = tk.Frame(self._pos_frame, bg=bg)
+                row.pack(fill=tk.X)
+                row.bind("<MouseWheel>", self._on_pos_mousewheel)
+
+                sym_short = symbol.replace("USDT", "")
+
+                if position == "LONG":
+                    activas += 1
+                    entry = state.get("entry_price", 0) or 0
+                    qty = state.get("remaining_qty", 0) or 0
+                    price = bot._last_price() if bot.df is not None and len(bot.df) > 0 else entry
+                    notional = qty * entry
+                    pnl_usdt = (price - entry) * qty if entry > 0 else 0
+                    pnl_pct = ((price / entry) - 1) * 100 if entry > 0 else 0
+                    total_pnl += pnl_usdt
+                    color = "lime" if pnl_usdt >= 0 else "red"
+
+                    tk.Label(
+                        row,
+                        text=f"{sym_short:<5}",
+                        bg=bg,
+                        fg="white",
+                        font=("Arial", 8, "bold"),
+                        width=5,
+                        anchor="w",
+                    ).pack(side=tk.LEFT)
+                    tk.Label(
+                        row, text=f"${notional:>6.1f}", bg=bg, fg="gray70", font=("Arial", 8), width=7, anchor="e"
+                    ).pack(side=tk.LEFT)
+                    tk.Label(
+                        row,
+                        text=f"{pnl_pct:>+5.1f}% ${pnl_usdt:>+6.2f}",
+                        bg=bg,
+                        fg=color,
+                        font=("Arial", 8, "bold"),
+                        anchor="e",
+                    ).pack(side=tk.RIGHT)
+                else:
+                    tk.Label(
+                        row, text=f"{sym_short:<5}", bg=bg, fg="gray50", font=("Arial", 8), width=5, anchor="w"
+                    ).pack(side=tk.LEFT)
+                    tk.Label(row, text="waiting", bg=bg, fg="gray50", font=("Arial", 8), anchor="e").pack(side=tk.RIGHT)
+
+            # Bindear mousewheel a todos los labels hijos del canvas
+            for child in self._pos_frame.winfo_children():
+                child.bind("<MouseWheel>", self._on_pos_mousewheel)
+                for subchild in child.winfo_children():
+                    subchild.bind("<MouseWheel>", self._on_pos_mousewheel)
+
+            # Ajustar ancho del frame interno al canvas
+            self._pos_canvas.itemconfig("pos_window", width=self._pos_canvas.winfo_width())
+
+            # PnL Total
+            pnl_color = "lime" if total_pnl >= 0 else "red"
+            self._lbl_pnl_total.config(text=f"${total_pnl:>+.2f}", fg=pnl_color)
+
+            # Contador posiciones
+            total = len(self.bots)
+            self._lbl_pos_count.config(text=f"{activas}/{total}")
+
+            # Pérdida por SL: position_size × stop_loss_pct
+            risk_pct_dec = self.config.get("risk_per_trade", 0.02)
+            sl_pct = self.config.get("stop_loss_pct", 0.02)
+            pos_size = capital * risk_pct_dec
+            sl_loss = pos_size * sl_pct
+            self._lbl_sl_trade.config(text=f"-${sl_loss:.2f}")
+
+            # Pérdida máxima: SL × cantidad de bots activos (o total si todos entran)
+            max_loss = sl_loss * total
+            max_loss_pct = (max_loss / capital * 100) if capital > 0 else 0
+            self._lbl_max_loss.config(text=f"-${max_loss:.2f} ({max_loss_pct:.1f}%)")
+
+        except Exception as e:
+            self.logger.error(f"_actualizar_panel_capital(): {e}")
 
     # =========================================
     # PANEL DE CONTROL
@@ -1205,7 +1423,7 @@ class BotCryptoUI:
     def _cargar_simbolos(self):
         """Carga símbolos desde otros_activos y crea widgets"""
         try:
-            activos, found = self.repositorio.select_otros_activos(symbol="all", account=self.ACCOUNT)
+            activos, found = self.repositorio.select_otros_activos(account=self.ACCOUNT, symbol="all")
 
             if not found or not activos:
                 self.logger.info(f"No hay símbolos para cuenta {self.ACCOUNT}")
@@ -1381,15 +1599,8 @@ class BotCryptoUI:
                         "fechahora": datetime.fromtimestamp(transact_time / 1000),
                     }
 
-                    found = self.repositorio.get_hash_booktrading(
-                        accion="valida",
-                        values=registro,
-                        symbol=symbol,
-                    )
-
-                    if not found:
-                        self.repositorio.insert_booktrading(values=registro, symbol=symbol)
-                        self.logger.warning(f"Booktrading: {symbol} | {side} | qty={cantidad} | price={price:.4f}")
+                    self.repositorio.insert_bottraderBook(values=registro, symbol=symbol, object="bottrader")
+                    self.logger.warning(f"Booktrading: {symbol} | {side} | qty={cantidad} | price={price:.4f}")
 
                 except Exception as e:
                     self.logger.error(f"Error procesando fill {symbol}: {e}")
@@ -1588,6 +1799,9 @@ class BotCryptoUI:
 
             # Publicar estado en DataHub para consulta desde Telegram
             self._publicar_estado_botcrypto()
+
+            # Actualizar panel capital
+            self._actualizar_panel_capital()
 
         except Exception as e:
             self.logger.error(f"_evaluar_bot(): Error evaluando bot {symbol}: {e}")
@@ -2412,9 +2626,16 @@ class BotCryptoUI:
                 lbl_status.config(text=f"Error creando widget: {e}", fg="red")
                 traceback.print_exc()
 
+        # gwi001
         dialog = tk.Toplevel(self.right)
         dialog.title("Agregar Símbolo - BotCrypto")
-        dialog.geometry("360x120")
+
+        try:
+            x = self.right.winfo_rootx() + self.right.winfo_width() - 200
+            y = self.right.winfo_rooty() + 200
+        except Exception:
+            x, y = 200, 150
+        dialog.geometry(f"360x280+{x}+{y}")
         dialog.resizable(False, False)
         dialog.config(bg=self.colors["bgcolor"])
         dialog.transient(self.right)
@@ -2443,21 +2664,19 @@ class BotCryptoUI:
 
         btn = tk.Button(
             dialog,
-            text="ADD",
+            text="Agregar",
             command=agregar,
-            fg="white",
             font=("Arial", 10),
             width=10,
         )
         btc = tk.Button(
             dialog,
             text="Cancel",
-            fg="white",
             font=("Arial", 10),
             width=10,
         )
-        btn.pack(padx=5, pady=10)
-        btc.pack(padx=5, pady=10)
+        btn.pack(side=tk.RIGHT, padx=5, pady=10)
+        btc.pack(side=tk.RIGHT, padx=5, pady=10)
 
         entry.bind("<Return>", lambda e: agregar())
 
@@ -2635,9 +2854,14 @@ class BotCryptoUI:
             bot.state["tp1_done"] = False
             bot.state["tp2_done"] = False
 
+            # Reservar capital de la posición existente
+            notional = balance * entry_price
+            if self.capital_manager:
+                self.capital_manager.reserve(notional)
+
             self.logger.warning(
                 f"📥 {symbol}: POSICIÓN CARGADA | qty={balance:.4f} | entry={entry_price:.6f} | "
-                f"SL={bot.state['stop_loss']:.6f}"
+                f"SL={bot.state['stop_loss']:.6f} | reservado=${notional:.2f}"
             )
 
             # Incrementar contador de trades activos

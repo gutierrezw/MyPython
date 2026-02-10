@@ -310,12 +310,12 @@ class ArsFondosInversion(tk.Frame):
             print("load_diaria_CNV(): {}".format(e))
 
     # define position en moneda base USD
-    def struct_positions_fci(self, ticket, positions, last):
+    def struct_positions_fci(self, account=None, ticket=None, positions=None, last=None):
         try:
             p = {}
 
             # obtiene costo promedio
-            activo, found = self.RepositorioOportunidades.select_otros_activos(symbol=ticket)
+            activo, found = self.RepositorioOportunidades.select_otros_activos(account=account, symbol=ticket)
 
             # obtiene precio de mercado
             conid = activo[0]["idcrypto"]
@@ -374,7 +374,7 @@ class ArsFondosInversion(tk.Frame):
 
             for account in self.account_fci:
                 positions = []
-                activo, found = self.RepositorioOportunidades.select_otros_activos(symbol="all", account=account)
+                activo, found = self.RepositorioOportunidades.select_otros_activos(account=account, symbol="all")
 
                 for keys in activo:
                     symbol = keys["symbol"]
@@ -387,7 +387,9 @@ class ArsFondosInversion(tk.Frame):
 
                     # valida que position sea mayor que el umbral
                     if abs(last_trader[0]["stock"]) > 0.01:
-                        datos = self.struct_positions_fci(symbol, in_positions, last_trader)
+                        datos = self.struct_positions_fci(
+                            account=last_trader[0]["cuenta"], ticket=symbol, positions=in_positions, last=last_trader
+                        )
                         positions.append(datos)
 
                 # actualiza tabla de inversiones con última información de la API
@@ -473,7 +475,7 @@ class ArsFondosInversion(tk.Frame):
                         values = {}
                         codigo = "O" if rows["Tipo"] == "Suscripción" else "C"
                         activo, found = self.RepositorioOportunidades.select_otros_activos(
-                            symbol=rows["Descripción de Especie"]
+                            account=self.account_bbva, symbol=rows["Descripción de Especie"]
                         )
                         if found:
                             cantidad = self.string_float(s=rows["Cantidad (VN)"]) * (1 if codigo == "O" else -1)
@@ -550,7 +552,9 @@ class ArsFondosInversion(tk.Frame):
                         else:
                             continue
 
-                        activo, found = self.RepositorioOportunidades.select_otros_activos(symbol=rows["Fondo"])
+                        activo, found = self.RepositorioOportunidades.select_otros_activos(
+                            account=self.account_sant, symbol=rows["Fondo"]
+                        )
 
                         if not found:
                             activo, found = self.RepositorioOportunidades.insert_otros_activos(symbol=rows["Fondo"])

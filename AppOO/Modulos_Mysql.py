@@ -193,6 +193,7 @@ class BDsystem:  # -------------------------------------------------------------
             bool: True si actualización exitosa, False en caso contrario
         """
         import json
+
         sql = "UPDATE sesion SET private_key=%s WHERE vehiculo=%s"
         conn = BDsystem.connect_dbase("Config.Update", False)
 
@@ -1917,7 +1918,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             cursor.close()
             conn.close()
 
-    def update_otros_activos(self, values=None, symbol=None):
+    def update_otros_activos(self, account=None, values=None, symbol=None):
         """
         @param values:
         @param symbol:
@@ -1928,7 +1929,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             valuesins = []
             qry = "UPDATE otros_activos SET "
 
-            found = self.select_otros_activos(symbol=symbol)
+            found = self.select_otros_activos(account=account, symbol=symbol)
             if found:
 
                 for keys, vals in values.items():
@@ -1936,8 +1937,9 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                     qry = qry + keys + "='%s', "
                     valuesins.append(vals)
 
+                valuesins.append(account)
                 valuesins.append(symbol)
-                qry += "WHERE symbol='%s';"
+                qry += "WHERE cuenta='%s' AND symbol='%s';"
                 qry = qry.replace(", WHERE", " WHERE")
 
                 valuesupd = tuple(valuesins)
@@ -2063,7 +2065,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 "objetivo",
                 "fecupdate",
             )
-            row, found = self.select_otros_activos(symbol=symbol)
+            row, found = self.select_otros_activos(account=cuenta, symbol=symbol)
 
             # Si existe pero en otra cuenta, permitir insertar para esta cuenta
             if found and row and row[0].get("cuenta") != cuenta:
@@ -2756,6 +2758,16 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.execute(qry % (account, idivisa, symbol))
                 sql = cursor.fetchall()
 
+            # opción para obtener ganancia en BOTTrade de venta
+            elif accion == "bottrader":
+                qry = """SELECT a.* FROM (SELECT * FROM booktrading  
+                                        WHERE cuenta = '%s' AND divisa = '%s' AND activa = 'Y'
+                                            AND codigo = 'O'  AND simbolo = '%s') AS a 
+                        ORDER BY fechahora ASC, sec ASC;"""
+
+                cursor.execute(qry % (account, idivisa, symbol))
+                sql = cursor.fetchall()
+
             # opción para obtener última fecha de operaciones para el cálculo de la diaria
             elif accion == "diaria":
                 qrq = """SELECT cuenta, simbolo,  max(fechahora) fechahora FROM bdinv.booktrading 
@@ -2875,6 +2887,192 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         # valida hashId en booktrading
         last, ix = self.select_booktrading(accion="hash", hash_id=hashId)
         return False if len(last) == 0 else True
+
+    def insert_bottraderBook(self, values=None, symbol="SPX", object="bottrader"):
+        """
+        Inserta operación BotTrader en booktrading.
+        Calcula basico (precio promedio), ganancias realizadas y stock acumulado.
+        @param values: dict con datos de la operación (cuenta, divisa, cantidad, preciotrans, etc.)
+        @param symbol: símbolo del activo
+        @param object: tipo de consulta para select_booktrading ('bottrader')
+        """
+
+        def _last_secbottrader():
+            """Obtiene cantidad registros para el vehiculo"""
+            qry = """SELECT count(*) as sec FROM booktrading
+                        WHERE cuenta = %s AND divisa = %s AND simbolo = %s;"""
+            cursor.execute(qry, (account, idivisa, symbol))
+            sql = cursor.fetchone()
+            return sql[0]
+
+        def _last_bottrader():
+            """Obtiene último registro activo de compra para calcular basico"""
+            qry = """SELECT a.* FROM (
+                        SELECT sec, fechahora, stock, basico, gprealizadas, cantidad,
+                               tarifacomision, idtrans, position_inversion, factor_cambio
+                        FROM booktrading
+                        WHERE cuenta = %s AND divisa = %s AND simbolo = %s
+                              AND activa = 'Y' AND codigo = 'O'
+                     ) AS a ORDER BY fechahora ASC, sec ASC;"""
+            cursor.execute(qry, (account, idivisa, symbol))
+            sql = cursor.fetchone()
+            columnas = [col[0] for col in cursor.description]
+            return [dict(zip(columnas, sql))] if sql else [], columnas
+
+        def _update_indicador_activa(idcuenta, divisa, ticket, id_trans, activa, sell, update):
+            """Actualiza indicador activa y sell en booktrading"""
+            try:
+                u_conn = self._conectar(tabla="update.booktrading")
+                u_cursor = u_conn.cursor()
+                upd = """UPDATE booktrading SET activa = %s, sell = %s, updateStamp = %s
+                         WHERE cuenta = %s AND divisa = %s AND simbolo = %s AND idtrans = %s;"""
+                u_cursor.execute(upd, (activa, sell, update, idcuenta, divisa, ticket, id_trans))
+                u_conn.commit()
+            except (Exception, connect.Error) as e:
+                self.logger.error(f"_update_indicador_activa(): {e}")
+
+        def _get_importe_sell(c_sell, update):
+            """Calcula importe de lotes vendidos y marca como inactivos"""
+            try:
+                book, iy = self.select_booktrading(accion=object, account=account, idivisa=idivisa, symbol=symbol)
+                ebook = enumerate(book)
+                eof_book, read = next(ebook, (None, None))
+
+                value, x_stock, ya_sell = 0.0, 0.0, 0.0
+                while (eof_book is not None) and (x_stock + c_sell < 0):
+                    a_sell = read[iy.index("sell")]
+                    cant = read[iy.index("cantidad")] - a_sell
+                    prec = read[iy.index("preciotrans")]
+
+                    if (cant + ya_sell + c_sell) <= 0:
+                        ya_sell += cant
+                        activa = "N"
+                        value += cant * prec
+                    elif (cant + ya_sell + c_sell) > 0:
+                        cant = abs(ya_sell + c_sell)
+                        a_sell += cant
+                        activa = "Y"
+                        value += cant * prec
+
+                    x_stock += cant
+                    _update_indicador_activa(
+                        read[iy.index("cuenta")],
+                        read[iy.index("divisa")],
+                        symbol,
+                        read[iy.index("idtrans")],
+                        activa,
+                        a_sell,
+                        update,
+                    )
+
+                    if x_stock + c_sell >= 0.0:
+                        break
+                    eof_book, read = next(ebook, (None, None))
+                return value
+            except (Exception, connect.Error) as e:
+                self.logger.error(f"_get_importe_sell(): {e}")
+                return 0.0
+
+        def _update_codigo_sell(id_trader, update):
+            """Marca como inactivas las ventas anteriores"""
+            try:
+                book, iy = self.select_booktrading(accion="select*", account=account, idivisa=idivisa, symbol=symbol)
+                for _, read in enumerate(book):
+                    if read[iy.index("codigo")] == "C" and read[iy.index("idtrans")] != id_trader:
+                        _update_indicador_activa(
+                            read[iy.index("cuenta")],
+                            read[iy.index("divisa")],
+                            symbol,
+                            read[iy.index("idtrans")],
+                            "N",
+                            read[iy.index("cantidad")],
+                            update,
+                        )
+            except (Exception, connect.Error) as e:
+                self.logger.error(f"_update_codigo_sell(): {e}")
+
+        try:
+            conn = self._conectar(tabla="insert.booktrading")
+            cursor = conn.cursor()
+
+            account = values["cuenta"]
+            idivisa = values["divisa"]
+            idtrans = values["idtrans"]
+
+            # Validar duplicado
+            if self.get_hash_booktrading(accion="valida", values=values, symbol=symbol):
+                return
+
+            hashId = self.get_hash_booktrading(values=values, symbol=symbol)
+
+            # Último registro para calcular basico y stock acumulado
+            nw_producto, ustock, usec, costo_avg = 0.0, 0.0, 0.0, 0.0
+            utrading, _ = _last_bottrader()
+            if utrading:
+                last = utrading[0]
+                nw_producto = last["basico"] * last["stock"]
+                costo_avg = last["basico"]
+                ustock = last["stock"]
+                usec = _last_secbottrader()
+
+            stock = ustock + values["cantidad"]
+            position = 0.0
+
+            # Compra (cantidad > 0)
+            if values["cantidad"] > 0:
+                basico = (values["preciotrans"] * values["cantidad"] + values["tarifacomision"] + nw_producto) / stock
+                gpreal = 0.0
+                codigo = "O"
+                activa = "Y"
+                mtmgp = 0.0
+
+            # Venta (cantidad < 0)
+            elif values["cantidad"] < 0:
+                basico = costo_avg
+                codigo = "C"
+                activa = "Y"
+                importe = _get_importe_sell(values["cantidad"], values["fechahora"])
+                gpreal = values["producto"] - (importe + values["tarifacomision"])
+                mtmgp = gpreal / abs(values["cantidad"])
+                _update_codigo_sell(idtrans, values["fechahora"])
+            else:
+                return
+
+            # Completar registro
+            values.update(
+                {
+                    "split": 1,
+                    "activa": activa,
+                    "stock": stock,
+                    "mtmgp": mtmgp,
+                    "basico": basico,
+                    "codigo": codigo,
+                    "gprealizadas": gpreal,
+                    "position_inversion": position,
+                    "updateStamp": datetime.now(),
+                    "hash_id": hashId,
+                    "sec": int(usec) + 1,
+                }
+            )
+
+            # Insert
+            columns = list(values.keys()) + ["simbolo"]
+            placeholders = ",".join(["%s"] * len(columns))
+            qry = f"INSERT INTO booktrading ({','.join(columns)}) VALUES ({placeholders});"
+            cursor.execute(qry, tuple(list(values.values()) + [symbol]))
+            conn.commit()
+            cursor.close()
+
+            # Actualizar costo promedio en otros_activos
+            time.sleep(0.4)
+            self.update_otros_activos(
+                account=account,
+                values={"avgcost": basico, "fecupdate": values["fechahora"]},
+                symbol=symbol,
+            )
+        except (Exception, connect.Error) as error:
+            self.logger.error(f"insert_bottraderBook({symbol}): {error}")
+            traceback.print_exc()
 
     # inserta operaciones buy-sell en booktrading
     def insert_booktrading(self, values=None, symbol="SPX"):
@@ -3078,7 +3276,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             cvalues = {}
             cvalues.update({"avgcost": basico})
             cvalues.update({"fecupdate": values["fechahora"]})
-            self.update_otros_activos(values=cvalues, symbol=symbol)
+            self.update_otros_activos(account=account, values=cvalues, symbol=symbol)
         except (Exception, EncodingWarning, connect.Error) as error:
             print(f"[Mysql:: insert_booktrading()]: {error}")
 
