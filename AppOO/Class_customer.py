@@ -5228,7 +5228,9 @@ class WidgetVehiculo(TickerInfo):
                 response = self.BClient.ticker_price(symbol=symbol)
                 if response and "price" in response:
                     precio = float(response["price"])
-                    crypto, found = self.RepositorioOportunidades.select_otros_activos(symbol=symbol)
+                    crypto, found = self.RepositorioOportunidades.select_otros_activos(
+                        accout=self.account, symbol=symbol
+                    )
                     conid = crypto[0]["idcrypto"] if found else None
 
                 else:
