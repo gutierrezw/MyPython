@@ -230,52 +230,50 @@ class AnalisisBase:
         valores = top5[columna_valor].values
 
         # Crear figura
-        fg = Figure(figsize=(5.2, 2.0), dpi=100)
+        fg = Figure(figsize=(5.4, 2.0), dpi=100)
         fg.patch.set_facecolor(self.CG_COLOR)
         fg.suptitle(titulo, fontsize=10, color="white")
-        fg.subplots_adjust(left=0.35)
+        fg.subplots_adjust(left=0.35, right=0.95, top=0.85, bottom=0.10)
 
         ax = fg.add_subplot(111)
         ax.set_facecolor(self.CG_COLOR)
 
-        # Colores de barras según valor
         colores = ["#024E02" if v > 0 else "#FF4444" for v in valores]
-
-        # Barras horizontales
         bars = ax.barh(nombres[::-1], valores[::-1], color=colores[::-1], height=0.6)
 
-        # Agregar valores en las barras
+        # Texto dentro de las barras
         for bar, val in zip(bars, valores[::-1]):
             x_pos = bar.get_width()
+            ha = "right" if x_pos >= 0 else "left"
+            offset = -0.02 if x_pos >= 0 else 0.02
             ax.text(
-                x_pos + (0.05 if x_pos >= 0 else -0.05),
+                x_pos + offset,
                 bar.get_y() + bar.get_height() / 2,
                 f"{val:+.1f}%",
                 va="center",
-                ha="right",
-                fontsize=6,
+                ha=ha,
+                fontsize=7,
                 color="white",
+                fontweight="bold",
             )
 
-        # Estilo
-        ax.tick_params(colors="white", labelsize=6)
+        ax.tick_params(colors="white", labelsize=7)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.spines["bottom"].set_color("gray")
         ax.spines["left"].set_color("gray")
         ax.axvline(x=0, color="gray", linewidth=0.5)
 
-        # Insertar en Tkinter
         frame_grafico = tk.Frame(parent, bg=self.CG_COLOR)
-        frame_grafico.grid(row=row, column=0, columnspan=2, padx=10, pady=5, sticky="w")
+        frame_grafico.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
 
         canvas = FigureCanvasTkAgg(fg, master=frame_grafico)
         canvas.draw()
-        canvas.get_tk_widget().pack()
+        canvas.get_tk_widget().pack(fill="x", expand=True)
 
         return row + 1
 
-    def crear_grafico_evolucion_top5(self, parent, df_historico, fondos_list, titulo, row, color_titulo="#27ae60"):
+    def crear_grafico_evolucion_top(self, parent, df_historico, fondos_list, titulo, row, color_titulo="#27ae60"):
         """
         Crea gráfico de líneas con evolución histórica del rendimiento acumulado.
 
@@ -308,7 +306,7 @@ class AnalisisBase:
             )
 
             # Crear figura
-            fg = Figure(figsize=(5.2, 3.0), dpi=100)
+            fg = Figure(figsize=(5.4, 3.0), dpi=100)
             fg.patch.set_facecolor(self.CG_COLOR)
 
             ax = fg.add_subplot(111)
@@ -349,23 +347,24 @@ class AnalisisBase:
 
             fg.legend(loc="outside upper left", handles=p_legend, fontsize=5)
             fg.suptitle(titulo, fontsize=10, color=color_titulo)
+            fg.subplots_adjust(left=0.05, right=0.90, top=0.85, bottom=0.20)
 
             # Insertar en Tkinter
             frame_grafico = tk.Frame(parent, bg=self.CG_COLOR)
-            frame_grafico.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="w")
+            frame_grafico.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
 
             canvas = FigureCanvasTkAgg(fg, master=frame_grafico)
             canvas.draw()
-            canvas.get_tk_widget().pack(padx=15)
+            canvas.get_tk_widget().pack(fill="x", expand=True)
 
             return row + 1
         except Exception as e:
-            print(f"[crear_grafico_evolucion_top5]: {e}")
+            print(f"[crear_grafico_evolucion_top]: {e}")
             return row
 
     def crear_treeview_ranking(self, parent, df, columnas, titulo, row, height=8):
         """
-        Crea TreeView para mostrar ranking de datos.
+        Crea TreeView con fondo negro para mostrar ranking de datos.
 
         Args:
             parent: Frame padre
@@ -378,48 +377,54 @@ class AnalisisBase:
         Returns:
             int: Siguiente fila disponible
         """
-        # Título de sección
         row = self.crear_seccion(parent, titulo, row)
 
         if df.empty:
             row = self.crear_campo(parent, "Estado:", "Sin datos disponibles", row, fg_valor="gray")
             return row
 
-        # Frame para TreeView
-        frame_tree = tk.Frame(parent, bg=self.CG_COLOR)
-        frame_tree.grid(row=row, column=0, columnspan=2, padx=10, pady=5, sticky="w")
+        frame_tree = tk.Frame(parent, bg="black")
+        frame_tree.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
 
-        # Configurar columnas
         col_ids = [c[0] for c in columnas]
+
+        # Hereda estilo base "Treeview" de style_app() (negro, blanco, Courier 8)
         tree = ttk.Treeview(frame_tree, columns=col_ids, show="headings", height=height)
 
-        # Estilo
-        style = ttk.Style()
-        style.configure(
-            "Treeview", background=self.CG_COLOR, foreground="white", fieldbackground="#1a4a4a", rowheight=22
-        )
-        style.configure("Treeview.Heading", background="DarkCyan", foreground="yellow", font=("Segoe UI", 9, "bold"))
-        style.map("Treeview", background=[("selected", "#2d6b6b")])
+        # Tags para colorear filas por señal
+        tree.tag_configure("compra", foreground="lime")
+        tree.tag_configure("venta", foreground="red")
+        tree.tag_configure("neutral", foreground="white")
 
         for col_id, col_titulo, col_ancho in columnas:
+            anchor = "w" if col_id == "fondo" else "center"
             tree.heading(col_id, text=col_titulo)
-            tree.column(col_id, width=col_ancho, anchor="center")
+            tree.column(col_id, width=col_ancho, anchor=anchor)
 
-        # Insertar datos
+        cols_importe = {"valor_actual", "costo_base", "ganancia_abs"}
         for _, fila in df.iterrows():
+            factor = float(fila.get("factor_cambio", 1)) if "factor_cambio" in fila.index else 1
             valores = []
             for col_id, _, _ in columnas:
                 val = fila.get(col_id, "")
                 if isinstance(val, float):
-                    val = f"{val:+.1f}" if "score" in col_id.lower() or "pct" in col_id.lower() else f"{val:.2f}"
+                    if col_id in cols_importe:
+                        val = f"${val * factor:,.0f}"
+                    elif "score" in col_id.lower():
+                        val = f"{val:+.1f}"
+                    elif "pct" in col_id.lower() or "ganancia" in col_id.lower():
+                        val = f"{val:+.1f}%"
+                    else:
+                        val = f"{val:.2f}"
                 valores.append(val)
-            tree.insert("", "end", values=valores)
 
-        # Scrollbar
+            senal = str(fila.get("senal", fila.get("decision", ""))).upper()
+            tag = "compra" if "COMPRA" in senal else ("venta" if "VENT" in senal else "neutral")
+            tree.insert("", "end", values=valores, tags=(tag,))
+
         scrollbar = ttk.Scrollbar(frame_tree, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=scrollbar.set)
-
-        tree.pack(side=tk.LEFT, fill="both")
+        tree.pack(side=tk.LEFT, fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
         return row + 1
@@ -436,6 +441,7 @@ class AnalisisFCI(AnalisisBase):
     def __init__(self, master, info, repositorio, colors, vehiculo="BBVA.ARS"):
         super().__init__(master, info, repositorio, colors, vehiculo)
         self.vehiculo = vehiculo
+        self.top = 3
         self.df_historico = pd.DataFrame()
         self.df_ultimo = pd.DataFrame()
         self.metricas = pd.DataFrame()
@@ -475,6 +481,31 @@ class AnalisisFCI(AnalisisBase):
             fg_valor=color_gan,
         )
 
+        # ========== GRÁFICOS EVOLUCIÓN HISTÓRICA (Rendimiento 90d) ==========
+        row = self.crear_seccion(frame, f"Rendimiento Posiciones:", row)
+        if not self.df_historico.empty and not self.df_ultimo.empty:
+            # self.Top mejores por variación 90 días
+            top_mejores = self.df_ultimo.nlargest(self.top, "variacion90dias")["fondo"].tolist()
+            row = self.crear_grafico_evolucion_top(
+                parent=frame,
+                df_historico=self.df_historico,
+                fondos_list=top_mejores,
+                titulo=f"TOP {self.top:.0f} MEJORES FCIs",
+                row=row,
+                color_titulo="#f7f7f7ff",
+            )
+
+            # self.Top peores por variación 90 días
+            top_peores = self.df_ultimo.nsmallest(self.top, "variacion90dias")["fondo"].tolist()
+            row = self.crear_grafico_evolucion_top(
+                parent=frame,
+                df_historico=self.df_historico,
+                fondos_list=top_peores,
+                titulo=f"TOP {self.top:.0f} PEORES FCIs",
+                row=row,
+                color_titulo="#f7f7f7ff",
+            )
+
         # ========== GRÁFICOS TOP 5 (Ganadores y Perdedores - todos los FCIs) ==========
         row = self.crear_seccion(frame, "Gráficos Top 5:", row)
         if not self.df_ultimo.empty and "variacion" in self.df_ultimo.columns:
@@ -498,74 +529,46 @@ class AnalisisFCI(AnalisisBase):
                 es_ganadores=False,
             )
 
-        # ========== GRÁFICOS EVOLUCIÓN HISTÓRICA (Rendimiento 90d) ==========
-        row = self.crear_seccion(frame, f"Rendimiento 90d:", row)
-        if not self.df_historico.empty and not self.df_ultimo.empty:
-            # Top 5 mejores por variación 90 días
-            top5_mejores = self.df_ultimo.nlargest(5, "variacion90dias")["fondo"].tolist()
-            row = self.crear_grafico_evolucion_top5(
-                parent=frame,
-                df_historico=self.df_historico,
-                fondos_list=top5_mejores,
-                titulo="TOP 5 MEJORES FCIs",
-                row=row,
-                color_titulo="#f7f7f7ff",
-            )
-
-            # Top 5 peores por variación 90 días
-            top5_peores = self.df_ultimo.nsmallest(5, "variacion90dias")["fondo"].tolist()
-            row = self.crear_grafico_evolucion_top5(
-                parent=frame,
-                df_historico=self.df_historico,
-                fondos_list=top5_peores,
-                titulo="TOP 5 PEORES FCIs",
-                row=row,
-                color_titulo="#f7f7f7ff",
-            )
-
-        # ========== SEÑALES DE VENTA ==========
-        row = self.crear_seccion(frame, "Senales de Venta", row)
-        if not self.df_lotes.empty:
-            senales = self.df_lotes[self.df_lotes["decision"] == "VENDER"]
-            if len(senales) > 0:
-                for _, lote in senales.iterrows():
-                    row = self.crear_campo(
-                        frame,
-                        f"[VENDER] {lote['fondo'][:15]}:",
-                        f"${lote['valor_actual']:,.2f}  |  {lote['ganancia_pct']:+.2f}%",
-                        row,
-                        fg_valor="orange",
-                    )
-            else:
-                row = self.crear_campo(frame, "Estado:", "No hay senales de venta", row, fg_valor="gray")
-
         # ========== RANKING DE FONDOS ==========
-        row = self.crear_seccion(frame, "Ranking Fondos (Score)", row)
         if not self.metricas.empty:
             ranking = self.metricas.nlargest(10, "score_decision")
-            for _, fondo in ranking.iterrows():
-                senal = fondo.get("senal", "N/A")
-                color = "lime" if "COMPRA" in senal else ("red" if "VENTA" in senal else self.VALUE_FG)
-                row = self.crear_campo(
-                    frame,
-                    f"{fondo['fondo'][:20]}:",
-                    f"Score: {fondo['score_decision']:+.1f}  |  {senal}",
-                    row,
-                    fg_valor=color,
-                )
+            columnas = [
+                ("fondo", "Fondo", 145),
+                ("score_decision", "Score", 50),
+                ("senal", "Señal", 75),
+                ("rendimiento_total", "Rend%", 50),
+                ("volatilidad", "Volat.", 45),
+                ("sharpe_ratio", "Sharpe", 50),
+                ("drawdown_max", "MaxDD%", 55),
+                ("posicion_relativa", "PosRel%", 55),
+            ]
+            row = self.crear_treeview_ranking(
+                parent=frame,
+                df=ranking,
+                columnas=columnas,
+                titulo="Ranking Fondos (Score)",
+                row=row,
+                height=min(10, len(ranking)),
+            )
 
-        # ========== DETALLE DE POSICIONES ==========
-        row = self.crear_seccion(frame, "Detalle de Posiciones", row)
-        if not self.df_lotes.empty:
-            for _, lote in self.df_lotes.sort_values("valor_actual", ascending=False).iterrows():
-                color = self.obtener_color_ganancia(lote["ganancia_pct"])
-                row = self.crear_campo(
-                    frame,
-                    f"{lote['fondo'][:18]}:",
-                    f"${lote['costo_base']:,.0f} -> ${lote['valor_actual']:,.0f} | {lote['ganancia_pct']:+.1f}%",
-                    row,
-                    width=50,
-                    fg_valor=color,
+        # ========== SEÑALES ==========
+        if not self.df_lotes.empty and "decision" in self.df_lotes.columns:
+            senales_df = self.df_lotes[self.df_lotes["decision"].isin(["VENDER", "COMPRAR"])].copy()
+            if not senales_df.empty:
+                col_senales = [
+                    ("fondo", "Fondo", 155),
+                    ("decision", "Señal", 75),
+                    ("valor_actual", "Valor", 75),
+                    ("ganancia_pct", "Gan%", 60),
+                    ("costo_base", "Costo", 75),
+                ]
+                row = self.crear_treeview_ranking(
+                    parent=frame,
+                    df=senales_df,
+                    columnas=col_senales,
+                    titulo="Señales de Compra / Venta",
+                    row=row,
+                    height=min(8, len(senales_df)),
                 )
 
     def cargar_datos_historicos(self):
@@ -636,7 +639,7 @@ class AnalisisFCI(AnalisisBase):
         grupo = grupo.sort_values("fecha")
         valores = grupo["valorActual"].values
 
-        if len(valores) < 5:
+        if len(valores) < self.top:
             return pd.Series(
                 {
                     "volatilidad": np.nan,
@@ -705,7 +708,6 @@ class AnalisisFCI(AnalisisBase):
             self.metricas["senal"] = self.metricas["score_decision"].apply(self.clasificar_senal)
 
             return self.metricas
-
         except Exception as e:
             print(f"[calcular_metricas_todos]: {e}")
             return pd.DataFrame()

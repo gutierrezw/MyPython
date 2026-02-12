@@ -309,7 +309,7 @@ class Debugging:
         self.logger.update(
             {"binance.websocket.websocket_client": logging.getLogger("binance.websocket.websocket_client")}
         )
-        self.logger["binance.websocket.websocket_client"].setLevel(logging.WARNING)
+        self.logger["binance.websocket.websocket_client"].setLevel(logging.ERROR)
 
         # manager logging
         self.logger.update({"binance.api": logging.getLogger("binance.api")})

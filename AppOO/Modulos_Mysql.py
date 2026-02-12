@@ -2911,9 +2911,8 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                         SELECT sec, fechahora, stock, basico, gprealizadas, cantidad,
                                tarifacomision, idtrans, position_inversion, factor_cambio
                         FROM booktrading
-                        WHERE cuenta = %s AND divisa = %s AND simbolo = %s
-                              AND activa = 'Y' AND codigo = 'O'
-                     ) AS a ORDER BY fechahora ASC, sec ASC;"""
+                        WHERE cuenta = %s AND divisa = %s AND simbolo = %s AND activa = 'Y' 
+                     ) AS a ORDER BY fechahora DESC, sec DESC;"""
             cursor.execute(qry, (account, idivisa, symbol))
             sql = cursor.fetchone()
             columnas = [col[0] for col in cursor.description]
@@ -3010,7 +3009,6 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             utrading, _ = _last_bottrader()
             if utrading:
                 last = utrading[0]
-                nw_producto = last["basico"] * last["stock"]
                 costo_avg = last["basico"]
                 ustock = last["stock"]
                 usec = _last_secbottrader()
@@ -3020,7 +3018,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
             # Compra (cantidad > 0)
             if values["cantidad"] > 0:
-                basico = (values["preciotrans"] * values["cantidad"] + values["tarifacomision"] + nw_producto) / stock
+                basico = (values["producto"] + values["tarifacomision"]) / values["cantidad"]
                 gpreal = 0.0
                 codigo = "O"
                 activa = "Y"

@@ -137,38 +137,75 @@ class IB(IBClient):
     # ===========================================================
     # Keep-alive (background)
     # ===========================================================
-    def _tickle_loop(self, interval: int, datahub={}) -> None:
+    def _tickle_loop(self, interval: int, datahub=None) -> None:
         """
         Loop interno para mantener viva la sesión IBKR.
-        Corre en thread daemon.
+        Detecta desconexión y reconecta automáticamente cuando el usuario
+        vuelve a autenticarse en el Gateway (sin reiniciar la app).
         """
         counter = 1
+        was_disconnected = False
+        reconnect_interval = 30
+
         while True:
             try:
                 resp = self.tickle()
                 auth = resp.get("iserver", {}).get("authStatus", {}).get("authenticated", False)
-                datahub.update_self_procesos(proces="thread", tarea=self.task, itera=counter)
+
+                if datahub:
+                    datahub.update_self_procesos(proces="thread", tarea=self.task, itera=counter)
                 counter += 1
 
-                if not auth:
-                    logging.warning(f"Tickle OK pero sesión no autenticada {datetime.now()}")
-                    time.sleep(900)
+                if auth:
+                    if was_disconnected:
+                        logging.warning("🔄 IB reconectando... recreando sesión")
+                        success = self.create_session()
+                        if success:
+                            logging.warning("✅ IB reconexión exitosa — sesión restaurada")
+                            was_disconnected = False
+                            if self._on_reconnect:
+                                try:
+                                    self._on_reconnect()
+                                except Exception as e:
+                                    logging.error(f"on_reconnect callback error: {e}")
+                        else:
+                            logging.warning("⚠️ IB auth OK pero create_session falló, reintentando...")
+                    self.authenticated = True
+                else:
+                    if not was_disconnected:
+                        logging.warning(f"⚠️ IB sesión perdida — esperando re-autenticación del Gateway")
+                    was_disconnected = True
+                    self.authenticated = False
+                    time.sleep(reconnect_interval)
+                    continue
 
             except Exception as e:
-                logging.error(f"Tickle falló: {e}")
+                if not was_disconnected:
+                    logging.error(f"Tickle falló: {e} — Gateway posiblemente caído")
+                was_disconnected = True
+                self.authenticated = False
+                time.sleep(reconnect_interval)
+                continue
+
             time.sleep(interval)
 
-    def start_tickle(self, interval: int = 30, datahub: dict = {}) -> None:
+    def start_tickle(self, interval: int = 30, datahub=None, on_reconnect=None) -> None:
         """
         Inicia el loop de tickle en background.
+
+        Args:
+            interval: Segundos entre cada tickle (default: 30)
+            datahub: DataHub para registrar proceso
+            on_reconnect: Callback ejecutado al reconectar tras pérdida de sesión
         """
+        self._on_reconnect = on_reconnect
         try:
-            logging.warning("✅ Tickle inicializado correctamente")
-
             if hasattr(self, "_tickle_thread"):
-                return  # ya iniciado
+                return
 
-            datahub.procesos.append({"thread": {self.task: 0}})
+            if datahub:
+                datahub.procesos.append({"thread": {self.task: 0}})
+
             self._tickle_thread = threading.Thread(
                 target=self._tickle_loop,
                 args=(interval, datahub),
@@ -176,9 +213,9 @@ class IB(IBClient):
                 name=self.task,
             )
             self._tickle_thread.start()
+            logging.warning("✅ Tickle inicializado correctamente")
         except Exception as e:
-            print(f"[start_tickle()]: {e}")
-            traceback.print_exc()
+            logging.error(f"start_tickle(): {e}")
 
     def stop_tickle(self):
         self._tickle_stop.set()

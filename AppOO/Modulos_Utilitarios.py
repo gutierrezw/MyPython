@@ -526,6 +526,24 @@ def limpiar_nan(obj):
         return obj
 
 
+def calcular_indicadores_df(df, rsi_window=14, ema_fast=9, ema_slow=21,
+                            macd_fast=12, macd_slow=26, macd_signal=9):
+    """
+    Calcula indicadores técnicos base sobre un DataFrame con columna 'Close'.
+    Agrega columnas: rsi, macd, macd_signal, macd_hist, ema_fast, ema_slow.
+    Modifica el DataFrame in-place y lo retorna.
+    """
+    close = df["Close"]
+    df["rsi"] = RSIIndicator(close=close, window=rsi_window).rsi()
+    macd_obj = MACD(close=close, window_slow=macd_slow, window_fast=macd_fast, window_sign=macd_signal)
+    df["macd"] = macd_obj.macd()
+    df["macd_signal"] = macd_obj.macd_signal()
+    df["macd_hist"] = macd_obj.macd_diff()
+    df["ema_fast"] = EMAIndicator(close=close, window=ema_fast).ema_indicator()
+    df["ema_slow"] = EMAIndicator(close=close, window=ema_slow).ema_indicator()
+    return df
+
+
 # Función para calcular indicadores técnicos
 def get_indicadores(symbol=None, datos=None):
     """
@@ -566,13 +584,13 @@ def get_indicadores(symbol=None, datos=None):
                 if df_resampled.empty:
                     continue
 
-                df_resampled["rsi"] = RSIIndicator(close=df_resampled["Close"]).rsi()
+                calcular_indicadores_df(df_resampled)
+                df_resampled["EMA009"] = df_resampled["ema_fast"]
+                df_resampled["EMA021"] = df_resampled["ema_slow"]
                 df_resampled["EMA020"] = EMAIndicator(close=df_resampled["Close"], window=20).ema_indicator()
                 df_resampled["EMA050"] = EMAIndicator(close=df_resampled["Close"], window=50).ema_indicator()
                 df_resampled["EMA100"] = EMAIndicator(close=df_resampled["Close"], window=100).ema_indicator()
                 df_resampled["EMA200"] = EMAIndicator(close=df_resampled["Close"], window=200).ema_indicator()
-                df_resampled["EMA009"] = EMAIndicator(close=df_resampled["Close"], window=9).ema_indicator()
-                df_resampled["EMA021"] = EMAIndicator(close=df_resampled["Close"], window=21).ema_indicator()
                 df_resampled["EMA055"] = EMAIndicator(close=df_resampled["Close"], window=55).ema_indicator()
                 df_resampled["EMA144"] = EMAIndicator(close=df_resampled["Close"], window=144).ema_indicator()
                 df_resampled["macd"] = MACD(close=df_resampled["Close"]).macd()
