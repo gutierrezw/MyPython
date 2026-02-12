@@ -181,7 +181,7 @@ class ArsFondosInversion(tk.Frame):
         return archivo_reciente
 
     # carga desde Excel rendimiento CNV
-    def load_diaria_CNV(self):
+    def load_EXCEL_TBdiaria_CNV_(self):
         try:
             columns = {
                 "A": "fondo",
@@ -306,8 +306,8 @@ class ArsFondosInversion(tk.Frame):
                     # file_CNV = define_FileCache("CNV_FCI_missing_activos.json")
 
                 delete_file(ruta=diaria_CNV, display=False)
-        except (EncodingWarning, Exception) as e:
-            print("load_diaria_CNV(): {}".format(e))
+        except Exception as e:
+            print("load_EXCEL_TBdiaria_CNV_(): {}".format(e))
 
     # define position en moneda base USD
     def struct_positions_fci(self, account=None, ticket=None, positions=None, last=None):
@@ -363,7 +363,7 @@ class ArsFondosInversion(tk.Frame):
             p["dgyp"] = p["mrkprice"] - p["open"]
 
             return p
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print("struct_positions_fci(): {}".format(e))
 
     # update self.ars.positions
@@ -388,7 +388,7 @@ class ArsFondosInversion(tk.Frame):
                     # valida que position sea mayor que el umbral
                     if abs(last_trader[0]["stock"]) > 0.01:
                         datos = self.struct_positions_fci(
-                            account=last_trader[0]["cuenta"], ticket=symbol, positions=in_positions, last=last_trader
+                            account=account, ticket=symbol, positions=in_positions, last=last_trader
                         )
                         positions.append(datos)
 
@@ -402,8 +402,9 @@ class ArsFondosInversion(tk.Frame):
             # re-escribe self.position en moneda base para que se muestre en widget
             out_positions = self.RepositorioOportunidades.select_inversion(tipoin=self.vehiculo, ticket="all")
             self.ars.positions = copy.deepcopy(out_positions)
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print("update_FCI_en_positions(): {}".format(e))
+            traceback.print_exc()
 
     # carga en booktrading operaciones de FCI
     def load_positions_FCI(self):
@@ -599,7 +600,7 @@ class ArsFondosInversion(tk.Frame):
                 fci_santander()
                 self.update_FCI_en_positions()
                 return self.account_sant
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"load_positions_FCI(): {e}")
 
     # carga de booktrading los movimientos USDT
@@ -641,7 +642,7 @@ class ArsFondosInversion(tk.Frame):
                         anterior = values[ix.index("preciotrans")]
 
                 return tasa if tasa > 0 else anterior
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print("get_tasa_cambio_USDT(): {}".format(e))
 
     # valida si llego nueva interfaz para cargar
@@ -664,7 +665,7 @@ class ArsFondosInversion(tk.Frame):
         diaria = self.obtener_archivo_mas_reciente(p_path=self.path, sufijo=self.aliasExcel.get("CNV"))
         if diaria is not None:
             # laod diaria, actualiza panel y no forza actualzaición de peformance
-            self.load_diaria_CNV()
+            self.load_EXCEL_TBdiaria_CNV_()
 
             # load new price in poistions and update panel()
             self.update_FCI_en_positions()
@@ -694,7 +695,7 @@ class ArsFondosInversion(tk.Frame):
         #    DataHub.last_process[self.vehiculo]["diaria_book_performance"] = wait
         #    DataHub.last_process["graph_performace_portafolio"] = False
 
-    # descarga de
+    # descarga EXCEl de la WEB
     def downdload_CNV_diaria(self):
         try:
 
@@ -705,7 +706,7 @@ class ArsFondosInversion(tk.Frame):
             # descarga planilla diaria CNV
             if prox_process.date() < datetime.now().date():
                 descargar_cnv_hoy(fecha_str=prox_process.strftime("%Y-%m-%d"))
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"downdload_CNV_diaria(): {e}")
 
     # vericica cada 90 segundos si hay nueva interfaz para cargar
@@ -713,7 +714,7 @@ class ArsFondosInversion(tk.Frame):
         def run_schedule(task=None):
             while True:
 
-                # descarga planilla diaria CNV
+                # descarga de la web planilla diaria CNV
                 self.downdload_CNV_diaria()
 
                 # valida si hay nueva interfaz
@@ -721,8 +722,8 @@ class ArsFondosInversion(tk.Frame):
 
                     # actualiza panel
                     account = self.load_positions_FCI()
-                    self.update_panel_fci()
-                    self.ars.update_panelVehiculo(orden=self.ars.orden)
+                    # self.update_panel_fci()
+                    # self.ars.update_panelVehiculo(orden=self.ars.orden)
 
                     # actualiza diaria y performance
                     self.schedule_diaria_performace(account)
@@ -739,8 +740,9 @@ class ArsFondosInversion(tk.Frame):
                 target=run_schedule,
                 task=task_name,
             )
-        except (EncodingWarning, Exception) as e:
+        except Exception as e:
             print(f"run_loads(ARS): {e}")
+            traceback.print_exc()
 
 
 def app():

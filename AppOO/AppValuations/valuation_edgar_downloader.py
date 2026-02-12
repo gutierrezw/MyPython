@@ -7,16 +7,16 @@ Funciones principales:
 - download_filing_file(cik, accession, filename, save_dir): Descarga un archivo específico del filing.
 - is_foreign_filer(form_list): Detecta si una empresa presenta formularios extranjeros (20-F, 6-K).
 """
+import sys
 
+sys.path.insert(0, "..")
 from Modulos_python import os, time, json, requests, datetime, timezone
 
 # =====================================================
 # Configuración
 # =====================================================
 BASE_DIR = r"C:\Users\InversionesWildaga\Documents\MyPython\AppOO\EDGAR"
-HEADERS = {
-    "User-Agent": "InversionesWildaga Research Bot (gutierrez.madrid.wilmer@example.com)"
-}
+HEADERS = {"User-Agent": "InversionesWildaga Research Bot (gutierrez.madrid.wilmer@example.com)"}
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 
@@ -193,10 +193,7 @@ def download_filing(ticker=None, display=False):
 
     # Crear directorios
     ticker_dir = os.path.join(BASE_DIR, f"{ticker}_EDGAR_Files")
-    dirs = {
-        form: os.path.join(ticker_dir, f"{form.replace('-', '')}_Filings")
-        for form in target_forms
-    }
+    dirs = {form: os.path.join(ticker_dir, f"{form.replace('-', '')}_Filings") for form in target_forms}
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
 

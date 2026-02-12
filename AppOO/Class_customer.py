@@ -195,6 +195,7 @@ class DataHub:
     MinProfit = envs_config["MinProfit"] or 50
     Toleranciasell = envs_config["Toleranciasell"] or 0.10
     MaxRoi = envs_config["MaxRoi"] or 0.09
+
     # Buy
     MinGananciaPrecio = envs_config.get("MinGananciaPrecio") or 0.05  # 5% mínimo de ganancia precio
     MinScoreBuy = envs_config.get("MinScoreBuy") or 0.5  # Score mínimo para Buy
@@ -213,6 +214,7 @@ class DataHub:
     manager_events = {}
     manager_after = {}
     manager_buysell = {}
+    manager_GyP = {"Plan": 0, "Inversion": 0, "dGyP": 0, "tGyp": 0, "Debit": 0, "Margen": 0}
     rebalanceo = {}
     telegram_botcrypto = {}
     procesos = []
@@ -1026,61 +1028,80 @@ class MyOrders:
             try:
                 response, enviada, values = {}, {}, {}
 
-                # rectifica type de los parametros
+                # Rectifica types de los parametros
                 for keys in pedido["orders"]:
                     if "conid" in keys:
                         keys["conid"] = int(keys["conid"])
-
                     if "price" in keys:
                         keys["price"] = float(keys["price"])
-
                     if "quantity" in keys:
                         keys["quantity"] = float(keys["quantity"])
                 orden = {"orders": [keys]}
 
+                self.logger.warning(f"place_OrderStock: account={account} | symbol={symbol} | order={orden}")
+
                 response = self.IClient.place_order(account_id=account, order=orden)
-                if response:
-                    self.SwichSumitOrder = True
-                    orden, resp = pedido["orders"][0], response[0]
-                    status, enviada, ClientOrderid = "Inactive", {}, " "
-                    stampSubmit = None
 
-                    # confirma orden en IB cunado no es simulación
-                    if not self.simulation:
+                if not response:
+                    self.logger.error(
+                        f"place_OrderStock: IB Gateway sin respuesta | account={account} | symbol={symbol}"
+                    )
+                    return {}, {}, {}
 
-                        RespEnviada = self.IClient.orderconfirm(replyid=resp["id"])
-                        if RespEnviada:
-                            tempJson = json.loads(RespEnviada)
-                            enviada = tempJson[0]
-                            if "order_status" in enviada:
-                                status = enviada.get("order_status")
-                                ClientOrderid = enviada.get("order_id")
-                                stampSubmit = datetime.now()
+                self.SwichSumitOrder = True
+                orden = pedido["orders"][0]
+                resp = response[0] if isinstance(response, list) and response else response
+                status, enviada, ClientOrderid = "Inactive", {}, " "
+                stampSubmit = None
 
-                    # salva información de la orden
-                    for items in response:
-                        values.update(
-                            {
-                                "account": account,
-                                "vehiculo": vehiculo,
-                                "id_order": items["id"],
-                                "conid": orden["conid"],
-                                "orderType": orden["orderType"],
-                                "price": orden["price"],
-                                "side": orden["side"],
-                                "tif": orden["tif"],
-                                "status": status,
-                                "quantity": orden["quantity"],
-                                "clientOrderId": ClientOrderid,
-                                "stampPlace": datetime.now(),
-                                "stampSubmit": stampSubmit,
-                                "hash_id_oportunidad": hash_id_Op,
-                            }
-                        )
-                        self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
+                self.logger.warning(
+                    f"place_OrderStock: place_order OK | id={resp.get('id')} | response={response} | symbol={symbol}"
+                )
+
+                # Confirma orden en IB cuando no es simulación
+                if not self.simulation and resp.get("id"):
+                    RespEnviada = self.IClient.orderconfirm(replyid=resp["id"])
+
+                    if RespEnviada:
+                        tempJson = json.loads(RespEnviada)
+                        enviada = tempJson[0]
+                        if "order_status" in enviada:
+                            status = enviada.get("order_status")
+                            ClientOrderid = enviada.get("order_id")
+                            stampSubmit = datetime.now()
+                        self.logger.warning(f"place_OrderStock: confirm OK | status={status} | orderId={ClientOrderid}")
+                    else:
+                        self.logger.error(f"place_OrderStock: orderconfirm sin respuesta | replyid={resp.get('id')}")
+
+                # Salva información de la orden
+                for items in response:
+                    values.update(
+                        {
+                            "account": account,
+                            "vehiculo": vehiculo,
+                            "id_order": items["id"],
+                            "conid": orden["conid"],
+                            "orderType": orden["orderType"],
+                            "price": orden["price"],
+                            "side": orden["side"],
+                            "tif": orden["tif"],
+                            "status": status,
+                            "quantity": orden["quantity"],
+                            "clientOrderId": ClientOrderid,
+                            "stampPlace": datetime.now(),
+                            "stampSubmit": stampSubmit,
+                            "hash_id_oportunidad": hash_id_Op,
+                        }
+                    )
+                    self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
+
+                self.logger.warning(
+                    f"place_OrderStock: COMPLETE | symbol={symbol} | status={status} | values={bool(values)}"
+                )
                 return response, enviada, values
             except Exception as e:
-                print(f"place_OrderStock(): {e}")
+                self.logger.error(f"place_OrderStock({symbol}): {e}")
+                traceback.print_exc()
                 return {}, {}, {}
 
         # place order Crypto
@@ -1120,7 +1141,8 @@ class MyOrders:
 
                 return response, enviada, values
             except Exception as e:
-                print(f"place_OrderCrypto(): {e}")
+                self.logger.error(f"place_OrderCrypto({symbol}): {e}")
+                traceback.print_exc()
                 return {}, {}, {}
 
         try:
@@ -1132,8 +1154,9 @@ class MyOrders:
             else:
                 response, enviada, values = {}, {}, {}
 
-            # captura traza para las ordenes
-            self.logger.debug(
+            # Traza de orden: WARNING si es remota o falló, DEBUG si local ok
+            log_level = "warning" if remote or not values else "debug"
+            getattr(self.logger, log_level)(
                 textwrap.dedent(
                     f"""
                         ====================================
@@ -1142,7 +1165,7 @@ class MyOrders:
                         Remote_order  : {remote}
                         Simutale_order: {self.simulation}
                         Order.........: {pedido}
-                        API_persponse : {response}
+                        API_response  : {response}
                         API_confirm   : {enviada}
                         Response      : {values}
                         """
@@ -1162,7 +1185,8 @@ class MyOrders:
 
             return values
         except Exception as e:
-            print(f"put_completa_orden(): {e}")
+            self.logger.error(f"put_completa_orden({symbol}): {e}")
+            traceback.print_exc()
             return {}
 
     # ejecuta order trader
@@ -2414,7 +2438,7 @@ class TickerInfo(MyOrders):
                     # libera recursos y entrega response
                     DataHub.QremoteOrder[self.vehiculo]._complete(future, resp)
         except Exception as e:
-            print(f"schedule_order_remote(): {e}")
+            self.logger.error(f"schedule_order_remote({self.vehiculo}): {e}")
             traceback.print_exc()
 
     # trades del vehículo y procede con update booktrading e inversión
@@ -3579,6 +3603,7 @@ class WidgetVehiculo(TickerInfo):
 
         except Exception as e:
             print("[inicio_widget_treeview()]: {}".format(e))
+            traceback.print_exc()
 
     def agregar_nuevo_activo(self, symbol, conid, precio, cantidad, costo):
         """Agrega un nuevo activo comprado al panel de posiciones.
@@ -4416,7 +4441,7 @@ class WidgetVehiculo(TickerInfo):
 
             # inserta registros en treeview
             for i, value in enumerate(s_sell):
-                if value["profit"] < DataHub.MinProfit:
+                if (value["profit"] / value["factor"]) < DataHub.MinProfit:
                     continue
 
                 # acumula para los profit > DataHub.MinProfit

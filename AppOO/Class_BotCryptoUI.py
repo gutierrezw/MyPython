@@ -23,17 +23,15 @@ from Modulos_python import (
     json,
     pd,
     datetime,
-    RSIIndicator,
-    EMAIndicator,
-    MACD,
     Figure,
     FigureCanvasTkAgg,
+    logging,
+    multiprocessing,
 )
 from Modulos_Mysql import BDsystem, PlanInversion, RepositorioOportunidadesBuySell
+from Modulos_Utilitarios import calcular_indicadores_df
 from Class_vehiculo import BinanceClient, BinanceStreamClient
 from Class_customer import DataHub, MyMessageBox
-import logging
-import multiprocessing
 import webview
 
 
@@ -349,25 +347,12 @@ class TradingBotSpot:
     def calcular_indicadores(self):
         """
         Calcula RSI, MACD, EMA rápida/lenta sobre el DataFrame.
-        Usa la librería `ta` (ya disponible en el proyecto).
+        Usa calcular_indicadores_df() de Modulos_Utilitarios (función unificada).
         """
         if self.df is None or len(self.df) < 30:
             return
 
-        close = self.df["Close"]
-
-        # RSI (14 períodos)
-        self.df["rsi"] = RSIIndicator(close=close, window=14).rsi()
-
-        # MACD (12, 26, 9)
-        macd_obj = MACD(close=close, window_slow=26, window_fast=12, window_sign=9)
-        self.df["macd"] = macd_obj.macd()
-        self.df["macd_signal"] = macd_obj.macd_signal()
-        self.df["macd_hist"] = macd_obj.macd_diff()
-
-        # EMA rápida (9) y lenta (21)
-        self.df["ema_fast"] = EMAIndicator(close=close, window=9).ema_indicator()
-        self.df["ema_slow"] = EMAIndicator(close=close, window=21).ema_indicator()
+        calcular_indicadores_df(self.df)
 
     def _last_price(self) -> float:
         return self.df["Close"].iloc[-1]
@@ -1101,15 +1086,15 @@ class BotCryptoUI:
         self._lbl_pnl_total.pack(side=tk.RIGHT)
 
         # Posiciones activas / total
-        count_row = tk.Frame(footer, bg=bg)
-        count_row.pack(fill=tk.X, padx=5)
-        tk.Label(count_row, text="Posiciones:", bg=bg, fg="gray70", font=("Arial", 8), anchor="w", width=12).pack(
-            side=tk.LEFT
-        )
-        self._lbl_pos_count = tk.Label(
-            count_row, text="0/0", bg=bg, fg=fg, font=("Arial", 8, "bold"), anchor="e", width=14
-        )
-        self._lbl_pos_count.pack(side=tk.RIGHT)
+        # count_row = tk.Frame(footer, bg=bg)
+        # count_row.pack(fill=tk.X, padx=5)
+        # tk.Label(count_row, text="Posiciones:", bg=bg, fg="gray70", font=("Arial", 8), anchor="w", width=12).pack(
+        #    side=tk.LEFT
+        # )
+        # self._lbl_pos_count = tk.Label(
+        #    count_row, text="0/0", bg=bg, fg=fg, font=("Arial", 8, "bold"), anchor="e", width=14
+        # )
+        # self._lbl_pos_count.pack(side=tk.RIGHT)
 
         # Pérdida por SL individual
         sl_row = tk.Frame(footer, bg=bg)
@@ -1222,7 +1207,9 @@ class BotCryptoUI:
 
             # Contador posiciones
             total = len(self.bots)
-            self._lbl_pos_count.config(text=f"{activas}/{total}")
+            self._cap_labels["reservado"].config(text=f"{activas} de {total} -  ${reservado:.2f}")
+
+            # self._lbl_pos_count.config(text=f"{activas}/{total}")
 
             # Pérdida por SL: position_size × stop_loss_pct
             risk_pct_dec = self.config.get("risk_per_trade", 0.02)
@@ -1235,7 +1222,6 @@ class BotCryptoUI:
             max_loss = sl_loss * total
             max_loss_pct = (max_loss / capital * 100) if capital > 0 else 0
             self._lbl_max_loss.config(text=f"-${max_loss:.2f} ({max_loss_pct:.1f}%)")
-
         except Exception as e:
             self.logger.error(f"_actualizar_panel_capital(): {e}")
 
@@ -1335,7 +1321,7 @@ class BotCryptoUI:
 
         # Selector de intervalo
         tk.Label(row2, text="Intervalo:", bg=self.colors["cgcolor"], fg="white").pack(side=tk.LEFT, padx=(10, 5))
-        self.combo_interval = ttk.Combobox(row2, values=["1m", "5m", "15m", "1h"], width=5, state="readonly")
+        self.combo_interval = ttk.Combobox(row2, values=["1m", "5m", "15m", "30m", "1h"], width=5, state="readonly")
         self.combo_interval.set(self.interval)  # Usa intervalo de BD o default 15m
         self.combo_interval.pack(side=tk.LEFT, padx=5)
         self.combo_interval.bind("<<ComboboxSelected>>", self._on_interval_change)
@@ -2527,12 +2513,21 @@ class BotCryptoUI:
                 self.logger.info(f"⚙️ {symbol}: Config actualizada a {new_interval}")
 
             if self.running:
-                # Reiniciar WebSocket con nuevo intervalo
-                self._detener_websocket()
-                self._iniciar_websocket()
+                # Recargar históricos y reiniciar WebSocket en background
+                def _reload():
+                    for sym, bot in self.bots.items():
+                        bot.interval = new_interval
+                        self._cargar_historico(bot, sym, limit=500)
+                    self.parent.after(0, self._detener_websocket)
+                    self.parent.after(500, self._iniciar_websocket)
+
+                threading.Thread(target=_reload, daemon=True).start()
 
     def _on_add_symbol(self):
-        """Abre diálogo para agregar nuevo símbolo al BotCrypto"""
+        """Abre diálogo para agregar nuevo símbolo al BotCrypto"""  # gwi001
+
+        def eexit():
+            dialog.destroy()
 
         def agregar():
             symbol = entry.get().strip().upper()
@@ -2626,16 +2621,14 @@ class BotCryptoUI:
                 lbl_status.config(text=f"Error creando widget: {e}", fg="red")
                 traceback.print_exc()
 
-        # gwi001
         dialog = tk.Toplevel(self.right)
-        dialog.title("Agregar Símbolo - BotCrypto")
-
+        dialog.title("Agregar Símbolo")
         try:
-            x = self.right.winfo_rootx() + self.right.winfo_width() - 200
+            x = self.right.winfo_rootx() + self.right.winfo_width() - 100
             y = self.right.winfo_rooty() + 200
         except Exception:
             x, y = 200, 150
-        dialog.geometry(f"360x280+{x}+{y}")
+        dialog.geometry(f"250x160+{x}+{y}")
         dialog.resizable(False, False)
         dialog.config(bg=self.colors["bgcolor"])
         dialog.transient(self.right)
@@ -2647,10 +2640,10 @@ class BotCryptoUI:
             bg=self.colors["bgcolor"],
             fg="white",
             font=("Arial", 10),
-        ).pack(pady=(15, 5))
+        ).pack(pady=(12, 4))
 
-        entry = tk.Entry(dialog, font=("Arial", 12), width=20, justify="center")
-        entry.pack(pady=5)
+        entry = tk.Entry(dialog, font=("Arial", 11), width=18, justify="center")
+        entry.pack(pady=4)
         entry.focus_set()
 
         lbl_status = tk.Label(
@@ -2660,25 +2653,27 @@ class BotCryptoUI:
             fg="yellow",
             font=("Arial", 9),
         )
-        lbl_status.pack(pady=5)
+        lbl_status.pack(pady=2)
 
-        btn = tk.Button(
-            dialog,
+        btn_frame = tk.Frame(dialog, bg=self.colors["bgcolor"])
+        btn_frame.pack(pady=6)
+        tk.Button(
+            btn_frame,
             text="Agregar",
             command=agregar,
-            font=("Arial", 10),
-            width=10,
-        )
-        btc = tk.Button(
-            dialog,
+            font=("Arial", 9),
+            width=9,
+        ).pack(side=tk.LEFT, padx=8)
+        tk.Button(
+            btn_frame,
             text="Cancel",
-            font=("Arial", 10),
-            width=10,
-        )
-        btn.pack(side=tk.RIGHT, padx=5, pady=10)
-        btc.pack(side=tk.RIGHT, padx=5, pady=10)
+            command=eexit,
+            font=("Arial", 9),
+            width=9,
+        ).pack(side=tk.LEFT, padx=8)
 
         entry.bind("<Return>", lambda e: agregar())
+        dialog.bind("<Escape>", lambda e: eexit())
 
     def _crear_bot(self, symbol):
         """Crea un TradingBotSpot para el símbolo"""
