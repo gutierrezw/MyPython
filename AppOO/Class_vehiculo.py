@@ -705,6 +705,7 @@ class IBGateway:
         # Control de tickle thread
         self._tickle_thread = None
         self._tickle_stop = threading.Event()
+        self._on_reconnect = None
 
         # Logger
         self.logger = logging.getLogger("IBGateway")
@@ -899,9 +900,13 @@ class IBGateway:
     def _tickle_loop(self, interval: int, datahub=None) -> None:
         """
         Loop interno para mantener viva la sesión IBKR.
-        Corre en thread daemon.
+        Detecta desconexión y reconecta automáticamente cuando el usuario
+        vuelve a autenticarse en el Gateway (sin reiniciar la app).
         """
         counter = 1
+        was_disconnected = False
+        reconnect_interval = 30  # segundos entre intentos de reconexión
+
         while not self._tickle_stop.is_set():
             try:
                 resp = self.tickle()
@@ -911,24 +916,50 @@ class IBGateway:
                     datahub.update_self_procesos(proces="thread", tarea=self.task, itera=counter)
                 counter += 1
 
-                if not auth:
-                    self.logger.warning(f"Tickle OK pero sesión no autenticada {datetime.datetime.now()}")
-                    time.sleep(900)
+                if auth:
+                    if was_disconnected:
+                        # Reconexión exitosa: recrear sesión
+                        self.logger.warning("🔄 IB reconectando... recreando sesión")
+                        success, _ = self.create_session()
+                        if success:
+                            self.logger.warning("✅ IB reconexión exitosa — sesión restaurada")
+                            was_disconnected = False
+                            if self._on_reconnect:
+                                try:
+                                    self._on_reconnect()
+                                except Exception as e:
+                                    self.logger.error(f"on_reconnect callback error: {e}")
+                        else:
+                            self.logger.warning("⚠️ IB auth OK pero create_session falló, reintentando...")
+                    self.authenticated = True
+                else:
+                    if not was_disconnected:
+                        self.logger.warning("⚠️ IB sesión perdida — esperando re-autenticación del Gateway")
+                    was_disconnected = True
+                    self.authenticated = False
+                    self._tickle_stop.wait(reconnect_interval)
+                    continue
 
             except Exception as e:
-                self.logger.error(f"Tickle falló: {e}")
+                if not was_disconnected:
+                    self.logger.error(f"Tickle falló: {e} — Gateway posiblemente caído")
+                was_disconnected = True
+                self.authenticated = False
+                self._tickle_stop.wait(reconnect_interval)
+                continue
 
-            # Esperar con check de stop
             self._tickle_stop.wait(interval)
 
-    def start_tickle(self, interval: int = 30, datahub=None) -> None:
+    def start_tickle(self, interval: int = 30, datahub=None, on_reconnect=None) -> None:
         """
         Inicia el loop de tickle en background.
 
         Args:
             interval: Segundos entre cada tickle (default: 30)
             datahub: DataHub para registrar proceso
+            on_reconnect: Callback ejecutado al reconectar tras pérdida de sesión
         """
+        self._on_reconnect = on_reconnect
         try:
             if self._tickle_thread is not None and self._tickle_thread.is_alive():
                 self.logger.warning("Tickle ya está corriendo")

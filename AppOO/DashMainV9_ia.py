@@ -128,8 +128,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
             func=self.schedule_order_remote,
         )
 
-    """ temporal para unificar parametros de entrada"""
-
     def on_message_binance_websocket(self, _, message):
         # captura de evento de precio
         def procesa_stream_crypto(x_message):
@@ -251,8 +249,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
         except json.JSONDecodeError or Exception as error:
             print("[on_message_binance_websocket()]: {}".format(error))
             time.sleep(1)
-
-    """ reemplaza  on_message_websocket() de websocket"""
 
     def on_message_IBrks_websocket(self, message):
         def procesa_stock(d_precio=None):
@@ -471,8 +467,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
             print("[on_message_IBrks_websocket({})]: {}".format(self.vehiculo, error))
             time.sleep(1)
 
-    """ actualiza self.positions"""
-
     def update_symbol_en_positions(self, struct):
         def update_position():
             try:
@@ -514,16 +508,12 @@ class DatosVehivulo(TickerInfo, MyOrders):
         except Exception as e:
             print("[update_symbol_en_positions({})]: {}".format(self.vehiculo, e))
 
-    """ calcula peso de symbols dentro de positions"""
-
     def update_peso_position(self):
         try:
             inversion = sum(position["costobase"] for position in self.positions)
             return inversion
         except Exception as e:
             print("[update_peso_position({})]: {}".format(self.vehiculo, e))
-
-    """ mantiene self.position igual a la tabla inversionesError"""
 
     def update_self_positions(self, in_positions=None):
         try:
@@ -551,8 +541,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         eof_sbook, position = next(sbook, (None, None))
         except Exception as e:
             print("[update_positions({})]: {}".format(self.vehiculo, e))
-
-    """ captura operaciones compra y ventas de activos"""
 
     def trader_api_vehiculo(self):
         # obtiene trader para las Cryptos
@@ -940,8 +928,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
         except (Exception, EnvironmentError, ExceptionGroup) as e:
             print(f"trader_api_vehiculo({self.vehiculo}): {e}")
 
-    """ declara las api para binance"""
-
     def api_vehiculo_binance(self):
         def update_inversion_crypto(api=None, in_positions=None) -> list:
             try:
@@ -1219,6 +1205,30 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
         # p_cartera instancia API vs p_positions tabla inversión
         def update_inversion_stock(p_cartera, p_positions):
+            def get_dividends_yfinance():
+
+                exDividendDate, dividendo = "9999-12-31", 0.0
+                dividendYield = yf_activo.get("dividendYield", 0)
+                price = yf_activo.get("previousClose", 0)
+
+                if yf_activo.get("quoteType") in ("STK", "EQUITY"):
+
+                    # si ha pagado dividndo en los ultimos 12 meses
+                    if yf_activo.get("trailingAnnualDividendRate", 0) > 0:
+                        dividendo = price * dividendYield / 100
+
+                        # ultima instaancia -- para obtener el dividendo
+                        if "dividendRate" in yf_activo:
+                            dividendo = yf_activo["dividendRate"]
+
+                if yf_activo.get("quoteType") == "ETF":
+                    dividendo = price * dividendYield / 100
+
+                if "exDividendDate" in yf_activo:
+                    exDividendDate = datetime.fromtimestamp(yf_activo["exDividendDate"])
+
+                return dividendo, dividendYield, exDividendDate
+
             try:
                 self.activos, x_positions = [], []
                 for key in p_cartera:
@@ -1230,12 +1240,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         continue
 
                     # encuentra factor de conversión para las positions que no están USD
-                    p, exDividendDate, dividendYield, dividendo = (
-                        {},
-                        "9999-12-31",
-                        0.0,
-                        0.0,
-                    )
+                    p = {}
                     factor = self.currency[key["currency"]]
                     symbol = key["contractDesc"]
 
@@ -1245,46 +1250,21 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     objetivo, x_open, price, empresa = 0.0, 0.0, 0.0, ""
                     sector = key["sector"] if "sector" in key else "buscar"
 
-                    if yf_activo:
-                        dividendo, dividendYield, exDividendDate = (
-                            0.0,
-                            0.0,
-                            "9999-12-31",
-                        )
-
                     price = key["mktPrice"]
-                    if "dividendYield" in yf_activo and "trailingAnnualDividendRate" in yf_activo:
-                        dividendYield = yf_activo["dividendYield"]
-                        if "previousClose" in yf_activo:
-                            price = yf_activo["previousClose"]
 
-                        # si ha pagado dividndo en los ultimos 12 meses
-                        if yf_activo.get("trailingAnnualDividendRate") > 0:
-                            dividendo = price * dividendYield / 100
+                    # captura el dividendo del activo
+                    dividendo, dividendYield, exDividendDate = get_dividends_yfinance()
 
-                            # ultima instaancia -- para obtener el dividendo
-                            if "dividendRate" in yf_activo:
-                                dividendo = yf_activo["dividendRate"]
-                        else:
-                            # Si no ha pagado dividendos en últimos 12 meses, resetear ambos valores
-                            dividendo = 0.0
-                            dividendYield = 0.0
-
-                    if "exDividendDate" in yf_activo:
-                        exDividendDate = datetime.fromtimestamp(yf_activo["exDividendDate"])
-
-                    if "open" in yf_activo:
-                        x_open = yf_activo["open"] * factor
+                    x_open = yf_activo.get("open", 0) * factor
 
                     # fija precio objetivo
-                    if "targetMeanPrice" in yf_activo:
-                        objetivo = yf_activo["targetMeanPrice"]
-                    elif "targetHighPrice" in yf_activo:
-                        objetivo = yf_activo["targetHighPrice"]
-                    elif "targetLowPrice" in yf_activo:
-                        objetivo = yf_activo["targetLowPrice"]
-                    elif "fiftyTwoWeekHigh" in yf_activo:
-                        objetivo = yf_activo["fiftyTwoWeekHigh"]
+                    objetivo = yf_activo.get("targetMeanPrice", 0)
+                    if objetivo == 0:
+                        objetivo = yf_activo.get("targetHighPrice", 0)
+                    if objetivo == 0:
+                        objetivo = yf_activo.get("targetLowPrice", 0)
+                    if objetivo == 0:
+                        objetivo = yf_activo.get("fiftyTwoWeekHigh", 0)
 
                     # asegura un sector, para los activos
                     if "sector" in yf_activo:
@@ -1294,8 +1274,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     else:
                         sector = sectores(symbol=symbol)
 
-                    if "longName" in yf_activo:
-                        empresa = yf_activo["longName"]
+                    empresa = yf_activo.get("longName", "revisar ------")
 
                     p["region"], p["country"] = "Global", "US"
                     if "region" in yf_activo:
@@ -2282,14 +2261,51 @@ class DashMain:
             )
             self.stock.header_panel()
 
+        def _ib_on_reconnect():
+            """Callback: IB Gateway reconectó tras pérdida de sesión."""
+            _log = logging.getLogger("IBGateway")
+            try:
+                if hasattr(self, "stock_ts") and self.stock_ts:
+                    # Ya existía conexión previa — refrescar datos
+                    self.stock_ts.ib_connection = self.stock_ts.IClient.create_session()
+                    self.stock_ts.carga_inversion_en_positions()
+                    self.stock_ts.conector_api_vehiclo()
+                    self.stock.positions = self.stock_ts.positions
+                    self.stock.resumen = self.stock_ts.resumen
+                    _log.warning("✅ IB reconnect: posiciones y datos actualizados")
+                else:
+                    # Arrancó Offline — crear DatosVehivulo y levantar todo
+                    self.stock_ts = DatosVehivulo(account=account, vehiculo=vehiculo)
+                    self.stock_ts.run()
+
+                    self.procesos.append({"widget": {"update_widget(Stock)": self.it_stock}})
+                    self.stock.positions = self.stock_ts.positions
+                    self.stock.resumen = self.stock_ts.resumen
+
+                    # UI updates deben correr en el hilo principal de Tkinter
+                    def _refresh_treeview():
+                        for tree in self.stock.m_heard + self.stock.m_tree:
+                            tree.delete(*tree.get_children())
+                        self.stock.inicio_widget_treeview(self.stock.positions)
+
+                    self.root.after(0, _refresh_treeview)
+                    self.root.after(100, lambda: self.stock.run_graficos())
+                    self.root.after(200, lambda: self.update_widget(vehiculo=vehiculo))
+                    _log.warning("✅ IB reconnect: DatosVehivulo creado + WebSocket + posiciones levantados")
+            except Exception as e:
+                _log.error(f"_ib_on_reconnect error: {e}")
+
         try:
             ib = IB()
-            # ib.ensure_connection()
-            ib.start_tickle(interval=30, datahub=DataHub)
-
             self.stock = WidgetVehiculo(master=self.win0, account=account, vehiculo=vehiculo)
 
-            if ib.is_localhost():
+            connected = False
+            try:
+                connected = ib.is_localhost()
+            except Exception:
+                logging.getLogger("IBGateway").warning("⚠️ IB Gateway no disponible — modo Offline")
+
+            if connected:
                 self.stock_ts = DatosVehivulo(account=account, vehiculo=vehiculo)
                 self.stock_ts.run()
 
@@ -2310,8 +2326,12 @@ class DashMain:
 
                 self.stock.inicio_widget_treeview(self.stock.positions)
                 self.stock.run_graficos()
+
+            # Tickle siempre corre — detecta reconexión aunque arranque offline
+            ib.start_tickle(interval=30, datahub=DataHub, on_reconnect=_ib_on_reconnect)
+
         except Exception as e:
-            print("start_stock(): {}".format(e))
+            logging.getLogger("IBGateway").error(f"start_stock(): {e}")
 
     """ chatbot y/o asistente ------------------------------------------------------------------------------------------"""
 
@@ -4672,11 +4692,14 @@ class DashMain:
 
             # Obtener totales desde la base de datos
             totales = self.RepositorioOportunidades.get_totales_inversiones()
-
-            # Formatear valores
+            limit_costoB, limit_gyp = self.get_limite_inversion()
             ganancias_dia = totales["total_ganancia_dia"]
             costo_base = totales["total_costo_base"]
-            limit_costoB, limit_gyp = self.get_limite_inversion()
+
+            # Formatear valores DataHub
+            DataHub.manager_GyP.update({"Plan": limit_costoB})
+            DataHub.manager_GyP.update({"Inversion": costo_base})
+            DataHub.manager_GyP.update({"dGyP": ganancias_dia})
 
             if ganancias_dia > 0:
                 _inf = 0

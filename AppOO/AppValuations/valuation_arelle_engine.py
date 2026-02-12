@@ -2,6 +2,9 @@
 # valuation_arelle_engine.py (DB READY VERSION)
 # Output estructurado para base de datos
 # ================================================
+import sys
+
+sys.path.insert(0, "..")
 from Modulos_python import (
     os,
     sys,
@@ -111,9 +114,7 @@ def extract_instances_from_zip(zip_path: str):
         with ZipFile(zip_path, "r") as z:
             for name in z.namelist():
                 low = name.lower()
-                if low.endswith(".xml") and not any(
-                    k in low for k in ["cal", "pre", "def", "lab"]
-                ):
+                if low.endswith(".xml") and not any(k in low for k in ["cal", "pre", "def", "lab"]):
                     instances.append(name)
     except Exception as e:
         print(f"⚠ Error leyendo ZIP {zip_path}: {e}")
@@ -245,29 +246,21 @@ def get_yf_data(ticker: str):
 
             if not price:
                 try:
-                    price = data["quoteSummary"]["result"][0]["price"][
-                        "regularMarketPrice"
-                    ]["raw"]
+                    price = data["quoteSummary"]["result"][0]["price"]["regularMarketPrice"]["raw"]
                 except:
                     pass
 
             if not company_name:
                 try:
-                    company_name = data["quoteSummary"]["result"][0]["assetProfile"][
-                        "longBusinessSummary"
-                    ]
+                    company_name = data["quoteSummary"]["result"][0]["assetProfile"]["longBusinessSummary"]
                     # Si es muy largo, intenta obtener el nombre corto
                     try:
-                        company_name = data["quoteSummary"]["result"][0]["price"][
-                            "longName"
-                        ]
+                        company_name = data["quoteSummary"]["result"][0]["price"]["longName"]
                     except:
                         pass
                 except:
                     try:
-                        company_name = data["quoteSummary"]["result"][0]["price"][
-                            "shortName"
-                        ]
+                        company_name = data["quoteSummary"]["result"][0]["price"]["shortName"]
                     except:
                         pass
 
@@ -304,11 +297,7 @@ def get_yf_data(ticker: str):
         except:
             pass
 
-    return {
-        "price": price,
-        "company_name": company_name,
-        "sector": sector
-    }
+    return {"price": price, "company_name": company_name, "sector": sector}
 
 
 def compute_reit_metrics(ttm: dict):
@@ -437,21 +426,13 @@ def compute_valuations(ttm: dict, price: float):
 
     # ✅ CORREGIDO: Ratios de apalancamiento (sin multiplicar por 100)
     # Los ratios deben ser decimales (0.055 = 5.5%), no porcentajes (5.5)
-    debt_to_equity = (
-        (total_debt / total_equity) if (total_debt and total_equity) else None
-    )
-    debt_to_assets = (
-        (total_debt / total_assets) if (total_debt and total_assets) else None
-    )
-    net_debt_to_equity = (
-        (net_debt / total_equity) if (net_debt and total_equity) else None
-    )
+    debt_to_equity = (total_debt / total_equity) if (total_debt and total_equity) else None
+    debt_to_assets = (total_debt / total_assets) if (total_debt and total_assets) else None
+    net_debt_to_equity = (net_debt / total_equity) if (net_debt and total_equity) else None
 
     # Enterprise Value = Market Cap + Net Debt
     market_cap = price * shares if (price and shares) else None
-    enterprise_value = (
-        (market_cap + net_debt) if (market_cap and net_debt is not None) else None
-    )
+    enterprise_value = (market_cap + net_debt) if (market_cap and net_debt is not None) else None
 
     # EV/EBITDA (usando Operating CF como proxy de EBITDA si no tenemos Depreciation)
     ev_to_ocf = (enterprise_value / ocf) if (enterprise_value and ocf) else None
@@ -537,9 +518,7 @@ def run_ddm_analysis(dividend_per_share, price, required_return=0.10):
                 }
 
     # Two-Stage DDM
-    result = ddm.two_stage(
-        high_growth_rate=0.07, high_growth_years=5, stable_growth_rate=0.03
-    )
+    result = ddm.two_stage(high_growth_rate=0.07, high_growth_years=5, stable_growth_rate=0.03)
     iv = result.get("intrinsic_value")
     if iv:
         mos = ddm.margin_of_safety(iv, price)
