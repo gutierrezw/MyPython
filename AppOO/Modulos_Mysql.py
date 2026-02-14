@@ -1949,6 +1949,20 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: update_otros_activos()]: {}".format(error))
 
+    def update_otros_activos_indicadores(self, symbol, cuenta, data):
+        """Actualiza campo indicadores (JSON) en otros_activos."""
+        try:
+            conn = self._conectar(tabla="update.crypto")
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE otros_activos SET indicadores = %s WHERE symbol = %s AND cuenta = %s",
+                (json.dumps(data), symbol, cuenta),
+            )
+            conn.commit()
+            cursor.close()
+        except Exception as e:
+            self.logger.error(f"update_otros_activos_indicadores({symbol}): {e}")
+
     def delete_otros_activos(self, symbol=None, cuenta=None):
         """
         Elimina un registro de la tabla otros_activos.
@@ -2763,7 +2777,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 qry = """SELECT a.* FROM (SELECT * FROM booktrading  
                                         WHERE cuenta = '%s' AND divisa = '%s' AND activa = 'Y'
                                             AND codigo = 'O'  AND simbolo = '%s') AS a 
-                        ORDER BY fechahora ASC, sec ASC;"""
+                        ORDER BY fechahora DESC, sec DESC;"""
 
                 cursor.execute(qry % (account, idivisa, symbol))
                 sql = cursor.fetchall()

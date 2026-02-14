@@ -10,8 +10,8 @@ from Class_DataFrame import (
     grupo_region,
     CacheHut,
 )
-from API_vehiculos import IB
-from Class_vehiculo import BinanceClient
+from Class_ApiIBrks import IB
+from Class_ApiBinnace import BinanceClient
 from Class_gestion import GestionInversion
 from Modulos_Mysql import (
     EstrategiaInversion,

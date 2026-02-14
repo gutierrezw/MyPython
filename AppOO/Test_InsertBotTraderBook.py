@@ -3,7 +3,7 @@ Reproceso: Inserta trades de BotCrypto en booktrading desde 07-feb-2025.
 Usa el mismo formato que trader_binance() de DashMainV9_ia.py.
 """
 
-from Class_vehiculo import BinanceClient
+from Class_ApiBinnace import BinanceClient
 from Modulos_Mysql import RepositorioOportunidadesBuySell as RepositorioOportunidades
 from datetime import datetime, timedelta
 import time
@@ -13,7 +13,7 @@ ACCOUNT = "B0000002"
 CATEGORIA = "BotCrypto"
 DIVISA = "USD"
 FECHA_DESDE = datetime(2026, 2, 7)
-SYMBOLS = ["DOGEUSDT", "ADAUSDT", "XRPUSDT", "TRXUSDT", "FILUSDT", "VETUSDT"]
+SYMBOLS = ["DOGEUSDT", "ADAUSDT", "XRPUSDT", "TRXUSDT", "FILUSDT", "VETUSDT", "ICPUSDT"]
 
 # Clientes
 client = BinanceClient(vehiculo="BotCrypto", env="PRODUCTION")

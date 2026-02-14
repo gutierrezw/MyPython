@@ -71,8 +71,8 @@ from Modulos_Mysql import (
 )
 from Class_Analisis import AnalisisFCI, AnalisisCrypto, AnalisisStock
 from AppValuations.rebalance_engine import RebalanceEngine
-from API_vehiculos import IB
-from Class_vehiculo import BinanceClient, BinanceStreamClient, BinanceWSApiClient
+from Class_ApiIBrks import IB
+from Class_ApiBinnace import BinanceClient, BinanceStreamClient, BinanceWSApiClient
 
 
 # class Manager para procesa ordenes remotas
