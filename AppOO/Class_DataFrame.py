@@ -44,7 +44,7 @@ from Modulos_python import (
     textwrap,
     traceback,
 )
-from Class_vehiculo import BinanceClient
+from Class_ApiBinnace import BinanceClient
 
 
 import yfinance as yf
@@ -896,14 +896,28 @@ def chart_symbol(fg=None, datos=None, keys=None):
                 ]
                 # Agrega zonas Fibonacci solo si está activo
                 if keys.get("fibonacci", False):
-                    ema.extend([
-                        mpf.make_addplot(pdatos["EMA009"], color="green", fill_between=zone_fib0, ax=ax, alpha=0.01),
-                        mpf.make_addplot(pdatos["EMA009"], color="green", fill_between=zone_fib1, ax=ax, alpha=0.01),
-                        mpf.make_addplot(pdatos["EMA009"], color="green", fill_between=zone_fib2, ax=ax, alpha=0.01),
-                        mpf.make_addplot(pdatos["EMA009"], color="green", fill_between=zone_fib3, ax=ax, alpha=0.01),
-                        mpf.make_addplot(pdatos["EMA009"], color="green", fill_between=zone_fib4, ax=ax, alpha=0.01),
-                        mpf.make_addplot(pdatos["EMA009"], color="green", fill_between=zone_fib5, ax=ax, alpha=0.01),
-                    ])
+                    ema.extend(
+                        [
+                            mpf.make_addplot(
+                                pdatos["EMA009"], color="green", fill_between=zone_fib0, ax=ax, alpha=0.01
+                            ),
+                            mpf.make_addplot(
+                                pdatos["EMA009"], color="green", fill_between=zone_fib1, ax=ax, alpha=0.01
+                            ),
+                            mpf.make_addplot(
+                                pdatos["EMA009"], color="green", fill_between=zone_fib2, ax=ax, alpha=0.01
+                            ),
+                            mpf.make_addplot(
+                                pdatos["EMA009"], color="green", fill_between=zone_fib3, ax=ax, alpha=0.01
+                            ),
+                            mpf.make_addplot(
+                                pdatos["EMA009"], color="green", fill_between=zone_fib4, ax=ax, alpha=0.01
+                            ),
+                            mpf.make_addplot(
+                                pdatos["EMA009"], color="green", fill_between=zone_fib5, ax=ax, alpha=0.01
+                            ),
+                        ]
+                    )
             else:
                 ema = [
                     mpf.make_addplot(
@@ -953,14 +967,28 @@ def chart_symbol(fg=None, datos=None, keys=None):
                 ]
                 # Agrega zonas Fibonacci solo si está activo
                 if keys.get("fibonacci", False):
-                    ema.extend([
-                        mpf.make_addplot(pdatos["EMA009"], color="green", fill_between=zone_fib0, ax=ax, alpha=0.01),
-                        mpf.make_addplot(pdatos["EMA009"], color="green", fill_between=zone_fib1, ax=ax, alpha=0.01),
-                        mpf.make_addplot(pdatos["EMA009"], color="green", fill_between=zone_fib2, ax=ax, alpha=0.01),
-                        mpf.make_addplot(pdatos["EMA009"], color="green", fill_between=zone_fib3, ax=ax, alpha=0.01),
-                        mpf.make_addplot(pdatos["EMA009"], color="green", fill_between=zone_fib4, ax=ax, alpha=0.01),
-                        mpf.make_addplot(pdatos["EMA009"], color="green", fill_between=zone_fib5, ax=ax, alpha=0.01),
-                    ])
+                    ema.extend(
+                        [
+                            mpf.make_addplot(
+                                pdatos["EMA009"], color="green", fill_between=zone_fib0, ax=ax, alpha=0.01
+                            ),
+                            mpf.make_addplot(
+                                pdatos["EMA009"], color="green", fill_between=zone_fib1, ax=ax, alpha=0.01
+                            ),
+                            mpf.make_addplot(
+                                pdatos["EMA009"], color="green", fill_between=zone_fib2, ax=ax, alpha=0.01
+                            ),
+                            mpf.make_addplot(
+                                pdatos["EMA009"], color="green", fill_between=zone_fib3, ax=ax, alpha=0.01
+                            ),
+                            mpf.make_addplot(
+                                pdatos["EMA009"], color="green", fill_between=zone_fib4, ax=ax, alpha=0.01
+                            ),
+                            mpf.make_addplot(
+                                pdatos["EMA009"], color="green", fill_between=zone_fib5, ax=ax, alpha=0.01
+                            ),
+                        ]
+                    )
             else:
                 ema = [
                     mpf.make_addplot(

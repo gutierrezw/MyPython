@@ -1,12 +1,12 @@
-from Class_vehiculo import BinanceClient
+from Class_ApiBinnace import BinanceClient
 from Class_customer import TickerInfo
 
 ib = BinanceClient().spot
-Tib = TickerInfo(account='B0000001', vehiculo='Crypto', colors={})
+Tib = TickerInfo(account="B0000001", vehiculo="Crypto", colors={})
 
 # print(ib.account_spot())
 
-response = Tib.crypto_wallet_free(symbol='all')
+response = Tib.crypto_wallet_free(symbol="all")
 print(f"Wallet Free: {response}")
 
 # Ajuste del LTV de un préstamo flexible
