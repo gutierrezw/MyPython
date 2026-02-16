@@ -77,6 +77,8 @@ class TradingBotSpot:
             "trailing_active": False,
             "trail_high": None,
             "trailing_stop": None,
+            # SL order en Binance (red de seguridad)
+            "sl_order_id": None,
         }
 
         # ----- Datos de mercado -----
@@ -292,7 +294,8 @@ class TradingBotSpot:
     # =========================
     def _calc_position_size(self, price: float, capital_usdt: float) -> float:
         risk_amount = capital_usdt * self.risk_cfg["risk_per_trade"]
-        return risk_amount / price
+        sl_pct = self.risk_cfg.get("stop_loss_pct", 0.02)
+        return risk_amount / (price * sl_pct)
 
     def _calc_stop_loss(self, price: float) -> float:
         return price * (1 - self.risk_cfg["stop_loss_pct"])
@@ -334,6 +337,7 @@ class TradingBotSpot:
             "trailing_active": False,
             "trail_high": None,
             "trailing_stop": None,
+            "sl_order_id": None,
         }
 
     def _persist_state(self):
@@ -402,19 +406,24 @@ class TradingBotSpot:
 
         calcular_indicadores_df(self.df)
 
-    def calcular_scoring(self) -> dict:
+    def calcular_scoring(self, contexto_superior=None) -> dict:
         """
-        Calcula score técnico de -7 a +7 para priorización de activos.
-        Componentes: RSI (-1 a +2), MACD (-2 a +2), EMA (-2 a +2), Volatilidad (-1 a +1).
+        Calcula score técnico para priorización de activos.
+        Score base: RSI (-1 a +2), MACD (-2 a +2), EMA (-2 a +2), Volatilidad (-1 a +1).
+        Contexto superior: penalización -5 si TF superior no confirma tendencia.
         """
         resultado = {
             "score_total": 0,
+            "score_base": 0,
+            "score_contexto": 0,
             "score_rsi": 0,
             "score_macd": 0,
             "score_ema": 0,
             "score_vol": 0,
             "prioridad": "BLOQUEADO",
             "permitir_compra": False,
+            "contexto_ok": True,
+            "contexto_detalle": {},
         }
 
         if self.df is None or len(self.df) < 30 or "rsi" not in self.df.columns:
@@ -470,10 +479,25 @@ class TradingBotSpot:
                 elif atr_pct > 5.0:
                     score_vol = -1  # volatilidad extrema
 
-            total = score_rsi + score_macd + score_ema + score_vol
+            score_base = score_rsi + score_macd + score_ema + score_vol
+
+            # --- Contexto Superior (penalización estructural) ---
+            score_contexto = 0
+            contexto_ok = True
+            contexto_detalle = {}
+            if contexto_superior is not None:
+                contexto_ok = contexto_superior.get("contexto_ok", True)
+                contexto_detalle = contexto_superior.get("detalle", {})
+                if not contexto_ok:
+                    score_contexto = -5
+            total = score_base + score_contexto
+            if not contexto_ok:
+                total = min(total, 0)
 
             # Clasificación
-            if total >= 5:
+            if not contexto_ok and score_base >= 1:
+                prioridad = "Fuera Ctx"
+            elif total >= 5:
                 prioridad = "Alta"
             elif total >= 3:
                 prioridad = "Media"
@@ -484,12 +508,16 @@ class TradingBotSpot:
 
             resultado = {
                 "score_total": total,
+                "score_base": score_base,
+                "score_contexto": score_contexto,
                 "score_rsi": score_rsi,
                 "score_macd": score_macd,
                 "score_ema": score_ema,
                 "score_vol": score_vol,
                 "prioridad": prioridad,
                 "permitir_compra": total >= 3,
+                "contexto_ok": contexto_ok,
+                "contexto_detalle": contexto_detalle,
                 "indicadores": {
                     "rsi": round(rsi, 2),
                     "macd": round(macd, 8),
@@ -696,6 +724,18 @@ class BotManager:
 
         return qty
 
+    def _format_price(self, symbol, price):
+        """Ajusta precio según tickSize del símbolo."""
+        lot = self.lot_sizes.get(symbol)
+        if not lot or "tickSize" not in lot:
+            return round(price, 8)
+        tick = lot["tickSize"]
+        if tick > 0:
+            price = price - (price % tick)
+        tick_str = f"{tick:.10f}".rstrip("0")
+        decimals = len(tick_str.split(".")[-1]) if "." in tick_str else 0
+        return round(price, decimals)
+
     def _check_notional(self, symbol: str, qty: float, price: float) -> bool:
         """Verifica que el nocional (qty * price) supere el mínimo de Binance."""
         lot = self.lot_sizes.get(symbol, {})
@@ -710,8 +750,84 @@ class BotManager:
         return True
 
     # =========================
+    # STOP LOSS EN EXCHANGE
+    # =========================
+    def _place_sl_order(self, bot):
+        """Coloca STOP_LOSS_LIMIT en Binance como red de seguridad."""
+        try:
+            sl_price = (
+                bot.state.get("trailing_stop") if bot.state.get("trailing_active") else bot.state.get("stop_loss")
+            )
+            if not sl_price:
+                return
+            qty = bot.state["remaining_qty"]
+            qty = self._format_qty(bot.symbol, qty)
+            if qty <= 0:
+                return
+            sl_price = self._format_price(bot.symbol, sl_price)
+            limit_price = self._format_price(bot.symbol, sl_price * 0.99)  # 1% slippage para flash crash
+
+            order = self.spot_client.get_new_order(
+                symbol=bot.symbol,
+                side="SELL",
+                type="STOP_LOSS_LIMIT",
+                quantity=qty,
+                stopPrice=sl_price,
+                price=limit_price,
+                timeInForce="GTC",
+            )
+            if order:
+                bot.state["sl_order_id"] = order["orderId"]
+                self.logger.warning(
+                    f"SL ORDER {bot.symbol}: orderId={order['orderId']} "
+                    f"stopPrice={sl_price} limitPrice={limit_price} qty={qty}"
+                )
+        except Exception as e:
+            self.logger.error(f"_place_sl_order({bot.symbol}): {e}")
+
+    def _cancel_sl_order(self, bot):
+        """Cancela la orden STOP_LOSS_LIMIT en Binance."""
+        sl_id = bot.state.get("sl_order_id")
+        if not sl_id:
+            return
+        try:
+            self.spot_client.get_cancel_order(symbol=bot.symbol, orderId=sl_id)
+            self.logger.warning(f"SL CANCELLED {bot.symbol}: orderId={sl_id}")
+        except Exception as e:
+            self.logger.error(f"_cancel_sl_order({bot.symbol}): {e}")
+        bot.state["sl_order_id"] = None
+
+    # =========================
     # EJECUCION ORDENES
     # =========================
+    def _log_orden(self, symbol, intent, order):
+        """Log detallado de orden ejecutada: fills, precio real, comisiones."""
+        try:
+            order_id = order.get("orderId", "?")
+            side = order.get("side", "?")
+            status = order.get("status", "?")
+            exec_qty = order.get("executedQty", "?")
+            cummulative = order.get("cummulativeQuoteQty", "?")
+
+            fills = order.get("fills", [])
+            total_commission = 0.0
+            avg_price = 0.0
+            commission_asset = ""
+            if fills:
+                total_qty = sum(float(f.get("qty", 0)) for f in fills)
+                total_cost = sum(float(f.get("qty", 0)) * float(f.get("price", 0)) for f in fills)
+                total_commission = sum(float(f.get("commission", 0)) for f in fills)
+                commission_asset = fills[0].get("commissionAsset", "")
+                avg_price = total_cost / total_qty if total_qty > 0 else 0
+
+            self.logger.warning(
+                f"ORDER {symbol} [{intent}] | side={side} status={status} | "
+                f"orderId={order_id} | qty={exec_qty} | total={cummulative} USDT | "
+                f"avgPrice={avg_price:.6f} | commission={total_commission:.6f} {commission_asset}"
+            )
+        except Exception as e:
+            self.logger.error(f"_log_orden({symbol}): {e}")
+
     def execute_action(self, bot, action):
         """Ejecuta la acción decidida por el bot."""
         if action == "BUY":
@@ -750,7 +866,13 @@ class BotManager:
 
         if notional < min_notional:
             qty_min = min_notional / price
-            qty_adjusted = self._format_qty(bot.symbol, qty_min * 1.01)  # +1% margen
+            qty_adjusted = self._format_qty(bot.symbol, qty_min * 1.05)  # +5% margen para absorber redondeo
+
+            # Verificar que tras redondeo siga arriba del mínimo
+            if qty_adjusted * price < min_notional:
+                step = lot.get("stepSize", 0.1)
+                qty_adjusted += step
+                qty_adjusted = self._format_qty(bot.symbol, qty_adjusted)
 
             # Limitar riesgo: 3x en TESTNET, 2.5x en PRODUCTION
             max_risk_factor = 3.0 if self.env == "TESTNET" else 2.5
@@ -767,7 +889,10 @@ class BotManager:
             )
             qty = qty_adjusted
 
-        self.logger.info(f"{bot.symbol}: BUY qty={qty} price={price:.4f} capital={capital:.2f}")
+        self.logger.warning(
+            f"API REQUEST {bot.symbol} | side=BUY type=MARKET qty={qty} "
+            f"price~{price:.6f} notional~{qty * price:.2f} USDT | capital={capital:.2f}"
+        )
 
         order = self.spot_client.get_new_order(
             symbol=bot.symbol,
@@ -779,6 +904,8 @@ class BotManager:
         if not order:
             self.logger.error(f"{bot.symbol}: Orden BUY fallida")
             return
+
+        self._log_orden(bot.symbol, "BUY", order)
 
         order_id = order["orderId"]
         self.order_manager.register_order(symbol=bot.symbol, order_id=order_id, intent="ENTRY")
@@ -796,6 +923,9 @@ class BotManager:
         self.logger.warning(
             f"✅ {bot.symbol}: POSICIÓN ABIERTA @ {price:.6f} | qty={qty} | SL={bot.state['stop_loss']:.6f}"
         )
+
+        # Colocar STOP_LOSS_LIMIT en Binance como red de seguridad
+        self._place_sl_order(bot)
 
         # Almacenar BUY en booktrading
         if self.on_trade_booktrading:
@@ -816,7 +946,10 @@ class BotManager:
         if not self._check_notional(bot.symbol, qty, price):
             return
 
-        self.logger.info(f"{bot.symbol}: {intent} SELL qty={qty}")
+        self.logger.warning(
+            f"API REQUEST {bot.symbol} | side=SELL type=MARKET intent={intent} "
+            f"qty={qty} price~{price:.6f} notional~{qty * price:.2f} USDT"
+        )
 
         order = self.spot_client.get_new_order(
             symbol=bot.symbol,
@@ -828,6 +961,8 @@ class BotManager:
         if not order:
             self.logger.error(f"{bot.symbol}: Orden {intent} fallida")
             return
+
+        self._log_orden(bot.symbol, intent, order)
 
         order_id = order["orderId"]
         self.order_manager.register_order(symbol=bot.symbol, order_id=order_id, intent=intent)
@@ -847,6 +982,11 @@ class BotManager:
             )
 
         self.capital_manager.release(qty * price)
+
+        # Actualizar SL en exchange: cancelar viejo, colocar nuevo (qty reducida + trailing)
+        self._cancel_sl_order(bot)
+        if bot.state["remaining_qty"] > 0:
+            self._place_sl_order(bot)
 
         self.logger.warning(
             f"✅ {bot.symbol}: {intent} EJECUTADO | vendido={qty} | remaining={bot.state['remaining_qty']:.6f}"
@@ -898,6 +1038,7 @@ class BotManager:
                     "trailing_active": False,
                     "trail_high": None,
                     "trailing_stop": None,
+                    "sl_order_id": None,
                 }
             )
             return
@@ -910,6 +1051,7 @@ class BotManager:
         # Si el valor es menor al mínimo de Binance, es dust - convertir a BNB y limpiar
         if notional < min_notional:
             self.logger.warning(f"{bot.symbol}: EXIT dust (${notional:.2f} < ${min_notional:.2f}), convirtiendo a BNB")
+            self._cancel_sl_order(bot)
             self._convert_dust_to_bnb(bot.symbol)
             bot.state.update(
                 {
@@ -919,11 +1061,18 @@ class BotManager:
                     "trailing_active": False,
                     "trail_high": None,
                     "trailing_stop": None,
+                    "sl_order_id": None,
                 }
             )
             return
 
-        self.logger.warning(f"{bot.symbol}: EXIT ({reason}) SELL qty={qty} | notional=${notional:.2f} | price={price}")
+        # Cancelar SL del exchange antes de vender
+        self._cancel_sl_order(bot)
+
+        self.logger.warning(
+            f"API REQUEST {bot.symbol} | side=SELL type=MARKET intent=EXIT-{reason} "
+            f"qty={qty} price~{price:.6f} notional~{notional:.2f} USDT"
+        )
 
         order = self.spot_client.get_new_order(
             symbol=bot.symbol,
@@ -942,9 +1091,12 @@ class BotManager:
                     "trailing_active": False,
                     "trail_high": None,
                     "trailing_stop": None,
+                    "sl_order_id": None,
                 }
             )
             return
+
+        self._log_orden(bot.symbol, f"EXIT-{reason}", order)
 
         order_id = order["orderId"]
         self.order_manager.register_order(symbol=bot.symbol, order_id=order_id, intent="EXIT")
@@ -961,6 +1113,7 @@ class BotManager:
         bot.state["trailing_active"] = False
         bot.state["trail_high"] = None
         bot.state["trailing_stop"] = None
+        bot.state["sl_order_id"] = None
 
         self.logger.warning(f"✅ {bot.symbol}: POSICIÓN CERRADA ({reason}) @ {price:.6f} | qty={qty}")
 
@@ -999,6 +1152,20 @@ class BotCryptoUI:
         "4h": {"tp1": 0.08, "sl": 0.05, "trail_mult": 2.5},
         "1d": {"tp1": 0.10, "sl": 0.06, "trail_mult": 3.0},
     }
+
+    # Mapeo de timeframe operativo → timeframe superior (contexto estructural)
+    SUPERIOR_INTERVALS = {
+        "1m": "5m",
+        "3m": "15m",
+        "5m": "30m",
+        "15m": "1h",
+        "30m": "4h",
+        "1h": "4h",
+        "4h": "1d",
+        "1d": None,
+    }
+    CONTEXTO_PENALIZACION = -5
+    CONTEXTO_CACHE_TTL = 600  # segundos (10 min)
 
     def __init__(self, parent, colors, repositorio):
         """
@@ -1070,6 +1237,13 @@ class BotCryptoUI:
         # TopLevel windows abiertas (para cerrar en detener())
         self._toplevel_windows = []
         self._dust_symbols = []
+
+        # Scoring cycle (independiente del intervalo de velas)
+        self._scoring_timer_id = None
+        self._scoring_interval = 120000  # 2 minutos en ms
+
+        # Cache de contexto superior por símbolo
+        self._contexto_cache = {}  # {symbol: {"timestamp": float, "resultado": dict}}
 
         # Contadores reales
         self.trades_count = 0  # Trades completados (ciclos BUY→SELL)
@@ -1148,7 +1322,7 @@ class BotCryptoUI:
 
         self.logger.warning(
             f"⚙️ Config ({interval}): "
-            f"capital={config.get('capital')} | risk={config.get('risk_per_trade',0)*100:.0f}% | "
+            f"capital={config.get('capital')} | risk={config.get('risk_per_trade',0)*100:.1f}% | "
             f"TP1={factors['tp1']*100:.1f}% | Trail×={factors['trail_mult']} | SL={factors['sl']*100:.1f}% | "
             f"tp1_size={config.get('tp1_size')} | "
             f"RSI={config.get('rsi_buy')}/{config.get('rsi_sell')} | max_bots={config.get('max_active_bots', 3)}"
@@ -1157,7 +1331,7 @@ class BotCryptoUI:
         return config
 
     def inicializar(self):
-        """Inicializa la UI completa"""
+        """Inicializa la UI completa"""  # gwi001
         try:
             self._crear_graficos()
             self._crear_panel_control()
@@ -1284,17 +1458,6 @@ class BotCryptoUI:
         )
         self._lbl_pnl_total.pack(side=tk.RIGHT)
 
-        # Posiciones activas / total
-        # count_row = tk.Frame(footer, bg=bg)
-        # count_row.pack(fill=tk.X, padx=5)
-        # tk.Label(count_row, text="Posiciones:", bg=bg, fg="gray70", font=("Arial", 8), anchor="w", width=12).pack(
-        #    side=tk.LEFT
-        # )
-        # self._lbl_pos_count = tk.Label(
-        #    count_row, text="0/0", bg=bg, fg=fg, font=("Arial", 8, "bold"), anchor="e", width=14
-        # )
-        # self._lbl_pos_count.pack(side=tk.RIGHT)
-
         # Pérdida por SL individual
         sl_row = tk.Frame(footer, bg=bg)
         sl_row.pack(fill=tk.X, padx=5)
@@ -1335,7 +1498,7 @@ class BotCryptoUI:
             self._cap_labels["capital"].config(text=f"${capital:.2f}")
             self._cap_labels["reservado"].config(text=f"${reservado:.2f}")
             self._cap_labels["disponible"].config(text=f"${disponible:.2f}", fg="lime" if disponible > 0 else "red")
-            self._cap_labels["risk"].config(text=f"{risk_pct:.0f}%")
+            self._cap_labels["risk"].config(text=f"{risk_pct:.1f}%")
 
             # Limpiar posiciones previas
             for w in self._pos_frame.winfo_children():
@@ -1540,6 +1703,18 @@ class BotCryptoUI:
         self.lbl_pnl = tk.Label(row2, text="0.00%", bg=self.colors["cgcolor"], fg="white")
         self.lbl_pnl.pack(side=tk.LEFT)
 
+        # Max símbolos activos
+        tk.Label(row2, text="Max:", bg=self.colors["cgcolor"], fg="white").pack(side=tk.LEFT, padx=(20, 2))
+        max_bots = self.config.get("max_active_bots", 3)
+        self._lbl_max_bots = tk.Label(
+            row2,
+            text=str(max_bots),
+            bg=self.colors["cgcolor"],
+            fg="yellow",
+            font=("Arial", 10, "bold"),
+        )
+        self._lbl_max_bots.pack(side=tk.LEFT)
+
         # Botón para ver posiciones activas
         btn_activas = tk.Button(
             row2,
@@ -1578,15 +1753,16 @@ class BotCryptoUI:
             fg=self.colors["bgcolor"],
             font=("Arial", 10, "bold"),
         ).pack(side=tk.LEFT)
-        max_bots = self.config.get("max_active_bots", 3)
-        self._lbl_max_bots = tk.Label(
+
+        # Última actualización
+        self._lbl_scoring_iter = tk.Label(
             header,
-            text=f"Max: {max_bots}",
+            text="--:--:--",
             bg=self.colors["cgcolor"],
-            fg="yellow",
+            fg="gray",
             font=("Arial", 8),
         )
-        self._lbl_max_bots.pack(side=tk.RIGHT)
+        self._lbl_scoring_iter.pack(side=tk.RIGHT)
 
         # Botón agregar símbolo al universo
         btn_add = tk.Button(
@@ -1600,21 +1776,22 @@ class BotCryptoUI:
         )
         btn_add.pack(side=tk.RIGHT, padx=3)
 
-        # Treeview — 4 columnas compactas
-        columns = ("symbol", "score", "prioridad", "estado")
+        # Treeview — 5 columnas compactas
+        columns = ("symbol", "score", "prioridad", "ctx", "estado")
         self.scoring_tree = ttk.Treeview(
             self._scoring_frame,
             columns=columns,
             show="headings",
             height=6,
-            style="B.Treeview",
+            style="TFrame",
         )
-        col_w = (self.WIDGET_WIDTH - 10) // 4
+        col_w = (self.WIDGET_WIDTH - 10) // 5
         hdrs = {
-            "symbol": ("Activo", col_w + 10),
-            "score": ("Score", col_w - 10),
+            "symbol": ("Activo", col_w + 20),
+            "score": ("Score", col_w - 5),
             "prioridad": ("Prior.", col_w),
-            "estado": ("Estado", col_w),
+            "ctx": ("Ctx", col_w - 10),
+            "estado": ("Estado", col_w - 5),
         }
         for col, (txt, w) in hdrs.items():
             self.scoring_tree.heading(col, text=txt)
@@ -1628,6 +1805,7 @@ class BotCryptoUI:
         self.scoring_tree.tag_configure("Media", foreground="yellow")
         self.scoring_tree.tag_configure("Revisión", foreground="white")
         self.scoring_tree.tag_configure("Bloqueado", foreground="red")
+        self.scoring_tree.tag_configure("Fuera Ctx", foreground="orange")
 
     # =========================================
     # CANVAS SCROLLABLE
@@ -1801,11 +1979,38 @@ class BotCryptoUI:
         }
 
     def _on_trade_complete(self, symbol):
-        """Callback cuando se completa un trade (posición cerrada)"""
+        """Callback cuando se completa un trade (posición cerrada).
+        Puede ser llamado desde background thread, usa after() para UI."""
         self.trades_count += 1
         self.logger.warning(f"Trade #{self.trades_count} completado: {symbol}")
-        if self.lbl_trades:
-            self.lbl_trades.config(text=str(self.trades_count))
+
+        def _ui_cleanup():
+            try:
+                if self.lbl_trades:
+                    self.lbl_trades.config(text=str(self.trades_count))
+
+                # Remover bot y widget del canvas
+                if symbol in self.bots:
+                    del self.bots[symbol]
+                if self.bot_manager:
+                    self.bot_manager.unregister_bot(symbol)
+                if symbol in self.widgets:
+                    self.widgets[symbol].frame.destroy()
+                    del self.widgets[symbol]
+
+                # Resetear indicadores en BD
+                self._resetear_indicadores_bd(symbol)
+
+                # Reorganizar grid y actualizar scoring
+                self._reorganizar_grid()
+                self._actualizar_panel_scoring()
+
+                # Forzar ciclo de scoring inmediato para buscar reemplazo
+                self._scoring_cycle()
+            except Exception as e:
+                self.logger.error(f"_on_trade_complete UI cleanup {symbol}: {e}")
+
+        self.parent.after(0, _ui_cleanup)
 
     def _almacenar_trades_booktrading(self, symbol, order=None):
         """
@@ -1858,9 +2063,15 @@ class BotCryptoUI:
     # WEBSOCKET
     # =========================================
     def _iniciar_websocket(self):
-        """Inicia WebSocket para recibir klines"""
+        """Inicia WebSocket para recibir klines de todo el universo de activos"""
         try:
-            symbols = list(self.widgets.keys())
+            # Monitorear todos los símbolos: activos + observación
+            symbols_set = set(self.bots.keys())
+            for a in self.all_activos:
+                s = a.get("symbol")
+                if s:
+                    symbols_set.add(s)
+            symbols = list(symbols_set)
             if not symbols:
                 return
 
@@ -1998,12 +2209,23 @@ class BotCryptoUI:
                 is_closed = kline["x"]
 
                 # Delegar actualizaciones de UI al main thread via .after()
+                price = float(kline["c"])
                 if symbol in self.widgets:
-                    price = float(kline["c"])
                     self.parent.after(0, self.widgets[symbol].update_price, price)
 
-                # Si vela cerrada y bot activo, evaluar
-                if is_closed and symbol in self.bots:
+                # Monitoreo SL tick-a-tick para bots en LONG
+                if symbol in self.bots:
+                    bot = self.bots[symbol]
+                    st = bot.state
+                    if st.get("position") == "LONG":
+                        trail_sl = st.get("trailing_stop")
+                        sl = st.get("stop_loss")
+                        effective_sl = trail_sl if st.get("trailing_active") and trail_sl else sl
+                        if effective_sl and price <= effective_sl:
+                            self.logger.warning(f"SL TICK {symbol}: price={price:.6f} <= sl={effective_sl:.6f}")
+                            self.parent.after(0, self._ejecutar_sl_tick, symbol)
+
+                if is_closed:
                     candle = {
                         "open": float(kline["o"]),
                         "high": float(kline["h"]),
@@ -2012,11 +2234,40 @@ class BotCryptoUI:
                         "volume": float(kline["v"]),
                         "timestamp": kline["t"],
                     }
-                    self.parent.after(0, self._evaluar_bot, symbol, candle)
+                    if symbol in self.bots:
+                        # Bot activo: evaluar normalmente
+                        self.parent.after(0, self._evaluar_bot, symbol, candle)
+                    else:
+                        # Símbolo en observación: recalcular scoring y buscar oportunidad
+                        self.parent.after(0, self._evaluar_observacion, symbol)
 
         except Exception as e:
             if not self._closing:
                 self.logger.error(f"Error procesando WS message: {e}")
+
+    def _ejecutar_sl_tick(self, symbol):
+        """Ejecuta EXIT inmediato por SL detectado tick-a-tick (main thread)."""
+        bot = self.bots.get(symbol)
+        if not bot or bot.state.get("position") != "LONG":
+            return  # Ya salió o no existe
+
+        self.logger.warning(f"SL TICK EXIT {symbol}: ejecutando salida inmediata")
+
+        def _exit_bg(b=bot, s=symbol):
+            try:
+                self.bot_manager._execute_exit(b, reason="SL_TICK")
+            except Exception as ex:
+                self.logger.error(f"{s}: SL_TICK exit error: {ex}")
+
+            def _post():
+                w = self.widgets.get(s)
+                if w:
+                    w.update_state(b.get_public_state(), b.get_indicators(), {})
+                self._actualizar_panel_capital()
+
+            self.parent.after(0, _post)
+
+        threading.Thread(target=_exit_bg, daemon=True).start()
 
     def _evaluar_bot(self, symbol, candle):
         """Evalúa el bot para un símbolo"""  # gwi001
@@ -2062,43 +2313,52 @@ class BotCryptoUI:
             # Publicar estado en DataHub para consulta desde Telegram
             self._publicar_estado_botcrypto()
 
-            # Actualizar panel capital
+            # Actualizar panel capital (scoring cycle también lo hace cada 2 min)
             self._actualizar_panel_capital()
-
-            # Recalcular scoring y evaluar rotación en cada cierre de vela
-            self._evaluar_rotacion_post_vela(symbol)
 
         except Exception as e:
             self.logger.error(f"_evaluar_bot(): Error evaluando bot {symbol}: {e}")
 
-    def _evaluar_rotacion_post_vela(self, symbol):
-        """Recalcula scoring de bots activos. Lanza recálculo de observación en background.
-        Si hay bot NONE, la rotación se ejecuta DESPUÉS de que observación esté fresco."""
-        try:
-            # Recalcular scoring de bots activos (rápido, sin REST)
-            for sym, bot in list(self.bots.items()):
-                scoring = bot.calcular_scoring()
-                self.scoring_data[sym] = scoring
-                self._persistir_scoring(sym, scoring)
+    def _evaluar_observacion(self, symbol):
+        """Evalúa un símbolo en observación cuando cierra vela.
+        Solo actualiza scoring_data. La gestión de cubos la hace el scoring cycle."""
+        if symbol in self.bots:
+            return
+        if not self.running:
+            return
 
-            # ¿Hay algún bot en NONE? → rotación posible
-            bot = self.bots.get(symbol)
-            necesita_rotacion = False
-            if bot:
-                state = bot.get_public_state()
-                necesita_rotacion = state.get("position") == "NONE"
-
-            # Recalcular observación en background → rotar al terminar
-            def _recalcular_y_rotar():
-                self._recalcular_scoring_observacion_sync()
-                if necesita_rotacion:
-                    self.parent.after(0, self._rotar_activos)
+        def _bg():
+            try:
+                strategy_config = {
+                    "rsi_buy": self.config.get("rsi_buy", 35),
+                    "rsi_sell": self.config.get("rsi_sell", 65),
+                }
+                risk_config = {
+                    "risk_per_trade": self.config.get("risk_per_trade", 0.02),
+                    "tp1_pct": self.config.get("tp1_pct", 0.03),
+                    "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
+                    "tp1_size": self.config.get("tp1_size", 0.33),
+                    "trail_mult": self.config.get("trail_mult", 1.5),
+                }
+                tmp_bot = TradingBotSpot(
+                    symbol=symbol,
+                    interval=self.interval,
+                    strategy_config=strategy_config,
+                    risk_config=risk_config,
+                    state_repo=None,
+                    order_manager=None,
+                )
+                self._cargar_historico(tmp_bot, symbol, limit=500)
+                tmp_bot.calcular_indicadores()
+                contexto = self._evaluar_contexto_superior(symbol)
+                scoring = tmp_bot.calcular_scoring(contexto_superior=contexto)
+                self.scoring_data[symbol] = scoring
+                self._persistir_scoring(symbol, scoring)
                 self.parent.after(0, self._actualizar_panel_scoring)
+            except Exception as e:
+                self.logger.error(f"_evaluar_observacion({symbol}): {e}")
 
-            threading.Thread(target=_recalcular_y_rotar, daemon=True).start()
-
-        except Exception as e:
-            self.logger.error(f"_evaluar_rotacion_post_vela({symbol}): {e}")
+        threading.Thread(target=_bg, daemon=True).start()
 
     def _recalcular_scoring_observacion_sync(self):
         """Recalcula scoring para activos en observación (no activos). Síncrono."""
@@ -2130,7 +2390,8 @@ class BotCryptoUI:
                     )
                     self._cargar_historico(tmp_bot, symbol, limit=500)
                     tmp_bot.calcular_indicadores()
-                    scoring = tmp_bot.calcular_scoring()
+                    contexto = self._evaluar_contexto_superior(symbol)
+                    scoring = tmp_bot.calcular_scoring(contexto_superior=contexto)
                     self.scoring_data[symbol] = scoring
                     self._persistir_scoring(symbol, scoring)
                 except Exception as e:
@@ -2184,6 +2445,7 @@ class BotCryptoUI:
                         del self.widgets[none_sym]
                     if self.bot_manager:
                         self.bot_manager.unregister_bot(none_sym)
+                    self._resetear_indicadores_bd(none_sym)
 
                     # Crear widget vacío (UI)
                     activo = activos_map.get(mejor_sym, {})
@@ -2204,11 +2466,30 @@ class BotCryptoUI:
                         except Exception as ex:
                             self.logger.error(f"Rotación _crear_bot({sym}): {ex}")
 
+                    # Evaluar inmediatamente los nuevos bots (aún en background)
+                    for sym in rotaciones:
+                        bot = self.bots.get(sym)
+                        if bot and bot.df is not None and len(bot.df) >= 50:
+                            try:
+                                bot.calcular_indicadores()
+                                action, conditions = bot.evaluate()
+                                self.logger.warning(f"ROTACIÓN {sym}: Eval → {action}")
+                                if action != "HOLD" and self.bot_manager:
+                                    self.bot_manager.execute_action(bot, action)
+                            except Exception as ex:
+                                self.logger.error(f"Rotación eval {sym}: {ex}")
+
                     def _post_rotacion():
                         for sym in rotaciones:
                             w = self.widgets.get(sym)
-                            if w:
+                            bot = self.bots.get(sym)
+                            if w and bot:
                                 w.set_running(True)
+                                if bot.df is not None and len(bot.df) >= 50:
+                                    st = bot.get_public_state()
+                                    ind = bot.get_indicators()
+                                    _, conds = bot.evaluate()
+                                    w.update_state(st, ind, conds)
                         self._detener_websocket()
                         self.parent.after(500, self._iniciar_websocket)
 
@@ -2241,13 +2522,19 @@ class BotCryptoUI:
 
                 score = scoring.get("score_total", 0)
                 prioridad = scoring.get("prioridad", "BLOQUEADO")
+                ctx_icon = "OK" if scoring.get("contexto_ok", True) else "NO"
 
                 self.scoring_tree.insert(
                     "",
                     "end",
-                    values=(sym, score, prioridad, "OBSERV."),
+                    values=(sym, score, prioridad, ctx_icon, "OBSERV."),
                     tags=(prioridad,),
                 )
+
+            # Actualizar timestamp
+            now = datetime.now().strftime("%H:%M:%S")
+            self._lbl_scoring_iter.config(text=now, fg="cyan")
+
         except Exception as e:
             self.logger.error(f"_actualizar_panel_scoring(): {e}")
 
@@ -2256,21 +2543,155 @@ class BotCryptoUI:
         try:
             from datetime import datetime
 
+            # Recuperar contexto completo del cache para indicadores_ctx
+            ctx_cached = self._contexto_cache.get(symbol, {}).get("resultado", {})
+
             data = {
                 "scoring": {
                     "total": scoring.get("score_total", 0),
+                    "base": scoring.get("score_base", 0),
+                    "contexto": scoring.get("score_contexto", 0),
                     "rsi": scoring.get("score_rsi", 0),
                     "macd": scoring.get("score_macd", 0),
                     "ema": scoring.get("score_ema", 0),
                     "vol": scoring.get("score_vol", 0),
                 },
                 "prioridad": scoring.get("prioridad", "BLOQUEADO"),
+                "intervalo": self.interval,
                 "indicadores": scoring.get("indicadores", {}),
+                "contexto_superior": {
+                    "ok": scoring.get("contexto_ok", True),
+                    "timeframe": ctx_cached.get("timeframe", self.SUPERIOR_INTERVALS.get(self.interval)),
+                    "condiciones": ctx_cached.get("condiciones_cumplidas", 0),
+                    "detalle": scoring.get("contexto_detalle", {}),
+                    "indicadores": ctx_cached.get("indicadores_ctx", {}),
+                },
                 "timestamp": datetime.now().isoformat(),
             }
             self.repositorio.update_otros_activos_indicadores(symbol, self.ACCOUNT, data)
         except Exception as e:
             self.logger.error(f"_persistir_scoring({symbol}): {e}")
+
+    def _evaluar_contexto_superior(self, symbol):
+        """Evalúa el contexto del timeframe superior para penalización estructural.
+        Usa cache de 10 min para evitar API calls excesivos.
+        Retorna dict con contexto_ok, condiciones_cumplidas, detalle."""
+        superior_interval = self.SUPERIOR_INTERVALS.get(self.interval)
+
+        # Sin TF superior (1d) → contexto OK por defecto
+        if superior_interval is None:
+            return {
+                "contexto_ok": True,
+                "condiciones_cumplidas": 4,
+                "detalle": {
+                    "ema20_gt_ema50": True,
+                    "price_gt_ema20": True,
+                    "macd_gt_0": True,
+                    "rsi_gt_50": True,
+                },
+            }
+
+        # Revisar cache
+        now = time.time()
+        cached = self._contexto_cache.get(symbol)
+        if cached and (now - cached["timestamp"]) < self.CONTEXTO_CACHE_TTL:
+            return cached["resultado"]
+
+        try:
+            if not self.spot_client:
+                return {"contexto_ok": True, "condiciones_cumplidas": 4, "detalle": {}}
+
+            klines = self.spot_client.klines(symbol=symbol, interval=superior_interval, limit=100)
+            if not klines or len(klines) < 55:
+                return {"contexto_ok": True, "condiciones_cumplidas": 4, "detalle": {}}
+
+            df_htf = pd.DataFrame(
+                [
+                    {
+                        "Date": datetime.fromtimestamp(k[0] / 1000),
+                        "Open": float(k[1]),
+                        "High": float(k[2]),
+                        "Low": float(k[3]),
+                        "Close": float(k[4]),
+                        "Volume": float(k[5]),
+                    }
+                    for k in klines
+                ]
+            )
+
+            # Indicadores con EMA20/EMA50 para contexto estructural
+            calcular_indicadores_df(df_htf, ema_fast=20, ema_slow=50)
+
+            last = df_htf.iloc[-1]
+            prev = df_htf.iloc[-2] if len(df_htf) >= 2 else last
+
+            # Valores numéricos del TF superior
+            ctx_rsi = float(last["rsi"])
+            ctx_macd = float(last["macd"])
+            ctx_macd_signal = float(last["macd_signal"])
+            ctx_ema20 = float(last["ema_fast"])
+            ctx_ema50 = float(last["ema_slow"])
+            ctx_price = float(last["Close"])
+
+            # Variación porcentual de la última vela superior
+            ctx_cambio_pct = (
+                ((ctx_price - float(prev["Close"])) / float(prev["Close"])) * 100 if float(prev["Close"]) > 0 else 0
+            )
+
+            # Tendencia EMA: distancia porcentual EMA20 vs EMA50
+            ctx_ema_gap_pct = ((ctx_ema20 - ctx_ema50) / ctx_ema50) * 100 if ctx_ema50 > 0 else 0
+
+            # Evaluación de condiciones
+            ema20_gt_ema50 = bool(ctx_ema20 > ctx_ema50)
+            price_gt_ema20 = bool(ctx_price > ctx_ema20)
+            macd_gt_0 = bool(ctx_macd > 0)
+            rsi_gt_50 = bool(ctx_rsi > 50)
+
+            condiciones = sum([ema20_gt_ema50, price_gt_ema20, macd_gt_0, rsi_gt_50])
+            contexto_ok = condiciones >= 3
+
+            resultado = {
+                "contexto_ok": contexto_ok,
+                "condiciones_cumplidas": condiciones,
+                "timeframe": superior_interval,
+                "detalle": {
+                    "ema20_gt_ema50": ema20_gt_ema50,
+                    "price_gt_ema20": price_gt_ema20,
+                    "macd_gt_0": macd_gt_0,
+                    "rsi_gt_50": rsi_gt_50,
+                },
+                "indicadores_ctx": {
+                    "rsi": round(ctx_rsi, 2),
+                    "macd": round(ctx_macd, 8),
+                    "macd_signal": round(ctx_macd_signal, 8),
+                    "ema20": round(ctx_ema20, 6),
+                    "ema50": round(ctx_ema50, 6),
+                    "price": round(ctx_price, 6),
+                    "cambio_pct": round(ctx_cambio_pct, 3),
+                    "ema_gap_pct": round(ctx_ema_gap_pct, 3),
+                },
+            }
+
+            self._contexto_cache[symbol] = {"timestamp": now, "resultado": resultado}
+            self.logger.info(
+                f"CONTEXTO {symbol} [{superior_interval}]: {condiciones}/4 → {'OK' if contexto_ok else 'FUERA'}"
+            )
+            return resultado
+
+        except Exception as e:
+            self.logger.error(f"_evaluar_contexto_superior({symbol}): {e}")
+            return {"contexto_ok": True, "condiciones_cumplidas": 4, "detalle": {}}
+
+    def _resetear_indicadores_bd(self, symbol):
+        """Limpia el campo indicadores en BD cuando un símbolo sale del panel activo"""
+        try:
+            data = {"scoring": {}, "prioridad": "OBSERV.", "indicadores": {}, "timestamp": datetime.now().isoformat()}
+            self.repositorio.update_otros_activos_indicadores(symbol, self.ACCOUNT, data)
+            if symbol in self.scoring_data:
+                del self.scoring_data[symbol]
+            self.logger.info(f"{symbol}: Indicadores reseteados en BD")
+        except Exception as e:
+            self.logger.error(f"_resetear_indicadores_bd({symbol}): {e}")
 
     # =========================================
     # EVENT HANDLERS
@@ -2355,12 +2776,28 @@ class BotCryptoUI:
         threading.Thread(target=_trabajo_pesado, daemon=True).start()
 
     def _fase_ui_bots(self, pre_bots):
-        """Main thread: solo operaciones UI (widgets, scoring, WS). Sin REST."""
+        """Main thread: solo operaciones UI (widgets, scoring, WS). Sin REST.
+        Solo crea widgets para bots con posición LONG o señal BUY. Los NONE no entran al canvas."""
         try:
             activos_map = {a["symbol"]: a for a in self.all_activos}
             active_count = 0
 
             for symbol, bot in pre_bots.items():
+                # Evaluar antes de decidir si entra al canvas
+                action = "HOLD"
+                conditions = {}
+                has_position = bot.get_public_state().get("position") == "LONG"
+
+                if bot.df is not None and len(bot.df) >= 50:
+                    action, conditions = bot.evaluate()
+
+                # Solo crear widget si tiene posición LONG, señal BUY, o scoring Alta (>=5)
+                score = self.scoring_data.get(symbol, {}).get("score_total", 0)
+                if not has_position and action != "BUY" and score < 5:
+                    self.logger.info(f"{symbol}: NONE sin BUY ni Alta → no entra al canvas (score={score})")
+                    self._resetear_indicadores_bd(symbol)
+                    continue
+
                 # Crear widget (UI pura)
                 activo = activos_map.get(symbol, {})
                 grid_idx = active_count + 1
@@ -2372,39 +2809,41 @@ class BotCryptoUI:
                 self.bots[symbol] = bot
                 self.widgets[symbol].set_running(True)
 
-                # Evaluación inicial + ejecución
-                if bot.df is not None and len(bot.df) >= 50:
-                    action, conditions = bot.evaluate()
-                    state = bot.get_public_state()
-                    indicators = bot.get_indicators()
-                    self.widgets[symbol].update_state(state, indicators, conditions)
-                    self.logger.warning(f"{symbol}: Eval → {action} | position={state.get('position')}")
+                # Mostrar estado
+                state = bot.get_public_state()
+                indicators = bot.get_indicators()
+                self.widgets[symbol].update_state(state, indicators, conditions)
+                self.logger.warning(f"{symbol}: Eval → {action} | position={state.get('position')}")
 
-                    if action != "HOLD" and self.bot_manager:
-                        self.logger.warning(f">>> {symbol}: EJECUTANDO {action}")
+                # Ejecutar acción si no es HOLD
+                if action != "HOLD" and self.bot_manager:
+                    self.logger.warning(f">>> {symbol}: EJECUTANDO {action}")
 
-                        def _exec_init(b=bot, a=action, s=symbol, c=conditions):
-                            try:
-                                self.bot_manager.execute_action(b, a)
-                            except Exception as ex:
-                                self.logger.error(f"{s}: Error init {a}: {ex}")
+                    def _exec_init(b=bot, a=action, s=symbol, c=conditions):
+                        try:
+                            self.bot_manager.execute_action(b, a)
+                        except Exception as ex:
+                            self.logger.error(f"{s}: Error init {a}: {ex}")
 
-                            def _upd():
-                                w = self.widgets.get(s)
-                                if w:
-                                    w.update_state(b.get_public_state(), b.get_indicators(), c)
+                        def _upd():
+                            w = self.widgets.get(s)
+                            if w:
+                                w.update_state(b.get_public_state(), b.get_indicators(), c)
 
-                            self.parent.after(0, _upd)
+                        self.parent.after(0, _upd)
 
-                        threading.Thread(target=_exec_init, daemon=True).start()
+                    threading.Thread(target=_exec_init, daemon=True).start()
 
                 active_count += 1
 
             # Scoring panel
             self._actualizar_panel_scoring()
 
-            # WebSocket
+            # WebSocket (incluye todos los símbolos del universo para detectar señales)
             self._iniciar_websocket()
+
+            # Iniciar ciclo de scoring independiente (cada 2 min)
+            self._iniciar_scoring_cycle()
 
             self.lbl_status.config(text="● RUNNING", fg="lime")
             self.logger.warning(f"BotCrypto LISTO | bots={len(self.bots)} | scoring={len(self.scoring_data)}")
@@ -2444,7 +2883,8 @@ class BotCryptoUI:
                 )
                 self._cargar_historico(tmp_bot, symbol, limit=500)
                 tmp_bot.calcular_indicadores()
-                scoring = tmp_bot.calcular_scoring()
+                contexto = self._evaluar_contexto_superior(symbol)
+                scoring = tmp_bot.calcular_scoring(contexto_superior=contexto)
                 self.scoring_data[symbol] = scoring
             except Exception as e:
                 self.logger.error(f"Scoring {symbol}: {e}")
@@ -2465,8 +2905,13 @@ class BotCryptoUI:
         self.running = False
         self.lbl_status.config(text="● STOPPED", fg="gray")
 
-        # Detener WebSocket
+        # Detener WebSocket y scoring cycle
         self._detener_websocket()
+        self._detener_scoring_cycle()
+
+        # Resetear indicadores en BD para todos los bots activos
+        for sym in list(self.bots.keys()):
+            self._resetear_indicadores_bd(sym)
 
         # Limpiar bots
         self.bots.clear()
@@ -2613,10 +3058,13 @@ class BotCryptoUI:
                 self.widgets[symbol].frame.destroy()
                 del self.widgets[symbol]
 
-            # 4. Actualizar scoring — el símbolo pasa a OBSERV.
+            # 4. Resetear indicadores en BD
+            self._resetear_indicadores_bd(symbol)
+
+            # 5. Actualizar scoring — el símbolo pasa a OBSERV.
             self._actualizar_panel_scoring()
 
-            # 5. Reorganizar grid
+            # 6. Reorganizar grid
             self._reorganizar_grid()
 
             self.logger.info(f"{symbol}: Quitado del panel → pasa a observación")
@@ -2751,7 +3199,9 @@ class BotCryptoUI:
         tree_frame.pack(expand=True, fill="both", padx=10, pady=5)
 
         # selectmode="extended" permite selección múltiple con Ctrl+click o Shift+click
-        tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=8, selectmode="extended")
+        tree = ttk.Treeview(
+            tree_frame, columns=columns, show="headings", height=8, selectmode="extended", style="TFrame"
+        )
 
         # Configurar columnas
         tree.heading("symbol", text="Symbol")
@@ -3060,6 +3510,157 @@ class BotCryptoUI:
             self.right.after_cancel(self._refresh_timer_id)
             self._refresh_timer_id = None
 
+    # =========================================
+    # SCORING CYCLE (independiente del intervalo de velas)
+    # =========================================
+    def _iniciar_scoring_cycle(self):
+        """Inicia el ciclo periódico de scoring (cada 2 min)"""
+        self._scoring_cycle()
+
+    def _detener_scoring_cycle(self):
+        """Detiene el ciclo de scoring"""
+        if self._scoring_timer_id:
+            self.parent.after_cancel(self._scoring_timer_id)
+            self._scoring_timer_id = None
+
+    def _scoring_cycle(self):
+        """Ciclo independiente: recalcula scoring de TODO el universo,
+        gestiona cubos (entra Alta, sale no-Alta), actualiza panel.
+        Corre cada 2 min sin importar el intervalo de velas."""
+        if self._closing or not self.running:
+            return
+
+        def _bg():
+            try:
+                self.logger.info("SCORING CYCLE: Recalculando universo...")
+                self._recalcular_scoring_observacion_sync()
+
+                # Recalcular scoring de bots activos (con contexto superior)
+                for sym, bot in list(self.bots.items()):
+                    try:
+                        contexto = self._evaluar_contexto_superior(sym)
+                        scoring = bot.calcular_scoring(contexto_superior=contexto)
+                        self.scoring_data[sym] = scoring
+                        self._persistir_scoring(sym, scoring)
+                    except Exception:
+                        pass
+
+                # Gestionar cubos en main thread
+                self.parent.after(0, self._gestionar_cubos)
+
+            except Exception as e:
+                self.logger.error(f"_scoring_cycle bg: {e}")
+            finally:
+                # Programar siguiente ciclo
+                if not self._closing and self.running:
+                    self.parent.after(0, self._programar_siguiente_scoring)
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _programar_siguiente_scoring(self):
+        """Programa el siguiente ciclo de scoring"""
+        if not self._closing and self.running:
+            self._scoring_timer_id = self.parent.after(self._scoring_interval, self._scoring_cycle)
+
+    def _gestionar_cubos(self):
+        """Main thread: agrega/remueve cubos según scoring actual.
+        - Score >= 5 (Alta) + hay espacio → entra al canvas
+        - Score < 5 + NONE → sale del canvas
+        """
+        try:
+            max_bots = self.config.get("max_active_bots", 3)
+
+            # 1. Remover bots NONE con scoring < 5
+            bots_removidos = []
+            for sym, bot in list(self.bots.items()):
+                if bot.get_public_state().get("position") != "NONE":
+                    continue
+                score = self.scoring_data.get(sym, {}).get("score_total", 0)
+                if score < 5:
+                    self.logger.warning(f"SCORING CYCLE: {sym} score={score} < 5 → removiendo")
+                    bots_removidos.append(sym)
+                    del self.bots[sym]
+                    if self.bot_manager:
+                        self.bot_manager.unregister_bot(sym)
+                    if sym in self.widgets:
+                        self.widgets[sym].frame.destroy()
+                        del self.widgets[sym]
+                    self._resetear_indicadores_bd(sym)
+
+            # 2. Agregar observación con scoring Alta si hay espacio
+            activos_en_panel = set(self.bots.keys())
+            candidatos = []
+            for sym, scoring in self.scoring_data.items():
+                if sym not in activos_en_panel:
+                    score = scoring.get("score_total", 0)
+                    if score >= 5:
+                        candidatos.append((sym, score))
+
+            candidatos.sort(key=lambda x: x[1], reverse=True)
+
+            for sym, score in candidatos:
+                if len(self.bots) >= max_bots:
+                    break
+                if sym in self.bots:
+                    continue
+
+                self.logger.warning(f"SCORING CYCLE: {sym} score={score} → creando bot")
+
+                # Crear bot en background
+                def _crear_bg(s=sym):
+                    try:
+                        self._crear_bot(s)
+                    except Exception as e:
+                        self.logger.error(f"SCORING CYCLE _crear_bot({s}): {e}")
+                        return
+
+                    def _ui(s=s):
+                        if s not in self.bots:
+                            return
+                        activos_map = {a["symbol"]: a for a in self.all_activos}
+                        activo = activos_map.get(s, {})
+                        grid_idx = len(self.widgets) + 1
+                        row = grid_idx // self.COLUMNS
+                        col = grid_idx % self.COLUMNS
+                        self._crear_widget_simbolo(s, activo, row, col)
+                        self.widgets[s].set_running(True)
+
+                        bot = self.bots.get(s)
+                        if bot and bot.df is not None and len(bot.df) >= 50:
+                            action, conds = bot.evaluate()
+                            self.widgets[s].update_state(bot.get_public_state(), bot.get_indicators(), conds)
+                            if action == "BUY" and self.bot_manager:
+                                self.logger.warning(f">>> {s}: BUY desde scoring cycle")
+
+                                def _exec(b=bot):
+                                    try:
+                                        self.bot_manager.execute_action(b, "BUY")
+                                    except Exception as ex:
+                                        self.logger.error(f"{s}: BUY error: {ex}")
+
+                                    def _upd():
+                                        w = self.widgets.get(s)
+                                        if w:
+                                            w.update_state(b.get_public_state(), b.get_indicators(), {})
+
+                                    self.parent.after(0, _upd)
+
+                                threading.Thread(target=_exec, daemon=True).start()
+
+                    self.parent.after(0, _ui)
+
+                threading.Thread(target=_crear_bg, daemon=True).start()
+
+            if bots_removidos:
+                self._reorganizar_grid()
+
+            # 3. Actualizar panel scoring y capital (alineados)
+            self._actualizar_panel_scoring()
+            self._actualizar_panel_capital()
+
+        except Exception as e:
+            self.logger.error(f"_gestionar_cubos(): {e}")
+
     def _cerrar_toplevel(self, win):
         """Cierra una TopLevel y la remueve del registro"""
         try:
@@ -3085,6 +3686,7 @@ class BotCryptoUI:
             self.parent.after_cancel(self._ws_reconnect_timer)
             self._ws_reconnect_timer = None
         self._detener_auto_refresh()
+        self._detener_scoring_cycle()
         self._detener_websocket()
 
     def _on_refresh_config(self):
@@ -3102,6 +3704,10 @@ class BotCryptoUI:
                 self.capital_manager.capital_total = new_capital
                 self.logger.info(f"CapitalManager actualizado: {new_capital:.2f} USDT")
 
+            # Actualizar label Max bots
+            new_max = self.config.get("max_active_bots", 3)
+            self._lbl_max_bots.config(text=str(new_max))
+
             # Actualizar combo de ambiente si cambió
             if self.env:
                 self.combo_env.set(self.env)
@@ -3110,7 +3716,7 @@ class BotCryptoUI:
             self._actualizar_saldo()
 
             self.logger.warning(
-                f"🔄 Config recargada: capital {old_capital:.2f} → {new_capital:.2f} USDT | env={self.env}"
+                f"Config recargada: capital {old_capital:.2f} → {new_capital:.2f} | max_bots={new_max} | env={self.env}"
             )
 
         except Exception as e:
@@ -3140,6 +3746,17 @@ class BotCryptoUI:
         """Cambia el intervalo de velas y auto-ajusta TP/SL"""
         new_interval = self.combo_interval.get()
         if new_interval != self.interval:
+            # Bloquear si hay posiciones LONG activas
+            tiene_posiciones = any(bot.get_public_state().get("position") == "LONG" for bot in self.bots.values())
+            if tiene_posiciones:
+                self.combo_interval.set(self.interval)  # Revertir combo
+                self.logger.warning(f"Cambio de intervalo bloqueado: hay posiciones LONG activas")
+                MyMessageBox(self.right).showwarning(
+                    "Cambio bloqueado",
+                    "No se puede cambiar la temporalidad con posiciones LONG activas.\nCierra las posiciones primero.",
+                )
+                return
+
             self.interval = new_interval
 
             # Auto-ajustar TP/SL según nueva temporalidad
@@ -3268,7 +3885,8 @@ class BotCryptoUI:
                             )
                             self._cargar_historico(tmp_bot, symbol, limit=500)
                             tmp_bot.calcular_indicadores()
-                            scoring = tmp_bot.calcular_scoring()
+                            contexto = self._evaluar_contexto_superior(symbol)
+                            scoring = tmp_bot.calcular_scoring(contexto_superior=contexto)
                             self.scoring_data[symbol] = scoring
                             self._persistir_scoring(symbol, scoring)
                         except Exception as e:
@@ -3700,26 +4318,25 @@ class WidgetBotSymbol:
             command=self.on_stop,
         ).pack(side=tk.LEFT, padx=2)
 
-        tk.Button(
-            btn_frame,
-            text="📈",
-            bg="blue",
-            fg="white",
-            width=3,
-            command=self.on_chart,
-        ).pack(side=tk.LEFT, padx=2)
-
         # SELL ALL - vender todo el balance del activo
         self.btn_sell_all = tk.Button(
             btn_frame,
-            text="SELL",
+            text="Close",
             bg="#E91E63",
             fg="white",
-            width=5,
+            width=7,
             font=("Arial", 8, "bold"),
             command=self.on_sell_all if self.on_sell_all else lambda: None,
         )
         self.btn_sell_all.pack(side=tk.RIGHT, padx=2)
+        tk.Button(
+            btn_frame,
+            text="Stragy",
+            bg="blue",
+            fg="white",
+            width=7,
+            command=self.on_chart,
+        ).pack(side=tk.RIGHT, padx=2)
 
     def _crear_label_row(self, parent, label_text, attr_name, row, font_size=9):
         """Crea una fila con label y valor"""
