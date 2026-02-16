@@ -27,6 +27,8 @@ EDGAR/
 .idea/
 *.swp
 *.swo
+.env
+node_modules/
 
 # otros proyectos
 AppOliday/

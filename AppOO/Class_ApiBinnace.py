@@ -185,6 +185,8 @@ class BinanceSpot(Spot):
                                 result[symbol]["stepSize"] = float(filtro["stepSize"])
                             elif filtro["filterType"] == "NOTIONAL":
                                 result[symbol]["minNotional"] = float(filtro.get("minNotional", 5.0))
+                            elif filtro["filterType"] == "PRICE_FILTER":
+                                result[symbol]["tickSize"] = float(filtro["tickSize"])
                         return result
         except (ClientError, requests.exceptions.RequestException) as e:
             self.logger.error(f"get_exchange_info(): {e}")
@@ -193,7 +195,8 @@ class BinanceSpot(Spot):
     # ÓRDENES
     # =========================
     @handle_binance_exceptions
-    def get_new_order(self, symbol=None, side=None, type=None, price=None, quantity=None, timeInForce=None):
+    def get_new_order(self, symbol=None, side=None, type=None, price=None,
+                      quantity=None, timeInForce=None, stopPrice=None):
 
         params = {
             "symbol": symbol,
@@ -203,13 +206,19 @@ class BinanceSpot(Spot):
             "timestamp": int(time.time() * 1000),
         }
         if price is not None:
-            params.update({"price": float(price)})
+            params["price"] = float(price)
+        if stopPrice is not None:
+            params["stopPrice"] = float(stopPrice)
+        if timeInForce is not None:
+            params["timeInForce"] = timeInForce
+
+        self.logger.warning(f"API >> POST /api/v3/order | {params}")
 
         signed_query = self.signature_spot_message(REQUEST=params)
-
         headers = {"X-MBX-APIKEY": self.api_key}
-
         r = requests.post(self._base_url + "/api/v3/order", headers=headers, params=signed_query, timeout=5)
+
+        self.logger.warning(f"API << {r.status_code} | {r.text[:500]}")
 
         r.raise_for_status()
         return r.json()
@@ -222,11 +231,13 @@ class BinanceSpot(Spot):
             "timestamp": int(time.time() * 1000),
         }
 
+        self.logger.warning(f"API >> DELETE /api/v3/order | {params}")
+
         signed_query = self.signature_spot_message(params)
-
         headers = {"X-MBX-APIKEY": self.api_key}
+        r = requests.delete(self._base_url + "/api/v3/order", headers=headers, params=signed_query, timeout=5)
 
-        r = requests.delete(self.base_url + "/api/v3/order", headers=headers, params=signed_query, timeout=5)
+        self.logger.warning(f"API << {r.status_code} | {r.text[:500]}")
 
         r.raise_for_status()
         return r.json()
@@ -238,11 +249,13 @@ class BinanceSpot(Spot):
             "timestamp": int(time.time() * 1000),
         }
 
+        self.logger.warning(f"API >> DELETE /api/v3/openOrders | {params}")
+
         signed_query = self.signature_spot_message(params)
-
         headers = {"X-MBX-APIKEY": self.api_key}
+        r = requests.delete(self._base_url + "/api/v3/openOrders", headers=headers, params=signed_query, timeout=5)
 
-        r = requests.delete(self.base_url + "/api/v3/openOrders", headers=headers, params=signed_query, timeout=5)
+        self.logger.warning(f"API << {r.status_code} | {r.text[:500]}")
 
         r.raise_for_status()
         return r.json()
