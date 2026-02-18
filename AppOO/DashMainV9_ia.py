@@ -4788,7 +4788,7 @@ class DashMain:
         # Start ayudante y agentes del sistema------------------------------------------------------------
         self.start_chatbot()
 
-        # Iniciar actualización de totales de inversiones
+        # Iniciar actualización de totales de inversionescls
         self.actualizar_totales_inversiones()
 
         self.root.mainloop()

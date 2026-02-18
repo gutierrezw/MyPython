@@ -65,9 +65,7 @@ def analyze_dividend_history(ticker, years=10, display_log=False):
             # Si el dividendo actual es < 80% del año anterior, probablemente incompleto
             if current_month < 12 or current_year_div < (previous_year_div * 0.80):
                 if display_log:
-                    print(
-                        f"\n⚠️  Excluyendo {current_year} (año incompleto: ${current_year_div:.4f})"
-                    )
+                    print(f"\n⚠️  Excluyendo {current_year} (año incompleto: ${current_year_div:.4f})")
                 dividends_annual = dividends_annual[:-1]  # Remover último año
 
     # Limitar a últimos N años
@@ -92,12 +90,8 @@ def analyze_dividend_history(ticker, years=10, display_log=False):
             if display_log:
                 print(f"\n📈 CRECIMIENTO:")
                 print("-" * 70)
-                print(
-                    f"  Dividendo inicial ({dividends_annual.index[0]}): ${start_div:.4f}"
-                )
-                print(
-                    f"  Dividendo final ({dividends_annual.index[-1]}): ${end_div:.4f}"
-                )
+                print(f"  Dividendo inicial ({dividends_annual.index[0]}): ${start_div:.4f}")
+                print(f"  Dividendo final ({dividends_annual.index[-1]}): ${end_div:.4f}")
                 print(f"  Período: {years_diff} años")
                 print(f"  CAGR: {cagr*100:.2f}% anual")
 
@@ -173,9 +167,7 @@ def compare_tickers(tickers, years=10, display_log=False):
             print("\n" + "=" * 70)
             print("📋 RESUMEN COMPARATIVO:")
             print("=" * 70)
-            print(
-                f"{'Ticker':<10} {'CAGR':<10} {'Div Actual':<15} {'Recomendación DDM':<20}"
-            )
+            print(f"{'Ticker':<10} {'CAGR':<10} {'Div Actual':<15} {'Recomendación DDM':<20}")
             print("-" * 70)
 
         for r in results:
@@ -188,9 +180,7 @@ def compare_tickers(tickers, years=10, display_log=False):
                 rec = "5-7% (optimista)"
 
             if display_log:
-                print(
-                    f"{r['ticker']:<10} {cagr_pct:>6.2f}%    ${r['end_dividend']:<12.4f}  {rec:<20}"
-                )
+                print(f"{r['ticker']:<10} {cagr_pct:>6.2f}%    ${r['end_dividend']:<12.4f}  {rec:<20}")
 
     return results
 
@@ -282,9 +272,7 @@ def get_zip_files(ticker_dir, display_logs=False):
                 with ZipFile(path, "r") as z:
                     for name in z.namelist():
                         low = name.lower()
-                        if low.endswith(".xml") and not any(
-                            k in low for k in ["cal", "pre", "def", "lab"]
-                        ):
+                        if low.endswith(".xml") and not any(k in low for k in ["cal", "pre", "def", "lab"]):
                             inst.append(name)
             except:
                 pass
@@ -517,12 +505,9 @@ def calculate_ttm_sum(facts, contexts, prefer="duration"):
 
             # Solo agregar si la duración es razonable (> 30 días)
             if duration_days > 30:
-                periods_with_duration.append({
-                    "end": end,
-                    "start": start,
-                    "value": value,
-                    "duration_days": duration_days
-                })
+                periods_with_duration.append(
+                    {"end": end, "start": start, "value": value, "duration_days": duration_days}
+                )
 
     if not periods_with_duration:
         return None
@@ -578,13 +563,9 @@ def calculate_ttm_sum(facts, contexts, prefer="duration"):
                 "ttm_value": ttm_sum,
                 "ttm_end_date": ttm_end_date,
                 "quarters": [
-                    {
-                        "date": q["end"].isoformat(),
-                        "value": q["value"],
-                        "duration_days": q["duration_days"]
-                    }
+                    {"date": q["end"].isoformat(), "value": q["value"], "duration_days": q["duration_days"]}
                     for q in valid_quarters
-                ]
+                ],
             }
 
     # ===================================================================
@@ -599,9 +580,9 @@ def calculate_ttm_sum(facts, contexts, prefer="duration"):
                 {
                     "date": most_recent_annual["end"].isoformat(),
                     "value": most_recent_annual["value"],
-                    "duration_days": most_recent_annual["duration_days"]
+                    "duration_days": most_recent_annual["duration_days"],
                 }
-            ]
+            ],
         }
 
     # Si no hay ni trimestres ni años válidos, retornar None
@@ -649,7 +630,7 @@ def get_ttm_fact(filings, concept_names, prefer="duration"):
                     "end_date": ttm_data["ttm_end_date"].isoformat(),
                     "quarters": ttm_data["quarters"],
                     "method": "ttm_sum",
-                    "concept": concept
+                    "concept": concept,
                 }
 
             # Fallback: usar el valor más reciente
@@ -662,7 +643,7 @@ def get_ttm_fact(filings, concept_names, prefer="duration"):
                         "end_date": all_values[0][0].isoformat(),
                         "quarters": [],
                         "method": "single_value",
-                        "concept": concept
+                        "concept": concept,
                     }
 
     return None
@@ -693,7 +674,7 @@ def get_instant_fact(filings, concept_names):
                 return {
                     "value": all_values[0][1],  # Valor más reciente
                     "date": all_values[0][0].isoformat(),  # Fecha más reciente
-                    "concept": concept
+                    "concept": concept,
                 }
 
     return None
@@ -731,128 +712,164 @@ def build_ttm(filings):
 
     # ✅ EXTRACCIÓN CON TTM REAL (suma de 4 trimestres)
     # Income Statement & Cash Flow: TTM (duration)
-    net_income = try_ttm_names([
-        "us-gaap:ProfitLoss",
-        "us-gaap:NetIncomeLoss",
-        "ifrs-full:ProfitLoss",
-    ])
+    net_income = try_ttm_names(
+        [
+            "us-gaap:ProfitLoss",
+            "us-gaap:NetIncomeLoss",
+            "ifrs-full:ProfitLoss",
+        ]
+    )
 
-    depreciation = try_ttm_names([
-        "us-gaap:DepreciationDepletionAndAmortization",
-        "us-gaap:Depreciation",
-        "us-gaap:DepreciationAndAmortization",
-        "ifrs-full:DepreciationAndAmortisationExpense",
-    ])
+    depreciation = try_ttm_names(
+        [
+            "us-gaap:DepreciationDepletionAndAmortization",
+            "us-gaap:Depreciation",
+            "us-gaap:DepreciationAndAmortization",
+            "ifrs-full:DepreciationAndAmortisationExpense",
+        ]
+    )
 
-    gains_on_sales = try_ttm_names([
-        "us-gaap:ProceedsFromSaleOfRealEstateHeldforinvestment",
-        "us-gaap:GainLossOnSaleOfProperties",
-        "us-gaap:GainLossOnSaleOfPropertyPlantEquipment",
-        "ifrs-full:GainsLossesOnDisposalsOfPropertyPlantAndEquipment",
-    ])
+    gains_on_sales = try_ttm_names(
+        [
+            "us-gaap:ProceedsFromSaleOfRealEstateHeldforinvestment",
+            "us-gaap:GainLossOnSaleOfProperties",
+            "us-gaap:GainLossOnSaleOfPropertyPlantEquipment",
+            "ifrs-full:GainsLossesOnDisposalsOfPropertyPlantAndEquipment",
+        ]
+    )
 
-    operating_cf = try_ttm_names([
-        "us-gaap:NetCashProvidedByUsedInOperatingActivities",
-        "us-gaap:CashProvidedByUsedInOperatingActivities",
-        "us-gaap:NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
-        "ifrs-full:CashFlowsFromUsedInOperatingActivities",
-    ], fallback=[
-        "vale:CashFlowsFromUsedInOperatingActivitiesContinuingOperation",
-        "ifrs-full:CashFlowsFromUsedInOperatingActivitiesContinuingOperations",
-    ])
+    operating_cf = try_ttm_names(
+        [
+            "us-gaap:NetCashProvidedByUsedInOperatingActivities",
+            "us-gaap:CashProvidedByUsedInOperatingActivities",
+            "us-gaap:NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+            "ifrs-full:CashFlowsFromUsedInOperatingActivities",
+        ],
+        fallback=[
+            "vale:CashFlowsFromUsedInOperatingActivitiesContinuingOperation",
+            "ifrs-full:CashFlowsFromUsedInOperatingActivitiesContinuingOperations",
+        ],
+    )
 
-    capex = try_ttm_names([
-        "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
-        "us-gaap:CapitalExpenditures",
-        "ifrs-full:PurchaseOfPropertyPlantAndEquipment",
-    ], fallback=[
-        "vale:AcquisitionOfPropertyPlantAndEquipmentAndIntangibleAssets",
-    ])
+    capex = try_ttm_names(
+        [
+            "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
+            "us-gaap:CapitalExpenditures",
+            "ifrs-full:PurchaseOfPropertyPlantAndEquipment",
+        ],
+        fallback=[
+            "vale:AcquisitionOfPropertyPlantAndEquipmentAndIntangibleAssets",
+        ],
+    )
 
-    dividends = try_ttm_names([
-        "us-gaap:DividendsCommonStockCash",
-        "us-gaap:PaymentsOfDividends",
-        "us-gaap:PaymentsOfDividendsCommonStock",
-        "ifrs-full:DividendsPaidToEquityHoldersOfParentClassifiedAsFinancingActivities",
-        "ifrs-full:DividendsPaidClassifiedAsFinancingActivities",
-        "ifrs-full:DividendsRecognisedAsDistributionsToOwnersOfParent",
-    ])
+    dividends = try_ttm_names(
+        [
+            "us-gaap:DividendsCommonStockCash",
+            "us-gaap:PaymentsOfDividends",
+            "us-gaap:PaymentsOfDividendsCommonStock",
+            "ifrs-full:DividendsPaidToEquityHoldersOfParentClassifiedAsFinancingActivities",
+            "ifrs-full:DividendsPaidClassifiedAsFinancingActivities",
+            "ifrs-full:DividendsRecognisedAsDistributionsToOwnersOfParent",
+        ]
+    )
 
-    revenues = try_ttm_names([
-        "us-gaap:RevenueFromContractWithCustomerIncludingAssessedTax",
-        "us-gaap:Revenues",
-        "us-gaap:SalesRevenueNet",
-        "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
-        "ifrs-full:Revenue",
-    ])
+    revenues = try_ttm_names(
+        [
+            "us-gaap:RevenueFromContractWithCustomerIncludingAssessedTax",
+            "us-gaap:Revenues",
+            "us-gaap:SalesRevenueNet",
+            "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+            "ifrs-full:Revenue",
+        ]
+    )
 
-    ffo = try_ttm_names([
-        "us-gaap:FundsFromOperations",
-        "hasi:FundsFromOperations",
-    ])
+    ffo = try_ttm_names(
+        [
+            "us-gaap:FundsFromOperations",
+            "hasi:FundsFromOperations",
+        ]
+    )
 
-    affo = try_ttm_names([
-        "us-gaap:AdjustedFundsFromOperations",
-        "hasi:AdjustedFundsFromOperations",
-    ])
+    affo = try_ttm_names(
+        [
+            "us-gaap:AdjustedFundsFromOperations",
+            "hasi:AdjustedFundsFromOperations",
+        ]
+    )
 
-    adjusted_earnings = try_ttm_names([
-        "hasi:AdjustedNetIncome",
-        "hasi:AdjustedEarnings",
-        "us-gaap:AdjustedNetIncome",
-        "us-gaap:NonGAAPNetIncome",
-    ])
+    adjusted_earnings = try_ttm_names(
+        [
+            "hasi:AdjustedNetIncome",
+            "hasi:AdjustedEarnings",
+            "us-gaap:AdjustedNetIncome",
+            "us-gaap:NonGAAPNetIncome",
+        ]
+    )
 
     # Balance Sheet: Instant (snapshot más reciente)
-    shares = try_instant_names([
-        "us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding",
-        "us-gaap:WeightedAverageNumberOfSharesOutstandingBasic",
-        "dei:EntityCommonStockSharesOutstanding",
-        "ifrs-full:WeightedAverageNumberOfOrdinarySharesOutstanding",
-    ])
+    shares = try_instant_names(
+        [
+            "us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding",
+            "us-gaap:WeightedAverageNumberOfSharesOutstandingBasic",
+            "dei:EntityCommonStockSharesOutstanding",
+            "ifrs-full:WeightedAverageNumberOfOrdinarySharesOutstanding",
+        ]
+    )
 
-    total_assets = try_instant_names([
-        "us-gaap:Assets",
-        "ifrs-full:Assets",
-    ])
+    total_assets = try_instant_names(
+        [
+            "us-gaap:Assets",
+            "ifrs-full:Assets",
+        ]
+    )
 
-    total_equity = try_instant_names([
-        "us-gaap:StockholdersEquity",
-        "us-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
-        "us-gaap:Equity",
-        "ifrs-full:Equity",
-    ])
+    total_equity = try_instant_names(
+        [
+            "us-gaap:StockholdersEquity",
+            "us-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+            "us-gaap:Equity",
+            "ifrs-full:Equity",
+        ]
+    )
 
-    short_term_debt = try_instant_names([
-        "us-gaap:ShortTermBorrowings",
-        "us-gaap:DebtCurrent",
-        "us-gaap:LongTermDebtCurrent",
-        "ifrs-full:ShorttermBorrowings",
-        "ifrs-full:CurrentBorrowings",
-        "ifrs-full:CurrentPortionOfLongtermBorrowings",
-    ], fallback=[
-        "vale:CurrentBorrowingsAndCurrentPortionOfNonCurrentBorrowingsGross",
-        "vale:LoansBorrowingsAndCurrent",
-    ])
+    short_term_debt = try_instant_names(
+        [
+            "us-gaap:ShortTermBorrowings",
+            "us-gaap:DebtCurrent",
+            "us-gaap:LongTermDebtCurrent",
+            "ifrs-full:ShorttermBorrowings",
+            "ifrs-full:CurrentBorrowings",
+            "ifrs-full:CurrentPortionOfLongtermBorrowings",
+        ],
+        fallback=[
+            "vale:CurrentBorrowingsAndCurrentPortionOfNonCurrentBorrowingsGross",
+            "vale:LoansBorrowingsAndCurrent",
+        ],
+    )
 
-    long_term_debt = try_instant_names([
-        "us-gaap:LongTermDebtNoncurrent",
-        "us-gaap:LongTermDebt",
-        "us-gaap:DebtNoncurrent",
-        "ifrs-full:LongtermBorrowings",
-        "ifrs-full:NoncurrentBorrowings",
-    ], fallback=[
-        "vale:LoansBorrowingsAndNonCurrent",
-        "vale:LongtermBorrowingsGross",
-        "vale:LongtermUnsecuredDebt",
-    ])
+    long_term_debt = try_instant_names(
+        [
+            "us-gaap:LongTermDebtNoncurrent",
+            "us-gaap:LongTermDebt",
+            "us-gaap:DebtNoncurrent",
+            "ifrs-full:LongtermBorrowings",
+            "ifrs-full:NoncurrentBorrowings",
+        ],
+        fallback=[
+            "vale:LoansBorrowingsAndNonCurrent",
+            "vale:LongtermBorrowingsGross",
+            "vale:LongtermUnsecuredDebt",
+        ],
+    )
 
-    cash = try_instant_names([
-        "us-gaap:CashAndCashEquivalentsAtCarryingValue",
-        "us-gaap:Cash",
-        "us-gaap:CashCashEquivalentsAndShortTermInvestments",
-        "ifrs-full:CashAndCashEquivalents",
-    ])
+    cash = try_instant_names(
+        [
+            "us-gaap:CashAndCashEquivalentsAtCarryingValue",
+            "us-gaap:Cash",
+            "us-gaap:CashCashEquivalentsAndShortTermInvestments",
+            "ifrs-full:CashAndCashEquivalents",
+        ]
+    )
 
     # Construir el diccionario con valores y metadata
     result = {
@@ -873,7 +890,6 @@ def build_ttm(filings):
         "ShortTermDebt": short_term_debt["value"] if short_term_debt else None,
         "LongTermDebt": long_term_debt["value"] if long_term_debt else None,
         "CashAndEquivalents": cash["value"] if cash else None,
-
         # ✅ NUEVO: Metadata con fechas y método de cálculo
         "_metadata": {
             "NetIncome": net_income,
@@ -892,7 +908,7 @@ def build_ttm(filings):
             "ShortTermDebt": short_term_debt,
             "LongTermDebt": long_term_debt,
             "CashAndEquivalents": cash,
-        }
+        },
     }
 
     return result

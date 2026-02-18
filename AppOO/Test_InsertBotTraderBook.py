@@ -19,6 +19,15 @@ SYMBOLS = ["DOGEUSDT", "ADAUSDT", "XRPUSDT", "TRXUSDT", "FILUSDT", "VETUSDT", "I
 client = BinanceClient(vehiculo="BotCrypto", env="PRODUCTION")
 repositorio = RepositorioOportunidades()
 
+# Precio BNB para convertir comisiones
+try:
+    bnb_ticker = client.spot.ticker_price("BNBUSDT")
+    PRICE_BNB = float(bnb_ticker.get("price", 0))
+    print(f"Precio BNB/USDT: ${PRICE_BNB:.2f}")
+except Exception as e:
+    PRICE_BNB = 0.0
+    print(f"WARNING: No se pudo obtener precio BNB: {e}")
+
 print("=" * 60)
 print(f"REPROCESO BOOKTRADING: {ACCOUNT} desde {FECHA_DESDE.strftime('%d-%b-%Y')}")
 print(f"Símbolos: {', '.join(SYMBOLS)}")
@@ -55,7 +64,13 @@ for symbol in SYMBOLS:
                 qty = qty if trade["isBuyer"] else -1 * qty
                 quoteqty = float(trade.get("quoteQty", 0.0))
                 price = float(trade.get("price", 0.0))
-                commission = float(trade.get("commission", 0.0)) * price
+                commission_raw = float(trade.get("commission", 0.0))
+                commission_asset = trade.get("commissionAsset", "")
+                commission = (
+                    commission_raw * PRICE_BNB
+                    if commission_asset == "BNB" and PRICE_BNB > 0
+                    else commission_raw * price
+                )
                 fechahora = datetime.fromtimestamp(trade.get("time", 0) / 1000)
 
                 registro = {

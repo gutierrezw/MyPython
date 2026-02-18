@@ -12,8 +12,9 @@ Softare y Datos:
 
 Software base:
 	java: https://www.java.com/es/download/ie_manual.jsp
+	node: https://nodejs.org/es (latest LTS for windows)
 	mysql : https://dev.mysql.com/downloads/
-	python: https://www.python.org/downloads/
+	python install Nabager: https://www.python.org/downloads/windows/
 	tsw: https://www.interactivebrokers.co.uk/es/trading/ib-api.php
 	git: https://git-scm.com/downloads/win
 	clientportal.gw:  https://www.interactivebrokers.com/es/trading/ib-api.php
@@ -32,6 +33,14 @@ pip uninstall <paquete>
 cuando cambie de versi�n
 Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Scope CurrentUser
 Get-ExecutionPolicy -List
+
+== identifica las dependencias de APP
+pip install pipreqs
+
+== Ejecuta
+pipreqs --force
+pip install -r requirements.txt
+
 
 Ejecución de API
 resources\bin\run.bat resources\root\conf.yaml
