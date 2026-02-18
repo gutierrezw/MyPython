@@ -233,7 +233,7 @@ class BinanceSpot(Spot):
 
         self.logger.warning(f"API >> DELETE /api/v3/order | {params}")
 
-        signed_query = self.signature_spot_message(params)
+        signed_query = self.signature_spot_message(REQUEST=params)
         headers = {"X-MBX-APIKEY": self.api_key}
         r = requests.delete(self._base_url + "/api/v3/order", headers=headers, params=signed_query, timeout=5)
 
@@ -251,7 +251,7 @@ class BinanceSpot(Spot):
 
         self.logger.warning(f"API >> DELETE /api/v3/openOrders | {params}")
 
-        signed_query = self.signature_spot_message(params)
+        signed_query = self.signature_spot_message(REQUEST=params)
         headers = {"X-MBX-APIKEY": self.api_key}
         r = requests.delete(self._base_url + "/api/v3/openOrders", headers=headers, params=signed_query, timeout=5)
 

@@ -27,18 +27,12 @@ from Modulos_python import (
     FigureCanvasTkAgg,
     logging,
     multiprocessing,
+    np,
 )
 from Modulos_Mysql import BDsystem, RepositorioOportunidadesBuySell
 from Modulos_Utilitarios import calcular_indicadores_df
 from Class_ApiBinnace import BinanceClient, BinanceStreamClient
 from Class_customer import DataHub, MyMessageBox
-import webview
-
-
-def _webview_process(title, url, width, height):
-    """Función top-level para multiprocessing (pywebview requiere main thread)"""
-    webview.create_window(title, url=url, width=width, height=height)
-    webview.start()
 
 
 # =============================================================================
@@ -237,15 +231,11 @@ class TradingBotSpot:
         return ok
 
     def _should_exit(self, price: float) -> bool:
-        # Stop loss
+        # Solo salir por Stop Loss (RSI no fuerza exit, solo bloquea compras)
         if self.state["stop_loss"] is None:
             return False
 
-        if price <= self.state["stop_loss"]:
-            return True
-
-        rsi = self.df["rsi"].iloc[-1]
-        return rsi > self.strategy_cfg["rsi_sell"]
+        return price <= self.state["stop_loss"]
 
     # =========================
     # TAKE PROFIT (PRIVADO)
@@ -292,8 +282,9 @@ class TradingBotSpot:
     # =========================
     # RIESGO (PRIVADO)
     # =========================
-    def _calc_position_size(self, price: float, capital_usdt: float) -> float:
-        risk_amount = capital_usdt * self.risk_cfg["risk_per_trade"]
+    def _calc_position_size(self, price: float, capital_per_bot: float) -> float:
+        # capital_per_bot ya viene calculado como capital_total / max_bots
+        risk_amount = capital_per_bot * self.risk_cfg["risk_per_trade"]
         sl_pct = self.risk_cfg.get("stop_loss_pct", 0.02)
         return risk_amount / (price * sl_pct)
 
@@ -406,16 +397,20 @@ class TradingBotSpot:
 
         calcular_indicadores_df(self.df)
 
-    def calcular_scoring(self, contexto_superior=None) -> dict:
+    def calcular_scoring(self, contexto_superior=None, lateralidad=None, momentum=None) -> dict:
         """
         Calcula score técnico para priorización de activos.
         Score base: RSI (-1 a +2), MACD (-2 a +2), EMA (-2 a +2), Volatilidad (-1 a +1).
         Contexto superior: penalización -5 si TF superior no confirma tendencia.
+        Lateralidad: penalización -3 si mercado lateral (3/4 métricas no cumplen).
+        Momentum: penalización -2 si sobreextendido o RSI>75 en TF superior.
         """
         resultado = {
             "score_total": 0,
             "score_base": 0,
             "score_contexto": 0,
+            "score_lateral": 0,
+            "score_momentum": 0,
             "score_rsi": 0,
             "score_macd": 0,
             "score_ema": 0,
@@ -424,6 +419,10 @@ class TradingBotSpot:
             "permitir_compra": False,
             "contexto_ok": True,
             "contexto_detalle": {},
+            "lateral_ok": True,
+            "lateral_detalle": {},
+            "momentum_ok": True,
+            "momentum_fase": "indefinido",
         }
 
         if self.df is None or len(self.df) < 30 or "rsi" not in self.df.columns:
@@ -490,13 +489,38 @@ class TradingBotSpot:
                 contexto_detalle = contexto_superior.get("detalle", {})
                 if not contexto_ok:
                     score_contexto = -5
-            total = score_base + score_contexto
+
+            # --- Filtro Anti-Lateralidad (penalización táctica) ---
+            score_lateral = 0
+            lateral_ok = True
+            lateral_detalle = {}
+            if lateralidad is not None:
+                lateral_ok = lateralidad.get("ok", True)
+                lateral_detalle = lateralidad.get("detalle", {})
+                if not lateral_ok:
+                    score_lateral = -3
+
+            # --- Filtro Momentum Débil (sobreextensión / pérdida de fuerza) ---
+            score_momentum = 0
+            momentum_ok = True
+            momentum_fase = "indefinido"
+            if momentum is not None:
+                momentum_ok = momentum.get("ok", True)
+                momentum_fase = momentum.get("fase", "indefinido")
+                if not momentum_ok:
+                    score_momentum = -2
+
+            total = score_base + score_contexto + score_lateral + score_momentum
             if not contexto_ok:
                 total = min(total, 0)
 
-            # Clasificación
+            # Clasificación (prioridad del filtro más restrictivo primero)
             if not contexto_ok and score_base >= 1:
                 prioridad = "Fuera Ctx"
+            elif not lateral_ok and score_base >= 1:
+                prioridad = "Lateral"
+            elif not momentum_ok and score_base >= 1:
+                prioridad = "MomDebil"
             elif total >= 5:
                 prioridad = "Alta"
             elif total >= 3:
@@ -510,6 +534,8 @@ class TradingBotSpot:
                 "score_total": total,
                 "score_base": score_base,
                 "score_contexto": score_contexto,
+                "score_lateral": score_lateral,
+                "score_momentum": score_momentum,
                 "score_rsi": score_rsi,
                 "score_macd": score_macd,
                 "score_ema": score_ema,
@@ -518,6 +544,10 @@ class TradingBotSpot:
                 "permitir_compra": total >= 3,
                 "contexto_ok": contexto_ok,
                 "contexto_detalle": contexto_detalle,
+                "lateral_ok": lateral_ok,
+                "lateral_detalle": lateral_detalle,
+                "momentum_ok": momentum_ok,
+                "momentum_fase": momentum_fase,
                 "indicadores": {
                     "rsi": round(rsi, 2),
                     "macd": round(macd, 8),
@@ -653,6 +683,7 @@ class BotManager:
         spot_client,
         order_manager,
         capital_manager,
+        config=None,
         env="TESTNET",
         on_trade_complete=None,
         on_trade_booktrading=None,
@@ -660,6 +691,7 @@ class BotManager:
         self.spot_client = spot_client
         self.order_manager = order_manager
         self.capital_manager = capital_manager
+        self.config = config or {}
         self.env = env
         self.on_trade_complete = on_trade_complete  # Callback cuando se cierra posición
         self.on_trade_booktrading = on_trade_booktrading  # Callback para registrar en booktrading
@@ -786,15 +818,22 @@ class BotManager:
             self.logger.error(f"_place_sl_order({bot.symbol}): {e}")
 
     def _cancel_sl_order(self, bot):
-        """Cancela la orden STOP_LOSS_LIMIT en Binance."""
+        """Cancela la orden STOP_LOSS_LIMIT en Binance (por ID o todas las abiertas)."""
         sl_id = bot.state.get("sl_order_id")
-        if not sl_id:
-            return
         try:
-            self.spot_client.get_cancel_order(symbol=bot.symbol, orderId=sl_id)
-            self.logger.warning(f"SL CANCELLED {bot.symbol}: orderId={sl_id}")
+            if sl_id:
+                self.spot_client.get_cancel_order(symbol=bot.symbol, orderId=sl_id)
+                self.logger.warning(f"SL CANCELLED {bot.symbol}: orderId={sl_id}")
+            else:
+                # Sin ID guardado (ej: posición cargada al reiniciar) → cancelar todas
+                self.spot_client.cancel_all_orders(bot.symbol)
+                self.logger.warning(f"SL CANCELLED {bot.symbol}: todas las órdenes abiertas")
         except Exception as e:
-            self.logger.error(f"_cancel_sl_order({bot.symbol}): {e}")
+            # -2011 = no hay órdenes abiertas, no es error real
+            if "-2011" in str(e):
+                self.logger.warning(f"_cancel_sl_order({bot.symbol}): sin órdenes abiertas (OK)")
+            else:
+                self.logger.error(f"_cancel_sl_order({bot.symbol}): {e}")
         bot.state["sl_order_id"] = None
 
     # =========================
@@ -841,17 +880,22 @@ class BotManager:
 
     def _execute_buy(self, bot):
         price = bot._last_price()
-        capital = self.capital_manager.get_available_capital()
+        max_bots = self.config.get("max_active_bots", 3)
+        capital_total = self.config.get("capital", 0)
+        capital_per_bot = capital_total / max_bots
 
-        if capital <= 0:
-            self.logger.warning(f"{bot.symbol}: Sin capital disponible")
+        available = self.capital_manager.get_available_capital()
+        if available < capital_per_bot * 0.5:
+            self.logger.warning(
+                f"{bot.symbol}: Capital insuficiente (disponible={available:.2f}, necesario~{capital_per_bot:.2f})"
+            )
             return
 
-        qty_original = bot._calc_position_size(price, capital)
+        qty_original = bot._calc_position_size(price, capital_per_bot)
         qty = self._format_qty(bot.symbol, qty_original)
 
         self.logger.warning(
-            f"{bot.symbol}: BUY eval | price={price:.6f} capital={capital:.2f} "
+            f"{bot.symbol}: BUY eval | price={price:.6f} capital={capital_per_bot:.2f} "
             f"qty_orig={qty_original:.8f} qty_fmt={qty:.8f} lot_sizes={self.lot_sizes.get(bot.symbol, 'NO')}"
         )
 
@@ -891,7 +935,7 @@ class BotManager:
 
         self.logger.warning(
             f"API REQUEST {bot.symbol} | side=BUY type=MARKET qty={qty} "
-            f"price~{price:.6f} notional~{qty * price:.2f} USDT | capital={capital:.2f}"
+            f"price~{price:.6f} notional~{qty * price:.2f} USDT | capital={capital_per_bot:.2f}"
         )
 
         order = self.spot_client.get_new_order(
@@ -1024,12 +1068,20 @@ class BotManager:
             return False
 
     def _execute_exit(self, bot, reason="SL"):
-        # Usar balance real de Binance en vez del estado interno
+        # Cancelar SL primero para liberar balance locked
+        self._cancel_sl_order(bot)
+
+        # Usar balance real de Binance (ahora free, ya no locked)
         real_qty = self._get_real_balance(bot.symbol)
         qty = self._format_qty(bot.symbol, real_qty)
 
         if qty <= 0:
-            self.logger.warning(f"{bot.symbol}: EXIT sin balance disponible (real={real_qty}), limpiando estado")
+            self.logger.warning(f"{bot.symbol}: EXIT sin balance (SL de Binance ya ejecutó), limpiando estado")
+            # Guardar datos antes de resetear
+            entry = bot.state.get("entry_price")
+            exit_qty = bot.state.get("remaining_qty", 0) or bot.state.get("position_qty", 0)
+            sl_order_id = bot.state.get("sl_order_id")
+
             bot.state.update(
                 {
                     "position": "NONE",
@@ -1041,6 +1093,30 @@ class BotManager:
                     "sl_order_id": None,
                 }
             )
+
+            # Buscar la orden real de SL en Binance y registrar en booktrading
+            if self.on_trade_booktrading and sl_order_id:
+                try:
+                    real_order = self.spot_client.get_order(symbol=bot.symbol, orderId=sl_order_id)
+                    if real_order and real_order.get("status") == "FILLED":
+                        self.on_trade_booktrading(bot.symbol, order=real_order)
+                        self.logger.warning(
+                            f"📝 {bot.symbol}: Booktrading registrado (SL real de Binance) | "
+                            f"orderId={sl_order_id} | qty={real_order.get('executedQty')}"
+                        )
+                    else:
+                        self.logger.warning(
+                            f"{bot.symbol}: SL order {sl_order_id} no está FILLED: {real_order.get('status') if real_order else 'None'}"
+                        )
+                except Exception as e:
+                    self.logger.error(f"{bot.symbol}: Error consultando SL order {sl_order_id}: {e}")
+
+            if self.on_trade_complete:
+                self.on_trade_complete(bot.symbol)
+
+            if self.capital_manager and entry and exit_qty > 0:
+                self.capital_manager.release(exit_qty * entry)
+
             return
 
         price = bot._last_price()
@@ -1051,7 +1127,8 @@ class BotManager:
         # Si el valor es menor al mínimo de Binance, es dust - convertir a BNB y limpiar
         if notional < min_notional:
             self.logger.warning(f"{bot.symbol}: EXIT dust (${notional:.2f} < ${min_notional:.2f}), convirtiendo a BNB")
-            self._cancel_sl_order(bot)
+            entry_price = bot.state.get("entry_price")
+            exit_qty = bot.state.get("remaining_qty", 0) or bot.state.get("position_qty", 0)
             self._convert_dust_to_bnb(bot.symbol)
             bot.state.update(
                 {
@@ -1064,10 +1141,14 @@ class BotManager:
                     "sl_order_id": None,
                 }
             )
-            return
 
-        # Cancelar SL del exchange antes de vender
-        self._cancel_sl_order(bot)
+            if self.on_trade_complete:
+                self.on_trade_complete(bot.symbol)
+
+            if self.capital_manager and entry_price and exit_qty > 0:
+                self.capital_manager.release(exit_qty * entry_price)
+
+            return
 
         self.logger.warning(
             f"API REQUEST {bot.symbol} | side=SELL type=MARKET intent=EXIT-{reason} "
@@ -1143,14 +1224,14 @@ class BotCryptoUI:
 
     # Factores de ajuste por temporalidad (base = 5m)
     INTERVAL_FACTORS = {
-        "1m": {"tp1": 0.015, "sl": 0.01, "trail_mult": 1.0},
-        "3m": {"tp1": 0.02, "sl": 0.015, "trail_mult": 1.0},
-        "5m": {"tp1": 0.03, "sl": 0.02, "trail_mult": 1.2},
-        "15m": {"tp1": 0.04, "sl": 0.025, "trail_mult": 1.5},
-        "30m": {"tp1": 0.05, "sl": 0.03, "trail_mult": 1.5},
-        "1h": {"tp1": 0.06, "sl": 0.035, "trail_mult": 2.0},
-        "4h": {"tp1": 0.08, "sl": 0.05, "trail_mult": 2.5},
-        "1d": {"tp1": 0.10, "sl": 0.06, "trail_mult": 3.0},
+        "1m": {"tp1": 0.008, "sl": 0.005, "trail_mult": 1.0},
+        "3m": {"tp1": 0.01, "sl": 0.008, "trail_mult": 1.0},
+        "5m": {"tp1": 0.015, "sl": 0.01, "trail_mult": 1.2},
+        "15m": {"tp1": 0.02, "sl": 0.015, "trail_mult": 1.5},
+        "30m": {"tp1": 0.025, "sl": 0.02, "trail_mult": 1.5},
+        "1h": {"tp1": 0.03, "sl": 0.025, "trail_mult": 1.5},
+        "4h": {"tp1": 0.05, "sl": 0.035, "trail_mult": 2.0},
+        "1d": {"tp1": 0.08, "sl": 0.05, "trail_mult": 2.5},
     }
 
     # Mapeo de timeframe operativo → timeframe superior (contexto estructural)
@@ -1167,6 +1248,23 @@ class BotCryptoUI:
     CONTEXTO_PENALIZACION = -5
     CONTEXTO_CACHE_TTL = 600  # segundos (10 min)
 
+    # Filtro Anti-Lateralidad: umbrales por timeframe (ATR%, rango%, dist_ema%, vol_ratio)
+    LATERAL_PENALIZACION = -3
+    LATERAL_MIN_CONDICIONES = 4  # 3 de 4 para considerar mercado con tendencia
+    LATERAL_UMBRALES = {
+        "1m": {"atr_min": 0.008, "rango_min": 0.006, "dist_ema_min": 0.002, "vol_ratio_min": 1.1},
+        "3m": {"atr_min": 0.009, "rango_min": 0.007, "dist_ema_min": 0.002, "vol_ratio_min": 1.1},
+        "5m": {"atr_min": 0.010, "rango_min": 0.008, "dist_ema_min": 0.003, "vol_ratio_min": 1.2},
+        "15m": {"atr_min": 0.012, "rango_min": 0.010, "dist_ema_min": 0.003, "vol_ratio_min": 1.2},
+        "30m": {"atr_min": 0.013, "rango_min": 0.011, "dist_ema_min": 0.003, "vol_ratio_min": 1.2},
+        "1h": {"atr_min": 0.015, "rango_min": 0.012, "dist_ema_min": 0.003, "vol_ratio_min": 1.2},
+        "4h": {"atr_min": 0.020, "rango_min": 0.015, "dist_ema_min": 0.004, "vol_ratio_min": 1.3},
+        "1d": {"atr_min": 0.025, "rango_min": 0.020, "dist_ema_min": 0.005, "vol_ratio_min": 1.3},
+    }
+
+    # Filtro Momentum Débil: penalización por sobreextensión o pérdida de fuerza en 4H
+    MOMENTUM_PENALIZACION = -2
+
     def __init__(self, parent, colors, repositorio):
         """
         Args:
@@ -1180,9 +1278,7 @@ class BotCryptoUI:
 
         # Frame principales
         self.parent = parent
-        self.right = ttk.Frame(
-            parent, padding=(3, 6, 1, 1), style="C.TFrame", height=600
-        )  # bot   antes (3,5,1,1) gwi001
+        self.right = ttk.Frame(parent, padding=(3, 6, 1, 1), style="C.TFrame", height=600)
         self.left = ttk.Frame(parent, padding=(3, 6, 1, 1), style="B.TFrame")  # control grafico
         self.left.pack(side=tk.LEFT)
         self.right.pack(fill=tk.BOTH, expand=True)
@@ -1492,7 +1588,13 @@ class BotCryptoUI:
             # Capital
             capital = self.config.get("capital", 0)
             reservado = self.capital_manager.capital_reservado if self.capital_manager else 0
-            disponible = self.capital_manager.get_available_capital() if self.capital_manager else 0
+            # Disponible = saldo real USDT de Binance (no teórico)
+            saldo_real = getattr(self, "_saldo_real_usdt", None)
+            disponible = (
+                saldo_real
+                if saldo_real is not None
+                else (self.capital_manager.get_available_capital() if self.capital_manager else 0)
+            )
             risk_pct = self.config.get("risk_per_trade", 0.02) * 100
 
             self._cap_labels["capital"].config(text=f"${capital:.2f}")
@@ -1521,7 +1623,11 @@ class BotCryptoUI:
                     activas += 1
                     entry = state.get("entry_price", 0) or 0
                     qty = state.get("remaining_qty", 0) or 0
-                    price = bot._last_price() if bot.df is not None and len(bot.df) > 0 else entry
+                    # Precio live del WS, fallback al DataFrame
+                    live_prices = getattr(self, "_live_prices", {})
+                    price = live_prices.get(symbol) or (
+                        bot._last_price() if bot.df is not None and len(bot.df) > 0 else entry
+                    )
                     notional = qty * entry
                     pnl_usdt = (price - entry) * qty if entry > 0 else 0
                     pnl_pct = ((price / entry) - 1) * 100 if entry > 0 else 0
@@ -1542,7 +1648,7 @@ class BotCryptoUI:
                     ).pack(side=tk.LEFT)
                     tk.Label(
                         row,
-                        text=f"{pnl_pct:>+5.1f}% ${pnl_usdt:>+6.2f}",
+                        text=f"{pnl_pct:>+5.2f}% ${pnl_usdt:>+6.2f}",
                         bg=bg,
                         fg=color,
                         font=("Arial", 8, "bold"),
@@ -1573,11 +1679,10 @@ class BotCryptoUI:
 
             # self._lbl_pos_count.config(text=f"{activas}/{total}")
 
-            # Pérdida por SL: position_size × stop_loss_pct
+            # Pérdida por SL = risk_amount por bot (capital / max_bots × risk_per_trade)
             risk_pct_dec = self.config.get("risk_per_trade", 0.02)
-            sl_pct = self.config.get("stop_loss_pct", 0.02)
-            pos_size = capital * risk_pct_dec
-            sl_loss = pos_size * sl_pct
+            max_bots = self.config.get("max_active_bots", 3)
+            sl_loss = (capital / max_bots) * risk_pct_dec
             self._lbl_sl_trade.config(text=f"-${sl_loss:.2f}")
 
             # Pérdida máxima: SL × cantidad de bots activos (o total si todos entran)
@@ -1776,8 +1881,8 @@ class BotCryptoUI:
         )
         btn_add.pack(side=tk.RIGHT, padx=3)
 
-        # Treeview — 5 columnas compactas
-        columns = ("symbol", "score", "prioridad", "ctx", "estado")
+        # Treeview — 7 columnas compactas
+        columns = ("symbol", "score", "prioridad", "ctx", "lat", "mom", "estado")
         self.scoring_tree = ttk.Treeview(
             self._scoring_frame,
             columns=columns,
@@ -1785,12 +1890,14 @@ class BotCryptoUI:
             height=6,
             style="TFrame",
         )
-        col_w = (self.WIDGET_WIDTH - 10) // 5
+        col_w = (self.WIDGET_WIDTH - 10) // 7
         hdrs = {
             "symbol": ("Activo", col_w + 20),
             "score": ("Score", col_w - 5),
             "prioridad": ("Prior.", col_w),
             "ctx": ("Ctx", col_w - 10),
+            "lat": ("Lat", col_w - 10),
+            "mom": ("Mom", col_w - 10),
             "estado": ("Estado", col_w - 5),
         }
         for col, (txt, w) in hdrs.items():
@@ -1806,6 +1913,8 @@ class BotCryptoUI:
         self.scoring_tree.tag_configure("Revisión", foreground="white")
         self.scoring_tree.tag_configure("Bloqueado", foreground="red")
         self.scoring_tree.tag_configure("Fuera Ctx", foreground="orange")
+        self.scoring_tree.tag_configure("Lateral", foreground="#FF69B4")  # rosa/pink
+        self.scoring_tree.tag_configure("MomDebil", foreground="#DDA0DD")  # plum/lila
 
     # =========================================
     # CANVAS SCROLLABLE
@@ -1929,6 +2038,7 @@ class BotCryptoUI:
                 spot_client=self.spot_client,
                 order_manager=self.order_manager,
                 capital_manager=self.capital_manager,
+                config=self.config,
                 env=self.env,
                 on_trade_complete=self._on_trade_complete,
                 on_trade_booktrading=self._almacenar_trades_booktrading,
@@ -2016,7 +2126,7 @@ class BotCryptoUI:
         """
         Almacena trade en booktrading usando la respuesta directa de la orden.
         order: respuesta de get_new_order() con fills, side, symbol, transactTime.
-        """
+        """  # gwi001
         try:
             if not order or "fills" not in order:
                 self.logger.warning(f"_almacenar_trades_booktrading({symbol}): orden sin fills, ignorando")
@@ -2026,15 +2136,35 @@ class BotCryptoUI:
             order_id = str(order.get("orderId", ""))
             transact_time = order.get("transactTime", int(datetime.now().timestamp() * 1000))
 
-            for i, fill in enumerate(order["fills"]):
+            # Obtener precio BNB/USDT para convertir comisiones
+            price_bnb = 0.0
+            try:
+                bnb_ticker = self.spot_client.ticker_price("BNBUSDT")
+                price_bnb = float(bnb_ticker.get("price", 0))
+            except Exception as e:
+                self.logger.warning(f"No se pudo obtener precio BNB: {e}")
+
+            for fill in order["fills"]:
                 try:
                     qty = float(fill.get("qty", 0))
                     price = float(fill.get("price", 0))
                     commission = float(fill.get("commission", 0))
+                    commission_asset = fill.get("commissionAsset", "")
                     quoteqty = qty * price
+                    # Usar tradeId del fill (igual que Test_InsertBotTraderBook.py)
+                    trade_id = str(fill.get("tradeId", order_id))
 
                     # BUY = positivo, SELL = negativo (igual que trader_binance)
                     cantidad = qty if side == "BUY" else -qty
+
+                    # Comisión en USD: si viene en BNB usar precio BNB, si no usar precio del activo
+                    if commission_asset == "BNB" and price_bnb > 0:
+                        comision_usd = commission * price_bnb
+                    else:
+                        comision_usd = commission * price
+
+                    # obtiene situación actual del estado de los indicadores
+                    indicadores = self.bots[symbol].get_indicators()
 
                     registro = {
                         "categoria": "BotCrypto",
@@ -2042,16 +2172,29 @@ class BotCryptoUI:
                         "cuenta": self.ACCOUNT,
                         "cantidad": cantidad,
                         "producto": quoteqty,
-                        "idtrans": f"{order_id}_{i}" if len(order["fills"]) > 1 else order_id,
+                        "idtrans": trade_id,
                         "preciotrans": price,
                         "preciocierre": price,
-                        "tarifacomision": commission * price,
+                        "tarifacomision": comision_usd,
                         "mtmgp": 0.00,
+                        "indicadores": indicadores,
                         "fechahora": datetime.fromtimestamp(transact_time / 1000),
                     }
 
+                    # Anti-duplicado: validar si ya existe en BD
+                    found = self.repositorio.get_hash_booktrading(
+                        accion="valida",
+                        values=registro,
+                        symbol=symbol,
+                    )
+                    if found:
+                        self.logger.warning(f"Booktrading: {symbol} | tradeId={trade_id} ya existe, ignorando")
+                        continue
+
                     self.repositorio.insert_bottraderBook(values=registro, symbol=symbol, object="bottrader")
-                    self.logger.warning(f"Booktrading: {symbol} | {side} | qty={cantidad} | price={price:.4f}")
+                    self.logger.warning(
+                        f"Booktrading: {symbol} | {side} | qty={cantidad} | price={price:.4f} | tradeId={trade_id}"
+                    )
 
                 except Exception as e:
                     self.logger.error(f"Error procesando fill {symbol}: {e}")
@@ -2210,8 +2353,19 @@ class BotCryptoUI:
 
                 # Delegar actualizaciones de UI al main thread via .after()
                 price = float(kline["c"])
+                # Guardar precio live para panel de capital
+                if not hasattr(self, "_live_prices"):
+                    self._live_prices = {}
+                self._live_prices[symbol] = price
                 if symbol in self.widgets:
                     self.parent.after(0, self.widgets[symbol].update_price, price)
+
+                # Actualizar panel capital cada 30 ticks (~30s) para PnL en tiempo real
+                if not hasattr(self, "_ws_tick_counter"):
+                    self._ws_tick_counter = 0
+                self._ws_tick_counter += 1
+                if self._ws_tick_counter % 30 == 0:
+                    self.parent.after(0, self._actualizar_panel_capital)
 
                 # Monitoreo SL tick-a-tick para bots en LONG
                 if symbol in self.bots:
@@ -2351,7 +2505,9 @@ class BotCryptoUI:
                 self._cargar_historico(tmp_bot, symbol, limit=500)
                 tmp_bot.calcular_indicadores()
                 contexto = self._evaluar_contexto_superior(symbol)
-                scoring = tmp_bot.calcular_scoring(contexto_superior=contexto)
+                lateral = self._evaluar_lateralidad(symbol, tmp_bot)
+                mom = self._evaluar_momentum(symbol)
+                scoring = tmp_bot.calcular_scoring(contexto_superior=contexto, lateralidad=lateral, momentum=mom)
                 self.scoring_data[symbol] = scoring
                 self._persistir_scoring(symbol, scoring)
                 self.parent.after(0, self._actualizar_panel_scoring)
@@ -2391,7 +2547,9 @@ class BotCryptoUI:
                     self._cargar_historico(tmp_bot, symbol, limit=500)
                     tmp_bot.calcular_indicadores()
                     contexto = self._evaluar_contexto_superior(symbol)
-                    scoring = tmp_bot.calcular_scoring(contexto_superior=contexto)
+                    lateral = self._evaluar_lateralidad(symbol, tmp_bot)
+                    mom = self._evaluar_momentum(symbol)
+                    scoring = tmp_bot.calcular_scoring(contexto_superior=contexto, lateralidad=lateral, momentum=mom)
                     self.scoring_data[symbol] = scoring
                     self._persistir_scoring(symbol, scoring)
                 except Exception as e:
@@ -2523,11 +2681,13 @@ class BotCryptoUI:
                 score = scoring.get("score_total", 0)
                 prioridad = scoring.get("prioridad", "BLOQUEADO")
                 ctx_icon = "OK" if scoring.get("contexto_ok", True) else "NO"
+                lat_icon = "OK" if scoring.get("lateral_ok", True) else "NO"
+                mom_icon = "OK" if scoring.get("momentum_ok", True) else "NO"
 
                 self.scoring_tree.insert(
                     "",
                     "end",
-                    values=(sym, score, prioridad, ctx_icon, "OBSERV."),
+                    values=(sym, score, prioridad, ctx_icon, lat_icon, mom_icon, "OBSERV."),
                     tags=(prioridad,),
                 )
 
@@ -2551,6 +2711,7 @@ class BotCryptoUI:
                     "total": scoring.get("score_total", 0),
                     "base": scoring.get("score_base", 0),
                     "contexto": scoring.get("score_contexto", 0),
+                    "lateral": scoring.get("score_lateral", 0),
                     "rsi": scoring.get("score_rsi", 0),
                     "macd": scoring.get("score_macd", 0),
                     "ema": scoring.get("score_ema", 0),
@@ -2565,6 +2726,10 @@ class BotCryptoUI:
                     "condiciones": ctx_cached.get("condiciones_cumplidas", 0),
                     "detalle": scoring.get("contexto_detalle", {}),
                     "indicadores": ctx_cached.get("indicadores_ctx", {}),
+                },
+                "lateralidad": {
+                    "ok": scoring.get("lateral_ok", True),
+                    "detalle": scoring.get("lateral_detalle", {}),
                 },
                 "timestamp": datetime.now().isoformat(),
             }
@@ -2682,6 +2847,147 @@ class BotCryptoUI:
             self.logger.error(f"_evaluar_contexto_superior({symbol}): {e}")
             return {"contexto_ok": True, "condiciones_cumplidas": 4, "detalle": {}}
 
+    def _evaluar_lateralidad(self, symbol, tmp_bot):
+        """Evalúa si el mercado está lateral usando 4 métricas: ATR%, rango, dist_ema, volumen.
+        Requiere 3/4 condiciones OK para considerar mercado con tendencia.
+        Retorna dict con ok, condiciones_cumplidas, detalle, metricas."""
+        try:
+            df = tmp_bot.df
+            if df is None or len(df) < 20:
+                return {"ok": True, "condiciones_cumplidas": 4, "detalle": {}, "metricas": {}}
+
+            umbrales = self.LATERAL_UMBRALES.get(self.interval, self.LATERAL_UMBRALES["1h"])
+
+            price = df["Close"].iloc[-1]
+            ema20 = df["ema_fast"].iloc[-1] if "ema_fast" in df.columns else None
+
+            # ATR (Average True Range) - 14 periodos
+            high = df["High"]
+            low = df["Low"]
+            close = df["Close"]
+            tr = pd.concat(
+                [
+                    high - low,
+                    (high - close.shift(1)).abs(),
+                    (low - close.shift(1)).abs(),
+                ],
+                axis=1,
+            ).max(axis=1)
+            atr = tr.rolling(14).mean().iloc[-1]
+            atr_pct = atr / price if price > 0 else 0
+
+            # Rango últimas 10 velas
+            rango_10 = (high.iloc[-10:].max() - low.iloc[-10:].min()) / price if price > 0 else 0
+
+            # Distancia a EMA20
+            if ema20 and ema20 > 0:
+                dist_ema = abs(price - ema20) / price
+            else:
+                dist_ema = 0
+
+            # Volumen relativo (actual vs media 20)
+            vol_actual = df["Volume"].iloc[-1]
+            vol_media = df["Volume"].iloc[-20:].mean()
+            vol_ratio = vol_actual / vol_media if vol_media > 0 else 0
+
+            condiciones = {
+                "atr_ok": atr_pct >= umbrales["atr_min"],
+                "rango_ok": rango_10 >= umbrales["rango_min"],
+                "dist_ema_ok": dist_ema >= umbrales["dist_ema_min"],
+                "vol_ok": vol_ratio >= umbrales["vol_ratio_min"],
+            }
+
+            cumplidas = sum(condiciones.values())
+            ok = cumplidas >= self.LATERAL_MIN_CONDICIONES
+
+            metricas = {
+                "atr_pct": round(atr_pct, 4),
+                "rango_10": round(rango_10, 4),
+                "dist_ema": round(dist_ema, 4),
+                "vol_ratio": round(vol_ratio, 2),
+            }
+
+            self.logger.info(
+                f"LATERAL {symbol}: {cumplidas}/4 → {'OK' if ok else 'LATERAL'} | "
+                f"atr={metricas['atr_pct']} rango={metricas['rango_10']} "
+                f"dist_ema={metricas['dist_ema']} vol={metricas['vol_ratio']}"
+            )
+
+            return {
+                "ok": ok,
+                "condiciones_cumplidas": cumplidas,
+                "detalle": condiciones,
+                "metricas": metricas,
+            }
+
+        except Exception as e:
+            self.logger.error(f"_evaluar_lateralidad({symbol}): {e}")
+            return {"ok": True, "condiciones_cumplidas": 4, "detalle": {}, "metricas": {}}
+
+    def _clasificar_fase_contexto(self, indicadores_ctx):
+        """Clasifica la fase del activo usando indicadores del TF superior (4H)."""
+        rsi = indicadores_ctx.get("rsi", 50)
+        macd = indicadores_ctx.get("macd", 0)
+        macd_signal = indicadores_ctx.get("macd_signal", 0)
+        ema20 = indicadores_ctx.get("ema20", 0)
+        ema50 = indicadores_ctx.get("ema50", 0)
+
+        ema_gap_pct = ((ema20 - ema50) / ema50) * 100 if ema50 > 0 else 0
+
+        if ema20 > ema50 and macd > macd_signal and rsi < 70:
+            fase = "impulso_sano"
+        elif ema20 > ema50 and rsi >= 70:
+            fase = "sobreextendido"
+        elif ema20 > ema50 and macd < macd_signal:
+            fase = "enfriamiento"
+        elif ema20 < ema50:
+            fase = "bajista"
+        else:
+            fase = "indefinido"
+
+        return {"fase": fase, "ema_gap_pct": round(ema_gap_pct, 2), "rsi": rsi}
+
+    def _filtro_momentum_debil(self, fase_data):
+        """Detecta si el activo está sobreextendido o perdiendo fuerza."""
+        fase = fase_data.get("fase", "indefinido")
+        ema_gap_pct = fase_data.get("ema_gap_pct", 0)
+        rsi = fase_data.get("rsi", 50)
+
+        if fase == "sobreextendido" and ema_gap_pct > 2:
+            return True
+        if rsi > 75:
+            return True
+        return False
+
+    def _evaluar_momentum(self, symbol):
+        """Evalúa momentum usando los indicadores del TF superior ya cacheados.
+        Retorna dict con ok, fase, debil, fase_data."""
+        try:
+            cached = self._contexto_cache.get(symbol, {}).get("resultado", {})
+            indicadores_ctx = cached.get("indicadores_ctx", {})
+
+            if not indicadores_ctx:
+                return {"ok": True, "fase": "indefinido", "debil": False, "fase_data": {}}
+
+            fase_data = self._clasificar_fase_contexto(indicadores_ctx)
+            debil = self._filtro_momentum_debil(fase_data)
+
+            self.logger.info(
+                f"MOMENTUM {symbol}: fase={fase_data['fase']} ema_gap={fase_data['ema_gap_pct']}% "
+                f"rsi={fase_data['rsi']:.1f} → {'DEBIL' if debil else 'OK'}"
+            )
+
+            return {
+                "ok": not debil,
+                "fase": fase_data["fase"],
+                "debil": debil,
+                "fase_data": fase_data,
+            }
+
+        except Exception as e:
+            self.logger.error(f"_evaluar_momentum({symbol}): {e}")
+            return {"ok": True, "fase": "indefinido", "debil": False, "fase_data": {}}
+
     def _resetear_indicadores_bd(self, symbol):
         """Limpia el campo indicadores en BD cuando un símbolo sale del panel activo"""
         try:
@@ -2735,9 +3041,19 @@ class BotCryptoUI:
                     "trail_mult": self.config.get("trail_mult", 1.5),
                 }
 
+                # 3a. Detectar posiciones existentes en Binance (prioridad absoluta)
+                symbols_con_posicion = self._detectar_posiciones_binance()
+                self._symbols_con_posicion_binance = set(symbols_con_posicion)
+                for sym in symbols_con_posicion:
+                    if sym not in top_symbols:
+                        top_symbols.append(sym)
+                        self.logger.warning(f"📥 {sym}: Posición existente detectada → forzando cubo")
+
                 for symbol, _scoring in ranked:
                     if len(top_symbols) >= max_bots:
                         break
+                    if symbol in top_symbols:
+                        continue
                     top_symbols.append(symbol)
 
                 # Pre-crear bots + todo REST en background
@@ -2791,9 +3107,11 @@ class BotCryptoUI:
                 if bot.df is not None and len(bot.df) >= 50:
                     action, conditions = bot.evaluate()
 
-                # Solo crear widget si tiene posición LONG, señal BUY, o scoring Alta (>=5)
+                # Solo crear widget si tiene posición LONG, señal BUY, scoring Alta (>=5),
+                # o posición real detectada en Binance
                 score = self.scoring_data.get(symbol, {}).get("score_total", 0)
-                if not has_position and action != "BUY" and score < 5:
+                tiene_posicion_binance = symbol in getattr(self, "_symbols_con_posicion_binance", set())
+                if not has_position and not tiene_posicion_binance and action != "BUY" and score < 5:
                     self.logger.info(f"{symbol}: NONE sin BUY ni Alta → no entra al canvas (score={score})")
                     self._resetear_indicadores_bd(symbol)
                     continue
@@ -2884,7 +3202,9 @@ class BotCryptoUI:
                 self._cargar_historico(tmp_bot, symbol, limit=500)
                 tmp_bot.calcular_indicadores()
                 contexto = self._evaluar_contexto_superior(symbol)
-                scoring = tmp_bot.calcular_scoring(contexto_superior=contexto)
+                lateral = self._evaluar_lateralidad(symbol, tmp_bot)
+                mom = self._evaluar_momentum(symbol)
+                scoring = tmp_bot.calcular_scoring(contexto_superior=contexto, lateralidad=lateral, momentum=mom)
                 self.scoring_data[symbol] = scoring
             except Exception as e:
                 self.logger.error(f"Scoring {symbol}: {e}")
@@ -2951,51 +3271,268 @@ class BotCryptoUI:
             self.logger.warning(f"■ {symbol}: Bot DETENIDO")
 
     def _on_show_chart(self, symbol):
-        """Abre gráfico TradingView en ventana pywebview (no bloquea main thread)"""
-        interval_map = {
-            "1m": "1",
-            "3m": "3",
-            "5m": "5",
-            "15m": "15",
-            "30m": "30",
-            "1h": "60",
-            "2h": "120",
-            "4h": "240",
-            "1d": "D",
-            "1w": "W",
-            "1M": "M",
-        }
-        tv_interval = interval_map.get(self.interval, "15")
-        tv_url = f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}&interval={tv_interval}"
-        title = f"{symbol} - {self.interval}"
+        """Abre ventana con gráfico de estrategia con auto-actualización"""  # gwi001
 
-        p = multiprocessing.Process(
-            target=_webview_process,
-            args=(title, tv_url, 1050, 720),
-            daemon=True,
-        )
-        p.start()
+        # --- Funciones internas (al inicio, según pyproject.toml) ---
+        bg_color = "#16213e"
+        _timer_id = [None]
+
+        def _draw_chart(win_ref, fig_ref, canvas_ref, bot_ref):
+            """Dibuja/redibuja el gráfico con datos actuales"""
+            fig_ref.clear()
+            ax = fig_ref.add_subplot(111)
+            ax.set_facecolor(bg_color)
+
+            # Marca de agua: símbolo grande al fondo
+            ax.text(
+                0.5, 0.5, symbol.replace("USDT", ""),
+                transform=ax.transAxes, fontsize=72, fontweight="bold",
+                color="white", alpha=0.04, ha="center", va="center", zorder=0,
+            )
+
+            state = bot_ref.state
+            risk = bot_ref.risk_cfg
+            entry = state.get("entry_price")
+            sl_pct = risk.get("stop_loss_pct", 0.02)
+            tp1_pct = risk.get("tp1_pct", 0.025)
+            trail_mult = risk.get("trail_mult", 1.5)
+            tp1_size = risk.get("tp1_size", 0.33)
+            risk_per_trade = risk.get("risk_per_trade", 0.015)
+            max_bots = self.config.get("max_active_bots", 3)
+            capital_total = self.config.get("capital", 302)
+            capital_per_bot = capital_total / max_bots
+
+            df = bot_ref.df
+            if df is None or len(df) < 14:
+                return
+
+            price_now = self._live_prices.get(symbol, float(df["Close"].iloc[-1]))
+            atr = bot_ref._calc_atr14()
+
+            if not entry or entry <= 0:
+                entry = price_now
+
+            qty = state.get("remaining_qty") or state.get("position_qty") or 0
+            if qty <= 0:
+                qty = (capital_per_bot * risk_per_trade) / (price_now * sl_pct)
+
+            # Niveles clave
+            sl_price = entry * (1 - sl_pct)
+            tp1_price = entry * (1 + tp1_pct)
+            rally_price = entry * (1 + tp1_pct * 2.5)
+            avg_trail_exit = entry * (1 + tp1_pct * 1.5)
+
+            # Ganancias estimadas
+            loss_sl = qty * (sl_price - entry)
+            gain_tp1_partial = qty * tp1_size * (tp1_price - entry)
+            qty_after_tp1 = qty * (1 - tp1_size)
+            gain_trail = qty_after_tp1 * (avg_trail_exit - entry) + gain_tp1_partial
+            gain_rally = qty_after_tp1 * (rally_price - entry) + gain_tp1_partial
+
+            # --- Histórico (últimas 50 velas) ---
+            hist = df["Close"].tail(50).values.astype(float)
+            n_hist = len(hist)
+            x_hist = np.arange(n_hist)
+            ax.plot(x_hist, hist, color="#00d4ff", linewidth=1.5)
+
+            # --- Proyecciones (20 barras) ---
+            n_proj = 20
+            x_proj = np.arange(n_hist - 1, n_hist + n_proj)
+            x_total = n_hist + n_proj
+
+            y_max = np.linspace(price_now, rally_price, len(x_proj))
+            y_avg = np.linspace(price_now, avg_trail_exit, len(x_proj))
+            y_tp1 = np.linspace(price_now, tp1_price, len(x_proj))
+            y_min = np.linspace(price_now, sl_price, len(x_proj))
+
+            # Zonas de color
+            y_entry = np.full_like(x_proj, entry, dtype=float)
+            ax.fill_between(x_proj, y_avg, y_max, alpha=0.15, color="#00ff88")
+            ax.fill_between(x_proj, y_entry, y_avg, alpha=0.12, color="#ffaa00")
+            ax.fill_between(x_proj, y_entry, y_tp1, alpha=0.12, color="#00ff88")
+            ax.fill_between(x_proj, y_min, y_entry, alpha=0.15, color="#ff4444")
+
+            # Líneas de proyección
+            ax.plot(x_proj, y_max, color="#00ff88", linewidth=1.0, linestyle="--")
+            ax.plot(x_proj, y_avg, color="#ffaa00", linewidth=1.0, linestyle="--")
+            ax.plot(x_proj, y_tp1, color="#00ff88", linewidth=1.0, linestyle="--")
+            ax.plot(x_proj, y_min, color="#ff4444", linewidth=1.0, linestyle="--")
+
+            # Líneas horizontales
+            ax.axhline(y=tp1_price, color="#00ff88", linewidth=0.9, linestyle=":", alpha=0.4)
+            ax.axhline(y=sl_price, color="#ff4444", linewidth=0.9, linestyle=":", alpha=0.4)
+            ax.axhline(y=price_now, color="#00d4ff", linewidth=0.8, linestyle="-", alpha=0.3)
+            ax.axvline(x=n_hist - 1, color="gray", linewidth=0.8, linestyle="--", alpha=0.4)
+
+            # Anotaciones derecha
+            x_label = x_total - 1
+            ax.annotate(
+                f"  TP2 +{((rally_price/entry)-1)*100:.1f}%  ${gain_rally:+.2f}",
+                xy=(x_label, rally_price), fontsize=8, color="#00ff88", fontweight="bold",
+                va="center", bbox=dict(boxstyle="round,pad=0.2", facecolor="#00ff88", alpha=0.2),
+            )
+            ax.annotate(
+                f"  Trail +{((avg_trail_exit/entry)-1)*100:.1f}%  ${gain_trail:+.2f}",
+                xy=(x_label, avg_trail_exit), fontsize=8, color="#ffaa00", fontweight="bold",
+                va="center", bbox=dict(boxstyle="round,pad=0.2", facecolor="#ffaa00", alpha=0.2),
+            )
+            ax.annotate(
+                f"  TP1 +{((tp1_price/entry)-1)*100:.1f}%  ${gain_tp1_partial:+.2f}",
+                xy=(x_label, tp1_price), fontsize=8, color="#00ff88", fontweight="bold",
+                va="center", bbox=dict(boxstyle="round,pad=0.2", facecolor="#ffaa00", alpha=0.2),
+            )
+            ax.annotate(
+                f"  \u25c4 Actual  {price_now:.4f}",
+                xy=(x_label, price_now), fontsize=8, color="#00d4ff", fontweight="bold",
+                va="center", bbox=dict(boxstyle="round,pad=0.2", facecolor="#00d4ff", alpha=0.15),
+            )
+            ax.annotate(
+                f"  SL -{sl_pct*100:.1f}%  ${loss_sl:+.2f}",
+                xy=(x_label, sl_price), fontsize=8, color="#ff4444", fontweight="bold",
+                va="center", bbox=dict(boxstyle="round,pad=0.2", facecolor="#ff4444", alpha=0.2),
+            )
+
+            # Etiquetas de zona
+            ylim = ax.get_ylim()
+            ax.text(n_hist * 0.4, ylim[1], "HISTORIAL", fontsize=8, color="gray", ha="center", alpha=0.5, va="top")
+            ax.text(
+                n_hist + n_proj * 0.4, ylim[1], "PROYECCION", fontsize=8, color="gray", ha="center", alpha=0.5, va="top"
+            )
+
+            # Entry (si en posición)
+            if state.get("position") == "LONG":
+                ax.axhline(y=entry, color="#ffff00", linewidth=1, linestyle="-", alpha=0.4)
+                ax.annotate(f"  Entry {entry:.4f}", xy=(0, entry), fontsize=7, color="#ffff00", va="bottom")
+                ax.annotate(f"  Sl {sl_price:.4f}", xy=(0, sl_price), fontsize=7, color="#ff4444", va="bottom")
+                ax.annotate(f"  Tp {tp1_price:.4f}", xy=(0, tp1_price), fontsize=7, color="#00ff88", va="bottom")
+
+                pnl_now = qty * (price_now - entry)
+                pnl_pct = ((price_now / entry) - 1) * 100
+                pnl_color = "#00ff88" if pnl_now >= 0 else "#ff4444"
+                ax.annotate(
+                    f"PnL: ${pnl_now:+.2f} ({pnl_pct:+.2f}%)",
+                    xy=(n_hist - 2, price_now), fontsize=8, color=pnl_color,
+                    fontweight="bold", va="bottom", ha="right",
+                )
+
+            # Info box
+            rr = abs(gain_trail / loss_sl) if loss_sl != 0 else 0
+            info = (
+                f"{symbol} | {self.interval}\n"
+                f"Capital/bot: ${capital_per_bot:.0f}\n"
+                f"Qty: {qty:.2f} | Pos: ${qty*price_now:.2f}\n"
+                f"TP1: {tp1_pct*100:.1f}% | SL: {sl_pct*100:.1f}% | Trail: {trail_mult}x\n"
+                f"R/R: 1:{rr:.1f}"
+            )
+            ax.text(
+                0.02, 0.98, info, transform=ax.transAxes, fontsize=7.5,
+                color="white", verticalalignment="top", fontfamily="monospace",
+                bbox=dict(boxstyle="round,pad=0.4", facecolor=bg_color, edgecolor="gray", alpha=0.9),
+            )
+
+            # Estilo
+            ax.spines[["top", "right"]].set_visible(False)
+            ax.tick_params(colors="gray", labelsize=7)
+            for spine in ax.spines.values():
+                spine.set_color("#2a3a5e")
+            ax.set_xlim(-1, x_total + 2)
+            ax.yaxis.set_major_formatter(lambda x, _: f"{x:.4f}")
+            ax.set_xticklabels([])
+
+            fig_ref.tight_layout(pad=0.5)
+            canvas_ref.draw_idle()
+
+        def _auto_refresh(win_ref, fig_ref, canvas_ref, bot_ref):
+            if win_ref.winfo_exists():
+                _draw_chart(win_ref, fig_ref, canvas_ref, bot_ref)
+                _timer_id[0] = win_ref.after(5000, _auto_refresh, win_ref, fig_ref, canvas_ref, bot_ref)
+
+        def _on_close(win_ref):
+            if _timer_id[0]:
+                win_ref.after_cancel(_timer_id[0])
+            self._chart_windows.pop(symbol, None)
+            win_ref.destroy()
+
+        # --- Código principal ---
+        bot = self.bots.get(symbol)
+        if not bot:
+            return
+
+        # Una sola ventana por símbolo
+        if not hasattr(self, "_chart_windows"):
+            self._chart_windows = {}
+        existing = self._chart_windows.get(symbol)
+        if existing:
+            try:
+                if existing.winfo_exists():
+                    existing.lift()
+                    existing.focus_force()
+                    return
+            except tk.TclError:
+                pass
+            self._chart_windows.pop(symbol, None)
+
+        # Ventana Toplevel
+        win = tk.Toplevel(self.parent)
+        win.title(f"Strategy - {symbol} ({self.interval})")
+        try:
+            x = self.parent.winfo_rootx() + self.parent.winfo_width() - 90
+            y = self.parent.winfo_rooty() + 200
+        except Exception:
+            x, y = 200, 150
+
+        win.geometry(f"700x450+{x}+{y}")
+        win.configure(bg=bg_color)
+        win.resizable(False, False)
+        self._chart_windows[symbol] = win
+
+        fig = Figure(figsize=(7.0, 4.5), dpi=100, facecolor=bg_color)
+        canvas = FigureCanvasTkAgg(fig, master=win)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Dibujo inicial + auto-refresh
+        _draw_chart(win, fig, canvas, bot)
+        _timer_id[0] = win.after(5000, _auto_refresh, win, fig, canvas, bot)
+        win.protocol("WM_DELETE_WINDOW", lambda: _on_close(win))
 
     def _on_sell_all(self, symbol):
-        """Vende todo el balance de un símbolo específico (REST en background)"""
+        """Vende todo el balance de un símbolo específico (REST en background).
+        Cancela SL, vende, resetea estado del bot y libera capital."""
 
         def _bg():
             try:
+                bot = self.bots.get(symbol)
+
+                # 1. Cancelar orden SL en Binance antes de vender
+                if bot:
+                    self.bot_manager._cancel_sl_order(bot)
+
                 asset = symbol.replace("USDT", "")
-                account = self.spot_client.account_spot()
 
-                if not account or "balances" not in account:
-                    self.logger.error(f"No se pudo obtener cuenta de Binance")
-                    return
-
+                # 2. Esperar a que Binance libere el locked (retry hasta 3 veces)
                 balance = 0.0
-                for b in account["balances"]:
-                    if b["asset"] == asset:
-                        balance = float(b["free"])
+                for attempt in range(3):
+                    time.sleep(1.0)  # Esperar que Binance procese la cancelación
+                    account = self.spot_client.account_spot()
+
+                    if not account or "balances" not in account:
+                        self.logger.error(f"No se pudo obtener cuenta de Binance")
+                        return
+
+                    for b in account["balances"]:
+                        if b["asset"] == asset:
+                            balance = float(b["free"])
+                            locked = float(b.get("locked", 0))
+                            self.logger.warning(f"{symbol}: intento {attempt+1} | free={balance} locked={locked}")
+                            break
+
+                    if balance > 0:
                         break
 
                 if balance <= 0:
-                    self.logger.warning(f"{symbol}: Sin balance de {asset} para vender")
+                    self.logger.warning(f"{symbol}: Sin balance FREE de {asset} para vender (puede seguir locked)")
+                    if bot and bot.state.get("position") == "LONG":
+                        self._reset_bot_state(bot, symbol)
                     return
 
                 lot_info = self.bot_manager.lot_sizes.get(symbol, {})
@@ -3023,8 +3560,24 @@ class BotCryptoUI:
                 )
 
                 if order:
+                    price = float(order.get("fills", [{}])[0].get("price", 0)) if order.get("fills") else 0
+                    notional = qty * price if price else 0
                     self.logger.warning(f"✅ {symbol}: VENDIDO {qty} {asset} | orderId={order.get('orderId')}")
+
+                    # 3. Liberar capital reservado
+                    if notional > 0:
+                        self.capital_manager.release(notional)
+
+                    # 4. Registrar en booktrading
+                    if self.bot_manager.on_trade_booktrading:
+                        self.bot_manager.on_trade_booktrading(symbol, order=order)
+
+                    # 5. Resetear estado del bot
+                    if bot:
+                        self._reset_bot_state(bot, symbol)
+
                     self.parent.after(0, self._actualizar_saldo)
+                    self.parent.after(0, self._actualizar_panel_capital)
                 else:
                     self.logger.error(f"{symbol}: Orden SELL ALL fallida")
 
@@ -3033,6 +3586,29 @@ class BotCryptoUI:
                 traceback.print_exc()
 
         threading.Thread(target=_bg, daemon=True).start()
+
+    def _reset_bot_state(self, bot, symbol):
+        """Resetea el estado del bot a NONE después de cerrar posición manualmente."""
+        bot.state["position"] = "NONE"
+        bot.state["entry_price"] = None
+        bot.state["position_qty"] = 0.0
+        bot.state["remaining_qty"] = 0.0
+        bot.state["stop_loss"] = None
+        bot.state["tp1_done"] = False
+        bot.state["tp2_done"] = False
+        bot.state["trailing_active"] = False
+        bot.state["trail_high"] = None
+        bot.state["trailing_stop"] = None
+        bot.state["sl_order_id"] = None
+        self.logger.warning(f"✅ {symbol}: Estado reseteado a NONE (cierre manual)")
+
+        # Actualizar widget en main thread
+        def _upd():
+            w = self.widgets.get(symbol)
+            if w:
+                w.update_state(bot.get_public_state(), bot.get_indicators(), {})
+
+        self.parent.after(0, _upd)
 
     def _on_delete_symbol(self, symbol):
         """Detiene bot y quita widget. El símbolo permanece en otros_activos (dominio de rotación)."""
@@ -3148,6 +3724,7 @@ class BotCryptoUI:
 
         def _fetch():
             saldo = self._obtener_saldo_usdt()
+            self._saldo_real_usdt = saldo  # Guardar para panel de capital
 
             def _update_ui():
                 if saldo is not None:
@@ -3535,11 +4112,13 @@ class BotCryptoUI:
                 self.logger.info("SCORING CYCLE: Recalculando universo...")
                 self._recalcular_scoring_observacion_sync()
 
-                # Recalcular scoring de bots activos (con contexto superior)
+                # Recalcular scoring de bots activos (con contexto superior + lateralidad)
                 for sym, bot in list(self.bots.items()):
                     try:
                         contexto = self._evaluar_contexto_superior(sym)
-                        scoring = bot.calcular_scoring(contexto_superior=contexto)
+                        lateral = self._evaluar_lateralidad(sym, bot)
+                        mom = self._evaluar_momentum(sym)
+                        scoring = bot.calcular_scoring(contexto_superior=contexto, lateralidad=lateral, momentum=mom)
                         self.scoring_data[sym] = scoring
                         self._persistir_scoring(sym, scoring)
                     except Exception:
@@ -3587,7 +4166,8 @@ class BotCryptoUI:
                         del self.widgets[sym]
                     self._resetear_indicadores_bd(sym)
 
-            # 2. Agregar observación con scoring Alta si hay espacio
+            # 2. Rotación: si cubos llenos, reemplazar NONE de menor score
+            #    por candidato de mayor score (prioriza símbolos más prometedores)
             activos_en_panel = set(self.bots.keys())
             candidatos = []
             for sym, scoring in self.scoring_data.items():
@@ -3598,13 +4178,51 @@ class BotCryptoUI:
 
             candidatos.sort(key=lambda x: x[1], reverse=True)
 
+            # Set de símbolos pendientes de creación (evita race condition con threads)
+            if not hasattr(self, "_pending_bots"):
+                self._pending_bots = set()
+
+            # Si cubos llenos y hay candidatos, rotar NONE de menor score
+            if len(self.bots) + len(self._pending_bots) >= max_bots and candidatos:
+                # Bots en NONE ordenados por score ascendente (peor primero)
+                bots_none = []
+                for sym, bot in list(self.bots.items()):
+                    if bot.get_public_state().get("position") == "NONE":
+                        score_actual = self.scoring_data.get(sym, {}).get("score_total", 0)
+                        bots_none.append((sym, score_actual))
+                bots_none.sort(key=lambda x: x[1])  # peor score primero
+
+                for cand_sym, cand_score in candidatos:
+                    if not bots_none:
+                        break
+                    peor_sym, peor_score = bots_none[0]
+                    # Solo rotar si el candidato tiene mejor score
+                    if cand_score > peor_score:
+                        self.logger.warning(
+                            f"ROTACIÓN: {peor_sym}(score={peor_score}, NONE) → " f"{cand_sym}(score={cand_score})"
+                        )
+                        # Remover el NONE de menor score
+                        del self.bots[peor_sym]
+                        if self.bot_manager:
+                            self.bot_manager.unregister_bot(peor_sym)
+                        if peor_sym in self.widgets:
+                            self.widgets[peor_sym].frame.destroy()
+                            del self.widgets[peor_sym]
+                        self._resetear_indicadores_bd(peor_sym)
+                        bots_removidos.append(peor_sym)
+                        bots_none.pop(0)
+                    else:
+                        break  # candidatos están ordenados desc, si este no supera, ninguno lo hará
+
             for sym, score in candidatos:
-                if len(self.bots) >= max_bots:
+                total_ocupados = len(self.bots) + len(self._pending_bots)
+                if total_ocupados >= max_bots:
                     break
-                if sym in self.bots:
+                if sym in self.bots or sym in self._pending_bots:
                     continue
 
                 self.logger.warning(f"SCORING CYCLE: {sym} score={score} → creando bot")
+                self._pending_bots.add(sym)
 
                 # Crear bot en background
                 def _crear_bg(s=sym):
@@ -3612,7 +4230,8 @@ class BotCryptoUI:
                         self._crear_bot(s)
                     except Exception as e:
                         self.logger.error(f"SCORING CYCLE _crear_bot({s}): {e}")
-                        return
+                    finally:
+                        self._pending_bots.discard(s)
 
                     def _ui(s=s):
                         if s not in self.bots:
@@ -3886,7 +4505,11 @@ class BotCryptoUI:
                             self._cargar_historico(tmp_bot, symbol, limit=500)
                             tmp_bot.calcular_indicadores()
                             contexto = self._evaluar_contexto_superior(symbol)
-                            scoring = tmp_bot.calcular_scoring(contexto_superior=contexto)
+                            lateral = self._evaluar_lateralidad(symbol, tmp_bot)
+                            mom = self._evaluar_momentum(symbol)
+                            scoring = tmp_bot.calcular_scoring(
+                                contexto_superior=contexto, lateralidad=lateral, momentum=mom
+                            )
                             self.scoring_data[symbol] = scoring
                             self._persistir_scoring(symbol, scoring)
                         except Exception as e:
@@ -4052,6 +4675,44 @@ class BotCryptoUI:
         except Exception as e:
             self.logger.error(f"Error cargando histórico {symbol}: {e}")
 
+    def _detectar_posiciones_binance(self):
+        """Detecta símbolos con posiciones reales en Binance (balance > dust).
+        Retorna lista de símbolos USDT que tienen balance significativo."""
+        symbols_con_posicion = []
+        try:
+            account = self.spot_client.account_spot()
+            if not account or "balances" not in account:
+                return symbols_con_posicion
+
+            # Set de símbolos del universo para filtrar
+            universo = {a["symbol"] for a in self.all_activos}
+
+            for b in account["balances"]:
+                asset = b["asset"]
+                if asset in ("USDT", "BNB"):
+                    continue
+                total = float(b.get("free", 0)) + float(b.get("locked", 0))
+                if total <= 0:
+                    continue
+
+                symbol = f"{asset}USDT"
+                if symbol not in universo:
+                    continue
+
+                # Verificar que no sea dust (> $1)
+                try:
+                    ticker = self.spot_client.ticker_price(symbol)
+                    price = float(ticker.get("price", 0))
+                    if price > 0 and total * price > 1.0:
+                        symbols_con_posicion.append(symbol)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            self.logger.error(f"_detectar_posiciones_binance: {e}")
+
+        return symbols_con_posicion
+
     def _cargar_posicion_existente(self, bot, symbol):
         """
         Carga posición existente desde Binance al iniciar el bot.
@@ -4103,8 +4764,8 @@ class BotCryptoUI:
             trades = self.spot_client.get_my_trades(symbol, limit=50, startTime=day_ago, endTime=now)
 
             if not trades:
-                self.logger.warning(f"{symbol}: Balance={balance} pero sin trades recientes, usando precio actual")
-                entry_price = bot._last_price() if bot.df is not None else 0
+                self.logger.warning(f"{symbol}: Balance={balance} pero sin trades recientes")
+                entry_price = 0
             else:
                 # Calcular precio promedio ponderado de compras
                 total_qty = 0.0
@@ -4118,8 +4779,22 @@ class BotCryptoUI:
 
                 entry_price = total_cost / total_qty if total_qty > 0 else 0
 
+            # Fallback: usar precio actual si no se pudo calcular entry
             if entry_price <= 0:
-                self.logger.warning(f"{symbol}: No se pudo calcular precio de entrada")
+                entry_price = bot._last_price() if bot.df is not None and len(bot.df) > 0 else 0
+            if entry_price <= 0:
+                entry_price = price  # precio del ticker obtenido arriba
+            if entry_price <= 0:
+                self.logger.error(
+                    f"{symbol}: Balance={balance} pero no se pudo obtener ningún precio → forzando con ticker"
+                )
+                try:
+                    ticker = self.spot_client.ticker_price(symbol)
+                    entry_price = float(ticker.get("price", 0))
+                except Exception:
+                    pass
+            if entry_price <= 0:
+                self.logger.error(f"{symbol}: IMPOSIBLE obtener precio, posición no cargada")
                 return
 
             # 3. Configurar estado del bot con posición existente
@@ -4331,7 +5006,7 @@ class WidgetBotSymbol:
         self.btn_sell_all.pack(side=tk.RIGHT, padx=2)
         tk.Button(
             btn_frame,
-            text="Stragy",
+            text="Strategy",
             bg="blue",
             fg="white",
             width=7,
@@ -4362,16 +5037,35 @@ class WidgetBotSymbol:
         setattr(self, attr_name, lbl_value)
 
     def update_price(self, price):
-        """Actualiza el precio"""
-        self.lbl_price.config(text=f"{price:.4f}")
+        """Actualiza el precio y PnL en tiempo real (cada tick WS)"""
+        try:
+            if not self.lbl_price.winfo_exists():
+                return
+            self.lbl_price.config(text=f"{price:.4f}")
+            # Actualizar PnL con precio live
+            if hasattr(self, "_entry_price") and self._entry_price and hasattr(self, "_qty") and self._qty > 0:
+                pnl_pct = ((price - self._entry_price) / self._entry_price) * 100
+                color = "lime" if pnl_pct > 0 else "red" if pnl_pct < 0 else "white"
+                if self.lbl_pnl.winfo_exists():
+                    self.lbl_pnl.config(text=f"{pnl_pct:+.2f}%  :: (qty:{self._qty})", fg=color)
+        except tk.TclError:
+            pass
 
     def update_state(self, state, indicators, conditions):
         """Actualiza el estado y los indicadores"""
-        # RSI
+        # RSI con zona visual
         rsi = indicators.get("rsi")
         if rsi:
-            arrow = "▲" if rsi < 35 else "▼" if rsi > 65 else ""
-            color = "lime" if rsi < 35 else "red" if rsi > 65 else "white"
+            if rsi < 35:
+                arrow, color = "▲▲", "lime"  # Sobreventa (compra fuerte)
+            elif rsi < 45:
+                arrow, color = "▲", "#90EE90"  # Acercándose a compra
+            elif rsi <= 55:
+                arrow, color = "●", "yellow"  # Neutral
+            elif rsi <= 65:
+                arrow, color = "▼", "orange"  # Acercándose a venta
+            else:
+                arrow, color = "▼▼", "red"  # Sobrecompra (venta fuerte)
             self.lbl_rsi.config(text=f"{rsi:.1f} {arrow}", fg=color)
 
         # MACD
@@ -4406,6 +5100,9 @@ class WidgetBotSymbol:
             self.lbl_tp.config(text=f"TP1:{tp1}", fg="white")
 
         # PnL + cantidad del lote
+        # Guardar para update_price en tiempo real
+        self._entry_price = entry
+        self._qty = qty
         if entry and qty > 0:
             last = indicators.get("last_price", entry)
             pnl_pct = ((last - entry) / entry) * 100
