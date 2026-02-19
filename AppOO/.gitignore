@@ -7,12 +7,15 @@ __pycache__/
 .venv/
 venv/
 ENV/
+nul
+**/nul
 
 # Archivos de compilación (PyInstaller u otros)
 build/
 dist/
 *.spec
 *.exe
+
 
 # Archivos de caché de yfinance y otros temporales
 tmp/
