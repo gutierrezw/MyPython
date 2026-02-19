@@ -1437,8 +1437,8 @@ class BotCryptoUI:
             self._inicializar_managers()
             self._iniciar_auto_refresh()
 
-            # Auto-start: iniciar bots al cargar la app
-            if self.all_activos:
+            # Auto-start: iniciar bots al cargar la app, siempre self.env != None
+            if self.all_activos and self.env:
                 self._on_start_all()
         except Exception as e:
             self.logger.error(f"Error inicializando BotCryptoUI: {e}")
@@ -1781,8 +1781,14 @@ class BotCryptoUI:
 
         # Selector de ambiente
         tk.Label(row2, text="Env:", bg=self.colors["cgcolor"], fg="white").pack(side=tk.LEFT, padx=5)
-        self.combo_env = ttk.Combobox(row2, values=["TESTNET", "PRODUCTION"], width=12, state="disable")
-        self.combo_env.set(self.env)
+        self.combo_env = ttk.Combobox(row2, values=["TESTNET", "PRODUCTION", "DISABLE"], width=13, state="disable")
+
+        if self.env is not None:
+            self.combo_env.set(self.env)
+        else:
+            # sin env -- no se puede dar START
+            self.combo_env.set("DISABLE")
+            btn_start.config(state="disable")
         self.combo_env.pack(side=tk.LEFT, padx=5)
         self.combo_env.bind("<<ComboboxSelected>>", self._on_env_change)
 
@@ -1893,12 +1899,12 @@ class BotCryptoUI:
         col_w = (self.WIDGET_WIDTH - 10) // 7
         hdrs = {
             "symbol": ("Activo", col_w + 20),
-            "score": ("Score", col_w - 5),
+            "score": ("Sc.", col_w - 8),
             "prioridad": ("Prior.", col_w),
             "ctx": ("Ctx", col_w - 10),
             "lat": ("Lat", col_w - 10),
             "mom": ("Mom", col_w - 10),
-            "estado": ("Estado", col_w - 5),
+            "estado": ("Estado", col_w - 2),
         }
         for col, (txt, w) in hdrs.items():
             self.scoring_tree.heading(col, text=txt)
@@ -2024,7 +2030,10 @@ class BotCryptoUI:
 
             # Verificar consistencia de env
             if self.env != self.binance_client.env:
-                self.logger.warning(f"⚠️ env mismatch: UI={self.env}, Client={self.binance_client.env}")
+                self.logger.warning(
+                    f"⚠️ env mismatch: UI={self.env}, Client={self.binance_client.env}, No run _inicializar_managers(self)"
+                )
+                return
 
             # Order Manager
             self.order_manager = OrderManager()
@@ -2177,7 +2186,9 @@ class BotCryptoUI:
                         "preciocierre": price,
                         "tarifacomision": comision_usd,
                         "mtmgp": 0.00,
-                        "indicadores": indicadores,
+                        "indicadores": (
+                            json.dumps(indicadores, default=str) if isinstance(indicadores, dict) else indicadores
+                        ),
                         "fechahora": datetime.fromtimestamp(transact_time / 1000),
                     }
 
@@ -3285,9 +3296,17 @@ class BotCryptoUI:
 
             # Marca de agua: símbolo grande al fondo
             ax.text(
-                0.5, 0.5, symbol.replace("USDT", ""),
-                transform=ax.transAxes, fontsize=72, fontweight="bold",
-                color="white", alpha=0.04, ha="center", va="center", zorder=0,
+                0.5,
+                0.5,
+                symbol.replace("USDT", ""),
+                transform=ax.transAxes,
+                fontsize=72,
+                fontweight="bold",
+                color="white",
+                alpha=0.04,
+                ha="center",
+                va="center",
+                zorder=0,
             )
 
             state = bot_ref.state
@@ -3368,28 +3387,48 @@ class BotCryptoUI:
             x_label = x_total - 1
             ax.annotate(
                 f"  TP2 +{((rally_price/entry)-1)*100:.1f}%  ${gain_rally:+.2f}",
-                xy=(x_label, rally_price), fontsize=8, color="#00ff88", fontweight="bold",
-                va="center", bbox=dict(boxstyle="round,pad=0.2", facecolor="#00ff88", alpha=0.2),
+                xy=(x_label, rally_price),
+                fontsize=8,
+                color="#00ff88",
+                fontweight="bold",
+                va="center",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="#00ff88", alpha=0.2),
             )
             ax.annotate(
                 f"  Trail +{((avg_trail_exit/entry)-1)*100:.1f}%  ${gain_trail:+.2f}",
-                xy=(x_label, avg_trail_exit), fontsize=8, color="#ffaa00", fontweight="bold",
-                va="center", bbox=dict(boxstyle="round,pad=0.2", facecolor="#ffaa00", alpha=0.2),
+                xy=(x_label, avg_trail_exit),
+                fontsize=8,
+                color="#ffaa00",
+                fontweight="bold",
+                va="center",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="#ffaa00", alpha=0.2),
             )
             ax.annotate(
                 f"  TP1 +{((tp1_price/entry)-1)*100:.1f}%  ${gain_tp1_partial:+.2f}",
-                xy=(x_label, tp1_price), fontsize=8, color="#00ff88", fontweight="bold",
-                va="center", bbox=dict(boxstyle="round,pad=0.2", facecolor="#ffaa00", alpha=0.2),
+                xy=(x_label, tp1_price),
+                fontsize=8,
+                color="#00ff88",
+                fontweight="bold",
+                va="center",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="#ffaa00", alpha=0.2),
             )
             ax.annotate(
                 f"  \u25c4 Actual  {price_now:.4f}",
-                xy=(x_label, price_now), fontsize=8, color="#00d4ff", fontweight="bold",
-                va="center", bbox=dict(boxstyle="round,pad=0.2", facecolor="#00d4ff", alpha=0.15),
+                xy=(x_label, price_now),
+                fontsize=8,
+                color="#00d4ff",
+                fontweight="bold",
+                va="center",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="#00d4ff", alpha=0.15),
             )
             ax.annotate(
                 f"  SL -{sl_pct*100:.1f}%  ${loss_sl:+.2f}",
-                xy=(x_label, sl_price), fontsize=8, color="#ff4444", fontweight="bold",
-                va="center", bbox=dict(boxstyle="round,pad=0.2", facecolor="#ff4444", alpha=0.2),
+                xy=(x_label, sl_price),
+                fontsize=8,
+                color="#ff4444",
+                fontweight="bold",
+                va="center",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="#ff4444", alpha=0.2),
             )
 
             # Etiquetas de zona
@@ -3411,8 +3450,12 @@ class BotCryptoUI:
                 pnl_color = "#00ff88" if pnl_now >= 0 else "#ff4444"
                 ax.annotate(
                     f"PnL: ${pnl_now:+.2f} ({pnl_pct:+.2f}%)",
-                    xy=(n_hist - 2, price_now), fontsize=8, color=pnl_color,
-                    fontweight="bold", va="bottom", ha="right",
+                    xy=(n_hist - 2, price_now),
+                    fontsize=8,
+                    color=pnl_color,
+                    fontweight="bold",
+                    va="bottom",
+                    ha="right",
                 )
 
             # Info box
@@ -3425,8 +3468,14 @@ class BotCryptoUI:
                 f"R/R: 1:{rr:.1f}"
             )
             ax.text(
-                0.02, 0.98, info, transform=ax.transAxes, fontsize=7.5,
-                color="white", verticalalignment="top", fontfamily="monospace",
+                0.02,
+                0.98,
+                info,
+                transform=ax.transAxes,
+                fontsize=7.5,
+                color="white",
+                verticalalignment="top",
+                fontfamily="monospace",
                 bbox=dict(boxstyle="round,pad=0.4", facecolor=bg_color, edgecolor="gray", alpha=0.9),
             )
 
@@ -3732,7 +3781,10 @@ class BotCryptoUI:
                 else:
                     self.lbl_saldo.config(text="-- USDT")
 
-            self.parent.after(0, _update_ui)
+            try:
+                self.parent.after(0, _update_ui)
+            except RuntimeError:
+                pass
 
         threading.Thread(target=_fetch, daemon=True).start()
 

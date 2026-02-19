@@ -14,6 +14,7 @@ from Modulos_python import (
     Error,
     Optional,
     traceback,
+    logging,
 )
 from Modulos_Utilitarios import (
     is_none,
@@ -372,8 +373,8 @@ class BDsystem:  # -------------------------------------------------------------
                      (vehiculo, fesesion, iduser, idcuenta, orcartera, fiscalYear,
                       fefund, Pinvertir, xstrategy, environment, userapi, userpass,
                       private_key, public_key, port,
-                      id_transaccion, load_csv, gypPrecio, gainInversion)
-                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                      id_transaccion, load_csv, gypPrecio, gainInversion, parameters)
+                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
 
             data = (
                 values.get("vehiculo"),
@@ -395,6 +396,7 @@ class BDsystem:  # -------------------------------------------------------------
                 values.get("load_csv", False),
                 values.get("gypPrecio"),
                 values.get("gainInversion"),
+                values.get("parameters"),
             )
 
             cursor.execute(sql, data)
@@ -418,7 +420,8 @@ class BDsystem:  # -------------------------------------------------------------
                      fiscalYear=%s, fefund=%s, Pinvertir=%s, xstrategy=%s,
                      environment=%s, userapi=%s, userpass=%s, private_key=%s,
                      public_key=%s, port=%s,
-                     id_transaccion=%s, load_csv=%s, gypPrecio=%s, gainInversion=%s
+                     id_transaccion=%s, load_csv=%s, gypPrecio=%s, gainInversion=%s,
+                     parameters=%s
                      WHERE id=%s AND vehiculo=%s"""
 
             data = (
@@ -440,6 +443,7 @@ class BDsystem:  # -------------------------------------------------------------
                 values.get("load_csv", False),
                 values.get("gypPrecio"),
                 values.get("gainInversion"),
+                values.get("parameters"),
                 session_id,
                 vehiculo,
             )
@@ -1956,7 +1960,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE otros_activos SET indicadores = %s WHERE symbol = %s AND cuenta = %s",
-                (json.dumps(data), symbol, cuenta),
+                (json.dumps(data, default=str), symbol, cuenta),
             )
             conn.commit()
             cursor.close()
@@ -2186,6 +2190,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
     def __init__(self):
         self.display = False
+        self.logger = logging.getLogger("RepositorioOportunidades")
 
     def _conectar(self, tabla=None) -> object:
         try:

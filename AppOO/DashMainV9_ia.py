@@ -611,6 +611,16 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                                 )
 
                                                 if not found_hashId:
+
+                                                    # Agrega idnicadores al registro
+                                                    temp = DataHub.info[ticket].get("indicadores", {})
+                                                    indicadores = (
+                                                        json.dumps(temp, default=str)
+                                                        if isinstance(temp, dict)
+                                                        else temp
+                                                    )
+                                                    registro.update({"indicadores": indicadores})
+
                                                     self.RepositorioOportunidades.insert_booktrading(
                                                         values=registro, symbol=ticket
                                                     )
@@ -912,6 +922,12 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                         # inserta trade en booktrading
                         if not found_hashId:
+
+                            # Agrega indicadores al registro
+                            temp = DataHub.info[simbolo].get("indicadores", {})
+                            indicadores = json.dumps(temp, default=str) if isinstance(temp, dict) else temp
+                            registro.update({"indicadores": indicadores})
+
                             self.RepositorioOportunidades.insert_booktrading(values=registro, symbol=simbolo)
             except Exception as e:
                 print(f"trader_iteractive(): {e}")
@@ -979,6 +995,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         # rescribe el peso de la position
                         position["peso"] = position["costobase"] / self.update_peso_position()
 
+                        position["sectype"] = yf_activo.get("quoteType")
                         position["region"], position["country"] = "Crypto", "Crypto"
                         if "region" in yf_activo:
                             position["region"] = yf_activo["region"]
@@ -1276,6 +1293,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                     empresa = yf_activo.get("longName", "revisar ------")
 
+                    p["sectype"] = yf_activo.get("quoteType")
                     p["region"], p["country"] = "Global", "US"
                     if "region" in yf_activo:
                         p["region"] = yf_activo["region"]
@@ -2211,7 +2229,7 @@ class DashMain:
             self.crypto = WidgetVehiculo(master=self.win1, account=account, vehiculo=vehiculo)
 
             if cb.check_binance_connection():
-
+                DataHub.manager_sesion.update({"Crypto": True})
                 self.crypto_ts = DatosVehivulo(account=account, vehiculo=vehiculo)
                 self.crypto_ts.run()
 
@@ -2227,7 +2245,7 @@ class DashMain:
 
             # para widget offline
             elif not cb.check_binance_connection():
-
+                DataHub.manager_sesion.update({"Crypto": True})
                 self.crypto.carga_inversion_en_positions()
                 update_pane_crypto()
 
@@ -2302,10 +2320,13 @@ class DashMain:
             connected = False
             try:
                 connected = ib.is_localhost()
+                DataHub.manager_sesion.update({"Stock": False})
+
             except Exception:
                 logging.getLogger("IBGateway").warning("⚠️ IB Gateway no disponible — modo Offline")
 
             if connected:
+                DataHub.manager_sesion.update({"Stock": True})
                 self.stock_ts = DatosVehivulo(account=account, vehiculo=vehiculo)
                 self.stock_ts.run()
 
@@ -4085,6 +4106,11 @@ class DashMain:
                         ),
                         "port": entry_port.get().strip(),
                         "environment": entry_environment.get().strip() if entry_environment else None,
+                        "parameters": (
+                            blob_parameters.get("1.0", tk.END).strip().encode("utf-8")
+                            if blob_parameters.get("1.0", tk.END).strip()
+                            else None
+                        ),
                     }
 
                     # Validación de campos requeridos
@@ -4431,6 +4457,7 @@ class DashMain:
             blob_userpass = None
             blob_private_key = None
             blob_public_key = None
+            blob_parameters = None
 
             for field_name, label_text in blob_fields:
                 # Label
@@ -4483,6 +4510,42 @@ class DashMain:
                     blob_public_key = text_widget
 
                 row += 1
+
+            # Campo parameters (BLOB/JSON) — al final
+            label_params = tk.Label(
+                scrollable_frame,
+                text="Parameters (JSON):",
+                bg=self.colors["bgcolor"],
+                fg="white",
+                anchor="w",
+            )
+            label_params.grid(row=row, column=0, sticky="nw", padx=10, pady=5)
+
+            blob_frame_params = tk.Frame(scrollable_frame, bg=self.colors["bgcolor"])
+            blob_frame_params.grid(row=row, column=1, padx=20, pady=5, sticky="ew")
+
+            blob_parameters = tk.Text(blob_frame_params, width=30, height=5)
+            blob_parameters.pack(side=tk.LEFT)
+
+            import_btn_params = tk.Button(
+                blob_frame_params,
+                text="Importar",
+                command=lambda: import_blob_file(blob_parameters),
+            )
+            import_btn_params.pack(side=tk.LEFT, padx=5)
+
+            if edit_mode and session_data:
+                params_value = session_data.get("parameters")
+                if params_value:
+                    try:
+                        if isinstance(params_value, bytes):
+                            blob_parameters.insert("1.0", params_value.decode("utf-8"))
+                        else:
+                            blob_parameters.insert("1.0", str(params_value))
+                    except Exception:
+                        blob_parameters.insert("1.0", "[Datos binarios]")
+
+            row += 1
 
             # Frame de botones
             btn_frame = tk.Frame(scrollable_frame, bg=self.colors["bgcolor"])
@@ -4588,6 +4651,7 @@ class DashMain:
                 show_vscroll=False,
                 show_hscroll=False,
                 sort_columns=True,
+                style="TFrame",
             )
 
             # Vincular eventos
