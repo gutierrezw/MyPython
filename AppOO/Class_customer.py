@@ -989,6 +989,123 @@ class DataHub:
         except Exception as e:
             print(f"maximiza_sell_lotes(): {e}")
 
+    # ========================================================================================================
+    # PRESERVATION: Lógica de vehículo para el Agente de Preservación de Ganancias
+    # ========================================================================================================
+    @staticmethod
+    def preservation_get_price(symbol, positio):
+        """Obtiene precio actual del símbolo (websocket → fallback mrkprice)."""
+        info_symbol = DataHub.info.get(symbol, {})
+        ws = info_symbol.get("websocket", {})
+        return ws.get("last") or positio.get("mrkprice", 0)
+
+    @staticmethod
+    def preservation_get_atr(symbol, vehiculo="Stock"):
+        """Calcula ATR desde CacheHut con fallback a yfinance. Retorna (atr, error_msg)."""
+
+        # Intentar desde CacheHut primero
+        info_symbol = DataHub.info.get(symbol, {})
+        datos_fn = info_symbol.get("datos")
+        datos = datos_fn() if datos_fn else None
+
+        # Fallback: cargar desde yfinance si CacheHut está vacío
+        if datos is None or datos.empty or len(datos) < 14:
+            try:
+                ticket = convierte_ticket_crypto(symbol) if vehiculo == "Crypto" else symbol
+                result = get_yfinance(ticket=ticket, vehiculo=vehiculo, period="6mo", interval="1d")
+                if result:
+                    _, datos = result
+            except Exception:
+                pass
+
+        if datos is None or datos.empty or len(datos) < 14:
+            n = 0 if datos is None else len(datos)
+            return None, f"datos insuficientes ({n} rows, CacheHut + yfinance)"
+        return calcular_atr(datos), None
+
+    @staticmethod
+    def preservation_calc_qty(vehiculo, symbol, position_qty, proteccion_base):
+        """Calcula qty a proteger, respetando lotSize en Crypto."""
+
+        if vehiculo == "Crypto":
+            info_symbol = DataHub.info.get(symbol, {})
+            lot_info = info_symbol.get("lotSize", {})
+            step_size = lot_info.get("stepSize", 0.00001)
+            decimals = calculate_decimal_places(step_size)
+            qty_raw = position_qty * proteccion_base
+            return round(qty_raw - (qty_raw % step_size), decimals)
+        else:
+            return round(position_qty * proteccion_base)
+
+    @staticmethod
+    def preservation_build_trama(vehiculo, account, symbol, conid, stop_price, qty):
+        """Construye la trama de orden STOP según el vehículo (IB o Binance)."""
+        if vehiculo == "Stock":
+            return {
+                "account": account,
+                "vehiculo": "Stock",
+                "symbol": symbol,
+                "pedido": {
+                    "orders": [
+                        {
+                            "conid": int(conid),
+                            "orderType": "STP",
+                            "price": round(stop_price, 2),
+                            "side": "SELL",
+                            "tif": "GTC",
+                            "quantity": qty,
+                        }
+                    ]
+                },
+                "hash_id_Op": "PRESERVATION_STOP",
+            }
+        else:
+            return {
+                "account": account,
+                "vehiculo": "Crypto",
+                "symbol": symbol,
+                "pedido": {
+                    "symbol": symbol,
+                    "side": "SELL",
+                    "type": "STOP_LOSS_LIMIT",
+                    "price": round(stop_price, 2),
+                    "stopPrice": round(stop_price, 2),
+                    "quantity": qty,
+                    "timeInForce": "GTC",
+                },
+                "hash_id_Op": "PRESERVATION_STOP",
+            }
+
+    @staticmethod
+    def preservation_send_order(vehiculo, trama):
+        """Envía orden STOP via QremoteOrder. Retorna response."""
+        return DataHub.QremoteOrder[vehiculo]._request(trama)
+
+    @staticmethod
+    def preservation_cancel_order(vehiculo, account, order_id, symbol):
+        """Cancela una orden PRESERVATION_STOP existente."""
+        trama = {
+            "account": account,
+            "vehiculo": vehiculo,
+            "symbol": symbol,
+            "pedido": {"action": "cancel", "order_id": order_id},
+            "hash_id_Op": "PRESERVATION_STOP",
+        }
+        return DataHub.QremoteOrder[vehiculo]._request(trama)
+
+    @staticmethod
+    def preservation_extract_order_id(response):
+        """Extrae order_id de la respuesta tras colocar una orden."""
+        try:
+            if isinstance(response, dict):
+                return response.get("order_id") or response.get("id")
+            if isinstance(response, (list, tuple)) and response:
+                first = response[0] if isinstance(response[0], dict) else response
+                return first.get("order_id") or first.get("id")
+        except Exception:
+            pass
+        return None
+
 
 #  clase para colocar ordenes desde cualquier punto de la aplicacion
 class MyOrders:
