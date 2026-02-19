@@ -48,6 +48,7 @@ from Modulos_Utilitarios import (
     W,
     get_indicadores,
     calculate_decimal_places,
+    calcular_atr,
     define_FileCache,
 )
 from Modulos_Comunes import (
@@ -214,6 +215,7 @@ class DataHub:
     manager_events = {}
     manager_after = {}
     manager_buysell = {}
+    manager_sesion = {}
     manager_GyP = {"Plan": 0, "Inversion": 0, "dGyP": 0, "tGyp": 0, "Debit": 0, "Margen": 0}
     rebalanceo = {}
     telegram_botcrypto = {}
@@ -987,6 +989,123 @@ class DataHub:
         except Exception as e:
             print(f"maximiza_sell_lotes(): {e}")
 
+    # ========================================================================================================
+    # PRESERVATION: Lógica de vehículo para el Agente de Preservación de Ganancias
+    # ========================================================================================================
+    @staticmethod
+    def preservation_get_price(symbol, positio):
+        """Obtiene precio actual del símbolo (websocket → fallback mrkprice)."""
+        info_symbol = DataHub.info.get(symbol, {})
+        ws = info_symbol.get("websocket", {})
+        return ws.get("last") or positio.get("mrkprice", 0)
+
+    @staticmethod
+    def preservation_get_atr(symbol, vehiculo="Stock"):
+        """Calcula ATR desde CacheHut con fallback a yfinance. Retorna (atr, error_msg)."""
+
+        # Intentar desde CacheHut primero
+        info_symbol = DataHub.info.get(symbol, {})
+        datos_fn = info_symbol.get("datos")
+        datos = datos_fn() if datos_fn else None
+
+        # Fallback: cargar desde yfinance si CacheHut está vacío
+        if datos is None or datos.empty or len(datos) < 14:
+            try:
+                ticket = convierte_ticket_crypto(symbol) if vehiculo == "Crypto" else symbol
+                result = get_yfinance(ticket=ticket, vehiculo=vehiculo, period="6mo", interval="1d")
+                if result:
+                    _, datos = result
+            except Exception:
+                pass
+
+        if datos is None or datos.empty or len(datos) < 14:
+            n = 0 if datos is None else len(datos)
+            return None, f"datos insuficientes ({n} rows, CacheHut + yfinance)"
+        return calcular_atr(datos), None
+
+    @staticmethod
+    def preservation_calc_qty(vehiculo, symbol, position_qty, proteccion_base):
+        """Calcula qty a proteger, respetando lotSize en Crypto."""
+
+        if vehiculo == "Crypto":
+            info_symbol = DataHub.info.get(symbol, {})
+            lot_info = info_symbol.get("lotSize", {})
+            step_size = lot_info.get("stepSize", 0.00001)
+            decimals = calculate_decimal_places(step_size)
+            qty_raw = position_qty * proteccion_base
+            return round(qty_raw - (qty_raw % step_size), decimals)
+        else:
+            return round(position_qty * proteccion_base)
+
+    @staticmethod
+    def preservation_build_trama(vehiculo, account, symbol, conid, stop_price, qty):
+        """Construye la trama de orden STOP según el vehículo (IB o Binance)."""
+        if vehiculo == "Stock":
+            return {
+                "account": account,
+                "vehiculo": "Stock",
+                "symbol": symbol,
+                "pedido": {
+                    "orders": [
+                        {
+                            "conid": int(conid),
+                            "orderType": "STP",
+                            "price": round(stop_price, 2),
+                            "side": "SELL",
+                            "tif": "GTC",
+                            "quantity": qty,
+                        }
+                    ]
+                },
+                "hash_id_Op": "PRESERVATION_STOP",
+            }
+        else:
+            return {
+                "account": account,
+                "vehiculo": "Crypto",
+                "symbol": symbol,
+                "pedido": {
+                    "symbol": symbol,
+                    "side": "SELL",
+                    "type": "STOP_LOSS_LIMIT",
+                    "price": round(stop_price, 2),
+                    "stopPrice": round(stop_price, 2),
+                    "quantity": qty,
+                    "timeInForce": "GTC",
+                },
+                "hash_id_Op": "PRESERVATION_STOP",
+            }
+
+    @staticmethod
+    def preservation_send_order(vehiculo, trama):
+        """Envía orden STOP via QremoteOrder. Retorna response."""
+        return DataHub.QremoteOrder[vehiculo]._request(trama)
+
+    @staticmethod
+    def preservation_cancel_order(vehiculo, account, order_id, symbol):
+        """Cancela una orden PRESERVATION_STOP existente."""
+        trama = {
+            "account": account,
+            "vehiculo": vehiculo,
+            "symbol": symbol,
+            "pedido": {"action": "cancel", "order_id": order_id},
+            "hash_id_Op": "PRESERVATION_STOP",
+        }
+        return DataHub.QremoteOrder[vehiculo]._request(trama)
+
+    @staticmethod
+    def preservation_extract_order_id(response):
+        """Extrae order_id de la respuesta tras colocar una orden."""
+        try:
+            if isinstance(response, dict):
+                return response.get("order_id") or response.get("id")
+            if isinstance(response, (list, tuple)) and response:
+                first = response[0] if isinstance(response[0], dict) else response
+                return first.get("order_id") or first.get("id")
+        except Exception:
+            pass
+        return None
+
 
 #  clase para colocar ordenes desde cualquier punto de la aplicacion
 class MyOrders:
@@ -1064,7 +1183,7 @@ class MyOrders:
 
                     if RespEnviada:
                         tempJson = json.loads(RespEnviada)
-                        enviada = tempJson[0]
+                        enviada = tempJson[0] if isinstance(tempJson, list) else tempJson
                         if "order_status" in enviada:
                             status = enviada.get("order_status")
                             ClientOrderid = enviada.get("order_id")
@@ -1073,8 +1192,16 @@ class MyOrders:
                     else:
                         self.logger.error(f"place_OrderStock: orderconfirm sin respuesta | replyid={resp.get('id')}")
 
-                # Salva información de la orden
+                # Salva información de la orden — normalizar response a lista de dicts
+                if isinstance(response, dict):
+                    response = [response]
+                elif not isinstance(response, list):
+                    self.logger.error(f"place_OrderStock: response inesperado type={type(response)} | {response}")
+                    return {}, {}, {}
                 for items in response:
+                    if not isinstance(items, dict):
+                        self.logger.error(f"place_OrderStock: item no es dict: {items}")
+                        continue
                     values.update(
                         {
                             "account": account,
@@ -1792,9 +1919,8 @@ class MyOrders:
                 cantidad = sell["disponible"]
 
             return cantidad
-
         except Exception as e:
-            print("[stock_free_operar()]: {}")
+            pass
 
 
 # Superclase para unificar atributos de los activos
@@ -1875,6 +2001,7 @@ class TickerInfo(MyOrders):
                         position["region"],
                         position["country"],
                         position["divisa"],
+                        position["sectype"],
                     )
         except Exception as e:
             print("[carga_inversion_en_positions()]: {}".format(e))
@@ -1911,6 +2038,7 @@ class TickerInfo(MyOrders):
         region,
         country,
         divisa,
+        sectype,
     ):
         try:
             position = {
@@ -1943,6 +2071,7 @@ class TickerInfo(MyOrders):
                 "region": region,
                 "country": country,
                 "divisa": divisa,
+                "sectype": sectype,
             }
             self.positions.append(position)
         except Exception as e:
@@ -5270,18 +5399,15 @@ class WidgetVehiculo(TickerInfo):
                 response = self.IClient._get_symbol(symbol=symbol, secType="STK")
                 if response:
                     conid = response.get("conid")
-
-                    if not response.get("market_data"):
-                        precio = float(response["market_data"]["31"])
+                    precio = float(response["market_data"]["31"])
 
                 # Valida resposne o que tenga last market
-                if not response or response.get("market_data"):
+                if not response:
                     MyMessageBox(self.master).showinfo(
                         title="Buy - New symbol",
                         message=f"Símbolo {symbol} no encontrado en los activos {self.vehiculo}",
                     )
                     return
-
         except Exception as e:
             MyMessageBox(self.master).showinfo(title="Buy - New symbol", message=f"Error: {symbol} no válido")
             traceback.print_exc()

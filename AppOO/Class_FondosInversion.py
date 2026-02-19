@@ -345,6 +345,7 @@ class ArsFondosInversion(tk.Frame):
             p["empresa"] = activo[0]["descripcion"]
             p["nivelIA"] = "02"
             p["country"] = "Argentina"
+            p["sectype"] = "FCI"
             p["region"] = "AS"
             p["divisa"] = activo[0]["base_asset"]
 

@@ -544,6 +544,17 @@ def calcular_indicadores_df(df, rsi_window=14, ema_fast=9, ema_slow=21,
     return df
 
 
+def calcular_atr(df, window=14):
+    """Calcula ATR (Average True Range) sobre DataFrame con High/Low/Close."""
+    high, low, close = df["High"], df["Low"], df["Close"]
+    tr = pd.concat([
+        high - low,
+        (high - close.shift(1)).abs(),
+        (low - close.shift(1)).abs(),
+    ], axis=1).max(axis=1)
+    return tr.rolling(window).mean().iloc[-1]
+
+
 # Función para calcular indicadores técnicos
 def get_indicadores(symbol=None, datos=None):
     """
