@@ -64,7 +64,6 @@ class IB(IBClient):
         # Define URL Components
         self.ib_gateway_host = r"https://localhost"
         self.ib_gateway_port = r"5501"
-        # self.ib_gateway_path = ib_gateway_host + ":" + ib_gateway_port
 
         self.ib_gateway_path = f"{self.ib_gateway_host}:{self.ib_gateway_port}"
         self.backup_gateway_path = r"https://cdcdyn.interactivebrokers.com/portal.proxy"
@@ -137,6 +136,20 @@ class IB(IBClient):
     # ===========================================================
     # Keep-alive (background)
     # ===========================================================
+    def tickle(self) -> Dict:
+        """Keeps the session open.
+
+        If the gateway has not received any requests for several minutes an open session will
+        automatically timeout. The tickle endpoint pings the server to prevent the
+        session from ending.
+        """
+        # define request components
+        endpoint = r"tickle"
+        req_type = "POST"
+        content = self._make_request(endpoint=endpoint, req_type=req_type)
+
+        return content
+
     def _tickle_loop(self, interval: int, datahub=None) -> None:
         """
         Loop interno para mantener viva la sesión IBKR.
@@ -178,7 +191,6 @@ class IB(IBClient):
                     self.authenticated = False
                     time.sleep(reconnect_interval)
                     continue
-
             except Exception as e:
                 if not was_disconnected:
                     logging.error(f"Tickle falló: {e} — Gateway posiblemente caído")
@@ -186,7 +198,6 @@ class IB(IBClient):
                 self.authenticated = False
                 time.sleep(reconnect_interval)
                 continue
-
             time.sleep(interval)
 
     def start_tickle(self, interval: int = 30, datahub=None, on_reconnect=None) -> None:
@@ -773,7 +784,6 @@ class IB(IBClient):
 
         return content
 
-    def orderconfirm(self, replyid=None):
         """
         provisional :: An extension of the `place_confirm` endpoint but allows to confirm id orders.
 
@@ -789,6 +799,28 @@ class IB(IBClient):
         content = json.dumps(order_req.json(), indent=2)
 
         return content
+
+    def orderconfirm(self, replyid: str) -> str:
+        """
+        Confirma una orden que requiere respuesta.
+
+        Args:
+            replyid: ID del reply a confirmar
+
+        Returns:
+            JSON string con la respuesta
+        """
+        base_url = f"{self.ib_gateway_host}:{self.ib_gateway_port}/v1/api/"
+        endpoint = r"iserver/reply/{}".format(replyid)
+        reply_url = "".join([base_url, endpoint])
+        json_body = {"confirmed": True}
+
+        try:
+            order_req = requests.post(url=reply_url, verify=False, json=json_body)
+            return json.dumps(order_req.json(), indent=2)
+        except Exception as e:
+            self.logger.error(f"orderconfirm(): {e}")
+            return json.dumps({"error": str(e)})
 
     def deleteorder(self, account_id=None, customer_order_id=None):
         """Provisional Deletes the order specified by the customer order ID.
