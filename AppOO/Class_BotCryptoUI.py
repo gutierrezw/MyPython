@@ -820,20 +820,20 @@ class BotManager:
     def _cancel_sl_order(self, bot):
         """Cancela la orden STOP_LOSS_LIMIT en Binance (por ID o todas las abiertas)."""
         sl_id = bot.state.get("sl_order_id")
-        try:
-            if sl_id:
+        if sl_id:
+            try:
                 self.spot_client.get_cancel_order(symbol=bot.symbol, orderId=sl_id)
                 self.logger.warning(f"SL CANCELLED {bot.symbol}: orderId={sl_id}")
-            else:
-                # Sin ID guardado (ej: posición cargada al reiniciar) → cancelar todas
+            except Exception as e:
+                self.logger.warning(f"Ya estaba CANCELLED {bot.symbol}: orderId={sl_id}: Error: {e}")
+        else:
+            # Sin ID guardado (ej: posición cargada al reiniciar) → cancelar todas
+            try:
                 self.spot_client.cancel_all_orders(bot.symbol)
                 self.logger.warning(f"SL CANCELLED {bot.symbol}: todas las órdenes abiertas")
-        except Exception as e:
-            # -2011 = no hay órdenes abiertas, no es error real
-            if "-2011" in str(e):
-                self.logger.warning(f"_cancel_sl_order({bot.symbol}): sin órdenes abiertas (OK)")
-            else:
-                self.logger.error(f"_cancel_sl_order({bot.symbol}): {e}")
+            except Exception as e:
+                self.logger.warning(f"Ya estaban CANCELLED {bot.symbol}: sin órdenes abiertas (OK): ERROR {e}")
+
         bot.state["sl_order_id"] = None
 
     # =========================
