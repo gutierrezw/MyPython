@@ -73,6 +73,7 @@ class ClassAgenteIA:
         self.NotFound = []
         self.PlanInversion = PlanInversion()
         self.sesion = self.PlanInversion.get_sesion_by_vehiculo(self.vehiculo)
+        self.account = self.sesion["idcuenta"]
 
         # variables Modelo sell
         modelo = BDsystem.get_modelo_ia(modelo="modelo_sellv01")
@@ -358,35 +359,61 @@ class ClassAgenteIA:
             except Exception as e:
                 self.logger.error(f"Agente_ManagerPreservation({vehiculo}): {e}")
 
-    def _preservation_run_vehiculo(self, vehiculo):
-        """Orquesta la preservación para un vehículo. Lógica de vehículo en DataHub."""
-
-        self.logger.warning(f"Preservation({vehiculo}): INICIO")
+    def _preservation_get_config(self, vehiculo):
 
         # 1. Cargar config de preservation desde sesion.parameters
-        sesion = self.PlanInversion.get_sesion_by_vehiculo(vehiculo)
-        params_raw = sesion.get("parameters")
+        params_raw = self.sesion.get("parameters")
         if not params_raw:
             self.logger.warning(f"Preservation({vehiculo}): sin parameters en sesion → SKIP")
-            return
+            return {}, 0, False
+
         params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
         pconfig = params.get("preservation")
         if not pconfig:
             self.logger.warning(f"Preservation({vehiculo}): sin bloque 'preservation' en parameters → SKIP")
+            return {}, 0, False
+
+        # chequea intervalo para el vehiculo
+        revisiones_dia = pconfig.get("revisiones_dia", 2)
+        roi_minimo = pconfig.get("roi_minimo", 0.10)
+        proteccion_base = pconfig.get("proteccion_base", 0.50)
+        intervalo_min = 86400 / revisiones_dia
+        intervalo_min = int(86400 / 5)  # test
+        state = self.preservation_state.get(vehiculo, {})
+
+        # Iniacializa last_check vehiculo
+        if not state:
+            self.preservation_state[vehiculo] = {"last_check": datetime.now()}
+            return pconfig, intervalo_min, False
+
+        elif state:
+            last_check = state.get("last_check")
+            if last_check and (datetime.now() - last_check).total_seconds() < intervalo_min:
+                return pconfig, intervalo_min, False
+            else:
+                # toca revision
+                self.logger.warning(
+                    f"Preservation({vehiculo}): INICIO >> config OK | revisiones {intervalo_min}"
+                    f" | roi_min={roi_minimo} | prot={proteccion_base}"
+                )
+
+                # setea proxima evento
+                self.preservation_state[vehiculo] = {"last_check": datetime.now()}
+                return pconfig, intervalo_min, True
+
+    def _preservation_run_vehiculo(self, vehiculo):
+        """Orquesta la preservación para un vehículo. Lógica de vehículo en DataHub."""
+
+        pconfig, intervalo_min, time_revision = self._preservation_get_config(vehiculo)
+        if not time_revision:
             return
 
         roi_minimo = pconfig.get("roi_minimo", 0.10)
         proteccion_base = pconfig.get("proteccion_base", 0.50)
         correccion_pct = pconfig.get("correccion_pct", 0.08)
         atr_mult = pconfig.get("atr_mult", 2.0)
-        revisiones_dia = pconfig.get("revisiones_dia", 2)
-        intervalo_min = 86400 / revisiones_dia
-        # TODO TEST: intervalo reducido para pruebas, restaurar línea anterior en producción
-        intervalo_min = 60  # 60 segundos para testing
 
-        self.logger.warning(f"Preservation({vehiculo}): config OK | roi_min={roi_minimo} | prot={proteccion_base}")
-
-        # 2. Cargar posiciones activas
+        # 1. Cargar posiciones activas
         positions = self.PlanInversion.select_inversion(tipoin=vehiculo, ticket="all")
         self.logger.warning(f"Preservation({vehiculo}): {len(positions)} posiciones cargadas")
 
@@ -397,64 +424,70 @@ class ClassAgenteIA:
             position_qty = positio.get("position", 0)
             conid = positio.get("conid")
             account = positio.get("useraccount")
+            base_limit = unrealizedpnl * proteccion_base
 
             if costobase <= 0 or position_qty <= 0:
                 continue
 
-            # 3. Verificar ROI >= roi_minimo
+            # 2. Verificar ROI >= roi_minimo
             roi = unrealizedpnl / costobase
             if roi < roi_minimo:
                 continue
 
             self.logger.warning(f"Preservation({vehiculo}/{symbol}): ROI={roi:.1%} ≥ {roi_minimo:.0%} → evaluando")
 
-            # 4. Rate-limit por símbolo
+            # 3. Rate-limit por símbolo
             state = self.preservation_state.get(symbol, {})
             last_check = state.get("last_check")
             if last_check and (datetime.now() - last_check).total_seconds() < intervalo_min:
                 continue
 
-            # 5. Obtener precio actual (DataHub)
+            # 4. Obtener precio actual (DataHub)
             last = DataHub.preservation_get_price(symbol, positio)
             if not last or last <= 0:
                 self.logger.warning(f"Preservation({vehiculo}/{symbol}): sin precio → SKIP")
                 continue
 
-            # 6. Calcular ATR (DataHub)
+            # 5. Calcular ATR (DataHub)
             atr, atr_error = DataHub.preservation_get_atr(symbol, vehiculo)
             if atr is None:
                 self.logger.warning(f"Preservation({vehiculo}/{symbol}): {atr_error} → SKIP")
                 continue
 
-            # 7. Actualizar max_price
+            # 6. Actualizar max_price
             max_price_prev = state.get("max_price", last)
             max_price = max(max_price_prev, last)
 
-            # 8. Calcular stop
+            # 7. Calcular stop
             stop_distance = max(correccion_pct * max_price, atr_mult * atr)
             stop_calculado = max_price - stop_distance
 
-            # 9. Regla de oro: nunca bajar el stop
+            # 8. Regla de oro: nunca bajar el stop
             stop_anterior = state.get("stop_actual", 0)
             stop_final = max(stop_anterior, stop_calculado)
 
-            # 10. Cantidad a proteger (DataHub — respeta lotSize en Crypto)
-            qty = DataHub.preservation_calc_qty(vehiculo, symbol, position_qty, proteccion_base)
+            # 9. Cantidad a proteger (DataHub — respeta lotSize en Crypto)
+            qty = DataHub.preservation_calc_qty(self.account, vehiculo, symbol, last, base_limit)
             if qty <= 0:
                 continue
 
-            # 11. Construir trama de orden STOP (DataHub)
-            trama = DataHub.preservation_build_trama(vehiculo, account, symbol, conid, stop_final, qty)
+            # 10. Construir trama de orden STOP (DataHub)
+            trama = DataHub.preservation_build_trama(vehiculo, account, symbol, conid, stop_final, max_price, 10)
 
             order_id_prev = state.get("order_id")
 
-            if stop_final > stop_anterior:
-                # --- MODO DRY-RUN: solo log, sin enviar orden real ---
-                # TODO: cuando se active en firme, descomentar:
-                #   if order_id_prev:
-                #       DataHub.preservation_cancel_order(vehiculo, account, order_id_prev, symbol)
-                #   response = DataHub.preservation_send_order(vehiculo, trama)
-                #   order_id = DataHub.preservation_extract_order_id(response)
+            # Activa Order STOP para el symbol
+            if stop_final > stop_anterior and symbol == "PBR":
+
+                self.logger.warning(
+                    f"Preservation({vehiculo}/{symbol}): base_limit {base_limit}, Order: {trama},  Previo: {order_id_prev}"
+                )
+                if order_id_prev:
+                    DataHub.preservation_cancel_order(vehiculo, account, order_id_prev, symbol)
+
+                response = DataHub.preservation_send_order(vehiculo, trama)
+                order_id = DataHub.preservation_extract_order_id(response)
+
                 order_id = order_id_prev
 
                 accion = "NUEVA" if not order_id_prev else "MODIFICADA (cancel+new)"
@@ -472,7 +505,7 @@ class ClassAgenteIA:
                     f"stop={stop_final:.2f} (sin cambio)"
                 )
 
-            # 12. Persistir estado
+            # 11. Persistir estado
             self.preservation_state[symbol] = {
                 "max_price": max_price,
                 "stop_actual": stop_final,

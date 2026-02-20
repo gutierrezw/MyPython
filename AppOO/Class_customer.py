@@ -1024,22 +1024,39 @@ class DataHub:
         return calcular_atr(datos), None
 
     @staticmethod
-    def preservation_calc_qty(vehiculo, symbol, position_qty, proteccion_base):
+    def preservation_calc_qty(account, vehiculo, symbol, last, base_limit):
         """Calcula qty a proteger, respetando lotSize en Crypto."""
 
+        def cantidad_lote():
+            """Calcula qty a proteger desde booktranding."""
+            value, qty_raw = 0.0, 0
+            book = DataHub.get_lotesGainLost(opcion="gain", account=account, symbol=symbol, last=last)
+            for keys in book:
+                if value + keys.get("gyp", 0) > base_limit:
+                    break
+
+                value += keys.get("gyp", 0)
+                qty_raw += keys.get("cantidad", 0)
+
+            return qty_raw
+
+        qty_raw = cantidad_lote()
         if vehiculo == "Crypto":
             info_symbol = DataHub.info.get(symbol, {})
             lot_info = info_symbol.get("lotSize", {})
             step_size = lot_info.get("stepSize", 0.00001)
             decimals = calculate_decimal_places(step_size)
-            qty_raw = position_qty * proteccion_base
             return round(qty_raw - (qty_raw % step_size), decimals)
         else:
-            return round(position_qty * proteccion_base)
+            return qty_raw
 
     @staticmethod
-    def preservation_build_trama(vehiculo, account, symbol, conid, stop_price, qty):
+    def preservation_build_trama(vehiculo, account, symbol, conid, stop_price, max_price, qty):
         """Construye la trama de orden STOP según el vehículo (IB o Binance)."""
+
+        hash_id = DataHub.RepositorioOportunidades.generar_hash_id(
+            account=account, symbol=symbol, tipo="STP", subtipo="LMT", recomendado="PRESERVATION_STOP"
+        )
         if vehiculo == "Stock":
             return {
                 "account": account,
@@ -1049,17 +1066,19 @@ class DataHub:
                     "orders": [
                         {
                             "conid": int(conid),
-                            "orderType": "STP",
-                            "price": round(stop_price, 2),
+                            "orderType": "STP LMT",
+                            "auxPrice": round(stop_price, 2),
+                            "price": round(max_price, 2),
                             "side": "SELL",
                             "tif": "GTC",
                             "quantity": qty,
                         }
                     ]
                 },
-                "hash_id_Op": "PRESERVATION_STOP",
+                "hash_id_Op": hash_id,
             }
-        else:
+
+        if vehiculo == "Crypto":
             return {
                 "account": account,
                 "vehiculo": "Crypto",
@@ -1073,7 +1092,7 @@ class DataHub:
                     "quantity": qty,
                     "timeInForce": "GTC",
                 },
-                "hash_id_Op": "PRESERVATION_STOP",
+                "hash_id_Op": hash_id,
             }
 
     @staticmethod
@@ -1582,7 +1601,7 @@ class MyOrders:
                     {
                         "conid": idd,
                         "orderType": tip,
-                        "price": prc,
+                        "price": round(prc, 2),
                         "side": opt,
                         "tif": tim,
                         "quantity": qty,
