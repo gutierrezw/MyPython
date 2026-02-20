@@ -1657,6 +1657,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
             - Retorna información completa para análisis de rebalanceo
             """
             try:
+                campos = {}
                 ddatos, x_categoria, x_meses = self.rendimiento_dividends(activo=activo, datos=pdatos, symbol=x_symbol)
                 if not ddatos.empty:
                     d_json = ddatos.to_json(orient="split")
@@ -1664,9 +1665,23 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     campos.update({"trazaDividends": d_json})
                 else:
                     campos.update({"categoriaActivo": "X"})
+
+                # se agregan otros campos de intres para actualzair market
+                campos.update({"trailingAnnualDividendRate": activo.get("trailingAnnualDividendRate", 0)})
+                campos.update({"dividendYield": activo.get("dividendYield", 0)})
+
+                timestamp = activo.get("exDividendDate")
+                exdivi = "9999-12-31"
+                if timestamp is not None:
+                    fecha = datetime.fromtimestamp(timestamp)
+                    exdivi = fecha.strftime("%Y-%m-%d")
+                campos.update({"exDividendDate": exdivi})
+                campos.update({"previousClose": activo.get("previousClose", 0)})
+
                 return campos, x_categoria[0], x_meses
             except Exception as error:
                 print("[construct_info_dividends()]: {}".format(error))
+                traceback.print_exc()
 
         try:
             columnas, values, meses = [], [], []
@@ -2196,9 +2211,8 @@ class DashMain:
 
         # DashMain.manager_after = MangerAfterEvents(AppRoot=self.root, logger="root")
 
-    """ cambia estilo notebook ----------------------------------------------------------------------------------------"""
-
     def on_tab_changed(self, event):
+        """cambia estilo notebook ----------------------------------------------------------------------------------------"""
 
         selected = event.widget.index("current")
         for i in range(self.root_note.index("end")):
@@ -2207,9 +2221,9 @@ class DashMain:
             else:
                 self.root_note.tab(i, style="TNotebook.Tab")  # estilo por defecto
 
-    """ contendor para iniciar widget cryptos"""
-
     def start_crypto(self, account=None, vehiculo=None):
+        """contendor para iniciar widget cryptos"""
+
         def update_pane_crypto():
             nav, unpyl, dgyp, unprofit, costo = 0.0, 0.0, 0.0, 0.0, 0.0
             for keys in self.crypto.positions:
@@ -2254,9 +2268,9 @@ class DashMain:
         except Exception as e:
             print(f"start_cryptos({e})")
 
-    """ contendor para iniciar widget de stock"""
-
     def start_stock(self, account=None, vehiculo=None):
+        """contendor para iniciar widget de stock"""
+
         def update_pane_stock():
             nav, unpyl, dgyp, unprofit, costo = 0.0, 0.0, 0.0, 0.0, 0.0
             for keys in self.stock.positions:
@@ -2354,8 +2368,6 @@ class DashMain:
         except Exception as e:
             logging.getLogger("IBGateway").error(f"start_stock(): {e}")
 
-    """ chatbot y/o asistente ------------------------------------------------------------------------------------------"""
-
     def start_chatbot(self):
         """
         Inicializa el chatbot y su botón flotante.
@@ -2398,9 +2410,9 @@ class DashMain:
         except Exception:
             pass
 
-    """ update widget del crypto"""
-
     def update_widget(self, vehiculo=None):
+        """update widget del crypto"""
+
         try:
             # Verificar si debemos continuar ejecutando
             if not self.is_running:
@@ -2518,7 +2530,7 @@ class DashMain:
                                     values=values,
                                 )
 
-            except EncodingWarning as e:
+            except Exception as e:
                 print("insert_ordenes_treeview(): {}".format(e))
 
         # controla selección de items en orders activas
@@ -2580,7 +2592,7 @@ class DashMain:
                             orderid=orderId,
                         )
 
-            except EncodingWarning as e:
+            except Exception as e:
                 print("eliminar_orden(): {}".format(e))
 
         # refresca ordenes en treeview
@@ -2598,7 +2610,7 @@ class DashMain:
                         tree.delete(hijo)
 
                 insert_ordenes_treeview(tree)
-            except EncodingWarning as e:
+            except Exception as e:
                 print("update_treeview_ordenes(): {}".format(e))
 
         def envia_orders_stock(vehiculo, fields, values):
@@ -2618,7 +2630,7 @@ class DashMain:
                         # values = {'status': 'Submitted', 'stampSubmit': stamp}
 
                         # update_order_trader(account=account, values=values, symbol=symbol, orderid=orderId)
-            except EncodingWarning as e:
+            except Exception as e:
                 print("envia_orders_stock(): {}".format(e))
 
         try:
@@ -2739,12 +2751,11 @@ class DashMain:
             tree.item(Crypto, open=True)
 
             insert_ordenes_treeview(tree)
-        except EncodingWarning as e:
+        except Exception as e:
             print("car_ordenes_activas(): {}".format(e))
 
-    """ despliega ventana con detalle para el gráfico"""
-
     def detalle_graph(self, tipo=None):
+        """despliega ventana con detalle para el gráfico"""
 
         # controla salida de window_estrategia()
         def eexit():
@@ -2827,7 +2838,11 @@ class DashMain:
 
                 if market:
                     last = market[0][ix.index("lastDividendValue")]
-                    div = market[0][ix.index("dividendRate")]
+
+                    div = 0
+                    if market[0][ix.index("trailingAnnualDividendRate")] > 0:
+                        div = market[0][ix.index("dividendRate")]
+
                     string = market[0][ix.index("monthDividendsPay")]
                     fecha = market[0][ix.index("exDividendDate")]
                     trallingAnual = market[0][ix.index("trailingAnnualDividendRate", 0)]
@@ -2878,7 +2893,11 @@ class DashMain:
                 exdiv, rend, dividends = "", 0.0, [0] * 12
                 if market:
                     last = market[0][ix.index("lastDividendValue")]
-                    div = market[0][ix.index("dividendRate")]
+
+                    div = 0
+                    if market[0][ix.index("trailingAnnualDividendRate")] > 0:
+                        div = market[0][ix.index("dividendRate")]
+
                     string = market[0][ix.index("monthDividendsPay")]
                     fecha = market[0][ix.index("exDividendDate")]
                     trallingAnual = market[0][ix.index("trailingAnnualDividendRate", 0)]
@@ -2935,7 +2954,11 @@ class DashMain:
                 exdiv, rend, dividends = "", 0.0, [0] * 12
                 if market:
                     last = market[0][ix.index("lastDividendValue")]
-                    div = market[0][ix.index("dividendRate")]
+
+                    div = 0
+                    if market[0][ix.index("trailingAnnualDividendRate")] > 0:
+                        div = market[0][ix.index("dividendRate")]
+
                     string = market[0][ix.index("monthDividendsPay")]
                     fecha = market[0][ix.index("exDividendDate")]
                     exdiv = fecha.strftime("%d-%b") if fecha and fecha.month == date else " "
@@ -3059,7 +3082,7 @@ class DashMain:
 
                 # gráfica symbol con menor base de inversión
                 grafico_rendimiento_symbol(symbol=ticket, windows=windows)
-            except EncodingWarning as e:
+            except Exception as e:
                 print("treeview_dividendos(): {}".format(e))
 
         def treeview_sector(option=None, windows=None):
@@ -3147,7 +3170,7 @@ class DashMain:
 
                 # gráfica symbol con menor base de inversión
                 grafico_rendimiento_symbol(symbol=ticket, windows=windows)
-            except EncodingWarning as e:
+            except Exception as e:
                 print("treeview_sector(): {}".format(e))
 
         def treeview_TipoActivo(option=None, windows=None):
@@ -3235,7 +3258,7 @@ class DashMain:
 
                 # gráfica symbol con menor base de inversión
                 grafico_rendimiento_symbol(symbol=ticket, windows=windows)
-            except EncodingWarning as e:
+            except Exception as e:
                 print("treeview_TipoActivo(): {}".format(e))
 
         try:
@@ -3297,12 +3320,11 @@ class DashMain:
                 command=lambda: eexit(),
             )
             ft1.grid(pady=10)
-        except EncodingWarning as e:
+        except Exception as e:
             print("detalle_graph(): {}".format(e))
 
-    """ performace de  ultimos n meses"""
-
     def setup_graph_income(self, tipo=None):
+        """performace de  ultimos n meses"""
 
         parm = {
             "titulo": "Ingresos",
@@ -3314,9 +3336,9 @@ class DashMain:
         Agente_income_Manager(fg=self.rg0, parm=parm)
         self.rv0.draw()
 
-    """ graficos windows main"""
-
     def graficos_main(self):
+        """graficos windows main"""
+
         # Verificar si debemos continuar ejecutando
         if not self.is_running:
             return
@@ -3382,8 +3404,6 @@ class DashMain:
             after_id = self.root.after(1200000, lambda: self.graficos_main())
             self.after_ids.append(after_id)
         # DataHub.manager_after._safe(1200000, self.graficos_main(), name="graficos_main")
-
-    """ Detener cada módulo de forma ordenada"""
 
     def setup_config(self):
         """
@@ -4664,9 +4684,9 @@ class DashMain:
             print(f"[setup()]: {e}")
             MyMessageBox(session_window).showerror("Error", f"Error al abrir gestor de sesiones: {str(e)}")
 
-    """ Cierra la aplicación de forma ordenada"""
-
     def eexit(self):
+        """Cierra la aplicación de forma ordenada"""
+
         # Marcar como no ejecutando para detener nuevos callbacks
         self.is_running = False
 
@@ -4732,9 +4752,8 @@ class DashMain:
         # Forzar salida limpia del programa
         sys.exit(0)
 
-    """ toma limites de barraProgress"""
-
     def get_limite_inversion(self):
+        """toma limites de barraProgress"""
         traz = self.PlanInversion.select_trazaplan(idcuenta=self.sesion_stock["idcuenta"])
         if traz:
             for tkey in traz:
@@ -4793,9 +4812,9 @@ class DashMain:
                 after_id = self.root.after(30000, self.actualizar_totales_inversiones)
                 self.after_ids.append(after_id)
 
-    """ Inicia el dashboard"""
-
     def run(self):
+        """Inicia el dashboard"""
+
         # Cargar variables de entorno desde base de datos (sesión DataHub) ------------------------------------------
         DataHub.load_from_database()
 
