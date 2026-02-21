@@ -1343,8 +1343,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             message = f"🟢🔴 *Trader recent (-7 days):*\n"
             message += f"```\n"
-            message += f"{'timestamp':<14} {'symbol':>7} {'side':>5} {'quantity':>7} {'price':>5} {'status':>7}\n"
-            message += f"{'-' * 55}\n"
+            message += f"{'timestamp':<12} {'symbol':>7} {'side':>4} {'quantity':>7} {'price':>5} {'status':>7}\n"
+            message += f"{'-' * 52}\n"
             message += "\n".join(lines)
             message += "```"
 

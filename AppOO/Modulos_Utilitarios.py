@@ -328,7 +328,7 @@ def vehiculo_parm(vehiculo=None):
     @param vehiculo:
     @return:
     """
-    if vehiculo in ("Crypto", "token"):
+    if vehiculo in ("Crypto", "token", "BotCrypto"):
         symbol = "BTCUSDT"
         rtn_index = "Return BTC"
         cum_index = "Cum BTC"
@@ -526,8 +526,7 @@ def limpiar_nan(obj):
         return obj
 
 
-def calcular_indicadores_df(df, rsi_window=14, ema_fast=9, ema_slow=21,
-                            macd_fast=12, macd_slow=26, macd_signal=9):
+def calcular_indicadores_df(df, rsi_window=14, ema_fast=9, ema_slow=21, macd_fast=12, macd_slow=26, macd_signal=9):
     """
     Calcula indicadores técnicos base sobre un DataFrame con columna 'Close'.
     Agrega columnas: rsi, macd, macd_signal, macd_hist, ema_fast, ema_slow.
@@ -541,17 +540,22 @@ def calcular_indicadores_df(df, rsi_window=14, ema_fast=9, ema_slow=21,
     df["macd_hist"] = macd_obj.macd_diff()
     df["ema_fast"] = EMAIndicator(close=close, window=ema_fast).ema_indicator()
     df["ema_slow"] = EMAIndicator(close=close, window=ema_slow).ema_indicator()
+    df["ema100"] = EMAIndicator(close=close, window=100).ema_indicator()
+    df["ema200"] = EMAIndicator(close=close, window=200).ema_indicator()
     return df
 
 
 def calcular_atr(df, window=14):
     """Calcula ATR (Average True Range) sobre DataFrame con High/Low/Close."""
     high, low, close = df["High"], df["Low"], df["Close"]
-    tr = pd.concat([
-        high - low,
-        (high - close.shift(1)).abs(),
-        (low - close.shift(1)).abs(),
-    ], axis=1).max(axis=1)
+    tr = pd.concat(
+        [
+            high - low,
+            (high - close.shift(1)).abs(),
+            (low - close.shift(1)).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
     return tr.rolling(window).mean().iloc[-1]
 
 

@@ -29,10 +29,54 @@ from Modulos_python import (
     multiprocessing,
     np,
 )
+import os
 from Modulos_Mysql import BDsystem, RepositorioOportunidadesBuySell
-from Modulos_Utilitarios import calcular_indicadores_df
+from Modulos_Utilitarios import calcular_indicadores_df, define_FileCache
 from Class_ApiBinnace import BinanceClient, BinanceStreamClient
 from Class_customer import DataHub, MyMessageBox
+from Modulos_Comunes import diaria_book_performance, proceso_update_performance
+
+
+# =============================================================================
+# PERSISTENCIA DE ESTADO: FileStateRepo
+# =============================================================================
+class FileStateRepo:
+    """Persiste el estado del bot en archivos JSON por símbolo.
+    Directorio: <cwd>/tmp/bot_states/<symbol>.json
+    """
+
+    def __init__(self):
+        self._dir = define_FileCache("bot_states")
+        os.makedirs(self._dir, exist_ok=True)
+
+    def _path(self, symbol: str) -> str:
+        return os.path.join(self._dir, f"{symbol}.json")
+
+    def save_state(self, symbol: str, state: dict):
+        try:
+            with open(self._path(symbol), "w") as f:
+                json.dump(state, f, default=str)
+        except Exception as e:
+            logging.getLogger(__name__).error(f"FileStateRepo.save_state({symbol}): {e}")
+
+    def load_state(self, symbol: str) -> dict:
+        path = self._path(symbol)
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception as e:
+            logging.getLogger(__name__).error(f"FileStateRepo.load_state({symbol}): {e}")
+            return {}
+
+    def delete_state(self, symbol: str):
+        try:
+            path = self._path(symbol)
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
 
 
 # =============================================================================
@@ -95,8 +139,13 @@ class TradingBotSpot:
         ema_fast = self.df["ema_fast"].iloc[-1]
         ema_slow = self.df["ema_slow"].iloc[-1]
         price = self.df["Close"].iloc[-1]
+        regime = self._check_market_regime()
 
         conditions = {
+            "regime_ok": {
+                "value": regime == "BULL",
+                "detail": regime,
+            },
             "trend_ok": {
                 "value": macd > macd_signal and ema_fast > ema_slow,
                 "detail": f"MA {macd:.6f} > {macd_signal:.6f} " f"& EMf {ema_fast:.6f} > EMs {ema_slow:.6f}",
@@ -187,6 +236,9 @@ class TradingBotSpot:
                 "macd_signal": float(self.df["macd_signal"].iloc[-1]) if "macd_signal" in self.df.columns else None,
                 "ema_fast": float(self.df["ema_fast"].iloc[-1]) if "ema_fast" in self.df.columns else None,
                 "ema_slow": float(self.df["ema_slow"].iloc[-1]) if "ema_slow" in self.df.columns else None,
+                "ema100": float(self.df["ema100"].iloc[-1]) if "ema100" in self.df.columns else None,
+                "ema200": float(self.df["ema200"].iloc[-1]) if "ema200" in self.df.columns else None,
+                "regime": self._check_market_regime(),
                 "last_price": self._last_price(),
             }
         except Exception:
@@ -210,6 +262,10 @@ class TradingBotSpot:
         if self.df is None or len(self.df) < 50:
             return False
 
+        # Gate estructural: solo operar LONG en régimen BULL
+        if self._check_market_regime() != "BULL":
+            return False
+
         rsi = self.df["rsi"].iloc[-1]
         macd = self.df["macd"].iloc[-1]
         macd_signal = self.df["macd_signal"].iloc[-1]
@@ -229,6 +285,21 @@ class TradingBotSpot:
         ok = trend_ok and rsi_ok and price_ok
 
         return ok
+
+    def _check_market_regime(self) -> str:
+        """Clasifica régimen estructural basado en EMA100/EMA200.
+        Retorna: 'BULL' | 'RANGE' | 'BEAR'
+        """
+        if self.df is None or "ema100" not in self.df.columns or "ema200" not in self.df.columns:
+            return "RANGE"
+        ema100 = self.df["ema100"].iloc[-1]
+        ema200 = self.df["ema200"].iloc[-1]
+        price = self.df["Close"].iloc[-1]
+        if price > ema100 and ema100 > ema200:
+            return "BULL"
+        if price < ema100 and ema100 < ema200:
+            return "BEAR"
+        return "RANGE"
 
     def _should_exit(self, price: float) -> bool:
         # Solo salir por Stop Loss (RSI no fuerza exit, solo bloquea compras)
@@ -995,6 +1066,9 @@ class BotManager:
             f"qty={qty} price~{price:.6f} notional~{qty * price:.2f} USDT"
         )
 
+        # cancela orden previa y update en exchange: cancelar SL viejo, colocar nuevo (qty reducida + trailing)
+        self._cancel_sl_order(bot)
+
         order = self.spot_client.get_new_order(
             symbol=bot.symbol,
             side="SELL",
@@ -1011,6 +1085,7 @@ class BotManager:
         order_id = order["orderId"]
         self.order_manager.register_order(symbol=bot.symbol, order_id=order_id, intent=intent)
 
+        # actualizan qty remainning
         if intent == "TP1":
             bot.state["tp1_done"] = True
             bot.state["remaining_qty"] -= qty
@@ -1020,6 +1095,9 @@ class BotManager:
             atr = bot._calc_atr14()
             trail_mult = bot.risk_cfg.get("trail_mult", 1.5)
             bot.state["trailing_stop"] = price - (trail_mult * atr)
+
+            # Post-TP1: mover SL a breakeven (precio de entrada) para proteger ganancia
+            bot.state["stop_loss"] = bot.state["entry_price"]
             self.logger.warning(
                 f"{bot.symbol}: TRAILING activado | high={price:.6f} stop={bot.state['trailing_stop']:.6f} "
                 f"ATR={atr:.6f} mult={trail_mult}"
@@ -1027,8 +1105,7 @@ class BotManager:
 
         self.capital_manager.release(qty * price)
 
-        # Actualizar SL en exchange: cancelar viejo, colocar nuevo (qty reducida + trailing)
-        self._cancel_sl_order(bot)
+        # Actualizar SL en exchange: colocar nuevo (qty reducida + trailing)
         if bot.state["remaining_qty"] > 0:
             self._place_sl_order(bot)
 
@@ -1093,6 +1170,7 @@ class BotManager:
                     "sl_order_id": None,
                 }
             )
+            bot.state_repo.delete_state(bot.symbol) if bot.state_repo else None
 
             # Buscar la orden real de SL en Binance y registrar en booktrading
             if self.on_trade_booktrading and sl_order_id:
@@ -1217,7 +1295,8 @@ class BotCryptoUI:
     """
 
     # Configuración
-    ACCOUNT = "B0000002"
+    ACCOUNT = None
+    VEHICULO = None
     COLUMNS = 3
     WIDGET_WIDTH = 300
     WIDGET_HEIGHT = 290
@@ -1298,6 +1377,7 @@ class BotCryptoUI:
         self.bot_manager = None
         self.binance_client = None
         self.ws_client = None
+        self.state_repo = FileStateRepo()
 
         # Contadores WebSocket para process_system (DataHub)
         self.ws_msg_counter = 0
@@ -1388,6 +1468,7 @@ class BotCryptoUI:
                     config = json.loads(sesion.get("private_key"))
                     self.env = sesion.get("environment", "TESTNET")
                     self.ACCOUNT = sesion.get("idcuenta")
+                    self.VEHICULO = sesion.get("vehiculo")
 
                 else:
                     self.logger.warning(f"Ambiente no válido en BD: '{db_env}', usando TESTNET")
@@ -1436,6 +1517,7 @@ class BotCryptoUI:
             self._cargar_simbolos()
             self._inicializar_managers()
             self._iniciar_auto_refresh()
+            self._schedule_diaria_performace()
 
             # Auto-start: iniciar bots al cargar la app, siempre self.env != None
             if self.all_activos and self.env:
@@ -1443,6 +1525,22 @@ class BotCryptoUI:
         except Exception as e:
             self.logger.error(f"Error inicializando BotCryptoUI: {e}")
             traceback.print_exc()
+
+    # =========================================
+    # CONSTRUYE DIARA y PERFORMACE vehiculo
+    # =========================================
+    def _schedule_diaria_performace(self):
+
+        update = False
+        if self.ACCOUNT:
+            # for account in self.account_fci:
+            t_wait, update = DataHub.last_process[self.VEHICULO], False
+            update = diaria_book_performance(account=self.ACCOUNT, vehiculo=self.VEHICULO, proces=t_wait)
+
+            # si actualizó tabla diaria, calcula proxima fecha de update
+            if update:
+                # agrega performance a la tabla
+                proceso_update_performance(account=self.ACCOUNT, vehiculo=self.VEHICULO)
 
     # =========================================
     # PANEL DE GRAFICOS gwi001
@@ -3281,6 +3379,18 @@ class BotCryptoUI:
             self.widgets[symbol].set_running(False)
             self.logger.warning(f"■ {symbol}: Bot DETENIDO")
 
+    def _cerrar_chart_window(self, symbol):
+        """Cierra la ventana Strategy del símbolo si está abierta."""
+        if not hasattr(self, "_chart_windows"):
+            return
+        win = self._chart_windows.pop(symbol, None)
+        if win:
+            try:
+                if win.winfo_exists():
+                    win.destroy()
+            except tk.TclError:
+                pass
+
     def _on_show_chart(self, symbol):
         """Abre ventana con gráfico de estrategia con auto-actualización"""  # gwi001
 
@@ -3547,6 +3657,7 @@ class BotCryptoUI:
     def _on_sell_all(self, symbol):
         """Vende todo el balance de un símbolo específico (REST en background).
         Cancela SL, vende, resetea estado del bot y libera capital."""
+        self._cerrar_chart_window(symbol)
 
         def _bg():
             try:
@@ -3649,6 +3760,7 @@ class BotCryptoUI:
         bot.state["trail_high"] = None
         bot.state["trailing_stop"] = None
         bot.state["sl_order_id"] = None
+        self.state_repo.delete_state(symbol)
         self.logger.warning(f"✅ {symbol}: Estado reseteado a NONE (cierre manual)")
 
         # Actualizar widget en main thread
@@ -3678,15 +3790,18 @@ class BotCryptoUI:
             if self.bot_manager:
                 self.bot_manager.unregister_bot(symbol)
 
-            # 3. Destruir widget
+            # 3. Cerrar gráfico Strategy si está abierto
+            self._cerrar_chart_window(symbol)
+
+            # 4. Destruir widget
             if symbol in self.widgets:
                 self.widgets[symbol].frame.destroy()
                 del self.widgets[symbol]
 
-            # 4. Resetear indicadores en BD
+            # 5. Resetear indicadores en BD
             self._resetear_indicadores_bd(symbol)
 
-            # 5. Actualizar scoring — el símbolo pasa a OBSERV.
+            # 6. Actualizar scoring — el símbolo pasa a OBSERV.
             self._actualizar_panel_scoring()
 
             # 6. Reorganizar grid
@@ -4660,7 +4775,7 @@ class BotCryptoUI:
                 interval=self.interval,
                 strategy_config=strategy_config,
                 risk_config=risk_config,
-                state_repo=None,  # TODO: Implementar persistencia
+                state_repo=self.state_repo,
                 order_manager=self.order_manager,
             )
 
@@ -4767,11 +4882,28 @@ class BotCryptoUI:
 
     def _cargar_posicion_existente(self, bot, symbol):
         """
-        Carga posición existente desde Binance al iniciar el bot.
-        Si hay balance del activo, calcula el precio de entrada promedio
-        desde el historial de trades y configura el estado del bot.
+        Carga posición existente al iniciar el bot.
+        Primero intenta restaurar desde estado persistido (FileStateRepo).
+        Si no hay estado guardado, reconstruye desde Binance API.
         """
         try:
+            # 0. Intentar restaurar estado persistido
+            saved = self.state_repo.load_state(symbol)
+            if saved and saved.get("position") == "LONG" and saved.get("entry_price"):
+                bot.state.update(saved)
+                notional = bot.state.get("remaining_qty", 0) * bot.state["entry_price"]
+                if self.capital_manager and notional > 0:
+                    self.capital_manager.reserve(notional)
+                self.trades_count += 1
+                if self.lbl_trades:
+                    self.lbl_trades.config(text=str(self.trades_count))
+                self.logger.warning(
+                    f"📥 {symbol}: ESTADO RESTAURADO desde archivo | entry={bot.state['entry_price']:.6f} "
+                    f"| qty={bot.state.get('remaining_qty'):.4f} | tp1={bot.state.get('tp1_done')} "
+                    f"| trailing={bot.state.get('trailing_active')}"
+                )
+                return
+
             # 1. Obtener balance del activo
             asset = symbol.replace("USDT", "")
             account = self.spot_client.account_spot()
@@ -4933,6 +5065,7 @@ class WidgetBotSymbol:
         self.lbl_tp = None
         self.lbl_pnl = None
         self.lbl_status_indicator = None
+        self.lbl_regimeok = None
         self.lbl_trendok = None
         self.lbl_rsiok = None
         self.lbl_priceok = None
@@ -5017,6 +5150,8 @@ class WidgetBotSymbol:
         separator.grid(row=row, column=0, columnspan=2, sticky="ew", pady=5)
 
         row += 1
+        self._crear_label_row(content, "Regime:", "lbl_regimeok", row, font_size=7)
+        row += 1
         self._crear_label_row(content, "Trend:", "lbl_trendok", row, font_size=7)
         row += 1
         self._crear_label_row(content, "RSI:", "lbl_rsiok", row, font_size=7)
@@ -5099,7 +5234,7 @@ class WidgetBotSymbol:
                 pnl_pct = ((price - self._entry_price) / self._entry_price) * 100
                 color = "lime" if pnl_pct > 0 else "red" if pnl_pct < 0 else "white"
                 if self.lbl_pnl.winfo_exists():
-                    self.lbl_pnl.config(text=f"{pnl_pct:+.2f}%  :: (qty:{self._qty})", fg=color)
+                    self.lbl_pnl.config(text=f"{pnl_pct:+.2f}%  :: (qty:{self._qty:.1f})", fg=color)
         except tk.TclError:
             pass
 
@@ -5159,7 +5294,7 @@ class WidgetBotSymbol:
             last = indicators.get("last_price", entry)
             pnl_pct = ((last - entry) / entry) * 100
             color = "lime" if pnl_pct > 0 else "red"
-            self.lbl_pnl.config(text=f"{pnl_pct:+.2f}%  :: (qty:{qty})", fg=color)
+            self.lbl_pnl.config(text=f"{pnl_pct:+.2f}%  :: (qty:{qty:.1f})", fg=color)
         else:
             self.lbl_pnl.config(text="--", fg="white")
 
@@ -5167,6 +5302,14 @@ class WidgetBotSymbol:
         # Condiciones de compra (siempre visibles)
         # ─────────────────────────────────────────────────────────────
         if conditions:
+            # Regime: Filtro estructural EMA100/EMA200
+            regime_ok = conditions.get("regime_ok", {})
+            regime_val = regime_ok.get("value", False)
+            regime_detail = regime_ok.get("detail", "--")
+            regime_color = {"BULL": "lime", "BEAR": "red", "RANGE": "orange"}.get(regime_detail, "gray")
+            regime_icon = "✓" if regime_val else "✗"
+            self.lbl_regimeok.config(text=f"{regime_icon} {regime_detail}", fg=regime_color)
+
             # Trend: MACD > Signal AND EMA_fast > EMA_slow
             trend_ok = conditions.get("trend_ok", {})
             trend_val = trend_ok.get("value", False)
