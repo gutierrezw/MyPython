@@ -349,13 +349,14 @@ class DataHub:
     mrk_anterior = get_ultimo_dia_mercado(market="Stock")
     dia_anterior = get_ultimo_dia_mercado(market="Crypto")
     mrv_anterior = get_ultimo_dia_mercado(market="BBVA.ARS")
-    mrv_safeday = mrv_anterior - timedelta(days=1)  # BBVA.ARS cierra un dia después
+    mrv_safeday = mrv_anterior - timedelta(days=2)  # BBVA.ARS cierra un dia después
 
     wait_3m = now + timedelta(minutes=3)
     last_process = {
         "Stock": {"diaria_book_performance": mrk_anterior, "wait": wait_3m},
         "Crypto": {"diaria_book_performance": dia_anterior, "wait": wait_3m},
         "BBVA.ARS": {"diaria_book_performance": mrv_safeday, "wait": wait_3m},
+        "BotCrypto": {"diaria_book_performance": mrv_safeday, "wait": wait_3m},
         "graph_performace_portafolio": False,
         "dividends_en_market_stock": now,
     }
@@ -3417,6 +3418,8 @@ class WidgetVehiculo(TickerInfo):
                 data = self.struct_datos(position)
                 for idx, tree in enumerate(self.m_tree):
                     items_id = self.m_tree[idx].get_children()
+                    if index >= len(items_id):
+                        continue
 
                     sty = self.create_styles(index, idx, data, "rows")
                     data_string = self.display_format(tipo="rows", data=data)
@@ -3425,6 +3428,8 @@ class WidgetVehiculo(TickerInfo):
             return positions
         except Exception as e:
             print("[on_sort_treeview()]: {}".format(e))
+            traceback.print_exc()
+            return []
 
     @staticmethod
     # Función para bloquear el scroll del mouse**
@@ -3874,6 +3879,7 @@ class WidgetVehiculo(TickerInfo):
                 self.update_widget_treeview(symbol=symbol, position=position)
         except Exception as e:
             print("[update_panelVehiculo()]: {}".format(e))
+            traceback.print_exc()
 
     # obtiene lotes fiscales
     def get_lotes_fiscales(self, account=None, symbol=None, divisa="USD", last=None):

@@ -59,7 +59,7 @@ st.components.v1.html(
             "hotlist": true,
             // --- AGREGAR ESTO ---
             "studies": [
-            "kPuoGBGx", "1aKxXAmg"
+            "GutierrezW;kPuoGBGx", "GutierrezW;1aKxXAmg"
             ],
             "container_id": "tradingview_full"
         }});
