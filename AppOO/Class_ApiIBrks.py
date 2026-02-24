@@ -71,6 +71,8 @@ class IB(IBClient):
 
         # Asigna Nombre Logging
         self.logger = logging.getLogger("IBroks_Client")
+        # Flag para suprimir logs repetidos de red cuando no hay conexión IBKR
+        self._network_error_logged = False
 
     # valida conexión al localHost
     def is_localhost(self):
@@ -578,12 +580,15 @@ class IB(IBClient):
                     else:
                         data = {"raw_text": response.text}
 
+                    if self._network_error_logged:
+                        self.logger.warning("✅ IBKR conexión restaurada — requests funcionando nuevamente")
+                        self._network_error_logged = False
                     self.logger.debug(
                         textwrap.dedent(
                             f"""
                             ================
                             _make_request(): SUCCESS
-                            ================  
+                            ================
                             URL: {response.url}
                             Code: {status_code}
                             """
@@ -616,18 +621,21 @@ class IB(IBClient):
 
         except requests.exceptions.RequestException as e:
             # Errores de red: timeouts, conexión caída, etc.
-            self.logger.error(
-                textwrap.dedent(
-                    f"""
+            # Solo loguea la primera vez para no saturar el log cuando IBKR no está conectado
+            if not self._network_error_logged:
+                self.logger.error(
+                    textwrap.dedent(
+                        f"""
                     ================
                     _make_request(): NETWORK EXCEPTION
-                    ================  
+                    ================
                     URL: {url}
                     Type: {req_type}
                     Error: {e}
                     """
+                    )
                 )
-            )
+                self._network_error_logged = True
             return {}
         except Exception as e:
             # Otros errores no controlados
