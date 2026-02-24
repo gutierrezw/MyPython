@@ -28,9 +28,10 @@ from Modulos_python import (
     logging,
     multiprocessing,
     np,
+    timedelta,
 )
 import os
-from Modulos_Mysql import BDsystem, RepositorioOportunidadesBuySell
+from Modulos_Mysql import BDsystem, RepositorioOportunidadesBuySell, PlanInversion
 from Modulos_Utilitarios import calcular_indicadores_df, define_FileCache
 from Class_ApiBinnace import BinanceClient, BinanceStreamClient
 from Class_customer import DataHub, MyMessageBox
@@ -178,8 +179,12 @@ class TradingBotSpot:
         if not self.state["tp1_done"] and self._should_take_tp1(price):
             return "TP1", conditions
 
-        # Post-TP1: actualizar trailing y verificar exit
-        if self.state["tp1_done"]:
+        # Post-TP1: evaluar TP2
+        if self.state["tp1_done"] and not self.state["tp2_done"] and self._should_take_tp2(price):
+            return "TP2", conditions
+
+        # Post-TP2 (o TP1 si no hay TP2): trailing stop
+        if self.state["tp2_done"] or (self.state["tp1_done"] and not self.risk_cfg.get("tp2_pct")):
             self._update_trailing(price)
             if self._should_trail_exit(price):
                 return "TRAIL_EXIT", conditions
@@ -230,16 +235,24 @@ class TradingBotSpot:
             return {}
 
         try:
+            last_price = self._last_price()
+            vol_rel = None
+            if "Volume" in self.df.columns and len(self.df) >= 20:
+                vol_mean = float(self.df["Volume"].tail(20).mean())
+                vol_rel = round(float(self.df["Volume"].iloc[-1]) / vol_mean, 2) if vol_mean > 0 else None
             return {
                 "rsi": float(self.df["rsi"].iloc[-1]) if "rsi" in self.df.columns else None,
                 "macd": float(self.df["macd"].iloc[-1]) if "macd" in self.df.columns else None,
                 "macd_signal": float(self.df["macd_signal"].iloc[-1]) if "macd_signal" in self.df.columns else None,
+                "macd_hist": float(self.df["macd_hist"].iloc[-1]) if "macd_hist" in self.df.columns else None,
                 "ema_fast": float(self.df["ema_fast"].iloc[-1]) if "ema_fast" in self.df.columns else None,
                 "ema_slow": float(self.df["ema_slow"].iloc[-1]) if "ema_slow" in self.df.columns else None,
                 "ema100": float(self.df["ema100"].iloc[-1]) if "ema100" in self.df.columns else None,
                 "ema200": float(self.df["ema200"].iloc[-1]) if "ema200" in self.df.columns else None,
+                "atr14": round(self._calc_atr14(), 6),
+                "vol_rel": vol_rel,
                 "regime": self._check_market_regime(),
-                "last_price": self._last_price(),
+                "last_price": last_price,
             }
         except Exception:
             return {}
@@ -316,6 +329,16 @@ class TradingBotSpot:
             return False
 
         target = self.state["entry_price"] * (1 + self.risk_cfg["tp1_pct"])
+        return price >= target
+
+    def _should_take_tp2(self, price: float) -> bool:
+        if self.state["entry_price"] is None:
+            return False
+
+        tp2_pct = self.risk_cfg.get("tp2_pct", 0)
+        if not tp2_pct:
+            return False
+        target = self.state["entry_price"] * (1 + tp2_pct)
         return price >= target
 
     def _calc_atr14(self) -> float:
@@ -1089,18 +1112,32 @@ class BotManager:
         if intent == "TP1":
             bot.state["tp1_done"] = True
             bot.state["remaining_qty"] -= qty
-            # Activar trailing stop después de TP1
-            bot.state["trailing_active"] = True
-            bot.state["trail_high"] = price
+            # Post-TP1: mover SL a breakeven para proteger ganancia
+            bot.state["stop_loss"] = bot.state["entry_price"]
+            # Trailing solo arranca aquí si no hay TP2 configurado
+            if not bot.risk_cfg.get("tp2_pct"):
+                atr = bot._calc_atr14()
+                trail_mult = bot.risk_cfg.get("trail_mult", 1.5)
+                bot.state["trailing_active"] = True
+                bot.state["trail_high"] = price
+                bot.state["trailing_stop"] = price - (trail_mult * atr)
+                self.logger.warning(
+                    f"{bot.symbol}: TRAILING activado post-TP1 | high={price:.6f} "
+                    f"stop={bot.state['trailing_stop']:.6f} ATR={atr:.6f} mult={trail_mult}"
+                )
+
+        elif intent == "TP2":
+            bot.state["tp2_done"] = True
+            bot.state["remaining_qty"] -= qty
+            # Post-TP2: activar trailing sobre el remanente
             atr = bot._calc_atr14()
             trail_mult = bot.risk_cfg.get("trail_mult", 1.5)
+            bot.state["trailing_active"] = True
+            bot.state["trail_high"] = price
             bot.state["trailing_stop"] = price - (trail_mult * atr)
-
-            # Post-TP1: mover SL a breakeven (precio de entrada) para proteger ganancia
-            bot.state["stop_loss"] = bot.state["entry_price"]
             self.logger.warning(
-                f"{bot.symbol}: TRAILING activado | high={price:.6f} stop={bot.state['trailing_stop']:.6f} "
-                f"ATR={atr:.6f} mult={trail_mult}"
+                f"{bot.symbol}: TRAILING activado post-TP2 | high={price:.6f} "
+                f"stop={bot.state['trailing_stop']:.6f} ATR={atr:.6f} mult={trail_mult}"
             )
 
         self.capital_manager.release(qty * price)
@@ -1173,21 +1210,54 @@ class BotManager:
             bot.state_repo.delete_state(bot.symbol) if bot.state_repo else None
 
             # Buscar la orden real de SL en Binance y registrar en booktrading
-            if self.on_trade_booktrading and sl_order_id:
+            if self.on_trade_booktrading:
+                real_order = None
                 try:
-                    real_order = self.spot_client.get_order(symbol=bot.symbol, orderId=sl_order_id)
-                    if real_order and real_order.get("status") == "FILLED":
+                    if sl_order_id:
+                        # Caso normal: tenemos el ID de la orden SL
+                        real_order = self.spot_client.get_order(symbol=bot.symbol, orderId=sl_order_id)
+                        if real_order and real_order.get("status") != "FILLED":
+                            self.logger.warning(
+                                f"{bot.symbol}: SL order {sl_order_id} no está FILLED: {real_order.get('status')}"
+                            )
+                            real_order = None
+                    else:
+                        # Fallback: sl_order_id desconocido (ej: restart sin estado) →
+                        # buscar el último trade SELL ejecutado en Binance
+                        now = int(time.time() * 1000)
+                        trades = self.spot_client.get_my_trades(bot.symbol, limit=5, startTime=now - 3600000)
+                        sell_trades = [t for t in (trades or []) if not t.get("isBuyer")]
+                        if sell_trades:
+                            last_sell = sorted(sell_trades, key=lambda t: t["time"], reverse=True)[0]
+                            # Construir objeto orden compatible con on_trade_booktrading
+                            real_order = {
+                                "orderId": last_sell.get("orderId"),
+                                "symbol": bot.symbol,
+                                "side": "SELL",
+                                "type": "STOP_LOSS_LIMIT",
+                                "status": "FILLED",
+                                "executedQty": last_sell.get("qty"),
+                                "cummulativeQuoteQty": last_sell.get("quoteQty"),
+                                "price": last_sell.get("price"),
+                                "fills": [last_sell],
+                                "transactTime": last_sell.get("time"),
+                            }
+                            self.logger.warning(
+                                f"{bot.symbol}: sl_order_id desconocido → usando último SELL trade como fallback"
+                            )
+                        else:
+                            self.logger.warning(
+                                f"{bot.symbol}: No se encontró trade SELL reciente → booktrading no registrado"
+                            )
+
+                    if real_order:
                         self.on_trade_booktrading(bot.symbol, order=real_order)
                         self.logger.warning(
-                            f"📝 {bot.symbol}: Booktrading registrado (SL real de Binance) | "
-                            f"orderId={sl_order_id} | qty={real_order.get('executedQty')}"
-                        )
-                    else:
-                        self.logger.warning(
-                            f"{bot.symbol}: SL order {sl_order_id} no está FILLED: {real_order.get('status') if real_order else 'None'}"
+                            f"📝 {bot.symbol}: Booktrading registrado (SL Binance) | "
+                            f"orderId={real_order.get('orderId')} | qty={real_order.get('executedQty')}"
                         )
                 except Exception as e:
-                    self.logger.error(f"{bot.symbol}: Error consultando SL order {sl_order_id}: {e}")
+                    self.logger.error(f"{bot.symbol}: Error consultando SL order: {e}")
 
             if self.on_trade_complete:
                 self.on_trade_complete(bot.symbol)
@@ -1462,13 +1532,17 @@ class BotCryptoUI:
             if sesion:
                 db_env = (sesion.get("environment") or "").strip().upper()
                 if db_env in ("TESTNET", "PRODUCTION"):
+                    # Asignar env/cuenta ANTES de json.loads para que no queden en None si falla
+                    self.env = db_env
+                    self.ACCOUNT = sesion.get("idcuenta")
+                    self.VEHICULO = sesion.get("vehiculo")
                     config["env"] = db_env
 
                     self.logger.warning(f"✅ Ambiente '{db_env}', inicializado correctamente")
-                    config = json.loads(sesion.get("private_key"))
-                    self.env = sesion.get("environment", "TESTNET")
-                    self.ACCOUNT = sesion.get("idcuenta")
-                    self.VEHICULO = sesion.get("vehiculo")
+                    try:
+                        config = json.loads(sesion.get("private_key") or "{}")
+                    except Exception as je:
+                        self.logger.warning(f"⚠️ private_key JSON inválido, usando config default: {je}")
 
                 else:
                     self.logger.warning(f"Ambiente no válido en BD: '{db_env}', usando TESTNET")
@@ -1493,14 +1567,15 @@ class BotCryptoUI:
         factors = self.INTERVAL_FACTORS.get(interval, self.INTERVAL_FACTORS["15m"])
 
         config["interval"] = interval
-        config["tp1_pct"] = factors["tp1"]
-        config["stop_loss_pct"] = factors["sl"]
-        config["trail_mult"] = factors["trail_mult"]
+        # BD tiene prioridad; INTERVAL_FACTORS solo aplica como fallback
+        config["tp1_pct"] = config.get("tp1_pct") or factors["tp1"]
+        config["stop_loss_pct"] = config.get("stop_loss_pct") or factors["sl"]
+        config["trail_mult"] = config.get("trail_mult") or factors["trail_mult"]
 
         self.logger.warning(
             f"⚙️ Config ({interval}): "
             f"capital={config.get('capital')} | risk={config.get('risk_per_trade',0)*100:.1f}% | "
-            f"TP1={factors['tp1']*100:.1f}% | Trail×={factors['trail_mult']} | SL={factors['sl']*100:.1f}% | "
+            f"TP1={config['tp1_pct']*100:.1f}% | Trail×={config['trail_mult']} | SL={config['stop_loss_pct']*100:.1f}% | "
             f"tp1_size={config.get('tp1_size')} | "
             f"RSI={config.get('rsi_buy')}/{config.get('rsi_sell')} | max_bots={config.get('max_active_bots', 3)}"
         )
@@ -1529,12 +1604,99 @@ class BotCryptoUI:
     # =========================================
     # CONSTRUYE DIARA y PERFORMACE vehiculo
     # =========================================
+    def _get_insert_fallidos(self, desde=None, display_log=False):
+
+        bnb_ticker = self.spot_client.ticker_price("BNBUSDT")
+        PRICE_BNB = float(bnb_ticker.get("price", 0))
+        CATEGORIA = "BotCrypto"
+        DIVISA = "USD"
+        book, ix = PlanInversion().select_otros_activos(account=self.ACCOUNT, symbol="all")
+
+        for keys in book:
+            symbol = keys["symbol"]
+            efecha = desde
+            hoy = datetime.now()
+            sym_insertados = 0
+            sym_existentes = 0
+
+            while efecha <= hoy:
+                sfecha = efecha
+                efecha += timedelta(days=1)
+
+                stime = int(sfecha.timestamp() * 1000)
+                etime = int(efecha.timestamp() * 1000)
+
+                if etime <= stime:
+                    continue
+
+                trades = self.spot_client.get_my_trades(symbol, limit=50, startTime=stime, endTime=etime)
+
+                if not trades:
+                    continue
+
+                for trade in trades:
+                    try:
+                        qty = float(trade.get("qty", 0.0))
+                        qty = qty if trade["isBuyer"] else -1 * qty
+                        quoteqty = float(trade.get("quoteQty", 0.0))
+                        price = float(trade.get("price", 0.0))
+                        commission_raw = float(trade.get("commission", 0.0))
+                        commission_asset = trade.get("commissionAsset", "")
+                        commission = (
+                            commission_raw * PRICE_BNB
+                            if commission_asset == "BNB" and PRICE_BNB > 0
+                            else commission_raw * price
+                        )
+                        fechahora = datetime.fromtimestamp(trade.get("time", 0) / 1000)
+
+                        registro = {
+                            "categoria": CATEGORIA,
+                            "divisa": DIVISA,
+                            "cuenta": self.ACCOUNT,
+                            "cantidad": qty,
+                            "producto": quoteqty,
+                            "idtrans": str(trade.get("id")),
+                            "preciotrans": price,
+                            "preciocierre": price,
+                            "tarifacomision": commission,
+                            "mtmgp": 0.00,
+                            "fechahora": fechahora,
+                        }
+
+                        # Validar si ya existe
+                        found = self.repositorio.get_hash_booktrading(
+                            accion="valida",
+                            values=registro,
+                            symbol=symbol,
+                        )
+
+                        if not found:
+                            self.repositorio.insert_bottraderBook(values=registro, symbol=symbol, object="bottrader")
+                            side = "BUY" if trade["isBuyer"] else "SELL"
+                            if display_log:
+                                print(
+                                    f"  + {fechahora.strftime('%d-%b %H:%M')} | {side:4} | qty={abs(qty):>10.4f} | price={price:.6f} | ${quoteqty:.2f}"
+                                )
+                            sym_insertados += 1
+                        else:
+                            sym_existentes += 1
+
+                    except Exception as e:
+                        print(f"  ERROR: {e} | trade={trade}")
+
+                # Espera para no saturar la API
+                time.sleep(0.8)
+            if display_log:
+                print(f"  {symbol}: {sym_insertados} insertados, {sym_existentes} ya existían")
+
     def _schedule_diaria_performace(self):
 
         update = False
         if self.ACCOUNT:
-            # for account in self.account_fci:
+            # for account BotCrypto
             t_wait, update = DataHub.last_process[self.VEHICULO], False
+
+            self._get_insert_fallidos(desde=t_wait["diaria_book_performance"])
             update = diaria_book_performance(account=self.ACCOUNT, vehiculo=self.VEHICULO, proces=t_wait)
 
             # si actualizó tabla diaria, calcula proxima fecha de update
@@ -1546,26 +1708,50 @@ class BotCryptoUI:
     # PANEL DE GRAFICOS gwi001
     # =========================================
     def _crear_graficos(self):
-        """Crea el panel ladetral derecho controles graficos"""
+        """Crea el panel lateral izquierdo con gráficos de performance y CAPITAL & RIESGO"""
 
-        top = ttk.Frame(self.left, padding=(1, 1, 1, 1), style="C.TFrame")  # Imagen derecha superior
-        bot = ttk.Frame(self.left, padding=(1, 1, 1, 1), style="C.TFrame")  # Imagen derecha superior
-        cen = ttk.Frame(self.left, padding=(1, 1, 1, 1), style="C.TFrame")  # Imagen derecha superior
+        top = ttk.Frame(self.left, padding=(1, 1, 1, 1), style="C.TFrame")
+        bot = ttk.Frame(self.left, padding=(1, 1, 1, 1), style="C.TFrame")
+        cen = ttk.Frame(self.left, padding=(1, 1, 1, 1), style="C.TFrame")
         top.pack(side=tk.TOP)
         bot.pack(side=tk.BOTTOM)
         cen.pack(side=tk.LEFT)
 
-        fg0 = Figure(figsize=(2.9, 1.9), dpi=110, layout="tight")
-        fg0.set_facecolor(self.colors["cgcolor"])
-        cv0 = FigureCanvasTkAgg(fg0, master=top)
-        cv0.draw()
-        cv0.get_tk_widget().pack()
+        # Header fg0: título + botón refresh
+        hdr0 = tk.Frame(top, bg=self.colors["cgcolor"])
+        hdr0.pack(fill=tk.X)
+        tk.Label(hdr0, text="PnL Diario", bg=self.colors["cgcolor"], fg="gray60", font=("Arial", 7)).pack(
+            side=tk.LEFT, padx=4
+        )
+        tk.Button(
+            hdr0,
+            text="↺",
+            bg=self.colors["cgcolor"],
+            fg="gray60",
+            font=("Arial", 7),
+            relief="flat",
+            bd=0,
+            command=self._refresh_performance_charts,
+        ).pack(side=tk.RIGHT, padx=2)
 
-        fg1 = Figure(figsize=(2.9, 1.9), dpi=110, layout="tight")
-        fg1.set_facecolor(self.colors["cgcolor"])
-        cv1 = FigureCanvasTkAgg(fg1, master=cen)
-        cv1.draw()
-        cv1.get_tk_widget().pack()
+        self.fg0 = Figure(figsize=(2.9, 1.75), dpi=110, layout="tight")
+        self.fg0.set_facecolor(self.colors["cgcolor"])
+        self.cv0 = FigureCanvasTkAgg(self.fg0, master=top)
+        self.cv0.draw()
+        self.cv0.get_tk_widget().pack()
+
+        # Header fg1: título
+        hdr1 = tk.Frame(cen, bg=self.colors["cgcolor"])
+        hdr1.pack(fill=tk.X)
+        tk.Label(hdr1, text="PnL Acumulado", bg=self.colors["cgcolor"], fg="gray60", font=("Arial", 7)).pack(
+            side=tk.LEFT, padx=4
+        )
+
+        self.fg1 = Figure(figsize=(2.9, 1.75), dpi=110, layout="tight")
+        self.fg1.set_facecolor(self.colors["cgcolor"])
+        self.cv1 = FigureCanvasTkAgg(self.fg1, master=cen)
+        self.cv1.draw()
+        self.cv1.get_tk_widget().pack()
 
         self._crear_panel_capital(bot)
 
@@ -1673,6 +1859,190 @@ class BotCryptoUI:
             max_row, text="--", bg=bg, fg="red", font=("Arial", 8, "bold"), anchor="e", width=14
         )
         self._lbl_max_loss.pack(side=tk.RIGHT)
+
+    # =========================================
+    # GRAFICOS DE PERFORMANCE (fg0 / fg1)
+    # =========================================
+    def _refresh_performance_charts(self):
+        """Lanza en thread la carga y dibujo de gráficos de performance."""
+        threading.Thread(target=self._draw_performance_charts, daemon=True).start()
+
+    def _perf_placeholder(self, msg):
+        """Muestra mensaje de estado en fg0 y fg1 cuando no hay datos o hay error."""
+        bg = self.colors["cgcolor"]
+
+        def _do():
+            for fig, cv in ((self.fg0, self.cv0), (self.fg1, self.cv1)):
+                fig.clear()
+                ax = fig.add_subplot(111)
+                ax.set_facecolor(bg)
+                fig.set_facecolor(bg)
+                ax.text(0.5, 0.5, msg, transform=ax.transAxes, fontsize=8, color="0.5", ha="center", va="center")
+                for sp in ax.spines.values():
+                    sp.set_edgecolor("0.3")
+                ax.set_xticks([])
+                ax.set_yticks([])
+                cv.draw()
+
+        try:
+            self.parent.after(0, _do)
+        except RuntimeError:
+            pass
+
+    def _perf_render(self, daily, by_sym):
+        """Dibuja fg0 (PnL diario barras) y fg1 (PnL acumulado). Corre en main thread."""
+        bg = self.colors["cgcolor"]
+        green = "#00ff88"
+        red = "#ff4444"
+
+        # ── fg0: PnL DIARIO ────────────────────────────────────────────────────
+        self.fg0.clear()
+        ax0 = self.fg0.add_subplot(111)
+        ax0.set_facecolor(bg)
+        self.fg0.set_facecolor(bg)
+
+        fechas = daily["fecha"].dt.strftime("%d/%m").tolist()
+        valores = daily["pnl"].tolist()
+        colores = [green if v >= 0 else red for v in valores]
+        n = min(30, len(fechas))
+
+        ax0.bar(range(n), valores[-n:], color=colores[-n:], width=0.7, linewidth=0)
+        ax0.axhline(0, color="0.5", linewidth=0.5)
+        ax0.set_xticks(range(n))
+        ax0.set_xticklabels(fechas[-n:], fontsize=5, rotation=60, color="0.6")
+        ax0.tick_params(axis="y", labelsize=6, colors="0.6")
+        ax0.spines[["top", "right"]].set_visible(False)
+        ax0.grid(True, color="0.5", linewidth=0.1)
+
+        total_wins = int(daily["wins"].sum())
+        total_losses = int(daily["losses"].sum())
+        total_trades = total_wins + total_losses
+        wr = (total_wins / total_trades * 100) if total_trades else 0
+        total_pnl = daily["pnl"].sum()
+        pnl_color = green if total_pnl >= 0 else red
+
+        ax0.text(
+            0.02,
+            0.97,
+            f"${total_pnl:+.2f}  WR:{wr:.0f}%  T:{total_trades}",
+            transform=ax0.transAxes,
+            fontsize=6.5,
+            color=pnl_color,
+            va="top",
+            ha="left",
+            fontweight="bold",
+            bbox=dict(boxstyle="round,pad=0.2", facecolor=bg, alpha=0.7),
+        )
+        for sp in ax0.spines.values():
+            sp.set_edgecolor("0.3")
+        self.cv0.draw()
+
+        # ── fg1: PnL ACUMULADO (izq) + RANKING símbolos (der) ─────────────────
+        self.fg1.clear()
+        self.fg1.set_facecolor(bg)
+
+        gs = self.fg1.add_gridspec(1, 2, width_ratios=[3, 1], wspace=0.07)
+        ax1 = self.fg1.add_subplot(gs[0])  # línea acumulada
+        axr = self.fg1.add_subplot(gs[1])  # ranking
+
+        # ── Línea acumulada ─────────────────────────────────────────────────────
+        ax1.set_facecolor(bg)
+        cum_vals = daily["cum_pnl"].tolist()
+        x_vals = list(range(len(cum_vals)))
+        color_line = green if cum_vals[-1] >= 0 else red
+
+        cv = np.array(cum_vals)
+        ax1.plot(x_vals, cv, color=color_line, linewidth=1.0)
+        ax1.fill_between(x_vals, 0, cv, where=(cv >= 0), color=green, alpha=0.40, interpolate=True)
+        ax1.fill_between(x_vals, 0, cv, where=(cv < 0), color=red, alpha=0.40, interpolate=True)
+        ax1.axhline(0, color="0.5", linewidth=0.5)
+        ax1.annotate(
+            f"${cum_vals[-1]:+.2f}",
+            xy=(len(cum_vals) - 1, cum_vals[-1]),
+            fontsize=6,
+            color=color_line,
+            xytext=(-4, 4),
+            textcoords="offset points",
+            ha="right",
+        )
+        ax1.tick_params(axis="both", labelsize=6, colors="0.6")
+        ax1.spines[["top", "right"]].set_visible(False)
+        for sp in ax1.spines.values():
+            sp.set_edgecolor("0.3")
+
+        # ── Ranking símbolos ────────────────────────────────────────────────────
+        axr.set_facecolor(bg)
+        axr.set_xticks([])
+        axr.set_yticks([])
+        axr.spines[["top", "right"]].set_visible(False)
+        for sp in axr.spines.values():
+            sp.set_edgecolor("0.25")
+
+        if not by_sym.empty:
+            # ordenar: mejor arriba
+            ranking = by_sym.sort_values("pnl", ascending=False).head(8)
+            y_step = 1.0 / (len(ranking) + 1)
+            for i, (_, srow) in enumerate(ranking.iterrows()):
+                sym = str(srow["simbolo"]).replace("USDT", "")
+                pnl = float(srow["pnl"])
+                wins = int(srow["wins"])
+                tot = int(srow["trades"])
+                col = green if pnl >= 0 else red
+                y = 1.0 - (i + 1) * y_step
+                # barra de fondo proporcional al PnL absoluto
+                max_pnl = float(by_sym["pnl"].abs().max()) or 1
+                bar_w = abs(pnl) / max_pnl * 0.9
+                axr.barh(y, bar_w, height=y_step * 0.7, color=col, alpha=0.18, left=0)
+                axr.text(0.04, y, f"{sym}", transform=axr.transAxes, fontsize=6.5, color=col, va="center")
+                axr.text(
+                    0.96, y, f"${pnl:+.2f}", transform=axr.transAxes, fontsize=6, color=col, va="center", ha="right"
+                )
+
+        self.cv1.draw()
+
+    def _draw_performance_charts(self):
+        """Consulta booktrading y despacha el render al main thread. Corre en thread."""
+        try:
+            account = getattr(self, "ACCOUNT", None)
+            if not account:
+                self.logger.warning("_draw_performance_charts: ACCOUNT no disponible")
+                self._perf_placeholder("ACCOUNT no disponible")
+                return
+
+            rows, cols = self.repositorio.select_botcrypto_performance(account=account, dias=90)
+            self.logger.warning(f"_draw_performance_charts: account={account} rows={len(rows)}")
+
+            if not rows:
+                self._perf_placeholder(f"Sin trades (90 días)\ncuenta: {account}")
+                return
+
+            df = pd.DataFrame(rows, columns=cols)
+            df["fecha"] = pd.to_datetime(df["fecha"])
+            df["pnl_dia"] = df["pnl_dia"].astype(float)
+
+            daily = (
+                df.groupby("fecha")
+                .agg(pnl=("pnl_dia", "sum"), trades=("trades", "sum"), wins=("wins", "sum"), losses=("losses", "sum"))
+                .reset_index()
+                .sort_values("fecha")
+            )
+            daily["cum_pnl"] = daily["pnl"].cumsum()
+
+            by_sym = (
+                df.groupby("simbolo")
+                .agg(pnl=("pnl_dia", "sum"), trades=("trades", "sum"), wins=("wins", "sum"))
+                .reset_index()
+                .sort_values("pnl", ascending=True)
+            )
+
+            try:
+                self.parent.after(0, self._perf_render, daily, by_sym)
+            except RuntimeError:
+                pass
+
+        except Exception as e:
+            self.logger.error(f"_draw_performance_charts: {e}", exc_info=True)
+            self._perf_placeholder(f"Error: {e}")
 
     def _actualizar_panel_capital(self):
         """Actualiza el panel de capital con datos en tiempo real"""
@@ -2158,6 +2528,9 @@ class BotCryptoUI:
             # Mostrar saldo inicial de Binance
             self._actualizar_saldo()
 
+            # Cargar gráficos de performance al iniciar (delay para que mainloop esté listo)
+            self.parent.after(2000, self._refresh_performance_charts)
+
             # Telegram: cargar credenciales para notificaciones
         except Exception as e:
             self.logger.error(f"Error inicializando managers: {e}")
@@ -2270,8 +2643,31 @@ class BotCryptoUI:
                     else:
                         comision_usd = commission * price
 
-                    # obtiene situación actual del estado de los indicadores
-                    indicadores = self.bots[symbol].get_indicators()
+                    # obtiene situación actual del estado de los indicadores + contexto operación
+                    bot = self.bots.get(symbol)
+                    indicadores = bot.get_indicators() if bot else {}
+                    if bot and isinstance(indicadores, dict):
+                        entry = bot.state.get("entry_price")
+                        tp1_pct = bot.risk_cfg.get("tp1_pct", 0)
+                        tp2_pct = bot.risk_cfg.get("tp2_pct", 0)
+                        pnl_pct = round((price - entry) / entry * 100, 4) if entry and price else None
+                        scoring = self.scoring_data.get(symbol, {})
+                        indicadores.update(
+                            {
+                                "intent": order.get("type", side),
+                                "entry_price": entry,
+                                "sl_price": bot.state.get("stop_loss"),
+                                "tp1_target": round(entry * (1 + tp1_pct), 6) if entry else None,
+                                "tp2_target": round(entry * (1 + tp2_pct), 6) if entry and tp2_pct else None,
+                                "pnl_pct": pnl_pct,
+                                "tp1_done": bot.state.get("tp1_done"),
+                                "tp2_done": bot.state.get("tp2_done"),
+                                "trailing_active": bot.state.get("trailing_active"),
+                                "score": scoring.get("score_total"),
+                                "prioridad": scoring.get("prioridad"),
+                                "interval": self.interval,
+                            }
+                        )
 
                     registro = {
                         "categoria": "BotCrypto",
@@ -5279,12 +5675,13 @@ class WidgetBotSymbol:
 
         # TP + Trailing
         tp1 = "✓" if state.get("tp1_done") else "○"
+        tp2 = "✓" if state.get("tp2_done") else "○"
         if state.get("trailing_active"):
             trail_stop = state.get("trailing_stop")
             trail_txt = f"TRAIL:{trail_stop:.4f}" if trail_stop else "TRAIL:--"
-            self.lbl_tp.config(text=f"TP1:{tp1} | {trail_txt}", fg="cyan")
+            self.lbl_tp.config(text=f"TP1:{tp1} TP2:{tp2} | {trail_txt}", fg="cyan")
         else:
-            self.lbl_tp.config(text=f"TP1:{tp1}", fg="white")
+            self.lbl_tp.config(text=f"TP1:{tp1} TP2:{tp2}", fg="white")
 
         # PnL + cantidad del lote
         # Guardar para update_price en tiempo real

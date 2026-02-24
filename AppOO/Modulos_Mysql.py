@@ -3297,6 +3297,43 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         except (Exception, EncodingWarning, connect.Error) as error:
             print(f"[Mysql:: insert_booktrading()]: {error}")
 
+    def select_botcrypto_performance(self, account, dias=90):
+        """
+        Retorna rendimiento diario del BotCrypto desde booktrading (últimos N días).
+        Solo registros de venta (codigo='C') que son los que tienen gprealizadas != 0.
+        Returns: (rows, columnas)
+        """
+        try:
+            conn = self._conectar(tabla="select.botcrypto.performance")
+            cursor = conn.cursor()
+            qry = """
+                SELECT
+                    DATE(fechahora)                                             AS fecha,
+                    simbolo,
+                    SUM(gprealizadas)                                           AS pnl_dia,
+                    COUNT(*)                                                    AS trades,
+                    SUM(CASE WHEN gprealizadas > 0 THEN 1 ELSE 0 END)          AS wins,
+                    SUM(CASE WHEN gprealizadas <= 0 THEN 1 ELSE 0 END)         AS losses,
+                    SUM(tarifacomision)                                         AS comisiones,
+                    MAX(gprealizadas)                                           AS mejor_trade,
+                    MIN(gprealizadas)                                           AS peor_trade
+                FROM booktrading
+                WHERE cuenta = %s
+                  AND divisa = 'USD'
+                  AND codigo = 'C'
+                  AND DATE(fechahora) >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
+                GROUP BY DATE(fechahora), simbolo
+                ORDER BY fecha ASC, simbolo ASC;
+            """
+            cursor.execute(qry, (account, dias))
+            rows = cursor.fetchall()
+            columnas = [col[0] for col in cursor.description]
+            cursor.close()
+            return rows or [], columnas
+        except Exception as e:
+            self.logger.error(f"select_botcrypto_performance({account}): {e}")
+            return [], []
+
     def min_fec_booktrading(self, list_asset=None, account=None, idivisa=None):
         """
         @param list_asset: lista de símbolos

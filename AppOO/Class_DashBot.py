@@ -941,6 +941,8 @@ class Telegram:
     # Path to JSON file for storing message IDs
     async def _save_message(self, sent_message, CHAT_ID, hash_id=None):
         try:
+            if sent_message is None:
+                return
 
             # Obtiene el message_id del mensaje enviado
             message_id = sent_message.message_id

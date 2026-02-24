@@ -92,7 +92,7 @@ class ArsFondosInversion(tk.Frame):
 
             self.cus.positions = self.ars.positions
             for keys in self.ars.positions:
-                keys["factor_cambio"] = tasa_cambio
+                # keys["factor_cambio"] = tasa_cambio
                 keys["mrkprice"] = keys["mrkprice"] * keys["factor_cambio"]
                 keys["mktvalue"] = keys["mrkprice"] * keys["position"]
                 keys["costobase"] = keys["costobase"] * keys["factor_cambio"]

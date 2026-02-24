@@ -27,6 +27,7 @@ import functools
 import subprocess
 import warnings
 import traceback
+import pyautogui
 import multiprocessing
 
 import ssl as ssl

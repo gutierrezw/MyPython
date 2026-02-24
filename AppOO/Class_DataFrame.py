@@ -284,8 +284,8 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
     def safe_get_info(objeto, key):
         try:
             info = objeto.get_info()
-            return info
-        except EncodingWarning as e:
+            return info if info else {}
+        except Exception as e:
             print(f"safe_get_info({key}) :: {e}")
             return {}
 
@@ -398,6 +398,7 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
     except (Exception, EncodingWarning) as e:
         print(f"[Error:: safe_get_info()]: {e}")
         time.sleep(3)
+        return {}, pd.DataFrame()
 
 
 # captura precios historic de binance
