@@ -33,6 +33,8 @@ from Modulos_python import (
     Future,
     textwrap,
     traceback,
+    webbrowser,
+    pyautogui,
 )
 from Modulos_Utilitarios import (
     display_red_green,
@@ -3384,11 +3386,103 @@ class WidgetVehiculo(TickerInfo):
                 # antes de invocar válida que este construida la self.ts_yfinance_symbol
                 if symbol in self.info.keys():
                     self.symbol = symbol
-                    self.window_estrategia()
+                    self._on_symbol_menu(symbol, event)
                 else:
                     print("[aun no ha cargado self.info()]:", symbol)
         except Exception as e:
             print("[on_treeview_select()]: {}".format(e))
+
+    def _on_symbol_menu(self, symbol, event):
+        """Muestra menú con opciones para el símbolo seleccionado."""
+        menu = tk.Toplevel(self.master)
+        menu.overrideredirect(True)  # sin borde de ventana
+        menu.attributes("-topmost", True)
+
+        bg = self.bgcolor
+        fg = "#ffffff"
+        btn_cfg = dict(
+            bg=self.bgcolor,
+            fg=fg,
+            font=("Arial", 10),
+            relief="flat",
+            activebackground="#2a5298",
+            activeforeground=fg,
+            cursor="hand2",
+            anchor="w",
+            width=15,
+            pady=2,
+        )
+
+        tk.Label(
+            menu, text=f"  {symbol}", bg=self.bgcolor, fg=self.cgcolor, font=("Arial", 10, "bold"), anchor="w"
+        ).pack(fill=tk.X)
+
+        tk.Button(menu, text="Análisis", command=lambda: (menu.destroy(), self.window_estrategia()), **btn_cfg).pack(
+            fill=tk.X, padx=1, pady=(0, 1)
+        )
+
+        tk.Button(
+            menu, text="TradingView", command=lambda: (menu.destroy(), self._abrir_tradingview(symbol)), **btn_cfg
+        ).pack(fill=tk.X, padx=1, pady=(0, 1))
+
+        # Posicionar junto al cursorcls
+        x, y = pyautogui.position()
+        x += event.x + 5
+        y += event.y
+        menu.geometry(f"+{x}+{y}")
+
+        # Cerrar al perder foco
+        menu.bind("<FocusOut>", lambda e: menu.destroy())
+        menu.focus_set()
+
+    def _abrir_tradingview(self, symbol):
+        """Genera HTML con widget TradingView para el símbolo y lo abre en el browser."""
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{symbol} - TradingView</title>
+  <style>
+    body {{ margin: 0; padding: 0; background: #131722; }}
+    #tv_chart {{ width: 100vw; height: 100vh; }}
+  </style>
+</head>
+<body>
+  <div class="tradingview-widget-container" style="height:100vh; width:100vw;">
+    <div id="tradingview_full" style="height:100%; width:100%;"></div>
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+    <script type="text/javascript">
+    new TradingView.widget({{
+      "autosize": true,
+      "symbol": "{symbol}",
+      "interval": "D",
+      "timezone": "Etc/UTC",
+      "theme": "dark",
+      "style": "1",
+      "locale": "es",
+      "toolbar_bg": "#131722",
+      "enable_publishing": false,
+      "hide_side_toolbar": false,
+      "allow_symbol_change": true,
+      "withdateranges": true,
+      "save_image": true,
+      "details": true,
+      "studies": [
+        "Gutierrezw;kPuoGBGx",
+        "Gutierrezw;1aKxXAmg"
+      ],
+      "container_id": "tradingview_full"
+    }});
+    </script>
+  </div>
+</body>
+</html>"""
+        tmp_dir = os.path.join(os.path.dirname(__file__), "tmp")
+        os.makedirs(tmp_dir, exist_ok=True)
+        html_path = os.path.join(tmp_dir, f"tv_{symbol}.html")
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        webbrowser.open(f"file:///{html_path.replace(os.sep, '/')}")
 
     # Función para obtener columnas self.m_tree sincronizadamente
     def on_heading_click(self, column):

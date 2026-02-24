@@ -16,14 +16,12 @@ def diaria_book_performance(account=None, vehiculo=None, proces=None):
         if proces["diaria_book_performance"].date() < ahora.date():
 
             # itera para recorrer booktrading  e insertar performance dia(s) anteriores
-            book, ix = RepositorioOportunidades.select_booktrading(
-                accion="diaria_app", account=account, idivisa="USD"
-            )
-            path = detalle_book(
-                account=account, vehiculo=vehiculo, book=book, ix=ix, option="app"
-            )
+            book, ix = RepositorioOportunidades.select_booktrading(accion="diaria_app", account=account, idivisa="USD")
+            path = detalle_book(account=account, vehiculo=vehiculo, book=book, ix=ix, option="app")
 
             # Leer CSV e inserta después de ultima diaria
+            if path is None:
+                return update
             diaria, iy = read_csv_insert_diaria(path=path, insert=True)
             update = True
 
@@ -62,9 +60,7 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
             sql = Performa.select_performa_inversion(account=account, vehiculo=vehiculo)
 
         # constryuye diccionario de datos a partir de sql
-        d_datos = {
-            columnas: columna for columnas, columna in zip(columnas, zip(*sql[0]))
-        }
+        d_datos = {columnas: columna for columnas, columna in zip(columnas, zip(*sql[0]))}
 
         # obtiene DataFrame para portafolios
         if tipo in ("Stock", "Crypto", "BBVA.ARS"):
@@ -81,9 +77,7 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
             cols = ["nr_gyp", "value", "p_vehiculo", "costo_base"]
             wperf = wperf.drop(cols, axis=1)
 
-            (diaria, iy) = Performa.select_diaria_performance(
-                account=account, symbol=asset
-            )
+            (diaria, iy) = Performa.select_diaria_performance(account=account, symbol=asset)
 
             pdatos = pd.DataFrame(diaria, columns=iy)
             cols = ["id", "account", "cantidad", "gyp_dia", "comisiones", "symbol"]
@@ -279,32 +273,22 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
 
                 # cuando Stock hace Ticker para bajar los dividends
                 if read[ix.index("categoria")] == "Stock":
-                    activo, datos = get_yfinance(
-                        ticket=bkey, vehiculo="Dividends", desde=f_desde, hasta=f_hasta
-                    )
+                    activo, datos = get_yfinance(ticket=bkey, vehiculo="Dividends", desde=f_desde, hasta=f_hasta)
 
                 elif read[ix.index("categoria")] == "BBVA.ARS":
-                    activo, datos = get_yfinance(
-                        ticket=bkey, vehiculo="BBVA.ARS", desde=f_desde, hasta=f_hasta
-                    )
+                    activo, datos = get_yfinance(ticket=bkey, vehiculo="BBVA.ARS", desde=f_desde, hasta=f_hasta)
 
                 else:
-                    activo, datos = get_yfinance(
-                        ticket=bkey, vehiculo="download", desde=f_desde, hasta=f_hasta
-                    )
+                    activo, datos = get_yfinance(ticket=bkey, vehiculo="download", desde=f_desde, hasta=f_hasta)
 
-                if datos.empty:
+                if datos is None or datos.empty:
                     eof_book, read = next(ebook, (None, None))
                 else:
 
                     # en caso hay datos yfinance
                     idatos = datos.iterrows()
                     eof_datos, row = next(idatos, (None, None))
-                    while (
-                        (eof_datos is not None)
-                        and (eof_book is not None)
-                        and (read[ix.index("simbolo")] == bkey)
-                    ):
+                    while (eof_datos is not None) and (eof_book is not None) and (read[ix.index("simbolo")] == bkey):
 
                         if eof_datos.date() == read[ix.index("fechahora")].date():
                             a_read = acumula_igual_date()
@@ -318,9 +302,7 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                                 eof_book, read = next(ebook, (None, None))
 
                     # por fin simbolo completar diaria para el bkey anterior, si stock > 0
-                    if (a_read[ix.index("simbolo")] == bkey) and (
-                        a_read[ix.index("stock")] > 0
-                    ):
+                    if (a_read[ix.index("simbolo")] == bkey) and (a_read[ix.index("stock")] > 0):
                         completa_diaria()
 
         return path
@@ -351,17 +333,13 @@ def actualiza_performa_inversion(account=None, vehiculo=None):
 
     try:
         Performa = IPerformance()
-        (last_update, ix) = Performa.select_performa_inversion(
-            account=account, vehiculo=vehiculo, accion="last"
-        )
+        (last_update, ix) = Performa.select_performa_inversion(account=account, vehiculo=vehiculo, accion="last")
         if last_update:
 
             # obtiene a partir last fecha de performa, registros diarias pendientes
             f_desde = last_update[ix.index("fechaclose")]
             f_inicio = f_desde - timedelta(days=1)
-            diaria, iy = Performa.select_diaria_performance(
-                account=account, date=f_inicio, accion="desde"
-            )
+            diaria, iy = Performa.select_diaria_performance(account=account, date=f_inicio, accion="desde")
 
             datos = pd.DataFrame(diaria, columns=iy)
 
@@ -373,15 +351,11 @@ def actualiza_performa_inversion(account=None, vehiculo=None):
                 "costo_base",
                 "dividends",
             ]
-            datos[columns_to_clean] = (
-                datos[columns_to_clean].apply(pd.to_numeric, errors="coerce").fillna(0)
-            )
+            datos[columns_to_clean] = datos[columns_to_clean].apply(pd.to_numeric, errors="coerce").fillna(0)
             datos["Date"] = pd.to_datetime(datos["Date"])
 
             # Calcular valor del portafolio por día
-            datos["value Portafolio"] = (
-                datos["value"] + datos["dividends"] + datos["gyp_dia"]
-            )
+            datos["value Portafolio"] = datos["value"] + datos["dividends"] + datos["gyp_dia"]
 
             # agrupa y suma
             columnas = [
@@ -405,9 +379,7 @@ def actualiza_performa_inversion(account=None, vehiculo=None):
                 pdatos["CumPort"] = (1 + pdatos["retorno"]).cumprod() - 1
 
                 # busca desempeño del índice asociado al vehículo
-                (df_indice, index_ref, rtn_index) = crea_dataframe_index(
-                    vehiculo=vehiculo, desde=f_inicio
-                )
+                (df_indice, index_ref, rtn_index) = crea_dataframe_index(vehiculo=vehiculo, desde=f_inicio)
                 df_previo = pd.merge(df_indice, pdatos, on="Date", how="inner")
 
                 # deja en df_update las filas Date > f_desde
@@ -433,9 +405,7 @@ def crea_dataframe_index(vehiculo=None, desde=None):
 
         indice = pd.DataFrame()
         # symbol = convierte_ticket_crypto(symbol)
-        activo, datos = get_yfinance(
-            ticket=symbol, vehiculo="donwload", desde=desde, hasta=hoy
-        )
+        activo, datos = get_yfinance(ticket=symbol, vehiculo="donwload", desde=desde, hasta=hoy)
 
         # asegura tomar solo la primera columna si hay varias
         if isinstance(datos["Close"], pd.DataFrame):
@@ -470,9 +440,7 @@ def crea_dataframe_diaria(diaria=None, ix=None):
             "costo_base",
             "dividends",
         ]
-        datos[columns_to_clean] = (
-            datos[columns_to_clean].apply(pd.to_numeric, errors="coerce").fillna(0)
-        )
+        datos[columns_to_clean] = datos[columns_to_clean].apply(pd.to_numeric, errors="coerce").fillna(0)
 
         # estandariza formato Date y lo define como index
         datos["Date"] = pd.to_datetime(datos["Date"])
@@ -480,9 +448,7 @@ def crea_dataframe_diaria(diaria=None, ix=None):
         datos.set_index("Date", inplace=True)
 
         # Calcular valor del portafolio por día
-        datos["value Portafolio"] = (
-            datos["value"] + datos["dividends"] + datos["gyp_dia"]
-        )
+        datos["value Portafolio"] = datos["value"] + datos["dividends"] + datos["gyp_dia"]
 
         # agrupa y suma
         columnas = [
@@ -504,15 +470,11 @@ def crea_dataframe_diaria(diaria=None, ix=None):
 
 
 # módulo para crear performance del vehiculo a partir de la diaria
-def crea_dataframe_performa_Index(
-    account=None, vehiculo=None, display=True, diaria=None, iy=None
-):
+def crea_dataframe_performa_Index(account=None, vehiculo=None, display=True, diaria=None, iy=None):
     try:
         # define index a partir 1er dia de la diaria
         f_desde = diaria[0][iy.index("Date")]
-        indice, index_ref, rtn_index = crea_dataframe_index(
-            vehiculo=vehiculo, desde=f_desde
-        )
+        indice, index_ref, rtn_index = crea_dataframe_index(vehiculo=vehiculo, desde=f_desde)
 
         # evalua calculo del retorno
         pdatos = crea_dataframe_diaria(diaria=diaria, ix=iy)
@@ -529,11 +491,7 @@ def crea_dataframe_performa_Index(
             print("=" * 100)
             print(" - Procesado desde: {} hasta {}".format(f_desde, hoy))
             print(" ")
-            print(
-                " - Indice referencia: {}, Registros {}".format(
-                    index_ref, indice.shape[0]
-                )
-            )
+            print(" - Indice referencia: {}, Registros {}".format(index_ref, indice.shape[0]))
             print(
                 " - Inicio insert.performance()::",
                 account,
@@ -574,17 +532,14 @@ def proceso_update_performance(account=None, vehiculo=None):
     try:
         # obtienen última actualización y retrocede 60 días en la diaria
         Performa = IPerformance()
-        (last_update, ix) = Performa.select_performa_inversion(
-            account=account, vehiculo=vehiculo, accion="last"
-        )
+        (last_update, ix) = Performa.select_performa_inversion(account=account, vehiculo=vehiculo, accion="last")
+
         if last_update:
 
             hasta = last_update[ix.index("fechaclose")]
             desde = hasta - timedelta(days=60)
 
-            diaria, iy = Performa.select_diaria_performance(
-                account=account, date=desde, accion="desde"
-            )
+            diaria, iy = Performa.select_diaria_performance(account=account, date=desde, accion="desde")
 
             if diaria:
                 df_performa = crea_dataframe_performa_Index(
@@ -595,9 +550,7 @@ def proceso_update_performance(account=None, vehiculo=None):
                     iy=iy,
                 )
 
-                symbol, rtn_index, cum_index, index_ref = vehiculo_parm(
-                    vehiculo=vehiculo
-                )
+                symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=vehiculo)
 
                 # recorre Dataframe para insertar las filas mayores a la fecha desde
                 for date, rows in df_performa.iterrows():
