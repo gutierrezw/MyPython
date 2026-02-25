@@ -90,8 +90,10 @@ class ClassAgenteIA:
         # Asigna Nombre Logging
         self.logger = logging.getLogger("ClassAgenteIA")
 
-        # Estado del agente de preservación {symbol: {max_price, stop_actual, last_check}}
-        self.preservation_state = {}
+        # Estado del agente de preservación
+        self.preservation_state = {}   # {symbol: {max_price, stop_actual, last_check}}
+        self.preservation_config = {}  # {vehiculo: pconfig} — cargado una vez al inicio
+        self.preservation_last_run = {}  # {vehiculo: datetime} — última evaluación por vehículo
 
     # decorador para limitar ejecuciones
     def wait_rate(intervalo_segundos: int):
@@ -356,50 +358,66 @@ class ClassAgenteIA:
                 # valida conexion del vehiculo antes
                 if DataHub.manager_sesion.get(vehiculo):
                     self._preservation_run_vehiculo(vehiculo)
+                else:
+                    self.logger.warning(f"Agente_ManagerPreservation({vehiculo}): sesion no activa → SKIP")
             except Exception as e:
                 self.logger.error(f"Agente_ManagerPreservation({vehiculo}): {e}")
 
     def _preservation_get_config(self, vehiculo):
+        """
+        Carga config desde BD una sola vez por vehículo (cache en self.preservation_config).
+        En cada ciclo solo verifica si pasó el intervalo — sin tocar BD.
+        Retorna (pconfig, intervalo_min, ejecutar) donde ejecutar=True cuando toca revisión.
+        """
+        # 1. Carga config una sola vez al arranque del vehículo
+        if vehiculo not in self.preservation_config:
+            sesion = self.PlanInversion.get_sesion_by_vehiculo(vehiculo)
+            params_raw = sesion.get("parameters")
+            if not params_raw:
+                self.logger.warning(f"Preservation({vehiculo}): sin parameters en sesion → SKIP")
+                self.preservation_config[vehiculo] = None
+                return None, 0, False
+            params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
+            pconfig = params.get("preservation")
+            if not pconfig:
+                self.logger.warning(f"Preservation({vehiculo}): sin bloque 'preservation' en parameters → SKIP")
+                self.preservation_config[vehiculo] = None
+                return None, 0, False
+            self.preservation_config[vehiculo] = pconfig
+            roi_minimo = pconfig.get("roi_minimo", 0.10)
+            proteccion_base = pconfig.get("proteccion_base", 0.50)
+            self.logger.warning(
+                f"Preservation({vehiculo}): config cargada | roi_min={roi_minimo} | prot={proteccion_base}"
+            )
 
-        # 1. Cargar config de preservation desde sesion.parameters
-        params_raw = self.sesion.get("parameters")
-        if not params_raw:
-            self.logger.warning(f"Preservation({vehiculo}): sin parameters en sesion → SKIP")
-            return {}, 0, False
-
-        params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
-        pconfig = params.get("preservation")
+        pconfig = self.preservation_config.get(vehiculo)
         if not pconfig:
-            self.logger.warning(f"Preservation({vehiculo}): sin bloque 'preservation' en parameters → SKIP")
-            return {}, 0, False
+            return None, 0, False
 
-        # chequea intervalo para el vehiculo
         revisiones_dia = pconfig.get("revisiones_dia", 2)
-        roi_minimo = pconfig.get("roi_minimo", 0.10)
-        proteccion_base = pconfig.get("proteccion_base", 0.50)
         intervalo_min = 86400 / revisiones_dia
-        intervalo_min = int(86400 / 5)  # test
-        state = self.preservation_state.get(vehiculo, {})
+        # TODO TEST: intervalo reducido para pruebas, restaurar en producción
+        intervalo_min = 600  # 10 minutos para testing
 
-        # Iniacializa last_check vehiculo
-        if not state:
-            self.preservation_state[vehiculo] = {"last_check": datetime.now()}
+        # 2. Verificar intervalo por vehículo — único acceso a BD solo cuando toca
+        last_run = self.preservation_last_run.get(vehiculo)
+        if last_run is None:
+            # Primera ejecución: inicializa reloj pero no evalúa todavía
+            self.preservation_last_run[vehiculo] = datetime.now()
             return pconfig, intervalo_min, False
 
-        elif state:
-            last_check = state.get("last_check")
-            if last_check and (datetime.now() - last_check).total_seconds() < intervalo_min:
-                return pconfig, intervalo_min, False
-            else:
-                # toca revision
-                self.logger.warning(
-                    f"Preservation({vehiculo}): INICIO >> config OK | revisiones {intervalo_min}"
-                    f" | roi_min={roi_minimo} | prot={proteccion_base}"
-                )
+        elapsed = (datetime.now() - last_run).total_seconds()
+        if elapsed < intervalo_min:
+            return pconfig, intervalo_min, False
 
-                # setea proxima evento
-                self.preservation_state[vehiculo] = {"last_check": datetime.now()}
-                return pconfig, intervalo_min, True
+        # Toca revisión: actualiza reloj y autoriza evaluación
+        self.preservation_last_run[vehiculo] = datetime.now()
+        roi_minimo = pconfig.get("roi_minimo", 0.10)
+        proteccion_base = pconfig.get("proteccion_base", 0.50)
+        self.logger.warning(
+            f"Preservation({vehiculo}): REVISIÓN | roi_min={roi_minimo} | prot={proteccion_base} | elapsed={elapsed:.0f}s"
+        )
+        return pconfig, intervalo_min, True
 
     def _preservation_run_vehiculo(self, vehiculo):
         """Orquesta la preservación para un vehículo. Lógica de vehículo en DataHub."""
@@ -436,11 +454,8 @@ class ClassAgenteIA:
 
             self.logger.warning(f"Preservation({vehiculo}/{symbol}): ROI={roi:.1%} ≥ {roi_minimo:.0%} → evaluando")
 
-            # 3. Rate-limit por símbolo
+            # estado previo del símbolo
             state = self.preservation_state.get(symbol, {})
-            last_check = state.get("last_check")
-            if last_check and (datetime.now() - last_check).total_seconds() < intervalo_min:
-                continue
 
             # 4. Obtener precio actual (DataHub)
             last = DataHub.preservation_get_price(symbol, positio)
@@ -619,6 +634,12 @@ class Telegram:
                 )
                 self.telegram_app.add_handler(CallbackQueryHandler(self.handle_callback))
 
+                # Captura errores de red dentro del loop de polling (ConnectError, NetworkError, etc.)
+                async def _telegram_error_handler(update, context):
+                    self.logger.warning(f"Telegram network error (ignorado): {context.error}")
+
+                self.telegram_app.add_error_handler(_telegram_error_handler)
+
                 # Enviar mensaje de bienvenida antes de polling
                 async def _send_welcome():
                     await self.telegram_app.initialize()
@@ -704,7 +725,7 @@ class Telegram:
                     await self._save_message(sent_message, CHAT_ID, hash_id=hash_id)
                     return
         except Exception as e:
-            print(f"send_Telegram(): Error: {e}")
+            self.logger.warning(f"send_Telegram(): {e}")
 
     def put_order_stockTelegram(self, op, ix):
         try:
