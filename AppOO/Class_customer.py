@@ -3468,8 +3468,9 @@ class WidgetVehiculo(TickerInfo):
       "save_image": true,
       "details": true,
       "studies": [
-        "Gutierrezw;kPuoGBGx",
-        "Gutierrezw;1aKxXAmg"
+        "PUB;kPuoGBGx",
+        "PUB;1aKxXAmg",
+        "PUB;rMj56XfN"
       ],
       "container_id": "tradingview_full"
     }});
@@ -3929,6 +3930,19 @@ class WidgetVehiculo(TickerInfo):
             elif self.vehiculo == "Stock":
                 if hasattr(self, "idsymbol") and conid and str(conid) not in self.idsymbol:
                     self.idsymbol.append(str(conid))
+                    # Suscribir símbolo nuevo al websocket activo
+                    try:
+                        if hasattr(self, "ws") and self.ws and self.ws.sock and self.ws.sock.connected:
+                            self.ws.send(
+                                "smd+"
+                                + str(conid)
+                                + '+{"fields": ["31","55","70","71","76","82","84","86","7051","7292","7295","7296","7281","7286","7287","7288","7671","7672"]}'
+                            )
+                            print(f"[agregar_nuevo_activo()]: suscripto {symbol} (conid={conid})")
+                        else:
+                            print(f"[agregar_nuevo_activo()]: websocket no disponible para suscribir {symbol}")
+                    except Exception as ws_err:
+                        print(f"[agregar_nuevo_activo()]: error suscribiendo {symbol}: {ws_err}")
 
         except Exception as e:
             print(f"[agregar_nuevo_activo()]: {e}")
@@ -5516,17 +5530,32 @@ class WidgetVehiculo(TickerInfo):
             # Busca en Interactive Brokers (Stock)
             elif self.vehiculo == "Stock":
                 response = self.IClient._get_symbol(symbol=symbol, secType="STK")
-                if response:
-                    conid = response.get("conid")
-                    precio = float(response["market_data"]["31"])
-
-                # Valida resposne o que tenga last market
                 if not response:
                     MyMessageBox(self.master).showinfo(
                         title="Buy - New symbol",
                         message=f"Símbolo {symbol} no encontrado en los activos {self.vehiculo}",
                     )
                     return
+
+                conid = response.get("conid")
+
+                # Campo "31" puede no estar disponible si el websocket aún no suscribió el símbolo
+                market_data = response.get("market_data") or {}
+                precio_str = market_data.get("31")
+                if precio_str:
+                    precio = float(precio_str)
+                else:
+                    # Fallback: obtener precio desde yfinance
+                    result = get_yfinance(ticket=symbol, vehiculo="Stock")
+                    if result:
+                        activos, _ = result
+                        precio = float(activos.get("previous_close") or activos.get("open") or 0)
+                    if not precio:
+                        MyMessageBox(self.master).showinfo(
+                            title="Buy - New symbol",
+                            message=f"Símbolo {symbol}: websocket no suscripto aún. Reintenta en unos segundos.",
+                        )
+                        return
         except Exception as e:
             MyMessageBox(self.master).showinfo(title="Buy - New symbol", message=f"Error: {symbol} no válido")
             traceback.print_exc()
