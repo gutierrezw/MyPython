@@ -52,6 +52,7 @@ from cachetools import TTLCache
 from functools import wraps
 import pandas as pd
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 
 # establece cache para yfinance --------------------------------------------------------------------------------
@@ -266,6 +267,9 @@ class InfoYfinance:
 
 
 # =================================================================
+# Símbolos que fallaron get_info() por timeout — se omiten por 30 min
+_info_timeout_cache = TTLCache(maxsize=200, ttl=1800)
+
 # 📊 Función principal get_yfinance: encapsula llamados a yfinance
 # =================================================================
 @use_dataframe_cache(CacheHut)
@@ -282,11 +286,20 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
 
     # para obtener get_info() de manera segura
     def safe_get_info(objeto, key):
+        # Si el símbolo ya falló antes, omitir sin log ni llamada de red
+        if key in _info_timeout_cache:
+            return {}
         try:
-            info = objeto.get_info()
+            with ThreadPoolExecutor(max_workers=1) as ex:
+                future = ex.submit(objeto.get_info)
+                info = future.result(timeout=5)
             return info if info else {}
+        except FutureTimeoutError:
+            _info_timeout_cache[key] = True
+            CacheHut.logger.warning(f"safe_get_info({key}) :: timeout — bloqueado 30 min")
+            return {}
         except Exception as e:
-            print(f"safe_get_info({key}) :: {e}")
+            CacheHut.logger.error(f"safe_get_info({key}) :: {e}")
             return {}
 
     activo, pdatos = {}, pd.DataFrame()
@@ -356,8 +369,9 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
             # extraer el primer nivel de las columnas sacando infor Ticker
             pdatos.columns = pdatos.columns.get_level_values(0)
 
-            # elimina zona horaria y agrega días sin dividendos para hacer igual historic
-            dividends = dividends.tz_localize(None)
+            # elimina zona horaria si la tiene (algunos tickers la traen, otros no)
+            if dividends.index.tz is not None:
+                dividends = dividends.tz_localize(None)
 
             # Filtrar solo los días donde hubo dividendos
             dividends = dividends.reindex(pdatos.index)
@@ -396,7 +410,7 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
                 activo = {}
                 return activo, pdatos
     except (Exception, EncodingWarning) as e:
-        print(f"[Error:: safe_get_info()]: {e}")
+        CacheHut.logger.error(f"[get_yfinance({ticket}, {vehiculo})]: {e}")
         time.sleep(3)
         return {}, pd.DataFrame()
 
@@ -1240,20 +1254,28 @@ def setup_fear_greed(fg: object, parm=None):
         return x, y, colors
 
     def fear_vix(fear=None):
-        hoy = datetime.now().date()
-        BASE_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata/"
-        START_DATE = hoy.strftime("%Y-%m-%d")
-        ua = UserAgent()
+        try:
+            hoy = datetime.now().date()
+            BASE_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata/"
+            START_DATE = hoy.strftime("%Y-%m-%d")
+            ua = UserAgent()
 
-        headers = {
-            "User-Agent": ua.random,
-        }
+            headers = {
+                "User-Agent": ua.random,
+            }
 
-        r = requests.get(BASE_URL + START_DATE, headers=headers)
-        data = r.json()
-        wfear = data["fear_and_greed"]["score"] if is_none(fear) else fear
-        ind_wix = data["market_volatility_vix"]["score"]
-        return wfear, ind_wix
+            r = requests.get(BASE_URL + START_DATE, headers=headers, timeout=10)
+            if not r.ok or not r.text.strip():
+                print(f"[fear_vix()]: API no disponible — HTTP {r.status_code}, usando valores neutros")
+                return (fear if not is_none(fear) else 50), 50
+
+            data = r.json()
+            wfear = data["fear_and_greed"]["score"] if is_none(fear) else fear
+            ind_wix = data["market_volatility_vix"]["score"]
+            return wfear, ind_wix
+        except (requests.exceptions.RequestException, ValueError, KeyError) as e:
+            print(f"[fear_vix()]: {e} — usando valores neutros")
+            return (fear if not is_none(fear) else 50), 50
 
     def char_plot(ax=None, x=None, y=None, score=None, color=None, titulo=None):
         face = (

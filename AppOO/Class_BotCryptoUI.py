@@ -1747,7 +1747,7 @@ class BotCryptoUI:
             side=tk.LEFT, padx=4
         )
 
-        self.fg1 = Figure(figsize=(2.9, 1.75), dpi=110, layout="tight")
+        self.fg1 = Figure(figsize=(2.9, 1.75), dpi=110, layout="constrained")
         self.fg1.set_facecolor(self.colors["cgcolor"])
         self.cv1 = FigureCanvasTkAgg(self.fg1, master=cen)
         self.cv1.draw()
@@ -2039,7 +2039,6 @@ class BotCryptoUI:
                 self.parent.after(0, self._perf_render, daily, by_sym)
             except RuntimeError:
                 pass
-
         except Exception as e:
             self.logger.error(f"_draw_performance_charts: {e}", exc_info=True)
             self._perf_placeholder(f"Error: {e}")
@@ -2477,7 +2476,6 @@ class BotCryptoUI:
             on_chart=lambda s=symbol: self._on_show_chart(s),
             on_test_buy=lambda s=symbol: self._on_test_buy(s),
             on_delete=lambda s=symbol: self._on_delete_symbol(s),
-            on_sell_all=lambda s=symbol: self._on_sell_all(s),
             env=self.env,
             widget_width=self.WIDGET_WIDTH,
             widget_height=self.WIDGET_HEIGHT,
@@ -5429,7 +5427,6 @@ class WidgetBotSymbol:
         on_chart,
         on_test_buy=None,
         on_delete=None,
-        on_sell_all=None,
         env="TESTNET",
         widget_width=280,
         widget_height=220,
@@ -5444,7 +5441,6 @@ class WidgetBotSymbol:
         self.on_chart = on_chart
         self.on_test_buy = on_test_buy
         self.on_delete = on_delete
-        self.on_sell_all = on_sell_all
         self.env = env
         self.widget_width = widget_width
         self.widget_height = widget_height
@@ -5576,17 +5572,6 @@ class WidgetBotSymbol:
             command=self.on_stop,
         ).pack(side=tk.LEFT, padx=2)
 
-        # SELL ALL - vender todo el balance del activo
-        self.btn_sell_all = tk.Button(
-            btn_frame,
-            text="Close",
-            bg="#E91E63",
-            fg="white",
-            width=7,
-            font=("Arial", 8, "bold"),
-            command=self.on_sell_all if self.on_sell_all else lambda: None,
-        )
-        self.btn_sell_all.pack(side=tk.RIGHT, padx=2)
         tk.Button(
             btn_frame,
             text="Strategy",
