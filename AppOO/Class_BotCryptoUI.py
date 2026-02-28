@@ -118,6 +118,8 @@ class TradingBotSpot:
             "trailing_stop": None,
             # SL order en Binance (red de seguridad)
             "sl_order_id": None,
+            # Cooldown: timestamp ISO del último trade cerrado
+            "last_trade_time": None,
         }
 
         # ----- Datos de mercado -----
@@ -278,6 +280,18 @@ class TradingBotSpot:
         # Gate estructural: solo operar LONG en régimen BULL
         if self._check_market_regime() != "BULL":
             return False
+
+        # Cooldown: no re-entrar hasta que hayan pasado cooldown_hours desde el último trade
+        last_trade_str = self.state.get("last_trade_time")
+        if last_trade_str:
+            try:
+                last_trade_dt = datetime.fromisoformat(last_trade_str)
+                cooldown_h = self.risk_cfg.get("cooldown_hours", 4)
+                elapsed_h = (datetime.now() - last_trade_dt).total_seconds() / 3600
+                if elapsed_h < cooldown_h:
+                    return False
+            except Exception:
+                pass
 
         rsi = self.df["rsi"].iloc[-1]
         macd = self.df["macd"].iloc[-1]
@@ -1205,6 +1219,7 @@ class BotManager:
                     "trail_high": None,
                     "trailing_stop": None,
                     "sl_order_id": None,
+                    "last_trade_time": datetime.now().isoformat(),
                 }
             )
             bot.state_repo.delete_state(bot.symbol) if bot.state_repo else None
@@ -1287,6 +1302,7 @@ class BotManager:
                     "trail_high": None,
                     "trailing_stop": None,
                     "sl_order_id": None,
+                    "last_trade_time": datetime.now().isoformat(),
                 }
             )
 
@@ -1321,6 +1337,7 @@ class BotManager:
                     "trail_high": None,
                     "trailing_stop": None,
                     "sl_order_id": None,
+                    "last_trade_time": datetime.now().isoformat(),
                 }
             )
             return
@@ -1343,6 +1360,7 @@ class BotManager:
         bot.state["trail_high"] = None
         bot.state["trailing_stop"] = None
         bot.state["sl_order_id"] = None
+        bot.state["last_trade_time"] = datetime.now().isoformat()
 
         self.logger.warning(f"✅ {bot.symbol}: POSICIÓN CERRADA ({reason}) @ {price:.6f} | qty={qty}")
 
@@ -1523,6 +1541,7 @@ class BotCryptoUI:
             "rsi_sell": 65,
             "env": "TESTNET",
             "max_active_bots": 3,
+            "cooldown_hours": 4,
         }
 
         try:
@@ -1577,7 +1596,8 @@ class BotCryptoUI:
             f"capital={config.get('capital')} | risk={config.get('risk_per_trade',0)*100:.1f}% | "
             f"TP1={config['tp1_pct']*100:.1f}% | Trail×={config['trail_mult']} | SL={config['stop_loss_pct']*100:.1f}% | "
             f"tp1_size={config.get('tp1_size')} | "
-            f"RSI={config.get('rsi_buy')}/{config.get('rsi_sell')} | max_bots={config.get('max_active_bots', 3)}"
+            f"RSI={config.get('rsi_buy')}/{config.get('rsi_sell')} | max_bots={config.get('max_active_bots', 3)} | "
+            f"cooldown={config.get('cooldown_hours', 4)}h"
         )
 
         return config
@@ -2342,8 +2362,19 @@ class BotCryptoUI:
         )
         self._lbl_scoring_iter.pack(side=tk.RIGHT)
 
+        # Botón eliminar símbolo del universo
+        tk.Button(
+            header,
+            text="-",
+            bg="#b71c1c",
+            fg="white",
+            font=("Arial", 8, "bold"),
+            width=3,
+            command=self._on_remove_symbol,
+        ).pack(side=tk.RIGHT, padx=(0, 2))
+
         # Botón agregar símbolo al universo
-        btn_add = tk.Button(
+        tk.Button(
             header,
             text="+",
             bg="blue",
@@ -2351,8 +2382,7 @@ class BotCryptoUI:
             font=("Arial", 8, "bold"),
             width=3,
             command=self._on_add_symbol,
-        )
-        btn_add.pack(side=tk.RIGHT, padx=3)
+        ).pack(side=tk.RIGHT, padx=3)
 
         # Treeview — 7 columnas compactas
         columns = ("symbol", "score", "prioridad", "ctx", "lat", "mom", "estado")
@@ -2996,6 +3026,7 @@ class BotCryptoUI:
                     "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
                     "tp1_size": self.config.get("tp1_size", 0.33),
                     "trail_mult": self.config.get("trail_mult", 1.5),
+                    "cooldown_hours": self.config.get("cooldown_hours", 4),
                 }
                 tmp_bot = TradingBotSpot(
                     symbol=symbol,
@@ -3033,6 +3064,7 @@ class BotCryptoUI:
                 "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
                 "tp1_size": self.config.get("tp1_size", 0.33),
                 "trail_mult": self.config.get("trail_mult", 1.5),
+                "cooldown_hours": self.config.get("cooldown_hours", 4),
             }
             for activo in self.all_activos:
                 symbol = activo.get("symbol")
@@ -3542,6 +3574,7 @@ class BotCryptoUI:
                     "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
                     "tp1_size": self.config.get("tp1_size", 0.33),
                     "trail_mult": self.config.get("trail_mult", 1.5),
+                    "cooldown_hours": self.config.get("cooldown_hours", 4),
                 }
 
                 # 3a. Detectar posiciones existentes en Binance (prioridad absoluta)
@@ -3686,6 +3719,7 @@ class BotCryptoUI:
             "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
             "tp1_size": self.config.get("tp1_size", 0.33),
             "trail_mult": self.config.get("trail_mult", 1.5),
+            "cooldown_hours": self.config.get("cooldown_hours", 4),
         }
 
         for activo in self.all_activos:
@@ -3839,8 +3873,22 @@ class BotCryptoUI:
             if qty <= 0:
                 qty = (capital_per_bot * risk_per_trade) / (price_now * sl_pct)
 
-            # Niveles clave
-            sl_price = entry * (1 - sl_pct)
+            # Niveles clave — usar estado real del bot si está disponible
+            tp1_done = state.get("tp1_done", False)
+            trailing_active = state.get("trailing_active", False)
+            trailing_stop = state.get("trailing_stop")
+            state_sl = state.get("stop_loss")
+
+            if trailing_active and trailing_stop:
+                # Post-TP1 con trailing activo: SL efectivo = trailing_stop
+                sl_price = trailing_stop
+            elif state_sl and state_sl > 0:
+                # SL movido por el bot (ej: breakeven post-TP1)
+                sl_price = state_sl
+            else:
+                # Sin posición o antes del primer trade: usar config
+                sl_price = entry * (1 - sl_pct)
+
             tp1_price = entry * (1 + tp1_pct)
             rally_price = entry * (1 + tp1_pct * 2.5)
             avg_trail_exit = entry * (1 + tp1_pct * 1.5)
@@ -4154,6 +4202,7 @@ class BotCryptoUI:
         bot.state["trail_high"] = None
         bot.state["trailing_stop"] = None
         bot.state["sl_order_id"] = None
+        bot.state["last_trade_time"] = datetime.now().isoformat()
         self.state_repo.delete_state(symbol)
         self.logger.warning(f"✅ {symbol}: Estado reseteado a NONE (cierre manual)")
 
@@ -4418,8 +4467,10 @@ class BotCryptoUI:
             balances = {}
             for b in account["balances"]:
                 free = float(b["free"])
-                if free > 0.001 and b["asset"] not in ["USDT", "BNB"]:
-                    balances[b["asset"]] = free
+                locked = float(b.get("locked", 0))
+                total = free + locked
+                if total > 0.001 and b["asset"] not in ["USDT", "BNB"]:
+                    balances[b["asset"]] = total
 
             # Para cada símbolo con balance, mostrar info
             for asset, qty in balances.items():
@@ -4495,33 +4546,35 @@ class BotCryptoUI:
 
         for pos in symbols_to_close:
             symbol = pos["symbol"]
-            qty = pos["qty"]
 
             try:
-                lot_info = self.bot_manager.lot_sizes.get(symbol, {})
-                step_size = lot_info.get("stepSize", 0.00001)
-                qty_formatted = float(int(qty / step_size) * step_size)
+                self.logger.warning(f"🔴 {symbol}: CERRANDO POSICIÓN desde Posiciones Activas")
 
-                self.logger.warning(f"🔴 {symbol}: CERRANDO POSICIÓN | qty={qty_formatted}")
-
-                order = self.spot_client.get_new_order(
-                    symbol=symbol,
-                    side="SELL",
-                    type="MARKET",
-                    quantity=qty_formatted,
-                )
-
-                if order:
-                    self.logger.warning(f"✅ {symbol}: POSICIÓN CERRADA | orderId={order.get('orderId')}")
+                if symbol in self.bot_manager.bots:
+                    # Ruta bot activo: cancela SL order primero, luego MARKET SELL
+                    bot = self.bot_manager.bots[symbol]
+                    self.bot_manager._execute_exit(bot, reason="MANUAL")
                     cerradas += 1
-
-                    if symbol in self.bots:
-                        bot = self.bots[symbol]
-                        bot.state["position"] = "NONE"
-                        bot.state["entry_price"] = None
-                        bot.state["remaining_qty"] = 0.0
                 else:
-                    errores += 1
+                    # Ruta posición huérfana (sin bot): cancelar órdenes abiertas y vender balance free+locked
+                    self.spot_client.cancel_all_orders(symbol=symbol)
+                    real_qty = self.bot_manager._get_real_balance(symbol)
+                    qty_fmt = self.bot_manager._format_qty(symbol, real_qty)
+                    if qty_fmt > 0:
+                        order = self.spot_client.get_new_order(
+                            symbol=symbol,
+                            side="SELL",
+                            type="MARKET",
+                            quantity=qty_fmt,
+                        )
+                        if order:
+                            self.logger.warning(f"✅ {symbol}: POSICIÓN HUÉRFANA CERRADA | orderId={order.get('orderId')}")
+                            cerradas += 1
+                        else:
+                            errores += 1
+                    else:
+                        self.logger.warning(f"{symbol}: sin balance para vender")
+                        errores += 1
 
             except Exception as e:
                 self.logger.error(f"Error cerrando {symbol}: {e}")
@@ -4555,27 +4608,32 @@ class BotCryptoUI:
         for item in items:
             values = tree.item(item, "values")
             symbol = values[0]
-            qty = float(values[1])
 
             try:
-                lot_info = self.bot_manager.lot_sizes.get(symbol, {})
-                step_size = lot_info.get("stepSize", 0.00001)
-                qty_formatted = float(int(qty / step_size) * step_size)
-
-                order = self.spot_client.get_new_order(
-                    symbol=symbol,
-                    side="SELL",
-                    type="MARKET",
-                    quantity=qty_formatted,
-                )
-
-                if order:
-                    self.logger.warning(f"✅ {symbol}: POSICIÓN CERRADA")
+                if symbol in self.bot_manager.bots:
+                    # Ruta bot activo: cancela SL order primero, luego MARKET SELL
+                    bot = self.bot_manager.bots[symbol]
+                    self.bot_manager._execute_exit(bot, reason="MANUAL")
                     cerradas += 1
-                    if symbol in self.bots:
-                        self.bots[symbol].state["position"] = "NONE"
-                        self.bots[symbol].state["remaining_qty"] = 0.0
-                        self.trades_count += 1
+                else:
+                    # Ruta posición huérfana: cancelar órdenes abiertas y vender
+                    self.spot_client.cancel_all_orders(symbol=symbol)
+                    real_qty = self.bot_manager._get_real_balance(symbol)
+                    qty_fmt = self.bot_manager._format_qty(symbol, real_qty)
+                    if qty_fmt > 0:
+                        order = self.spot_client.get_new_order(
+                            symbol=symbol,
+                            side="SELL",
+                            type="MARKET",
+                            quantity=qty_fmt,
+                        )
+                        if order:
+                            self.logger.warning(f"✅ {symbol}: POSICIÓN HUÉRFANA CERRADA | orderId={order.get('orderId')}")
+                            cerradas += 1
+                        else:
+                            errores += 1
+                    else:
+                        errores += 1
 
             except Exception as e:
                 self.logger.error(f"Error cerrando {symbol}: {e}")
@@ -5053,6 +5111,7 @@ class BotCryptoUI:
                                     "stop_loss_pct": 0.02,
                                     "tp1_size": 0.33,
                                     "trail_mult": 1.5,
+                                    "cooldown_hours": 4,
                                 }.items()
                             }
                             tmp_bot = TradingBotSpot(
@@ -5142,6 +5201,86 @@ class BotCryptoUI:
         entry.bind("<Return>", lambda e: agregar())
         dialog.bind("<Escape>", lambda e: eexit())
 
+    def _on_remove_symbol(self):
+        """Abre diálogo para eliminar un símbolo del universo BotCrypto."""
+        simbolos = [a.get("symbol") for a in self.all_activos if a.get("symbol")]
+        if not simbolos:
+            return
+
+        bg  = self.colors["bgcolor"]
+        fg  = "white"
+
+        dialog = tk.Toplevel(self.right)
+        dialog.title("Eliminar Símbolo")
+        try:
+            x = self.right.winfo_rootx() + self.right.winfo_width() - 100
+            y = self.right.winfo_rooty() + 200
+        except Exception:
+            x, y = 200, 150
+        dialog.geometry(f"240x190+{x}+{y}")
+        dialog.resizable(False, False)
+        dialog.config(bg=bg)
+        dialog.transient(self.right)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="Seleccionar símbolo:", bg=bg, fg=fg,
+                 font=("Arial", 10)).pack(pady=(12, 4))
+
+        combo = ttk.Combobox(dialog, values=simbolos, state="readonly",
+                             font=("Arial", 11), width=16, justify="center")
+        combo.pack(pady=4)
+        if simbolos:
+            combo.current(0)
+
+        lbl_status = tk.Label(dialog, text="", bg=bg, fg="yellow", font=("Arial", 9))
+        lbl_status.pack(pady=2)
+
+        def eliminar():
+            symbol = combo.get().strip()
+            if not symbol:
+                return
+
+            # Bloquear si tiene bot activo con posición abierta
+            bot = self.bots.get(symbol)
+            if bot and bot.state.get("position") == "LONG":
+                lbl_status.config(text=f"{symbol} tiene posición abierta", fg="red")
+                return
+
+            lbl_status.config(text=f"Eliminando {symbol}...", fg="yellow")
+            dialog.update()
+
+            try:
+                self.repositorio.delete_otros_activos(symbol=symbol, cuenta=self.ACCOUNT)
+            except Exception as e:
+                lbl_status.config(text=f"Error BD: {e}", fg="red")
+                return
+
+            # Limpiar en memoria
+            self.all_activos  = [a for a in self.all_activos if a.get("symbol") != symbol]
+            self.scoring_data.pop(symbol, None)
+
+            # Si tiene cubo activo sin posición → cerrarlo
+            if symbol in self.bots:
+                self._on_stop_symbol(symbol)
+            if symbol in self.widgets:
+                self._cerrar_chart_window(symbol)
+                self.widgets[symbol].frame.destroy()
+                self.widgets.pop(symbol, None)
+
+            self.lbl_activos.config(text=str(len(self.all_activos)))
+            self._actualizar_panel_scoring()
+            self.logger.warning(f"Símbolo {symbol} eliminado del universo")
+            dialog.destroy()
+
+        btn_frame = tk.Frame(dialog, bg=bg)
+        btn_frame.pack(pady=8)
+        tk.Button(btn_frame, text="Eliminar", command=eliminar,
+                  bg="#b71c1c", fg="white", font=("Arial", 9), width=9).pack(side=tk.LEFT, padx=8)
+        tk.Button(btn_frame, text="Cancel", command=dialog.destroy,
+                  font=("Arial", 9), width=9).pack(side=tk.LEFT, padx=8)
+
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+
     def _crear_bot(self, symbol):
         """Crea un TradingBotSpot para el símbolo"""
         try:
@@ -5155,6 +5294,7 @@ class BotCryptoUI:
                 "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
                 "tp1_size": self.config.get("tp1_size", 0.33),
                 "trail_mult": self.config.get("trail_mult", 1.5),
+                "cooldown_hours": self.config.get("cooldown_hours", 4),
             }
 
             # valida symbol
