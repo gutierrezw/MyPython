@@ -72,21 +72,27 @@ def handle_binance_exceptions(func):
         try:
             return func(*args, **kwargs)
         except ClientError as e:
-            logger.error(
-                textwrap.dedent(
-                    f"""
-                  =======================================
-                  handle_binance_exceptions(ClientError):
-                  =======================================
-                  Code   : {getattr(e, "error_code", None)}
-                  status : {getattr(e, "status_error", None)}
-                  message: {getattr(e, "error_message", str(e))}
-                  func   : {func.__name__}
-                  args   : {args[1:]}
-                  kwargs : {kwargs}
-                  """
+            error_code = getattr(e, "error_code", None)
+            msg = getattr(e, "error_message", str(e))
+            # -2011: sin órdenes que cancelar (orden ya ejecutada por Binance) → no es error real
+            if error_code == -2011 or "-2011" in str(msg):
+                logger.warning(f"cancel_all_orders {func.__name__}: sin órdenes abiertas (orden ya ejecutada) [{error_code}]")
+            else:
+                logger.error(
+                    textwrap.dedent(
+                        f"""
+                      =======================================
+                      handle_binance_exceptions(ClientError):
+                      =======================================
+                      Code   : {error_code}
+                      status : {getattr(e, "status_error", None)}
+                      message: {msg}
+                      func   : {func.__name__}
+                      args   : {args[1:]}
+                      kwargs : {kwargs}
+                      """
+                    )
                 )
-            )
         except ConnectionError as e:
             logger.error(
                 textwrap.dedent(
@@ -101,19 +107,24 @@ def handle_binance_exceptions(func):
                 )
             )
         except Exception as e:
-            logger.error(
-                textwrap.dedent(
-                    f"""
-                  =============================
-                  handle_binance_exceptions():
-                  =============================
-                  func   : {func.__name__}
-                  Code   : {getattr(e, "error_code", None)}
-                  status : {getattr(e, "status_error", None)}
-                  message: {getattr(e, "error_message", str(e))}
-                  """
+            msg = getattr(e, "error_message", str(e))
+            # -2011 puede venir también como HTTPError genérico
+            if "-2011" in str(msg) or "-2011" in str(e):
+                logger.warning(f"{func.__name__}: sin órdenes abiertas (orden ya ejecutada por Binance) [-2011]")
+            else:
+                logger.error(
+                    textwrap.dedent(
+                        f"""
+                      =============================
+                      handle_binance_exceptions():
+                      =============================
+                      func   : {func.__name__}
+                      Code   : {getattr(e, "error_code", None)}
+                      status : {getattr(e, "status_error", None)}
+                      message: {msg}
+                      """
+                    )
                 )
-            )
         return None
 
     return wrapper

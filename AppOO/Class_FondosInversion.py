@@ -724,7 +724,7 @@ class ArsFondosInversion(tk.Frame):
                     # actualiza panel
                     account = self.load_positions_FCI()
                     self.update_panel_fci()
-                    # self.ars.update_panelVehiculo(orden=self.ars.orden)
+                    self.ars.update_panelVehiculo(orden=self.ars.orden)
 
                     # actualiza diaria y performance
                     self.schedule_diaria_performace(account)
