@@ -633,6 +633,9 @@ def get_indicadores(symbol=None, datos=None):
 
                 ultima = df_resampled.iloc[-1]
 
+                atr = calcular_atr(df_resampled) if len(df_resampled) >= 14 else None
+                atr_pct = float(round(atr / ultima["Close"], 6)) if atr and ultima["Close"] else None
+
                 value["datos_tecnicos"][nombre_temp] = {
                     "rsi": float(round(ultima["rsi"], 7)),
                     "ema(20,50,100,200)": {
@@ -653,6 +656,8 @@ def get_indicadores(symbol=None, datos=None):
                         "tendencia_bajista": x_bajista,
                     },
                     "macd": float(round(ultima["macd"], 7)),
+                    "atr": float(round(atr, 7)) if atr else None,
+                    "atr_pct": atr_pct,
                     MaximoMInimos[nombre_temp][0]: highs_lows[MaximoMInimos[nombre_temp][0]],  # Maximo
                     MaximoMInimos[nombre_temp][1]: highs_lows[MaximoMInimos[nombre_temp][1]],  # Minimo
                     "precio_calculo": float(round(ultima["Close"], 7)),

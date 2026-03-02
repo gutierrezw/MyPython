@@ -29,6 +29,7 @@ from Modulos_python import (
     multiprocessing,
     np,
     timedelta,
+    mdates,
 )
 import os
 from Modulos_Mysql import BDsystem, RepositorioOportunidadesBuySell, PlanInversion
@@ -125,6 +126,9 @@ class TradingBotSpot:
         # ----- Datos de mercado -----
         self.df = None
         self.last_candle_ts = None
+
+        # ----- Contexto timeframe superior (actualizado por BotCryptoUI) -----
+        self.contexto_ok = True  # True = 4h ok para comprar, False = bloqueado
 
     # =========================
     # INTERFAZ PUBLICA
@@ -277,8 +281,12 @@ class TradingBotSpot:
         if self.df is None or len(self.df) < 50:
             return False
 
-        # Gate estructural: solo operar LONG en régimen BULL
+        # Gate estructural: solo operar LONG en régimen BULL (1h)
         if self._check_market_regime() != "BULL":
+            return False
+
+        # Gate superior (4h): no comprar si contexto estructural no confirma
+        if not self.contexto_ok:
             return False
 
         # Cooldown: no re-entrar hasta que hayan pasado cooldown_hours desde el último trade
@@ -313,15 +321,17 @@ class TradingBotSpot:
 
         return ok
 
-    def _check_market_regime(self) -> str:
+    def _check_market_regime(self, df=None) -> str:
         """Clasifica régimen estructural basado en EMA100/EMA200.
         Retorna: 'BULL' | 'RANGE' | 'BEAR'
+        Acepta df opcional para evaluar timeframes superiores.
         """
-        if self.df is None or "ema100" not in self.df.columns or "ema200" not in self.df.columns:
+        data = df if df is not None else self.df
+        if data is None or "ema100" not in data.columns or "ema200" not in data.columns:
             return "RANGE"
-        ema100 = self.df["ema100"].iloc[-1]
-        ema200 = self.df["ema200"].iloc[-1]
-        price = self.df["Close"].iloc[-1]
+        ema100 = data["ema100"].iloc[-1]
+        ema200 = data["ema200"].iloc[-1]
+        price = data["Close"].iloc[-1]
         if price > ema100 and ema100 > ema200:
             return "BULL"
         if price < ema100 and ema100 < ema200:
@@ -685,12 +695,16 @@ class OrderManager:
     - enruta eventos al bot correcto
     """
 
-    def __init__(self):
+    def __init__(self, account=None, repositorio=None):
         # orderId -> metadata
         self.orders = {}
 
         # symbol -> TradingBotSpot
         self.bots = {}
+
+        # DB para sincronizar order_trade (opcional)
+        self.account = account
+        self.repositorio = repositorio
 
     # =========================
     # REGISTRO
@@ -719,6 +733,19 @@ class OrderManager:
 
         order_id = msg["i"]
         symbol = msg["s"]
+        status = msg["X"]
+
+        # Sincroniza estado en order_trade DB
+        if self.repositorio and self.account:
+            try:
+                from datetime import datetime
+                timestamp = datetime.fromtimestamp(msg["T"] / 1000.0)
+                values = {"status": status, "stampSubmit": timestamp}
+                self.repositorio.update_order_trader(
+                    account=self.account, values=values, symbol=symbol, orderid=str(order_id),
+                )
+            except Exception as e:
+                print(f"[OrderManager.on_execution_report() DB sync]: {e}")
 
         # Orden no registrada (re-sync o manual)
         if order_id not in self.orders:
@@ -738,7 +765,7 @@ class OrderManager:
         bot.on_order_update(msg)
 
         # Limpieza si terminó
-        if msg["X"] in ("FILLED", "CANCELED", "REJECTED", "EXPIRED"):
+        if status in ("FILLED", "CANCELED", "REJECTED", "EXPIRED"):
             self.orders.pop(order_id, None)
 
     # =========================
@@ -1084,7 +1111,7 @@ class BotManager:
             self.on_trade_booktrading(bot.symbol, order=order)
 
     def _execute_partial_sell(self, bot, intent: str = "TP1"):
-        """Venta parcial TP1 (33%). El cierre total se hace via _execute_exit (trailing o SL)."""
+        """Venta parcial TP1 (tp1_size%). Si tp1_size=1.0 cierra posición completa sin trailing."""
         qty = bot.state["position_qty"] * bot.risk_cfg["tp1_size"]
 
         qty = self._format_qty(bot.symbol, qty)
@@ -1126,19 +1153,38 @@ class BotManager:
         if intent == "TP1":
             bot.state["tp1_done"] = True
             bot.state["remaining_qty"] -= qty
-            # Post-TP1: mover SL a breakeven para proteger ganancia
-            bot.state["stop_loss"] = bot.state["entry_price"]
-            # Trailing solo arranca aquí si no hay TP2 configurado
-            if not bot.risk_cfg.get("tp2_pct"):
-                atr = bot._calc_atr14()
-                trail_mult = bot.risk_cfg.get("trail_mult", 1.5)
-                bot.state["trailing_active"] = True
-                bot.state["trail_high"] = price
-                bot.state["trailing_stop"] = price - (trail_mult * atr)
-                self.logger.warning(
-                    f"{bot.symbol}: TRAILING activado post-TP1 | high={price:.6f} "
-                    f"stop={bot.state['trailing_stop']:.6f} ATR={atr:.6f} mult={trail_mult}"
-                )
+
+            if bot.state["remaining_qty"] <= 0:
+                # tp1_size=1.0: vendió todo en TP1 → cerrar posición completa
+                bot.state["position"] = "NONE"
+                bot.state["entry_price"] = None
+                bot.state["position_qty"] = 0.0
+                bot.state["remaining_qty"] = 0.0
+                bot.state["stop_loss"] = None
+                bot.state["tp1_done"] = False
+                bot.state["trailing_active"] = False
+                bot.state["trail_high"] = None
+                bot.state["trailing_stop"] = None
+                bot.state["sl_order_id"] = None
+                bot.state["last_trade_time"] = datetime.now().isoformat()
+                self.logger.warning(f"✅ {bot.symbol}: TP1 TOTAL (tp1_size=1.0) @ {price:.6f} | POSICIÓN CERRADA")
+                if self.on_trade_complete:
+                    self.on_trade_complete(bot.symbol)
+            else:
+                # tp1_size < 1.0: venta parcial, activar trailing en remanente
+                # Post-TP1: mover SL a breakeven para proteger ganancia
+                bot.state["stop_loss"] = bot.state["entry_price"]
+                # Trailing solo arranca aquí si no hay TP2 configurado
+                if not bot.risk_cfg.get("tp2_pct"):
+                    atr = bot._calc_atr14()
+                    trail_mult = bot.risk_cfg.get("trail_mult", 1.5)
+                    bot.state["trailing_active"] = True
+                    bot.state["trail_high"] = price
+                    bot.state["trailing_stop"] = price - (trail_mult * atr)
+                    self.logger.warning(
+                        f"{bot.symbol}: TRAILING activado post-TP1 | high={price:.6f} "
+                        f"stop={bot.state['trailing_stop']:.6f} ATR={atr:.6f} mult={trail_mult}"
+                    )
 
         elif intent == "TP2":
             bot.state["tp2_done"] = True
@@ -1914,6 +1960,7 @@ class BotCryptoUI:
         bg = self.colors["cgcolor"]
         green = "#00ff88"
         red = "#ff4444"
+        white = "#e9f2f3"
 
         # ── fg0: PnL DIARIO ────────────────────────────────────────────────────
         self.fg0.clear()
@@ -1929,6 +1976,7 @@ class BotCryptoUI:
         ax0.bar(range(n), valores[-n:], color=colores[-n:], width=0.7, linewidth=0)
         ax0.axhline(0, color="0.5", linewidth=0.5)
         ax0.set_xticks(range(n))
+        ax0.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
         ax0.set_xticklabels(fechas[-n:], fontsize=5, rotation=60, color="0.6")
         ax0.tick_params(axis="y", labelsize=6, colors="0.6")
         ax0.spines[["top", "right"]].set_visible(False)
@@ -1980,7 +2028,7 @@ class BotCryptoUI:
             f"${cum_vals[-1]:+.2f}",
             xy=(len(cum_vals) - 1, cum_vals[-1]),
             fontsize=6,
-            color=color_line,
+            color=white,
             xytext=(-4, 4),
             textcoords="offset points",
             ha="right",
@@ -2083,6 +2131,13 @@ class BotCryptoUI:
                 else (self.capital_manager.get_available_capital() if self.capital_manager else 0)
             )
             risk_pct = self.config.get("risk_per_trade", 0.02) * 100
+            DataHub.manager_GyP["BotCrypto"] = {
+                "Value": saldo_real + reservado,
+                "Inversion": capital,
+                "dGyP": 0,
+                "Debit": 0,
+                "Margen": 0,
+            }
 
             self._cap_labels["capital"].config(text=f"${capital:.2f}")
             self._cap_labels["reservado"].config(text=f"${reservado:.2f}")
@@ -2531,8 +2586,11 @@ class BotCryptoUI:
                 )
                 return
 
-            # Order Manager
-            self.order_manager = OrderManager()
+            # Order Manager (con acceso a DB para sincronizar order_trade)
+            self.order_manager = OrderManager(
+                account=getattr(self, "ACCOUNT", None),
+                repositorio=getattr(self, "repositorio", None),
+            )
 
             # Capital Manager
             capital = self.config.get("capital", 100.0)
@@ -2964,6 +3022,11 @@ class BotCryptoUI:
                 return
 
             bot.on_market_data(candle)
+
+            # Actualizar contexto 4h usando _evaluar_contexto_superior (caché 10 min)
+            contexto = self._evaluar_contexto_superior(symbol)
+            bot.contexto_ok = contexto.get("contexto_ok", True)
+
             action, conditions = bot.evaluate()
 
             # Actualizar widget con estado
@@ -3092,106 +3155,6 @@ class BotCryptoUI:
 
         except Exception as e:
             self.logger.error(f"_recalcular_scoring_observacion_sync(): {e}")
-
-    def _rotar_activos(self):
-        """Rota activos: bots en NONE con bajo score salen, mejores candidatos entran.
-        NUNCA cierra posiciones LONG activas."""
-        try:
-            # Encontrar bots en NONE (candidatos a salir)
-            bots_none = []
-            for sym, bot in list(self.bots.items()):
-                state = bot.get_public_state()
-                if state.get("position") == "NONE":
-                    score = self.scoring_data.get(sym, {}).get("score_total", 0)
-                    bots_none.append((sym, score))
-
-            if not bots_none:
-                return
-
-            # Encontrar activos en observación con mejor score
-            activos_en_panel = set(self.bots.keys())
-            candidatos = []
-            for sym, scoring in self.scoring_data.items():
-                if sym not in activos_en_panel:
-                    candidatos.append((sym, scoring.get("score_total", -99)))
-
-            if not candidatos:
-                return
-
-            # Ordenar: bots NONE por score ascendente, candidatos por score descendente
-            bots_none.sort(key=lambda x: x[1])
-            candidatos.sort(key=lambda x: x[1], reverse=True)
-
-            # Rotar: si el mejor candidato supera al peor bot NONE
-            activos_map = {a["symbol"]: a for a in self.all_activos}
-            rotaciones = []  # (none_sym, mejor_sym)
-            for none_sym, none_score in bots_none:
-                if not candidatos:
-                    break
-                mejor_sym, mejor_score = candidatos[0]
-                if mejor_score > none_score:
-                    self.logger.warning(f"ROTACIÓN: {none_sym}(score={none_score}) → {mejor_sym}(score={mejor_score})")
-                    # Sacar bot NONE (UI)
-                    del self.bots[none_sym]
-                    if none_sym in self.widgets:
-                        self.widgets[none_sym].frame.destroy()
-                        del self.widgets[none_sym]
-                    if self.bot_manager:
-                        self.bot_manager.unregister_bot(none_sym)
-                    self._resetear_indicadores_bd(none_sym)
-
-                    # Crear widget vacío (UI)
-                    activo = activos_map.get(mejor_sym, {})
-                    grid_idx = len(self.widgets) + 1
-                    row = grid_idx // self.COLUMNS
-                    col = grid_idx % self.COLUMNS
-                    self._crear_widget_simbolo(mejor_sym, activo, row, col)
-                    rotaciones.append(mejor_sym)
-                    candidatos.pop(0)
-
-            # Crear bots en background (REST: historico + posición + lot_size)
-            if rotaciones:
-
-                def _crear_bots_bg():
-                    for sym in rotaciones:
-                        try:
-                            self._crear_bot(sym)
-                        except Exception as ex:
-                            self.logger.error(f"Rotación _crear_bot({sym}): {ex}")
-
-                    # Evaluar inmediatamente los nuevos bots (aún en background)
-                    for sym in rotaciones:
-                        bot = self.bots.get(sym)
-                        if bot and bot.df is not None and len(bot.df) >= 50:
-                            try:
-                                bot.calcular_indicadores()
-                                action, conditions = bot.evaluate()
-                                self.logger.warning(f"ROTACIÓN {sym}: Eval → {action}")
-                                if action != "HOLD" and self.bot_manager:
-                                    self.bot_manager.execute_action(bot, action)
-                            except Exception as ex:
-                                self.logger.error(f"Rotación eval {sym}: {ex}")
-
-                    def _post_rotacion():
-                        for sym in rotaciones:
-                            w = self.widgets.get(sym)
-                            bot = self.bots.get(sym)
-                            if w and bot:
-                                w.set_running(True)
-                                if bot.df is not None and len(bot.df) >= 50:
-                                    st = bot.get_public_state()
-                                    ind = bot.get_indicators()
-                                    _, conds = bot.evaluate()
-                                    w.update_state(st, ind, conds)
-                        self._detener_websocket()
-                        self.parent.after(500, self._iniciar_websocket)
-
-                    self.parent.after(0, _post_rotacion)
-
-                threading.Thread(target=_crear_bots_bg, daemon=True).start()
-
-        except Exception as e:
-            self.logger.error(f"_rotar_activos(): {e}")
 
     def _actualizar_panel_scoring(self):
         """Actualiza el treeview de scoring con datos actuales"""
@@ -4096,99 +4059,6 @@ class BotCryptoUI:
         _timer_id[0] = win.after(5000, _auto_refresh, win, fig, canvas, bot)
         win.protocol("WM_DELETE_WINDOW", lambda: _on_close(win))
 
-    def _on_sell_all(self, symbol):
-        """Vende todo el balance de un símbolo específico (REST en background).
-        Cancela SL, vende, resetea estado del bot y libera capital."""
-        self._cerrar_chart_window(symbol)
-
-        def _bg():
-            try:
-                bot = self.bots.get(symbol)
-
-                # 1. Cancelar orden SL en Binance antes de vender
-                if bot:
-                    self.bot_manager._cancel_sl_order(bot)
-
-                asset = symbol.replace("USDT", "")
-
-                # 2. Esperar a que Binance libere el locked (retry hasta 3 veces)
-                balance = 0.0
-                for attempt in range(3):
-                    time.sleep(1.0)  # Esperar que Binance procese la cancelación
-                    account = self.spot_client.account_spot()
-
-                    if not account or "balances" not in account:
-                        self.logger.error(f"No se pudo obtener cuenta de Binance")
-                        return
-
-                    for b in account["balances"]:
-                        if b["asset"] == asset:
-                            balance = float(b["free"])
-                            locked = float(b.get("locked", 0))
-                            self.logger.warning(f"{symbol}: intento {attempt+1} | free={balance} locked={locked}")
-                            break
-
-                    if balance > 0:
-                        break
-
-                if balance <= 0:
-                    self.logger.warning(f"{symbol}: Sin balance FREE de {asset} para vender (puede seguir locked)")
-                    if bot and bot.state.get("position") == "LONG":
-                        self._reset_bot_state(bot, symbol)
-                    return
-
-                lot_info = self.bot_manager.lot_sizes.get(symbol, {})
-                step_size = lot_info.get("stepSize", 1.0)
-                min_qty = lot_info.get("minQty", 1.0)
-
-                if step_size > 0:
-                    decimals = len(str(step_size).split(".")[-1].rstrip("0")) if "." in str(step_size) else 0
-                    qty = float(int(balance / step_size) * step_size)
-                    qty = round(qty, decimals)
-                else:
-                    qty = balance
-
-                if qty < min_qty:
-                    self.logger.warning(f"{symbol}: qty={qty} < minQty={min_qty}")
-                    return
-
-                self.logger.warning(f"🔴 {symbol}: SELL ALL qty={qty} {asset}")
-
-                order = self.spot_client.get_new_order(
-                    symbol=symbol,
-                    side="SELL",
-                    type="MARKET",
-                    quantity=qty,
-                )
-
-                if order:
-                    price = float(order.get("fills", [{}])[0].get("price", 0)) if order.get("fills") else 0
-                    notional = qty * price if price else 0
-                    self.logger.warning(f"✅ {symbol}: VENDIDO {qty} {asset} | orderId={order.get('orderId')}")
-
-                    # 3. Liberar capital reservado
-                    if notional > 0:
-                        self.capital_manager.release(notional)
-
-                    # 4. Registrar en booktrading
-                    if self.bot_manager.on_trade_booktrading:
-                        self.bot_manager.on_trade_booktrading(symbol, order=order)
-
-                    # 5. Resetear estado del bot
-                    if bot:
-                        self._reset_bot_state(bot, symbol)
-
-                    self.parent.after(0, self._actualizar_saldo)
-                    self.parent.after(0, self._actualizar_panel_capital)
-                else:
-                    self.logger.error(f"{symbol}: Orden SELL ALL fallida")
-
-            except Exception as e:
-                self.logger.error(f"_on_sell_all({symbol}): {e}")
-                traceback.print_exc()
-
-        threading.Thread(target=_bg, daemon=True).start()
-
     def _reset_bot_state(self, bot, symbol):
         """Resetea el estado del bot a NONE después de cerrar posición manualmente."""
         bot.state["position"] = "NONE"
@@ -4568,7 +4438,9 @@ class BotCryptoUI:
                             quantity=qty_fmt,
                         )
                         if order:
-                            self.logger.warning(f"✅ {symbol}: POSICIÓN HUÉRFANA CERRADA | orderId={order.get('orderId')}")
+                            self.logger.warning(
+                                f"✅ {symbol}: POSICIÓN HUÉRFANA CERRADA | orderId={order.get('orderId')}"
+                            )
                             cerradas += 1
                         else:
                             errores += 1
@@ -4628,7 +4500,9 @@ class BotCryptoUI:
                             quantity=qty_fmt,
                         )
                         if order:
-                            self.logger.warning(f"✅ {symbol}: POSICIÓN HUÉRFANA CERRADA | orderId={order.get('orderId')}")
+                            self.logger.warning(
+                                f"✅ {symbol}: POSICIÓN HUÉRFANA CERRADA | orderId={order.get('orderId')}"
+                            )
                             cerradas += 1
                         else:
                             errores += 1
@@ -5207,8 +5081,8 @@ class BotCryptoUI:
         if not simbolos:
             return
 
-        bg  = self.colors["bgcolor"]
-        fg  = "white"
+        bg = self.colors["bgcolor"]
+        fg = "white"
 
         dialog = tk.Toplevel(self.right)
         dialog.title("Eliminar Símbolo")
@@ -5223,11 +5097,9 @@ class BotCryptoUI:
         dialog.transient(self.right)
         dialog.grab_set()
 
-        tk.Label(dialog, text="Seleccionar símbolo:", bg=bg, fg=fg,
-                 font=("Arial", 10)).pack(pady=(12, 4))
+        tk.Label(dialog, text="Seleccionar símbolo:", bg=bg, fg=fg, font=("Arial", 10)).pack(pady=(12, 4))
 
-        combo = ttk.Combobox(dialog, values=simbolos, state="readonly",
-                             font=("Arial", 11), width=16, justify="center")
+        combo = ttk.Combobox(dialog, values=simbolos, state="readonly", font=("Arial", 11), width=16, justify="center")
         combo.pack(pady=4)
         if simbolos:
             combo.current(0)
@@ -5256,7 +5128,7 @@ class BotCryptoUI:
                 return
 
             # Limpiar en memoria
-            self.all_activos  = [a for a in self.all_activos if a.get("symbol") != symbol]
+            self.all_activos = [a for a in self.all_activos if a.get("symbol") != symbol]
             self.scoring_data.pop(symbol, None)
 
             # Si tiene cubo activo sin posición → cerrarlo
@@ -5274,61 +5146,14 @@ class BotCryptoUI:
 
         btn_frame = tk.Frame(dialog, bg=bg)
         btn_frame.pack(pady=8)
-        tk.Button(btn_frame, text="Eliminar", command=eliminar,
-                  bg="#b71c1c", fg="white", font=("Arial", 9), width=9).pack(side=tk.LEFT, padx=8)
-        tk.Button(btn_frame, text="Cancel", command=dialog.destroy,
-                  font=("Arial", 9), width=9).pack(side=tk.LEFT, padx=8)
+        tk.Button(
+            btn_frame, text="Eliminar", command=eliminar, bg="#b71c1c", fg="white", font=("Arial", 9), width=9
+        ).pack(side=tk.LEFT, padx=8)
+        tk.Button(btn_frame, text="Cancel", command=dialog.destroy, font=("Arial", 9), width=9).pack(
+            side=tk.LEFT, padx=8
+        )
 
         dialog.bind("<Escape>", lambda e: dialog.destroy())
-
-    def _crear_bot(self, symbol):
-        """Crea un TradingBotSpot para el símbolo"""
-        try:
-            strategy_config = {
-                "rsi_buy": self.config.get("rsi_buy", 35),
-                "rsi_sell": self.config.get("rsi_sell", 65),
-            }
-            risk_config = {
-                "risk_per_trade": self.config.get("risk_per_trade", 0.02),
-                "tp1_pct": self.config.get("tp1_pct", 0.03),
-                "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
-                "tp1_size": self.config.get("tp1_size", 0.33),
-                "trail_mult": self.config.get("trail_mult", 1.5),
-                "cooldown_hours": self.config.get("cooldown_hours", 4),
-            }
-
-            # valida symbol
-            if symbol in self.bots:
-                return
-
-            # =============================
-            # 1. Crear bot lógico
-            # =============================
-            bot = TradingBotSpot(
-                symbol=symbol,
-                interval=self.interval,
-                strategy_config=strategy_config,
-                risk_config=risk_config,
-                state_repo=self.state_repo,
-                order_manager=self.order_manager,
-            )
-
-            # Cargar datos históricos (usa el cliente del ambiente correcto)
-            self._cargar_historico(bot, symbol, limit=500)
-
-            self.bots[symbol] = bot
-
-            # Registrar en BotManager para ejecución de órdenes
-            if self.bot_manager:
-                self.bot_manager.register_bot(bot)
-
-            # =============================
-            # 2. Cargar posición existente desde Binance
-            # =============================
-            self._cargar_posicion_existente(bot, symbol)
-
-        except Exception as e:
-            self.logger.error(f"Error creando bot para {symbol}: {e}")
 
     def _cargar_historico(self, bot, symbol, limit=500):
         """
