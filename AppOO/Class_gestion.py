@@ -52,8 +52,9 @@ class GestionInversion(tk.Frame):
             "Resumen": 0,
             "Stock": 1,
             "Crypto": 2,
-            "BBVA.ARS": 3,
-            "SANT.ARS": 4,
+            "BotCrypto": 3,
+            "BBVA.ARS": 4,
+            "SANT.ARS": 5,
         }
         self.datsess = None
         self.indice = 0
@@ -500,6 +501,35 @@ class GestionInversion(tk.Frame):
 
                 parm["titulo"] = "Ingresos y Costos de Operación (Crypto)"
 
+            elif self.type_extract["BotCrypto"] == lista[self.indice % len(lista)]:
+
+                datos, f_datos = self.extractos(account=self.sesion["BotCrypto"]["idcuenta"], periodo=self.year)
+                botcrypto = self.extract.insert(
+                    "",
+                    "end",
+                    text="BotCrypto",
+                    values=(
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                    ),
+                )
+
+                extract_update_treeview(tipo=botcrypto)
+
+                parm["titulo"] = "Ingresos y Costos de Operación (BotCrypto)"
+
             elif self.type_extract["BBVA.ARS"] == lista[self.indice % len(lista)]:
 
                 datos, f_datos = self.extractos(account=self.sesion["BBVA.ARS"]["idcuenta"], periodo=self.year)
@@ -561,7 +591,6 @@ class GestionInversion(tk.Frame):
             # redibuja gráfico de margen Neto
             chart_margen_neto(fg=self.fg1, df=f_datos, parm=parm)
             self.cv1.draw()
-
         except Exception as error:
             print("widgets_extractos(): {}".format(error))
 
@@ -1091,6 +1120,139 @@ class GestionInversion(tk.Frame):
         # inserta último mes calculado
         self.PlaInversion.insert_extracto(account="B0000001", values=values)
 
+    # construye extracto de BotCrypto (cuenta B0000002, Binance Bot)
+    def construir_extracto_botcrypto(self, desde=None, hasta=None):
+
+        vehiculo = "BotCrypto"
+        sesion = self.PlaInversion.get_sesion_by_vehiculo(vehiculo)
+        account = sesion["idcuenta"]
+
+        if desde is not None:
+            book, ix = self.RepositorioOportunidades.select_booktrading(
+                accion="desde_hasta",
+                account=account,
+                idivisa="USD",
+                fecha=desde,
+                hasta=hasta,
+            )
+        else:
+            book, ix = self.RepositorioOportunidades.select_booktrading(
+                accion="cartera", account=account, idivisa="USD"
+            )
+
+        # Obtener desempeño del vehículo
+        performa, iy = self.Perfoma.select_performa_inversion(account=account, vehiculo=vehiculo, accion="all")
+
+        # dataframe(): para obtener ingresos, costos y comisiones
+        datos = pd.DataFrame(book, columns=ix)
+        datos = datos.drop(
+            columns=[
+                "id",
+                "sec",
+                "split",
+                "factor_cambio",
+                "updateStamp",
+                "categoria",
+                "position_inversion",
+                "idtrans",
+                "divisa",
+                "cuenta",
+                "sell",
+                "activa",
+                "cantidad",
+                "simbolo",
+                "preciocierre",
+                "preciotrans",
+                "basico",
+                "mtmgp",
+                "stock",
+            ]
+        )
+
+        # Dataframe() with datos de costo base y value
+        idatos = pd.DataFrame(performa, columns=iy)
+        idatos = idatos.drop(
+            columns=[
+                "id",
+                "idcuenta",
+                "vehiculo",
+                "referencia",
+                "p_referencia",
+                "p_vehiculo",
+                "timestamp",
+            ]
+        )
+
+        idatos["dividendos"] = idatos["dividends"]
+        idatos["navcierre"] = idatos["value"]
+        idatos["Date"] = pd.to_datetime(idatos["fechaclose"])
+
+        idatos.set_index("Date", inplace=True)
+        idatos = idatos.drop(columns=["fechaclose", "dividends", "value"])
+
+        # Seleccionar solo los fines de mes
+        idatos.index = pd.to_datetime(idatos.index)
+        m_idatos = idatos[idatos.index.is_month_end]
+
+        m_idatos.index = pd.to_datetime(m_idatos.index)
+        m_idatos.index = m_idatos.index.strftime("%Y-%m")
+
+        # identificar en columnas compras y ventas
+        datos["depositos"] = datos.apply(lambda rows: rows["producto"] if rows["codigo"] == "O" else 0, axis=1)
+        datos["retiros"] = datos.apply(lambda rows: rows["producto"] if rows["codigo"] == "C" else 0, axis=1)
+        datos["perdidas"] = datos.apply(
+            lambda rows: -rows["gprealizadas"] if rows["gprealizadas"] < 0 else 0,
+            axis=1,
+        )
+        datos["crecimiento"] = datos.apply(lambda rows: rows["gprealizadas"] if rows["gprealizadas"] > 0 else 0, axis=1)
+        datos["costos"] = datos["perdidas"] + datos["tarifacomision"]
+        datos["beneficios"] = datos["crecimiento"] - datos["costos"]
+        datos["comisiones"] = datos["tarifacomision"]
+        datos["idevengo"] = 0.0
+        datos["imargen"] = 0.0
+        datos["Date"] = pd.to_datetime(datos["fechahora"])
+        datos["tax"] = 0.0
+        datos["fee"] = 0.0
+
+        # agrupa por meses y suma los valores
+        datos = datos.drop(columns=["fechahora", "producto", "tarifacomision"])
+        datos.set_index("Date", inplace=True)
+        datos.index = pd.to_datetime(datos.index)
+        datos.index = datos.index.strftime("%Y-%m")
+        m_datos = datos.groupby(datos.index).sum()
+
+        resumen = pd.merge(m_datos, m_idatos, on="Date", how="left")
+        resumen = resumen.infer_objects(copy=False).fillna(0)
+        resumen.index = pd.to_datetime(resumen.index)
+
+        # deja como fin de mes las fechas Dataframe
+        resumen.index = resumen.index + pd.offsets.MonthEnd(0)
+        resumen.fillna(0, inplace=True)
+
+        anterior = 0.0
+        for row in resumen.itertuples():
+            values = {
+                "extracto": row.Index.date(),
+                "idcuenta": account,
+                "depositos": row.depositos,
+                "retiros": row.retiros,
+                "crecimiento": row.crecimiento,
+                "dividendos": row.dividendos,
+                "perdidas": row.perdidas,
+                "fee": row.fee,
+                "comisiones": row.comisiones,
+                "tax": row.tax,
+                "navcierre": row.navcierre,
+                "cierreanterior": anterior,
+                "costobase": row.costo_base,
+                "idevengo": row.idevengo,
+                "imargen": row.imargen,
+            }
+            anterior = row.navcierre
+
+        # inserta último mes calculado
+        self.PlaInversion.insert_extracto(account=account, values=values)
+
     # construye extracto de FCI en ARS
     def construir_extracto_fci(self, account=None, desde=None, hasta=None, insert=True):
 
@@ -1558,6 +1720,9 @@ class GestionInversion(tk.Frame):
                 f_desde = inicio.strftime("%Y-%m-%d")
                 f_hasta = now.strftime("%Y-%m-%d")
                 self.construir_extracto_crypto(desde=f_desde, hasta=f_hasta)
+
+                # extracto BotCrypto (Binance Bot, cuenta B0000002) ------------------------------------------------
+                self.construir_extracto_botcrypto(desde=f_desde, hasta=f_hasta)
 
                 # extracto BBVA y santander-------------------------------------------------------------------------
                 self.construir_extracto_fci(

@@ -10,6 +10,7 @@ from Modulos_Utilitarios import (
     convierte_ticket_crypto,
     meses_list,
     is_null,
+    calcular_atr,
 )
 from Modulos_python import (
     csv,
@@ -43,6 +44,9 @@ from Modulos_python import (
     HTTPError,
     textwrap,
     traceback,
+    tk,
+    Figure,
+    FigureCanvasTkAgg,
 )
 from Class_ApiBinnace import BinanceClient
 
@@ -1481,10 +1485,10 @@ def grupo_activos(fg: object, parm=None, strategy=None):
 
     # Configurar eje X
     ax.set_xticks(x)
-    ax.set_xticklabels(keys, rotation=45, ha="right")
+    ax.set_xticklabels(keys, rotation=0, ha="center")
     ax.set(xlim=[x[0], x[-1]])
     xlabels = ax.get_xticklabels()
-    plt.setp(xlabels, ha="right", fontsize=6, color=cchart["asx"], rotation=25)
+    plt.setp(xlabels, ha="center", fontsize=6, color=cchart["asx"], rotation=0)
 
     ax.spines[["top", "bottom", "right"]].set_visible(False)
     ax.spines["left"].set_color(cchart["asy"])
@@ -1624,7 +1628,14 @@ def grupo_region(fg: object, strategy=None, parm=None):
 
     ax.text(x[5], mean * 1.2, media, fontsize=6, ha="center", color=cchart["texto"])
 
-    ax.set_xticks(x, keys)
+    def abreviar_pais(nombre):
+        partes = nombre.split()
+        if len(partes) == 1:
+            return nombre[:3]
+        return "".join(p[0] for p in partes)
+
+    keys_abrev = [abreviar_pais(k) for k in keys]
+    ax.set_xticks(x, keys_abrev)
     ax.yaxis.set_major_formatter(currency)
     ax.tick_params(axis="y", colors=cchart["asx"])
 
@@ -2474,3 +2485,208 @@ def chart_trazaplan(fg=None, traza=None, cchart=None):
         av.tick_params(axis="y", colors=cchart["2eje"])
         av.spines["right"].set_color(cchart["2eje"])
         av.spines.right.set_visible(True)
+
+
+# ============================================================
+# Gráfico de estrategia compartido (usable desde cualquier módulo)
+# ============================================================
+def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_windows=None):
+    """Abre ventana de gráfico de estrategia para cualquier activo.
+
+    Args:
+        parent:        Tk root/Toplevel (para crear Toplevel y after())
+        symbol:        símbolo del activo (ej: "AAPL", "BTCUSDT")
+        vehiculo:      "Crypto" | "Stock"
+        targets:       dict opcional con: entry, sl, objetivo (float)
+        chart_windows: dict externo para rastrear ventanas abiertas (evitar duplicados)
+    """
+    from Class_customer import DataHub  # deferred — evita import circular
+
+    if chart_windows is None:
+        chart_windows = {}
+
+    # Evitar ventana duplicada para el mismo símbolo
+    existing = chart_windows.get(symbol)
+    if existing:
+        try:
+            if existing.winfo_exists():
+                existing.lift()
+                existing.focus_force()
+                return
+        except Exception:
+            pass
+        chart_windows.pop(symbol, None)
+
+    bg_color = "#16213e"
+    _timer_id = [None]
+    targets = targets or {}
+
+    # ----- Helpers de datos -----
+    def _get_data():
+        # Pasar symbol sin convertir — get_yfinance hace la conversión internamente
+        try:
+            result = get_yfinance(ticket=symbol, vehiculo=vehiculo, period="6mo", interval="1d")
+            if result:
+                _, df = result
+                if df is not None and not df.empty and len(df) >= 14:
+                    return df
+        except Exception:
+            pass
+        return None
+
+    def _get_price(df):
+        info = DataHub.info.get(symbol, {})
+        ws = info.get("websocket", {})
+        p = ws.get("last") or ws.get("close") or ws.get("price")
+        if p:
+            try:
+                return float(p)
+            except Exception:
+                pass
+        if df is not None and not df.empty:
+            return float(df["Close"].iloc[-1])
+        return 0.0
+
+    # ----- Dibujo -----
+    def _draw_chart(win_ref, fig_ref, canvas_ref):
+        fig_ref.clear()
+        ax = fig_ref.add_subplot(111)
+        ax.set_facecolor(bg_color)
+
+        label = symbol.replace("USDT", "") if vehiculo == "Crypto" else symbol
+        ax.text(0.5, 0.5, label, transform=ax.transAxes, fontsize=72, fontweight="bold",
+                color="white", alpha=0.04, ha="center", va="center", zorder=0)
+
+        df = _get_data()
+        price_now = _get_price(df)
+
+        if df is None or len(df) < 14 or price_now <= 0:
+            ax.text(0.5, 0.5, "Sin datos disponibles", transform=ax.transAxes,
+                    color="gray", ha="center", va="center", fontsize=12)
+            canvas_ref.draw_idle()
+            return
+
+        atr = calcular_atr(df)
+        atr = atr if atr and atr > 0 else price_now * 0.02
+
+        entry = targets.get("entry")
+        ref_price = entry if entry and entry > 0 else price_now
+        sl_price = targets.get("sl") or (ref_price - atr * 1.5)
+        objetivo_price = targets.get("objetivo") or (ref_price + atr * 2.0)
+
+        # Histórico (últimas 50 velas)
+        hist = df["Close"].tail(50).values.astype(float)
+        n_hist = len(hist)
+        x_hist = np.arange(n_hist)
+        ax.plot(x_hist, hist, color="#00d4ff", linewidth=1.5)
+
+        # Proyecciones (20 barras)
+        n_proj = 20
+        x_proj = np.arange(n_hist - 1, n_hist + n_proj)
+        x_total = n_hist + n_proj
+
+        y_obj = np.linspace(price_now, objetivo_price, len(x_proj))
+        y_sl = np.linspace(price_now, sl_price, len(x_proj))
+        y_ref = np.full_like(x_proj, ref_price, dtype=float)
+
+        ax.fill_between(x_proj, y_ref, y_obj, alpha=0.12, color="#00ff88")
+        ax.fill_between(x_proj, y_sl, y_ref, alpha=0.15, color="#ff4444")
+        ax.plot(x_proj, y_obj, color="#00ff88", linewidth=1.0, linestyle="--")
+        ax.plot(x_proj, y_sl, color="#ff4444", linewidth=1.0, linestyle="--")
+
+        ax.axhline(y=objetivo_price, color="#00ff88", linewidth=0.9, linestyle=":", alpha=0.4)
+        ax.axhline(y=sl_price, color="#ff4444", linewidth=0.9, linestyle=":", alpha=0.4)
+        ax.axhline(y=price_now, color="#00d4ff", linewidth=0.8, linestyle="-", alpha=0.3)
+        ax.axvline(x=n_hist - 1, color="gray", linewidth=0.8, linestyle="--", alpha=0.4)
+
+        # Línea de entrada (si hay posición)
+        if entry and entry > 0:
+            ax.axhline(y=entry, color="#ffff00", linewidth=1, linestyle="-", alpha=0.4)
+            ax.annotate(f"  Entrada {entry:.4f}", xy=(0, entry), fontsize=7,
+                        color="#ffff00", va="bottom")
+            pnl_pct_pos = ((price_now / entry) - 1) * 100
+            pnl_color = "#00ff88" if pnl_pct_pos >= 0 else "#ff4444"
+            ax.annotate(f"PnL: {pnl_pct_pos:+.2f}%", xy=(n_hist - 2, price_now),
+                        fontsize=8, color=pnl_color, fontweight="bold",
+                        va="bottom", ha="right")
+
+        # Anotaciones derecha
+        x_label = x_total - 1
+        obj_pct = ((objetivo_price / ref_price) - 1) * 100 if ref_price > 0 else 0
+        sl_pct_val = ((sl_price / ref_price) - 1) * 100 if ref_price > 0 else 0
+
+        ax.annotate(f"  Objetivo +{obj_pct:.1f}%  {objetivo_price:.4f}",
+                    xy=(x_label, objetivo_price), fontsize=8, color="#00ff88",
+                    fontweight="bold", va="center",
+                    bbox=dict(boxstyle="round,pad=0.2", facecolor="#00ff88", alpha=0.2))
+        ax.annotate(f"  \u25c4 Actual  {price_now:.4f}",
+                    xy=(x_label, price_now), fontsize=8, color="#00d4ff",
+                    fontweight="bold", va="center",
+                    bbox=dict(boxstyle="round,pad=0.2", facecolor="#00d4ff", alpha=0.15))
+        ax.annotate(f"  Ref.SL {sl_pct_val:.1f}%  {sl_price:.4f}",
+                    xy=(x_label, sl_price), fontsize=8, color="#ff4444",
+                    fontweight="bold", va="center",
+                    bbox=dict(boxstyle="round,pad=0.2", facecolor="#ff4444", alpha=0.2))
+
+        # Etiquetas de zona
+        ylim = ax.get_ylim()
+        ax.text(n_hist * 0.4, ylim[1], "HISTORIAL", fontsize=8, color="gray",
+                ha="center", alpha=0.5, va="top")
+        ax.text(n_hist + n_proj * 0.4, ylim[1], "PROYECCION", fontsize=8, color="gray",
+                ha="center", alpha=0.5, va="top")
+
+        # Info box
+        rr = abs(obj_pct / sl_pct_val) if sl_pct_val != 0 else 0
+        info_text = (
+            f"{symbol} | {vehiculo}\n"
+            f"Actual: {price_now:.4f}\n"
+            f"Objetivo: +{obj_pct:.1f}% | Ref.SL: {sl_pct_val:.1f}%\n"
+            f"R/R: 1:{rr:.1f}"
+        )
+        ax.text(0.02, 0.98, info_text, transform=ax.transAxes, fontsize=7.5,
+                color="white", verticalalignment="top", fontfamily="monospace",
+                bbox=dict(boxstyle="round,pad=0.4", facecolor=bg_color,
+                          edgecolor="gray", alpha=0.9))
+
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.tick_params(colors="gray", labelsize=7)
+        for spine in ax.spines.values():
+            spine.set_color("#2a3a5e")
+        ax.set_xlim(-1, x_total + 2)
+        ax.yaxis.set_major_formatter(lambda x, _: f"{x:.4f}")
+        ax.set_xticklabels([])
+        fig_ref.tight_layout(pad=0.5)
+        canvas_ref.draw_idle()
+
+    def _auto_refresh(win_ref, fig_ref, canvas_ref):
+        if win_ref.winfo_exists():
+            _draw_chart(win_ref, fig_ref, canvas_ref)
+            _timer_id[0] = win_ref.after(5000, _auto_refresh, win_ref, fig_ref, canvas_ref)
+
+    def _on_close(win_ref):
+        if _timer_id[0]:
+            win_ref.after_cancel(_timer_id[0])
+        chart_windows.pop(symbol, None)
+        win_ref.destroy()
+
+    # ----- Crear ventana -----
+    try:
+        x = parent.winfo_rootx() + parent.winfo_width() - 90
+        y = parent.winfo_rooty() + 200
+    except Exception:
+        x, y = 200, 150
+
+    win = tk.Toplevel(parent)
+    win.title(f"Estrategia - {symbol}")
+    win.geometry(f"700x450+{x}+{y}")
+    win.configure(bg=bg_color)
+    win.resizable(False, False)
+    chart_windows[symbol] = win
+
+    fig = Figure(figsize=(7.0, 4.5), dpi=100, facecolor=bg_color)
+    canvas = FigureCanvasTkAgg(fig, master=win)
+    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    _draw_chart(win, fig, canvas)
+    _timer_id[0] = win.after(5000, _auto_refresh, win, fig, canvas)
+    win.protocol("WM_DELETE_WINDOW", lambda: _on_close(win))

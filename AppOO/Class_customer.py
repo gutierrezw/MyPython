@@ -64,6 +64,7 @@ from Class_DataFrame import (
     chart_symbol,
     chart_rendimiento_dividendos,
     CacheHut,
+    show_strategy_chart,
 )
 from Modulos_Mysql import (
     PlanInversion,
@@ -218,7 +219,7 @@ class DataHub:
     manager_after = {}
     manager_buysell = {}
     manager_sesion = {}
-    manager_GyP = {"Plan": 0, "Inversion": 0, "dGyP": 0, "tGyp": 0, "Debit": 0, "Margen": 0}
+    manager_GyP = {"BotCrypto": {"Value": 0, "Inversion": 0, "dGyP": 0, "Debit": 0, "Margen": 0}}
     rebalanceo = {}
     telegram_botcrypto = {}
     procesos = []
@@ -3425,6 +3426,10 @@ class WidgetVehiculo(TickerInfo):
             menu, text="TradingView", command=lambda: (menu.destroy(), self._abrir_tradingview(symbol)), **btn_cfg
         ).pack(fill=tk.X, padx=1, pady=(0, 1))
 
+        tk.Button(
+            menu, text="Strategy", command=lambda: (menu.destroy(), self._abrir_grafico_estrategia(symbol)), **btn_cfg
+        ).pack(fill=tk.X, padx=1, pady=(0, 1))
+
         # Posicionar junto al cursorcls
         x, y = pyautogui.position()
         x += event.x + 5
@@ -3484,6 +3489,36 @@ class WidgetVehiculo(TickerInfo):
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(html)
         webbrowser.open(f"file:///{html_path.replace(os.sep, '/')}")
+
+    def _abrir_grafico_estrategia(self, symbol):
+        """Abre el gráfico de estrategia compartido para el símbolo seleccionado."""
+        if not hasattr(self, "_chart_windows_estrategia"):
+            self._chart_windows_estrategia = {}
+
+        # Extraer targets desde DataHub si están disponibles
+        targets = {}
+        info = DataHub.info.get(symbol, {})
+        ws = info.get("websocket", {})
+        avgcost = ws.get("avgCost") or ws.get("avgcost")
+        objetivo = ws.get("objetivo")
+        if avgcost:
+            try:
+                targets["entry"] = float(avgcost)
+            except Exception:
+                pass
+        if objetivo:
+            try:
+                targets["objetivo"] = float(objetivo)
+            except Exception:
+                pass
+
+        show_strategy_chart(
+            parent=self.master,
+            symbol=symbol,
+            vehiculo=self.vehiculo,
+            targets=targets or None,
+            chart_windows=self._chart_windows_estrategia,
+        )
 
     # Función para obtener columnas self.m_tree sincronizadamente
     def on_heading_click(self, column):
@@ -5124,11 +5159,17 @@ class WidgetVehiculo(TickerInfo):
             df_rendimiento["Rendimiento_Pct"] = df_rendimiento["Rendimiento"] * 100
 
             ganadores = df_rendimiento[df_rendimiento["Rendimiento"] >= 0].nlargest(5, "Rendimiento_Pct")
-            perdedores = df_rendimiento[df_rendimiento["Rendimiento"] < 0].nsmallest(5, "Rendimiento_Pct")
+
+            # Bear market: si no hay activos positivos, toma los 5 de menor pérdida
+            if ganadores.empty:
+                ganadores = df_rendimiento.nlargest(5, "Rendimiento_Pct")
+
+            excluir_simbolos = set(ganadores["Symbol"])
+            perdedores = df_rendimiento[
+                (df_rendimiento["Rendimiento"] < 0) & (~df_rendimiento["Symbol"].isin(excluir_simbolos))
+            ].nsmallest(5, "Rendimiento_Pct")
 
             # Combinar y ordenar para el gráfico único
-            # Es clave ordenar los perdedores de la mayor pérdida a la menor, y los ganadores de la mayor a la menor.
-            # Al combinarlos, se recomienda poner los ganadores y perdedores en bloques separados.
             df_combinado = pd.concat(
                 [
                     ganadores.sort_values(by="Rendimiento_Pct", ascending=False),

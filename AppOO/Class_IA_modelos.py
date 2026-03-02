@@ -133,6 +133,8 @@ class ModeloOportunidadesSell:
                     plano[f"rsi{sufijo}"] = fuente.get("rsi")
                     plano[f"macd{sufijo}"] = fuente.get("macd")
                     plano[f"Close{sufijo}"] = fuente.get("precio_calculo")
+                    plano[f"atr{sufijo}"] = fuente.get("atr")
+                    plano[f"atr_pct{sufijo}"] = fuente.get("atr_pct")
 
                     # construye string para extraer Maximos y Minimos
                     smax = timeMaxMin[tf] + "_max"
@@ -190,6 +192,8 @@ class ModeloOportunidadesSell:
             "rsi",
             "macd",
             "Close",
+            "atr",
+            "atr_pct",
             "EMA020",
             "EMA050",
             "EMA100",
@@ -550,6 +554,8 @@ class ModeloOportunidadesBuy:
                     plano[f"rsi{sufijo}"] = fuente.get("rsi")
                     plano[f"macd{sufijo}"] = fuente.get("macd")
                     plano[f"Close{sufijo}"] = fuente.get("precio_calculo")
+                    plano[f"atr{sufijo}"] = fuente.get("atr")
+                    plano[f"atr_pct{sufijo}"] = fuente.get("atr_pct")
 
                     smax = timeMaxMin[tf] + "_max"
                     smin = timeMaxMin[tf] + "_min"
@@ -587,6 +593,8 @@ class ModeloOportunidadesBuy:
             "rsi",
             "macd",
             "Close",
+            "atr",
+            "atr_pct",
             "EMA020",
             "EMA050",
             "EMA100",

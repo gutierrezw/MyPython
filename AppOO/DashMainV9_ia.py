@@ -234,6 +234,37 @@ class DatosVehivulo(TickerInfo, MyOrders):
             except Exception as e:
                 print("procesa_orders_crypto(): {}".format(e))
 
+        def procesa_execution_report_crypto(msg):
+            """Actualiza order_trade y self.orders cuando llega un executionReport de Binance."""
+            try:
+                order_id = str(msg["i"])
+                symbol = msg["s"]
+                status = msg["X"]
+                side = msg["S"]
+                qty = float(msg.get("q", 0))
+                cum_qty = float(msg.get("z", 0))
+                timestamp = datetime.fromtimestamp(msg["T"] / 1000.0)
+
+                values = {"status": status, "stampSubmit": timestamp}
+                self.RepositorioOportunidades.update_order_trader(
+                    account=self.account,
+                    values=values,
+                    symbol=symbol,
+                    orderid=order_id,
+                )
+
+                for orden in self.orders.get("Crypto", []):
+                    if str(orden.get("id_order")) == order_id:
+                        orden["status"] = status
+                        break
+
+                self.logger.warning(
+                    f"executionReport(Crypto): symbol={symbol} orderId={order_id} "
+                    f"status={status} side={side} qty={qty} cumFilled={cum_qty}"
+                )
+            except Exception as e:
+                print(f"[procesa_execution_report_crypto()]: {e}")
+
         try:
             data = json.loads(message)
 
@@ -241,6 +272,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
             if "e" in data.keys():
                 if data["e"] == "24hrTicker":
                     procesa_stream_crypto(data)
+                elif data["e"] == "executionReport":
+                    procesa_execution_report_crypto(data)
 
             # captura otros eventos id Client: trasladado a get_orders_binance()
             # elif 'id' in data.keys():
@@ -460,6 +493,29 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     socket = f"WebsocketStream_OnMessage({self.vehiculo})"
                     DataHub.update_self_procesos(proces="widget", tarea=socket, itera=self.WsStock.counter)
 
+            elif data["topic"] == "sor":
+                # Smart Order Routing: actualiza estado de orden en order_trade
+                try:
+                    args = data.get("args", {})
+                    order_id = str(args.get("orderId", args.get("order_id", "")))
+                    symbol = args.get("ticker", args.get("symbol", ""))
+                    status = args.get("orderStatus", args.get("status", ""))
+                    if order_id and status:
+                        values = {"status": status}
+                        self.RepositorioOportunidades.update_order_trader(
+                            account=self.account,
+                            values=values,
+                            symbol=symbol,
+                            orderid=order_id,
+                        )
+                        for orden in self.orders.get("Stock", []):
+                            if str(orden.get("id_order")) == order_id:
+                                orden["status"] = status
+                                break
+                        self.logger.warning(f"sor(Stock): symbol={symbol} orderId={order_id} status={status}")
+                except Exception as e:
+                    print(f"[on_message_IBrks_websocket(sor)]: {e}")
+
             elif not data["topic"].startswith("prefijo"):
                 # print(f"data=={data}")
                 pass
@@ -612,8 +668,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                                                 if not found_hashId:
 
-                                                    # Agrega idnicadores al registro
-                                                    temp = DataHub.info[ticket].get("indicadores", {})
+                                                    # Agrega indicadores técnicos al registro
+                                                    temp = DataHub.info[ticket].get("datos_tecnicos", {})
                                                     indicadores = (
                                                         json.dumps(temp, default=str)
                                                         if isinstance(temp, dict)
@@ -923,8 +979,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         # inserta trade en booktrading
                         if not found_hashId:
 
-                            # Agrega indicadores al registro
-                            temp = DataHub.info[simbolo].get("indicadores", {})
+                            # Agrega indicadores técnicos al registro
+                            temp = DataHub.info[simbolo].get("datos_tecnicos", {})
                             indicadores = json.dumps(temp, default=str) if isinstance(temp, dict) else temp
                             registro.update({"indicadores": indicadores})
 
@@ -2173,7 +2229,13 @@ class DashMain:
             relief=tk.FLAT,
             command=lambda: self.detalle_graph("Activo"),
         )
-        gt6 = tk.Button(pn6, image=imagen_tk, bg=self.colors["bgcolor"], relief=tk.FLAT)
+        gt6 = tk.Button(
+            pn6,
+            image=imagen_tk,
+            bg=self.colors["bgcolor"],
+            relief=tk.FLAT,
+            command=lambda: self.detalle_graph("Region"),
+        )
 
         gt3.imagen = imagen_tk
         gt4.imagen = imagen_tk
@@ -2818,7 +2880,7 @@ class DashMain:
                     message = "symbol :" + symbol + " No informa pago de dividendos"
                     self.messagebox.showwarning("Advertencia", message)
 
-            elif tipo == "Azctivo":
+            elif tipo == "Activo":
                 if str_float(values[4]) > 0.0:
                     symbol = values[1]
                     grafico_rendimiento_symbol(symbol=symbol, windows=windows)
@@ -2827,6 +2889,11 @@ class DashMain:
                     symbol = values[1]
                     message = "symbol :" + symbol + " No informa pago de dividendos"
                     self.messagebox.showwarning("Advertencia", message)
+
+            elif tipo == "Region":
+                symbol = str(values[1]).strip()
+                if symbol:
+                    grafico_rendimiento_symbol(symbol=symbol, windows=windows)
 
         # selecciona y clasifica detalle por symbol y dividendos
         def detalle_dividendos(meses):
@@ -3261,6 +3328,122 @@ class DashMain:
             except Exception as e:
                 print("treeview_TipoActivo(): {}".format(e))
 
+        def treeview_Region(option=None, windows=None):
+            try:
+                fixed_columns = ["País", "Symbol", "Capital", "Mkt Value", "PnL", "Retorno%", "Peso%", "Year $", "%Yield"]
+                alignments = {
+                    "País":      {"width": 148, "anchor": "w"},
+                    "Symbol":    {"width": 100, "anchor": "w"},
+                    "Capital":   {"width": 90,  "anchor": "e"},
+                    "Mkt Value": {"width": 95,  "anchor": "e"},
+                    "PnL":       {"width": 88,  "anchor": "e"},
+                    "Retorno%":  {"width": 78,  "anchor": "e"},
+                    "Peso%":     {"width": 68,  "anchor": "e"},
+                    "Year $":    {"width": 80,  "anchor": "e"},
+                    "%Yield":    {"width": 74,  "anchor": "e"},
+                }
+                columns = list(alignments.keys())
+
+                tree = CustomTreeview(
+                    master=frm1,
+                    columns=columns,
+                    fixed_columns=fixed_columns,
+                    fixed_row=True,
+                    show_vscroll=True,
+                    show_hscroll=True,
+                    height=17,
+                    column_alignments=alignments,
+                    style="Treeview",
+                )
+
+                tree.tree_fixed.bind(
+                    "<<TreeviewSelect>>",
+                    lambda event: item_selected(event, tree.tree_fixed, windows),
+                )
+
+                # Agrupar posiciones por país
+                strategy = self.Estrategia.read()
+                d_country = {}
+                for activos in strategy.values():
+                    for activo in activos:
+                        country = activo.get("country") or "NotCountry"
+                        if country == "US":
+                            country = "United States"
+                        elif country == "Digital":
+                            country = "Crypto"
+                        d_country.setdefault(country, []).append(activo)
+
+                total_capital_global = sum(a["costobase"] for activos in d_country.values() for a in activos) or 1
+
+                min_base, ticket = pow(10, 9), ""
+                total_cap_sum, total_mkt_sum, total_pnl_sum, total_div_sum = 0.0, 0.0, 0.0, 0.0
+
+                for country, activos in sorted(d_country.items()):
+                    cap_pais  = sum(a["costobase"] for a in activos)
+                    mkt_pais  = sum(a["costobase"] + a["unrealizedpnl"] for a in activos)
+                    pnl_pais  = mkt_pais - cap_pais
+                    div_pais  = sum(a.get("dividendo", 0) or 0 for a in activos)
+                    retorno_pais = pnl_pais / cap_pais if cap_pais > 0 else 0
+                    peso_pais    = cap_pais / total_capital_global
+                    yield_pais   = div_pais / cap_pais if cap_pais > 0 else 0
+
+                    tree.insert_row(texto=country, padre=None, values=[
+                        country, "",
+                        "{:,.0f}".format(cap_pais),
+                        "{:,.0f}".format(mkt_pais),
+                        "{:+,.0f}".format(pnl_pais),
+                        "{:.2%}".format(retorno_pais),
+                        "{:.1%}".format(peso_pais),
+                        "{:,.1f}".format(div_pais),
+                        "{:.2%}".format(yield_pais),
+                    ])
+
+                    for activo in sorted(activos, key=lambda a: a["symbol"]):
+                        symbol = activo["symbol"]
+                        cap    = activo["costobase"]
+                        mkt    = activo["costobase"] + activo["unrealizedpnl"]
+                        pnl    = activo["unrealizedpnl"]
+                        div    = activo.get("dividendo", 0) or 0
+                        retorno   = pnl / cap if cap > 0 else 0
+                        peso      = cap / total_capital_global
+                        yield_pct = div / cap if cap > 0 else 0
+
+                        if cap < min_base:
+                            min_base, ticket = cap, symbol
+
+                        tree.insert_row(texto=None, padre=country, values=[
+                            "", symbol,
+                            "{:,.0f}".format(cap),
+                            "{:,.0f}".format(mkt),
+                            "{:+,.0f}".format(pnl),
+                            "{:.2%}".format(retorno),
+                            "{:.1%}".format(peso),
+                            "{:,.1f}".format(div),
+                            "{:.2%}".format(yield_pct),
+                        ])
+                        total_cap_sum += cap
+                        total_mkt_sum += mkt
+                        total_pnl_sum += pnl
+                        total_div_sum += div
+
+                retorno_total = total_pnl_sum / total_cap_sum if total_cap_sum > 0 else 0
+                yield_total   = total_div_sum / total_cap_sum if total_cap_sum > 0 else 0
+                tree.insert_row(summary=[
+                    "",                                           # País  (vacío)
+                    "",                                           # Symbol (vacío)
+                    "{:,.0f}".format(total_cap_sum),             # Capital
+                    "{:,.0f}".format(total_mkt_sum),             # Mkt Value
+                    "{:+,.0f}".format(total_pnl_sum),            # PnL
+                    "{:.2%}".format(retorno_total),              # Retorno%
+                    "100%",                                       # Peso%
+                    "{:,.1f}".format(total_div_sum),             # Year $
+                    "{:.2%}".format(yield_total),                # %Yield
+                ])
+
+                grafico_rendimiento_symbol(symbol=ticket, windows=windows)
+            except Exception as e:
+                print("treeview_Region(): {}".format(e))
+
         try:
             # define titulo de la pantalla
             title = "Diversificación vs pago Dividendos"
@@ -3268,6 +3451,8 @@ class DashMain:
                 title = "Diversificación vs Performance Sector"
             elif tipo == "Activo":
                 title = "Diversificación vs Tipo Activo"
+            elif tipo == "Region":
+                title = "Diversificación vs Región"
 
             rnb = tk.Toplevel()
             dimension = "%dx%d+%d+%d" % (847, 665, self.df - 240, 65)
@@ -3309,6 +3494,10 @@ class DashMain:
             # detalle para el tipo de graph activo
             elif tipo == "Activo":
                 treeview_TipoActivo(option=tipo, windows=fr20)
+
+            # detalle para el tipo de graph region
+            elif tipo == "Region":
+                treeview_Region(option=tipo, windows=fr20)
 
             # boton de salida ---------------------------------------------------------------------------------------------------
             ft1 = tk.Button(
@@ -4776,13 +4965,14 @@ class DashMain:
             # Obtener totales desde la base de datos
             totales = self.RepositorioOportunidades.get_totales_inversiones()
             limit_costoB, limit_gyp = self.get_limite_inversion()
-            ganancias_dia = totales["total_ganancia_dia"]
-            costo_base = totales["total_costo_base"]
 
-            # Formatear valores DataHub
-            DataHub.manager_GyP.update({"Plan": limit_costoB})
-            DataHub.manager_GyP.update({"Inversion": costo_base})
-            DataHub.manager_GyP.update({"dGyP": ganancias_dia})
+            # add saldos botCrypto
+            capital_botCrypto = DataHub.manager_GyP["BotCrypto"].get("Inversion", 0)
+            Value_botCrypto = DataHub.manager_GyP["BotCrypto"].get("Value", 0)
+            Gyp_botCrypto = capital_botCrypto - Value_botCrypto
+
+            ganancias_dia = totales["total_ganancia_dia"] + Gyp_botCrypto
+            costo_base = totales["total_costo_base"] + capital_botCrypto
 
             if ganancias_dia > 0:
                 _inf = 0
