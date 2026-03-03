@@ -274,6 +274,7 @@ class InfoYfinance:
 # Símbolos que fallaron get_info() por timeout — se omiten por 30 min
 _info_timeout_cache = TTLCache(maxsize=200, ttl=1800)
 
+
 # 📊 Función principal get_yfinance: encapsula llamados a yfinance
 # =================================================================
 @use_dataframe_cache(CacheHut)
@@ -677,8 +678,11 @@ def get_extractos_csv(account=None, ruta=None):
                         "Amount",
                     )
 
+                    extracto.update({"imargen": 0})
                     if "Debit" in row[ix.index("Description")]:
                         extracto.update({"imargen": abs(float(row[ix.index("Amount")]))})
+
+                    extracto.update({"idevengo": 0})
                     if "Managed Securities" in row[ix.index("Description")]:
                         extracto.update({"idevengo": row[ix.index("Amount")]})
 
@@ -2554,15 +2558,34 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
         ax.set_facecolor(bg_color)
 
         label = symbol.replace("USDT", "") if vehiculo == "Crypto" else symbol
-        ax.text(0.5, 0.5, label, transform=ax.transAxes, fontsize=72, fontweight="bold",
-                color="white", alpha=0.04, ha="center", va="center", zorder=0)
+        ax.text(
+            0.5,
+            0.5,
+            label,
+            transform=ax.transAxes,
+            fontsize=72,
+            fontweight="bold",
+            color="white",
+            alpha=0.04,
+            ha="center",
+            va="center",
+            zorder=0,
+        )
 
         df = _get_data()
         price_now = _get_price(df)
 
         if df is None or len(df) < 14 or price_now <= 0:
-            ax.text(0.5, 0.5, "Sin datos disponibles", transform=ax.transAxes,
-                    color="gray", ha="center", va="center", fontsize=12)
+            ax.text(
+                0.5,
+                0.5,
+                "Sin datos disponibles",
+                transform=ax.transAxes,
+                color="gray",
+                ha="center",
+                va="center",
+                fontsize=12,
+            )
             canvas_ref.draw_idle()
             return
 
@@ -2602,38 +2625,58 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
         # Línea de entrada (si hay posición)
         if entry and entry > 0:
             ax.axhline(y=entry, color="#ffff00", linewidth=1, linestyle="-", alpha=0.4)
-            ax.annotate(f"  Entrada {entry:.4f}", xy=(0, entry), fontsize=7,
-                        color="#ffff00", va="bottom")
+            ax.annotate(f"  Entrada {entry:.4f}", xy=(0, entry), fontsize=7, color="#ffff00", va="bottom")
             pnl_pct_pos = ((price_now / entry) - 1) * 100
             pnl_color = "#00ff88" if pnl_pct_pos >= 0 else "#ff4444"
-            ax.annotate(f"PnL: {pnl_pct_pos:+.2f}%", xy=(n_hist - 2, price_now),
-                        fontsize=8, color=pnl_color, fontweight="bold",
-                        va="bottom", ha="right")
+            ax.annotate(
+                f"PnL: {pnl_pct_pos:+.2f}%",
+                xy=(n_hist - 2, price_now),
+                fontsize=8,
+                color=pnl_color,
+                fontweight="bold",
+                va="bottom",
+                ha="right",
+            )
 
         # Anotaciones derecha
         x_label = x_total - 1
         obj_pct = ((objetivo_price / ref_price) - 1) * 100 if ref_price > 0 else 0
         sl_pct_val = ((sl_price / ref_price) - 1) * 100 if ref_price > 0 else 0
 
-        ax.annotate(f"  Objetivo +{obj_pct:.1f}%  {objetivo_price:.4f}",
-                    xy=(x_label, objetivo_price), fontsize=8, color="#00ff88",
-                    fontweight="bold", va="center",
-                    bbox=dict(boxstyle="round,pad=0.2", facecolor="#00ff88", alpha=0.2))
-        ax.annotate(f"  \u25c4 Actual  {price_now:.4f}",
-                    xy=(x_label, price_now), fontsize=8, color="#00d4ff",
-                    fontweight="bold", va="center",
-                    bbox=dict(boxstyle="round,pad=0.2", facecolor="#00d4ff", alpha=0.15))
-        ax.annotate(f"  Ref.SL {sl_pct_val:.1f}%  {sl_price:.4f}",
-                    xy=(x_label, sl_price), fontsize=8, color="#ff4444",
-                    fontweight="bold", va="center",
-                    bbox=dict(boxstyle="round,pad=0.2", facecolor="#ff4444", alpha=0.2))
+        ax.annotate(
+            f"  Objetivo +{obj_pct:.1f}%  {objetivo_price:.4f}",
+            xy=(x_label, objetivo_price),
+            fontsize=8,
+            color="#00ff88",
+            fontweight="bold",
+            va="center",
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="#00ff88", alpha=0.2),
+        )
+        ax.annotate(
+            f"  \u25c4 Actual  {price_now:.4f}",
+            xy=(x_label, price_now),
+            fontsize=8,
+            color="#00d4ff",
+            fontweight="bold",
+            va="center",
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="#00d4ff", alpha=0.15),
+        )
+        ax.annotate(
+            f"  Ref.SL {sl_pct_val:.1f}%  {sl_price:.4f}",
+            xy=(x_label, sl_price),
+            fontsize=8,
+            color="#ff4444",
+            fontweight="bold",
+            va="center",
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="#ff4444", alpha=0.2),
+        )
 
         # Etiquetas de zona
         ylim = ax.get_ylim()
-        ax.text(n_hist * 0.4, ylim[1], "HISTORIAL", fontsize=8, color="gray",
-                ha="center", alpha=0.5, va="top")
-        ax.text(n_hist + n_proj * 0.4, ylim[1], "PROYECCION", fontsize=8, color="gray",
-                ha="center", alpha=0.5, va="top")
+        ax.text(n_hist * 0.4, ylim[1], "HISTORIAL", fontsize=8, color="gray", ha="center", alpha=0.5, va="top")
+        ax.text(
+            n_hist + n_proj * 0.4, ylim[1], "PROYECCION", fontsize=8, color="gray", ha="center", alpha=0.5, va="top"
+        )
 
         # Info box
         rr = abs(obj_pct / sl_pct_val) if sl_pct_val != 0 else 0
@@ -2643,10 +2686,17 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
             f"Objetivo: +{obj_pct:.1f}% | Ref.SL: {sl_pct_val:.1f}%\n"
             f"R/R: 1:{rr:.1f}"
         )
-        ax.text(0.02, 0.98, info_text, transform=ax.transAxes, fontsize=7.5,
-                color="white", verticalalignment="top", fontfamily="monospace",
-                bbox=dict(boxstyle="round,pad=0.4", facecolor=bg_color,
-                          edgecolor="gray", alpha=0.9))
+        ax.text(
+            0.02,
+            0.98,
+            info_text,
+            transform=ax.transAxes,
+            fontsize=7.5,
+            color="white",
+            verticalalignment="top",
+            fontfamily="monospace",
+            bbox=dict(boxstyle="round,pad=0.4", facecolor=bg_color, edgecolor="gray", alpha=0.9),
+        )
 
         ax.spines[["top", "right"]].set_visible(False)
         ax.tick_params(colors="gray", labelsize=7)

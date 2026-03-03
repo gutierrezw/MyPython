@@ -322,19 +322,23 @@ class TradingBotSpot:
         return ok
 
     def _check_market_regime(self, df=None) -> str:
-        """Clasifica régimen estructural basado en EMA100/EMA200.
+        """Clasifica régimen estructural basado en EMA_fast/EMA_slow/EMA100.
+        Usa EMA9 (fast) y EMA21 (slow) — confiables con 500 barras.
+        EMA100 como filtro adicional de tendencia media.
         Retorna: 'BULL' | 'RANGE' | 'BEAR'
-        Acepta df opcional para evaluar timeframes superiores.
         """
         data = df if df is not None else self.df
-        if data is None or "ema100" not in data.columns or "ema200" not in data.columns:
+        if data is None or "ema_fast" not in data.columns or "ema_slow" not in data.columns:
             return "RANGE"
-        ema100 = data["ema100"].iloc[-1]
-        ema200 = data["ema200"].iloc[-1]
-        price = data["Close"].iloc[-1]
-        if price > ema100 and ema100 > ema200:
+        ema_fast = data["ema_fast"].iloc[-1]   # EMA9
+        ema_slow = data["ema_slow"].iloc[-1]   # EMA21
+        ema100   = data["ema100"].iloc[-1] if "ema100" in data.columns else ema_slow
+        price    = data["Close"].iloc[-1]
+        # BULL: precio > EMA9 > EMA21 > EMA100 (alineación alcista completa)
+        if price > ema_fast and ema_fast > ema_slow and ema_slow > ema100:
             return "BULL"
-        if price < ema100 and ema100 < ema200:
+        # BEAR: precio < EMA9 < EMA21 (tendencia bajista confirmada)
+        if price < ema_fast and ema_fast < ema_slow:
             return "BEAR"
         return "RANGE"
 
@@ -3262,11 +3266,11 @@ class BotCryptoUI:
 
         try:
             if not self.spot_client:
-                return {"contexto_ok": True, "condiciones_cumplidas": 4, "detalle": {}}
+                return {"contexto_ok": False, "condiciones_cumplidas": 0, "detalle": {}}
 
-            klines = self.spot_client.klines(symbol=symbol, interval=superior_interval, limit=100)
+            klines = self.spot_client.klines(symbol=symbol, interval=superior_interval, limit=1000)
             if not klines or len(klines) < 55:
-                return {"contexto_ok": True, "condiciones_cumplidas": 4, "detalle": {}}
+                return {"contexto_ok": False, "condiciones_cumplidas": 0, "detalle": {}}
 
             df_htf = pd.DataFrame(
                 [
@@ -3304,21 +3308,53 @@ class BotCryptoUI:
             # Tendencia EMA: distancia porcentual EMA20 vs EMA50
             ctx_ema_gap_pct = ((ctx_ema20 - ctx_ema50) / ctx_ema50) * 100 if ctx_ema50 > 0 else 0
 
-            # Evaluación de condiciones
+            # Gates estructurales OBLIGATORIOS (EMA50 es confiable con 250 barras)
+            # 1. EMA20 > EMA50 en TF superior → estructura alcista media plazo
+            # 2. Precio > EMA50 en TF superior → precio sobre promedio medio plazo
             ema20_gt_ema50 = bool(ctx_ema20 > ctx_ema50)
+            price_gt_ema50 = bool(ctx_price > ctx_ema50)
+
+            if not ema20_gt_ema50 or not price_gt_ema50:
+                resultado = {
+                    "contexto_ok": False,
+                    "condiciones_cumplidas": 0,
+                    "timeframe": superior_interval,
+                    "detalle": {
+                        "ema20_gt_ema50": ema20_gt_ema50,
+                        "price_gt_ema50": price_gt_ema50,
+                        "ema20": round(ctx_ema20, 6),
+                        "ema50": round(ctx_ema50, 6),
+                        "price": round(ctx_price, 6),
+                    },
+                    "indicadores_ctx": {
+                        "price": round(ctx_price, 6),
+                        "ema20": round(ctx_ema20, 6),
+                        "ema50": round(ctx_ema50, 6),
+                    },
+                }
+                self._contexto_cache[symbol] = {"timestamp": now, "resultado": resultado}
+                self.logger.warning(
+                    f"CONTEXTO {symbol} [{superior_interval}]: BLOQUEADO "
+                    f"EMA20={ctx_ema20:.4f} {'>' if ema20_gt_ema50 else '<='} EMA50={ctx_ema50:.4f} | "
+                    f"precio={ctx_price:.4f} {'>' if price_gt_ema50 else '<='} EMA50={ctx_ema50:.4f}"
+                )
+                return resultado
+
+            # Condiciones adicionales de confirmación (necesita ≥ 2 de 3)
             price_gt_ema20 = bool(ctx_price > ctx_ema20)
             macd_gt_0 = bool(ctx_macd > 0)
             rsi_gt_50 = bool(ctx_rsi > 50)
 
-            condiciones = sum([ema20_gt_ema50, price_gt_ema20, macd_gt_0, rsi_gt_50])
-            contexto_ok = condiciones >= 3
+            condiciones = sum([price_gt_ema20, macd_gt_0, rsi_gt_50])
+            contexto_ok = condiciones >= 2
 
             resultado = {
                 "contexto_ok": contexto_ok,
                 "condiciones_cumplidas": condiciones,
                 "timeframe": superior_interval,
                 "detalle": {
-                    "ema20_gt_ema50": ema20_gt_ema50,
+                    "ema20_gt_ema50": True,
+                    "price_gt_ema50": True,
                     "price_gt_ema20": price_gt_ema20,
                     "macd_gt_0": macd_gt_0,
                     "rsi_gt_50": rsi_gt_50,
@@ -3337,13 +3373,13 @@ class BotCryptoUI:
 
             self._contexto_cache[symbol] = {"timestamp": now, "resultado": resultado}
             self.logger.info(
-                f"CONTEXTO {symbol} [{superior_interval}]: {condiciones}/4 → {'OK' if contexto_ok else 'FUERA'}"
+                f"CONTEXTO {symbol} [{superior_interval}]: {condiciones}/4 → {'OK' if contexto_ok else 'FUERA'} | EMA200={ctx_ema200:.4f}"
             )
             return resultado
 
         except Exception as e:
             self.logger.error(f"_evaluar_contexto_superior({symbol}): {e}")
-            return {"contexto_ok": True, "condiciones_cumplidas": 4, "detalle": {}}
+            return {"contexto_ok": False, "condiciones_cumplidas": 0, "detalle": {}}
 
     def _evaluar_lateralidad(self, symbol, tmp_bot):
         """Evalúa si el mercado está lateral usando 4 métricas: ATR%, rango, dist_ema, volumen.
