@@ -1680,8 +1680,11 @@ class GestionInversion(tk.Frame):
 
             # chequea carga de extracto Stock -----------------------------------------------------------------------
             if ilog:
-                self.PlaInversion.insert_extracto(account=sesion["idcuenta"], values=d_extract)
+                idcuenta = sesion["idcuenta"]
+                self.PlaInversion.insert_extracto(account=idcuenta, values=d_extract)
                 self.d_extract = d_extract
+                msj = f"Cargado extracto {idcuenta} a la fecha [{d_extract["extracto"].strftime("%b-%Y")}], enter para continuar."
+                MyMessageBox(self.root).showwarning("Advertencia", msj)
 
                 # actualiza panel gestion
                 self.widgets_extractos()

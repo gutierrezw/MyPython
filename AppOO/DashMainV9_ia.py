@@ -494,12 +494,20 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     DataHub.update_self_procesos(proces="widget", tarea=socket, itera=self.WsStock.counter)
 
             elif data["topic"] == "sor":
-                # Smart Order Routing: actualiza estado de orden en order_trade
+                # Smart Order Routing IB: args = lista de 1 dict con orderId/ticker/status
                 try:
-                    args = data.get("args", {})
-                    order_id = str(args.get("orderId", args.get("order_id", "")))
-                    symbol = args.get("ticker", args.get("symbol", ""))
-                    status = args.get("orderStatus", args.get("status", ""))
+                    raw = data.get("args", [])
+                    args = raw[0] if isinstance(raw, list) and raw else {}
+                    order_id = str(args.get("orderId", ""))
+                    status = args.get("status", "")
+                    # ticker solo llega en el primer mensaje completo;
+                    # en updates parciales lo buscamos en self.orders
+                    symbol = args.get("ticker", "")
+                    if not symbol:
+                        for orden in self.orders.get("Stock", []):
+                            if str(orden.get("id_order")) == order_id:
+                                symbol = orden.get("symbol", "")
+                                break
                     if order_id and status:
                         values = {"status": status}
                         self.RepositorioOportunidades.update_order_trader(
@@ -512,7 +520,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             if str(orden.get("id_order")) == order_id:
                                 orden["status"] = status
                                 break
-                        self.logger.warning(f"sor(Stock): symbol={symbol} orderId={order_id} status={status}")
+                        self.logger.warning(
+                            f"sor(Stock): symbol={symbol} orderId={order_id} status={status}"
+                        )
                 except Exception as e:
                     print(f"[on_message_IBrks_websocket(sor)]: {e}")
 
@@ -2386,6 +2396,9 @@ class DashMain:
                     self.root.after(100, lambda: self.stock.run_graficos())
                     self.root.after(200, lambda: self.update_widget(vehiculo=vehiculo))
                     _log.warning("✅ IB reconnect: DatosVehivulo creado + WebSocket + posiciones levantados")
+
+                # en ambos casos (refresh o arranque diferido) la sesión ya está activa
+                DataHub.manager_sesion.update({"Stock": True})
             except Exception as e:
                 _log.error(f"_ib_on_reconnect error: {e}")
 
