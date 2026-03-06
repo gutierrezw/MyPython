@@ -273,7 +273,7 @@ class GestionInversion(tk.Frame):
         for sesion in lista:
 
             # rechaza los registros q no aplican como vehiculo de inversión
-            if sesion["Pinvertir"] is None and sesion["fefund"] is None:
+            if (sesion["Pinvertir"] is None or sesion["Pinvertir"] == 0) and sesion["fefund"] is None:
                 continue
 
             # toma información clave fiscal Year
@@ -336,6 +336,7 @@ class GestionInversion(tk.Frame):
                 return costo_base, nav_cierre
             except Exception as e:
                 print("meses_extract(): {}".format(e))
+                return 0.0, 0.0
 
         # Detalles de extracts por year  en stock -------------------------------------------------------------
         def extract_update_treeview(tipo=None):
@@ -1365,9 +1366,7 @@ class GestionInversion(tk.Frame):
         resumen.index = pd.to_datetime(resumen.index)
 
         # se construye saldo al final de cada mes
-        # resumen["navcierre"] = resumen["costo_base"] + resumen["beneficios"] - resumen["costos"]
-        # Creamos con importe inicial para cada mes
-        # resumen['cierreanterior'] = resumen['navcierre'].shift(1)
+        resumen["navcierre"] = resumen["costo_base"] + resumen["beneficios"] - resumen["costos"]
 
         # deja como fin de mes las fechas Dataframe
         resumen.index = resumen.index + pd.offsets.MonthEnd(0)

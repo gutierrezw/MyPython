@@ -522,6 +522,7 @@ def get_klines_info(symbol=None, period="5y", interval="1d", desde=None, hasta=N
 
     except (Exception, AttributeError, Exception) as e:
         print(f"[Error:: get_klines_info()]: {e}")
+        return pd.DataFrame()
 
 
 def get_ultimo_dia_mercado(market="Stock"):
