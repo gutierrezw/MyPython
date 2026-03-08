@@ -3802,6 +3802,13 @@ class BotCryptoUI:
     def _on_stop_symbol(self, symbol):
         """Detiene bot para un símbolo específico"""
         if symbol in self.bots:
+            bot = self.bots[symbol]
+            # Cancelar STOP_LOSS_LIMIT en Binance si existe
+            if self.bot_manager and bot.state.get("position") == "LONG":
+                try:
+                    self.bot_manager._cancel_sl_order(bot)
+                except Exception as e:
+                    self.logger.error(f"■ {symbol}: Error cancelando SL al detener: {e}")
             del self.bots[symbol]
             self.widgets[symbol].set_running(False)
             self.logger.warning(f"■ {symbol}: Bot DETENIDO")
@@ -5190,6 +5197,39 @@ class BotCryptoUI:
         )
 
         dialog.bind("<Escape>", lambda e: dialog.destroy())
+
+    def _crear_bot(self, symbol):
+        """Crea un TradingBotSpot para el símbolo"""
+        try:
+            strategy_config = {
+                "rsi_buy": self.config.get("rsi_buy", 35),
+                "rsi_sell": self.config.get("rsi_sell", 65),
+            }
+            risk_config = {
+                "risk_per_trade": self.config.get("risk_per_trade", 0.02),
+                "tp1_pct": self.config.get("tp1_pct", 0.03),
+                "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
+                "tp1_size": self.config.get("tp1_size", 0.33),
+                "trail_mult": self.config.get("trail_mult", 1.5),
+                "cooldown_hours": self.config.get("cooldown_hours", 4),
+            }
+            if symbol in self.bots:
+                return
+            bot = TradingBotSpot(
+                symbol=symbol,
+                interval=self.interval,
+                strategy_config=strategy_config,
+                risk_config=risk_config,
+                state_repo=self.state_repo,
+                order_manager=self.order_manager,
+            )
+            self._cargar_historico(bot, symbol, limit=500)
+            self.bots[symbol] = bot
+            if self.bot_manager:
+                self.bot_manager.register_bot(bot)
+            self._cargar_posicion_existente(bot, symbol)
+        except Exception as e:
+            self.logger.error(f"Error creando bot para {symbol}: {e}")
 
     def _cargar_historico(self, bot, symbol, limit=500):
         """

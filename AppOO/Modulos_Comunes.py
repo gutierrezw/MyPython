@@ -1,5 +1,5 @@
 from Class_DataFrame import get_yfinance
-from Modulos_Mysql import IPerformance, RepositorioOportunidadesBuySell
+from Modulos_Mysql import BDsystem, IPerformance, RepositorioOportunidadesBuySell
 from Modulos_Utilitarios import vehiculo_parm, convierte_ticket_crypto, define_FileCache
 from Modulos_python import datetime, pd, timedelta, os, csv, traceback
 
@@ -43,51 +43,78 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
     Performa = IPerformance()
     try:
         symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=vehiculo)
-        columnas = [
-            "Date",
-            "p_referencia",
-            "p_vehiculo",
-            "nr_gyp",
-            "value",
-            "costo_base",
-        ]
 
-        # establece consulta SQL en función del vehículo
-        if vehiculo == "BBVA.ARS":
-            sql = Performa.select_performa_inversion(vehiculo=vehiculo)
-
-        elif vehiculo != "BBVA.ARS":
-            sql = Performa.select_performa_inversion(account=account, vehiculo=vehiculo)
-
-        # constryuye diccionario de datos a partir de sql
-        d_datos = {columnas: columna for columnas, columna in zip(columnas, zip(*sql[0]))}
-
-        # obtiene DataFrame para portafolios
+        # obtiene DataFrame para portafolios — recalcula desde diaria_performance
         if tipo in ("Stock", "Crypto", "BBVA.ARS"):
-            if sql:
-                datos = pd.DataFrame(d_datos, index=d_datos["Date"])
-                datos[index_ref] = (1 + datos["p_referencia"]).cumprod()
-                datos["++ index"] = (1 + datos["p_vehiculo"]).cumprod()
-                datos["Date"] = pd.to_datetime(datos["Date"])
-                datos = datos.set_index("Date")
+            # Descubrir cuentas: para FCI combina BBVA + SANT, para el resto usa account
+            accounts = []
+            if vehiculo == "BBVA.ARS":
+                for veh in ("BBVA.ARS", "SANT.ARS"):
+                    try:
+                        ses = BDsystem.get_sesion_by_vehiculo(vehiculo=veh)
+                        if ses and ses.get("idcuenta"):
+                            accounts.append(ses["idcuenta"])
+                    except Exception:
+                        pass
+            else:
+                # Auto-descubrir account si no se pasó
+                if account is None:
+                    try:
+                        ses = BDsystem.get_sesion_by_vehiculo(vehiculo=vehiculo)
+                        if ses and ses.get("idcuenta"):
+                            account = ses["idcuenta"]
+                    except Exception:
+                        pass
+                accounts = [account]
 
-        # obtiene DataFrame para un activo que esté en la tabla diaria
+            # Consolidar diaria_performance de todas las cuentas
+            diaria_all, ix = [], []
+            for acc in accounts:
+                sql, iy = Performa.select_diaria_performance(account=acc)
+                if sql:
+                    if not ix:
+                        ix = iy
+                    diaria_all.extend(sql)
+
+            if diaria_all and ix:
+                pdatos = crea_dataframe_diaria(diaria=diaria_all, ix=ix)
+                if pdatos is not None and not pdatos.empty:
+                    # Normalizar desde raíz: ambas curvas arrancan en 0%
+                    raiz = pdatos["performa"].iloc[0]
+                    pdatos["CumPort"] = (pdatos["performa"] / raiz) - 1
+
+                    # Índice desde la primera fecha de la diaria
+                    first_date = pdatos.index[0]
+                    result = crea_dataframe_index(vehiculo=vehiculo, desde=first_date)
+                    if result is not None:
+                        indice, _, _ = result
+                        pdatos.index = pd.to_datetime(pdatos.index)
+                        indice.index = pd.to_datetime(indice.index)
+                        cols_pdatos = ["CumPort"] + [c for c in ("value", "costo_base") if c in pdatos.columns]
+                        datos = pdatos[cols_pdatos].join(indice[[cum_index]], how="inner").dropna(subset=["CumPort", cum_index])
+                        # Alias para compatibilidad con graph_performace_portafolio
+                        datos[index_ref] = datos[cum_index]
+                        datos["++ Portafolio"] = datos["CumPort"]
+
+        # obtiene DataFrame para un activo individual desde diaria_performance
         if tipo == "activo":
-            wperf = pd.DataFrame(d_datos, index=d_datos["Date"])
-            cols = ["nr_gyp", "value", "p_vehiculo", "costo_base"]
-            wperf = wperf.drop(cols, axis=1)
+            sql, iy = Performa.select_diaria_performance(account=account, symbol=asset)
+            if sql:
+                pdatos = pd.DataFrame(sql, columns=iy)
+                drop_cols = ["id", "account", "cantidad", "gyp_dia", "comisiones", "symbol"]
+                pdatos.drop(columns=[c for c in drop_cols if c in pdatos.columns], inplace=True)
+                pdatos["Date"] = pd.to_datetime(pdatos["Date"])
+                pdatos.set_index("Date", inplace=True)
 
-            (diaria, iy) = Performa.select_diaria_performance(account=account, symbol=asset)
-
-            pdatos = pd.DataFrame(diaria, columns=iy)
-            cols = ["id", "account", "cantidad", "gyp_dia", "comisiones", "symbol"]
-            pdatos = pdatos.drop(cols, axis=1)
-
-            datos = pd.merge(pdatos, wperf, on="Date", how="inner")
-            datos.set_index("Date", inplace=True)
-            datos[index_ref] = (1 + datos["p_referencia"]).cumprod() - 1
-            datos["retorno"] = datos["AdjClose"].pct_change()
-            datos["++ index"] = (1 + datos["retorno"]).cumprod()
+                first_date = str(pdatos.index.min().date())
+                result = crea_dataframe_index(vehiculo=vehiculo, desde=first_date)
+                if result is not None:
+                    indice, _, _ = result
+                    indice.index = pd.to_datetime(indice.index)
+                    datos = pdatos.join(indice[[rtn_index, cum_index]], how="inner")
+                    datos[index_ref] = datos[cum_index]
+                    datos["retorno"] = datos["AdjClose"].pct_change()
+                    datos["++ index"] = (1 + datos["retorno"]).cumprod()
 
         return datos
 
@@ -406,6 +433,9 @@ def crea_dataframe_index(vehiculo=None, desde=None):
         indice = pd.DataFrame()
         # symbol = convierte_ticket_crypto(symbol)
         activo, datos = get_yfinance(ticket=symbol, vehiculo="donwload", desde=desde, hasta=hoy)
+
+        if datos is None or datos.empty or "Close" not in datos.columns:
+            return None
 
         # asegura tomar solo la primera columna si hay varias
         if isinstance(datos["Close"], pd.DataFrame):
