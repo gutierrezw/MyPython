@@ -3318,7 +3318,7 @@ class WidgetVehiculo(TickerInfo):
             "avgCost": 0.0,
             "account": 0,
             "mkPrice": 0.0,
-            "periodo": "ME",
+            "periodo": "W",
             "secType": "Stock",
             "name": "buscar nombre",
             "tipo": "candle",
@@ -3490,7 +3490,7 @@ class WidgetVehiculo(TickerInfo):
             f.write(html)
         webbrowser.open(f"file:///{html_path.replace(os.sep, '/')}")
 
-    def _abrir_grafico_estrategia(self, symbol):
+    def _abrir_grafico_estrategia(self, symbol, Xposition=None):
         """Abre el gráfico de estrategia compartido para el símbolo seleccionado."""
         if not hasattr(self, "_chart_windows_estrategia"):
             self._chart_windows_estrategia = {}
@@ -3518,6 +3518,8 @@ class WidgetVehiculo(TickerInfo):
             vehiculo=self.vehiculo,
             targets=targets or None,
             chart_windows=self._chart_windows_estrategia,
+            Xposition=Xposition,
+            show_pm=True,
         )
 
     # Función para obtener columnas self.m_tree sincronizadamente
@@ -4074,6 +4076,16 @@ class WidgetVehiculo(TickerInfo):
             if not (self.rns is None):
                 self.rns.destroy()
 
+            # cerrar ventana de show_strategy_chart si está abierta
+            if hasattr(self, "_chart_windows_estrategia"):
+                for win in list(self._chart_windows_estrategia.values()):
+                    try:
+                        if win.winfo_exists():
+                            win.destroy()
+                    except Exception:
+                        pass
+                self._chart_windows_estrategia.clear()
+
             self.rnb.destroy()
 
         # ventana inferior para el activo
@@ -4459,9 +4471,18 @@ class WidgetVehiculo(TickerInfo):
                 relief=tk.FLAT,
                 command=lambda: chart_setup("YE", gtipo, "p"),
             )
+            bt5 = tk.Button(
+                win21,
+                text="6m",
+                width=2,
+                bg=self.bgcolor,
+                fg=self.cgcolor,
+                relief=tk.FLAT,
+                command=lambda: chart_setup("2QE", gtipo, "p"),
+            )
 
             # inicia variables
-            gtipo, gperiodo, position = "candle", "ME", None
+            gtipo, gperiodo, position = "candle", "W", None
             AGain, ALost = [], []
             self.gchar["fibonacci"] = False
 
@@ -4530,7 +4551,7 @@ class WidgetVehiculo(TickerInfo):
                 image=imagen_tk,
                 bg=self.bgcolor,
                 relief=tk.FLAT,
-                command=lambda: chart_setup(gperiodo, self.gchar["tipo"], "t", toggle_fib=True),
+                command=lambda: chart_setup(self.gchar["periodo"], self.gchar["tipo"], "t", toggle_fib=True),
             )
             gt0.imagen = imagen_tk
 
@@ -4541,7 +4562,7 @@ class WidgetVehiculo(TickerInfo):
                 image=imagen_tk,
                 bg=self.bgcolor,
                 relief=tk.FLAT,
-                command=lambda: chart_setup(gperiodo, "candle", "t"),
+                command=lambda: chart_setup(self.gchar["periodo"], "candle", "t"),
             )
             gt1.imagen = imagen_tk
 
@@ -4552,9 +4573,20 @@ class WidgetVehiculo(TickerInfo):
                 image=imagen_tk,
                 bg=self.bgcolor,
                 relief=tk.FLAT,
-                command=lambda: chart_setup(gperiodo, "line", "t"),
+                command=lambda: chart_setup(self.gchar["periodo"], "line", "t"),
             )
             gt2.imagen = imagen_tk
+
+            # botón gráfico de estrategia
+            imagen_tk = BDsystem.select_image(idd=105, size=(16, 16))
+            gt3 = tk.Button(
+                win21,
+                image=imagen_tk,
+                bg=self.bgcolor,
+                relief=tk.FLAT,
+                command=lambda: self._abrir_grafico_estrategia(self.symbol, Xposition=530),
+            )
+            gt3.imagen = imagen_tk
 
             ft3.pack(side=tk.RIGHT, anchor=tk.W, padx=3)
             ft2.pack(side=tk.RIGHT, anchor=tk.W, padx=3)
@@ -4563,11 +4595,13 @@ class WidgetVehiculo(TickerInfo):
             gt1.pack(side=tk.RIGHT, anchor=tk.E, padx=1)
             gt2.pack(side=tk.RIGHT, anchor=tk.E)
             gt0.pack(side=tk.RIGHT, anchor=tk.E)
+            gt3.pack(side=tk.RIGHT, anchor=tk.E, padx=(4, 1))
 
-            bt4.pack(side=tk.RIGHT, anchor=tk.E)
-            bt3.pack(side=tk.RIGHT, anchor=tk.E)
-            bt2.pack(side=tk.RIGHT, anchor=tk.E)
-            bt1.pack(side=tk.RIGHT, anchor=tk.E)
+            bt1.pack(side=tk.RIGHT, anchor=tk.E)  # 1w  → derecha
+            bt2.pack(side=tk.RIGHT, anchor=tk.E)  # 1m
+            bt3.pack(side=tk.RIGHT, anchor=tk.E)  # 3m
+            bt5.pack(side=tk.RIGHT, anchor=tk.E)  # 6m
+            bt4.pack(side=tk.RIGHT, anchor=tk.E)  # 1y  → izquierda
 
             # lienzo para grafico de activo
             fg = Figure(figsize=(5.9, 4.0), dpi=110)
@@ -4699,6 +4733,7 @@ class WidgetVehiculo(TickerInfo):
                     repositorio=self.PlanInversion,
                     colors=self.colors,
                     vehiculo=self.vehiculo,
+                    positions=self.positions,
                 )
             else:  # Stock y otros
                 analisis = AnalisisStock(
@@ -5037,6 +5072,8 @@ class WidgetVehiculo(TickerInfo):
         }
 
         # ajusta a tempralidad seleccionada
+        if self.Ddatos is None or self.Ddatos.empty or not isinstance(self.Ddatos.index, pd.DatetimeIndex):
+            return
         df_plot = self.Ddatos[self.Ddatos.index >= hoy - periodos[tipo]]
         self.graph_performace_portafolio(fg=self.graph[2][1], data=df_plot, parm=parm)
         self.graph[2][0].draw()
@@ -6010,6 +6047,7 @@ class MyMessageBox(tk.Toplevel):
         """
         parent = get_root(parent)
         super().__init__(parent)
+        self.withdraw()  # Ocultar hasta que se llame showinfo/askquestion
 
         # Crear la ventana modal
         self.bg = bg
@@ -6042,6 +6080,7 @@ class MyMessageBox(tk.Toplevel):
 
     # Etiqueta para el mensaje informativo
     def showinfo(self, title, message):
+        self.deiconify()  # Mostrar la ventana ahora que tiene contenido
 
         # agrega icono de mensaje ----------------------------------------------------------------------------------
         imagen0, xlis = BDsystem.select_objeto(codigo=18)
@@ -6082,6 +6121,8 @@ class MyMessageBox(tk.Toplevel):
         self.wait_window()  # Esperar hasta que se cierre
 
     def askquestion(self, title, message):
+        self.deiconify()  # Mostrar la ventana ahora que tiene contenido
+
         def respuesta(accion):
             nonlocal ask
             ask = accion

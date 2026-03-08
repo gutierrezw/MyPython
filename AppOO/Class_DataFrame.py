@@ -446,8 +446,8 @@ def get_klines_info(symbol=None, period="5y", interval="1d", desde=None, hasta=N
 
         # cuando intervalos es menor a 1000 dias
         elif cantidad.days < limit:
-            x_desde = datetime.combine(ifecha, datetime.min.time())
-            x_hasta = datetime.combine(ffecha, datetime.max.time())
+            x_desde = ifecha if isinstance(ifecha, datetime) else datetime.combine(ifecha, datetime.min.time())
+            x_hasta = ffecha if isinstance(ffecha, datetime) else datetime.combine(ffecha, datetime.max.time())
             intervalos.append((int(x_desde.timestamp() * 1000), int(x_hasta.timestamp() * 1000)))
 
         return intervalos
@@ -457,8 +457,18 @@ def get_klines_info(symbol=None, period="5y", interval="1d", desde=None, hasta=N
 
         # controla inicio y fin
         if (desde is not None) and (hasta is not None):
-            i_fecha = desde
-            f_fecha = hasta
+            # Normalizar a datetime: acepta str, date o datetime
+            def _to_datetime(val, end_of_day=False):
+                if isinstance(val, str):
+                    val = datetime.fromisoformat(val)
+                if not isinstance(val, datetime):
+                    # es date → combinar con medianoche o fin de día
+                    t = datetime.max.time() if end_of_day else datetime.min.time()
+                    return datetime.combine(val, t)
+                return val
+
+            i_fecha = _to_datetime(desde, end_of_day=False)
+            f_fecha = _to_datetime(hasta, end_of_day=True)
         else:
             f_fecha = datetime.now()
             i_fecha = f_fecha - timedelta(days=1800)
@@ -2495,7 +2505,7 @@ def chart_trazaplan(fg=None, traza=None, cchart=None):
 # ============================================================
 # Gráfico de estrategia compartido (usable desde cualquier módulo)
 # ============================================================
-def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_windows=None):
+def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_windows=None, Xposition=None, show_pm=False):
     """Abre ventana de gráfico de estrategia para cualquier activo.
 
     Args:
@@ -2505,8 +2515,6 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
         targets:       dict opcional con: entry, sl, objetivo (float)
         chart_windows: dict externo para rastrear ventanas abiertas (evitar duplicados)
     """
-    from Class_customer import DataHub  # deferred — evita import circular
-
     if chart_windows is None:
         chart_windows = {}
 
@@ -2526,11 +2534,21 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
     _timer_id = [None]
     targets = targets or {}
 
+    # Periodos disponibles: btn_label → {period, high_label, n_tail}
+    _PERIODS = {
+        "1y": {"period": "1y", "high_label": "Máx 52 sem", "n_tail": 60},
+        "6m": {"period": "6mo", "high_label": "Máx 26 sem", "n_tail": 50},
+        "3m": {"period": "3mo", "high_label": "Máx 13 sem", "n_tail": 42},
+        "1m": {"period": "1mo", "high_label": "Máx 1 mes", "n_tail": 21},
+        "1s": {"period": "1mo", "high_label": "Máx 1 sem", "n_tail": 21, "n_high": 7},
+    }
+    _current_period = ["5d"]  # yfinance period code activo
+    _btn_refs = {}  # {btn_label: Button widget}
+
     # ----- Helpers de datos -----
     def _get_data():
-        # Pasar symbol sin convertir — get_yfinance hace la conversión internamente
         try:
-            result = get_yfinance(ticket=symbol, vehiculo=vehiculo, period="6mo", interval="1d")
+            result = get_yfinance(ticket=symbol, vehiculo=vehiculo, period=_current_period[0], interval="1d")
             if result:
                 _, df = result
                 if df is not None and not df.empty and len(df) >= 14:
@@ -2540,7 +2558,9 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
         return None
 
     def _get_price(df):
-        info = DataHub.info.get(symbol, {})
+        import Class_customer  # import diferido — evita ciclo: Class_DataFrame→Class_customer→Modulos_Comunes→Class_DataFrame
+
+        info = Class_customer.DataHub.info.get(symbol, {})
         ws = info.get("websocket", {})
         p = ws.get("last") or ws.get("close") or ws.get("price")
         if p:
@@ -2552,6 +2572,13 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
             return float(df["Close"].iloc[-1])
         return 0.0
 
+    def _get_period_cfg():
+        """Retorna cfg del periodo activo."""
+        for cfg in _PERIODS.values():
+            if cfg["period"] == _current_period[0]:
+                return cfg
+        return _PERIODS["1m"]
+
     # ----- Dibujo -----
     def _draw_chart(win_ref, fig_ref, canvas_ref):
         fig_ref.clear()
@@ -2559,18 +2586,20 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
         ax.set_facecolor(bg_color)
 
         label = symbol.replace("USDT", "") if vehiculo == "Crypto" else symbol
+        wm_size = min(72, max(20, int(200 / max(len(label), 1))))
         ax.text(
             0.5,
             0.5,
             label,
             transform=ax.transAxes,
-            fontsize=72,
+            fontsize=wm_size,
             fontweight="bold",
             color="white",
             alpha=0.04,
             ha="center",
             va="center",
             zorder=0,
+            clip_on=True,
         )
 
         df = _get_data()
@@ -2590,6 +2619,11 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
             canvas_ref.draw_idle()
             return
 
+        cfg = _get_period_cfg()
+        high_label = cfg["high_label"]
+        n_tail = cfg["n_tail"]
+        n_high = cfg.get("n_high", n_tail)  # barras para calcular el máximo del periodo
+
         atr = calcular_atr(df)
         atr = atr if atr and atr > 0 else price_now * 0.02
 
@@ -2598,9 +2632,19 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
         sl_price = targets.get("sl") or (ref_price - atr * 1.5)
         objetivo_price = targets.get("objetivo") or (ref_price + atr * 2.0)
 
-        # Histórico (últimas 50 velas)
-        hist = df["Close"].tail(50).values.astype(float)
+        # Histórico (n_tail velas del periodo seleccionado)
+        df_vis = df.tail(n_tail)
+        hist = df_vis["Close"].values.astype(float)
         n_hist = len(hist)
+
+        # Máximo del periodo: usa n_high barras (puede ser menor que n_tail, ej. 1s = 7 días)
+        period_high = float(df.tail(n_high)["High"].max())
+        period_high_pct = ((period_high / price_now) - 1) * 100 if price_now > 0 else 0
+
+        # Ocultar Max cuando está a ≤5% del objetivo (se solapan visualmente)
+        _diff_obj_high = abs((objetivo_price - period_high) / period_high) * 100 if period_high > 0 else 0
+        show_period_high = _diff_obj_high > 5.0
+
         x_hist = np.arange(n_hist)
         ax.plot(x_hist, hist, color="#00d4ff", linewidth=1.5)
 
@@ -2617,11 +2661,19 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
         ax.fill_between(x_proj, y_sl, y_ref, alpha=0.15, color="#ff4444")
         ax.plot(x_proj, y_obj, color="#00ff88", linewidth=1.0, linestyle="--")
         ax.plot(x_proj, y_sl, color="#ff4444", linewidth=1.0, linestyle="--")
+        if show_period_high:
+            y_phigh = np.linspace(price_now, period_high, len(x_proj))
+            ax.fill_between(x_proj, y_obj, y_phigh, alpha=0.07, color="#ff9900")
+            ax.plot(x_proj, y_phigh, color="#ff9900", linewidth=1.2, linestyle="--")
 
         ax.axhline(y=objetivo_price, color="#00ff88", linewidth=0.9, linestyle=":", alpha=0.4)
         ax.axhline(y=sl_price, color="#ff4444", linewidth=0.9, linestyle=":", alpha=0.4)
         ax.axhline(y=price_now, color="#00d4ff", linewidth=0.8, linestyle="-", alpha=0.3)
         ax.axvline(x=n_hist - 1, color="gray", linewidth=0.8, linestyle="--", alpha=0.4)
+
+        # Línea del máximo del periodo (solo si no se solapa con objetivo)
+        if show_period_high:
+            ax.axhline(y=period_high, color="#ff9900", linewidth=0.9, linestyle=":", alpha=0.4)
 
         # Línea de entrada (si hay posición)
         if entry and entry > 0:
@@ -2644,6 +2696,16 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
         obj_pct = ((objetivo_price / ref_price) - 1) * 100 if ref_price > 0 else 0
         sl_pct_val = ((sl_price / ref_price) - 1) * 100 if ref_price > 0 else 0
 
+        if show_period_high:
+            ax.annotate(
+                f"  {high_label}  {period_high:.4f}  (+{period_high_pct:.1f}%)",
+                xy=(x_label, period_high),
+                fontsize=8,
+                color="#ff9900",
+                fontweight="bold",
+                va="center",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="#ff9900", alpha=0.2),
+            )
         ax.annotate(
             f"  Objetivo +{obj_pct:.1f}%  {objetivo_price:.4f}",
             xy=(x_label, objetivo_price),
@@ -2672,31 +2734,61 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
             bbox=dict(boxstyle="round,pad=0.2", facecolor="#ff4444", alpha=0.2),
         )
 
-        # Etiquetas de zona
+        # Anotación derecha precio medio — solo desde window_estrategia y entre SL y máximo u objetivo
+        upper_ref = max(period_high, objetivo_price)
+        if show_pm and entry and entry > 0 and sl_price <= entry <= upper_ref:
+            pm_pct = ((price_now / entry) - 1) * 100
+            pm_color = "#00ff88" if pm_pct >= 0 else "#ff4444"
+            ax.annotate(
+                f"  PM  {entry:.4f}  ({pm_pct:+.1f}%)",
+                xy=(x_label, entry),
+                fontsize=8,
+                color="#ffff00",
+                fontweight="bold",
+                va="center",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="#ffff00", alpha=0.2),
+            )
+
+        # Etiquetas de zona — desplazadas al 88% del ylim para separar de la leyenda
         ylim = ax.get_ylim()
-        ax.text(n_hist * 0.4, ylim[1], "HISTORIAL", fontsize=8, color="gray", ha="center", alpha=0.5, va="top")
+        y_zona = ylim[0] + (ylim[1] - ylim[0]) * 0.88
         ax.text(
-            n_hist + n_proj * 0.4, ylim[1], "PROYECCION", fontsize=8, color="gray", ha="center", alpha=0.5, va="top"
+            n_hist * 0.4,
+            y_zona,
+            "HISTORIAL",
+            fontsize=9,
+            color="white",
+            ha="center",
+            alpha=0.75,
+            va="top",
+            fontweight="bold",
+        )
+        ax.text(
+            n_hist + n_proj * 0.4,
+            y_zona,
+            "PREVISION",
+            fontsize=9,
+            color="white",
+            ha="center",
+            alpha=0.75,
+            va="top",
+            fontweight="bold",
         )
 
-        # Info box
+        # Título informativo — 3 líneas encima del gráfico
         rr = abs(obj_pct / sl_pct_val) if sl_pct_val != 0 else 0
-        info_text = (
-            f"{symbol} | {vehiculo}\n"
-            f"Actual: {price_now:.4f}\n"
-            f"Objetivo: +{obj_pct:.1f}% | Ref.SL: {sl_pct_val:.1f}%\n"
-            f"R/R: 1:{rr:.1f}"
-        )
-        ax.text(
-            0.02,
-            0.98,
-            info_text,
-            transform=ax.transAxes,
+        line1 = f"{symbol}  |  {vehiculo}  —  Actual: {price_now:.4f}"
+        line2 = f"Obj: +{obj_pct:.1f}%   SL: {sl_pct_val:.1f}%   R/R: 1:{rr:.1f}"
+        line3 = f"{high_label}: {period_high:.4f}  (+{period_high_pct:.1f}%)" if show_period_high else ""
+        title_text = f"{line1}\n{line2}\n{line3}" if show_period_high else f"{line1}\n{line2}"
+        ax.set_title(
+            title_text,
+            loc="left",
             fontsize=7.5,
-            color="white",
-            verticalalignment="top",
+            color="black",
             fontfamily="monospace",
-            bbox=dict(boxstyle="round,pad=0.4", facecolor=bg_color, edgecolor="gray", alpha=0.9),
+            pad=4,
+            bbox=dict(facecolor="white", edgecolor="none", alpha=0.92, pad=3),
         )
 
         ax.spines[["top", "right"]].set_visible(False)
@@ -2705,8 +2797,42 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
             spine.set_color("#2a3a5e")
         ax.set_xlim(-1, x_total + 2)
         ax.yaxis.set_major_formatter(lambda x, _: f"{x:.4f}")
-        ax.set_xticklabels([])
+
+        # Eje X con fechas reales
+        try:
+            dates = df_vis.index
+            p = _current_period[0]
+            fmt = "%b '%y" if p == "1y" else ("%d %b" if p in ("6mo", "3mo") else "%d/%m")
+
+            # Hasta 6 ticks espaciados uniformemente en la zona histórica
+            n_ticks = min(6, n_hist)
+            tick_pos = np.linspace(0, n_hist - 1, n_ticks, dtype=int)
+            tick_lbl = [dates[pos].strftime(fmt) if pos < len(dates) else "" for pos in tick_pos]
+
+            ax.set_xticks(list(tick_pos))
+            ax.set_xticklabels(tick_lbl, fontsize=7, color="gray", rotation=30, ha="right")
+
+            # Fecha estimada fin proyección
+            proj_end = dates[-1] + pd.Timedelta(days=n_proj)
+            ax.text(
+                x_total - 1,
+                -0.06,
+                f"~{proj_end.strftime(fmt)}",
+                transform=ax.get_xaxis_transform(),
+                fontsize=7,
+                color="gray",
+                ha="center",
+                va="top",
+            )
+        except Exception:
+            ax.set_xticklabels([])
+
         fig_ref.tight_layout(pad=0.5)
+        fig_ref.subplots_adjust(top=0.83, bottom=0.12)
+
+        # Línea separadora entre leyenda (título) y área del gráfico
+        ax.plot([0, 1], [1, 1], transform=ax.transAxes, color="#445577", linewidth=0.8, alpha=0.7, clip_on=False)
+
         canvas_ref.draw_idle()
 
     def _auto_refresh(win_ref, fig_ref, canvas_ref):
@@ -2720,23 +2846,61 @@ def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_w
         chart_windows.pop(symbol, None)
         win_ref.destroy()
 
+    def _set_period(p_code, btn_lbl, win_ref, fig_ref, canvas_ref):
+        if _timer_id[0]:
+            win_ref.after_cancel(_timer_id[0])
+        _current_period[0] = p_code
+        for lbl, btn in _btn_refs.items():
+            if lbl == btn_lbl:
+                btn.configure(bg="#00d4ff", fg="#16213e")
+            else:
+                btn.configure(bg="#1a2a4a", fg="#888888")
+        _draw_chart(win_ref, fig_ref, canvas_ref)
+        _timer_id[0] = win_ref.after(5000, _auto_refresh, win_ref, fig_ref, canvas_ref)
+
     # ----- Crear ventana -----
     try:
-        x = parent.winfo_rootx() + parent.winfo_width() - 90
+        x = parent.winfo_rootx() + parent.winfo_width() - 150 if Xposition is None else Xposition
         y = parent.winfo_rooty() + 200
     except Exception:
         x, y = 200, 150
 
     win = tk.Toplevel(parent)
     win.title(f"Estrategia - {symbol}")
-    win.geometry(f"700x450+{x}+{y}")
+    win.geometry(f"750x560+{x}+{y}")
     win.configure(bg=bg_color)
     win.resizable(False, False)
     chart_windows[symbol] = win
 
-    fig = Figure(figsize=(7.0, 4.5), dpi=100, facecolor=bg_color)
+    # Toolbar de selección de periodo (alineado a la derecha)
+    toolbar = tk.Frame(win, bg=bg_color, pady=0)
+    toolbar.pack(side=tk.TOP, fill=tk.X)
+    btn_frame = tk.Frame(toolbar, bg=bg_color)
+    btn_frame.pack(side=tk.RIGHT, padx=8)
+    tk.Label(btn_frame, text="Intervalo:", bg=bg_color, fg="#888888", font=("Arial", 8)).pack(side=tk.LEFT, padx=(0, 4))
+    for btn_lbl, cfg in _PERIODS.items():
+        is_active = cfg["period"] == _current_period[0]
+        btn = tk.Button(
+            btn_frame,
+            text=btn_lbl,
+            width=4,
+            font=("Arial", 8, "bold"),
+            bg="#00d4ff" if is_active else "#1a2a4a",
+            fg="#16213e" if is_active else "#888888",
+            relief=tk.FLAT,
+            cursor="hand2",
+        )
+        _btn_refs[btn_lbl] = btn
+        btn.pack(side=tk.LEFT, padx=2)
+
+    fig = Figure(figsize=(7.5, 5.4), dpi=100, facecolor=bg_color)
     canvas = FigureCanvasTkAgg(fig, master=win)
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    # Asignar commands una vez que win/fig/canvas existen
+    for btn_lbl, btn in _btn_refs.items():
+        p_code = _PERIODS[btn_lbl]["period"]
+        btn.configure(command=lambda pc=p_code, bl=btn_lbl: _set_period(pc, bl, win, fig, canvas))
 
     _draw_chart(win, fig, canvas)
     _timer_id[0] = win.after(5000, _auto_refresh, win, fig, canvas)
