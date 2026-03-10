@@ -1244,6 +1244,28 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql::insert_market()]: {}".format(error))
 
+    def load_symbols(self, account):
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT symbol, categoriaActivo FROM market WHERE account = %s", (account,))
+            return {row[0]: row[1] for row in cursor.fetchall()}
+        except (Exception, connect.Error) as error:
+            print("[Mysql::load_symbols()]: {}".format(error))
+            return {}
+
+    def delete(self, symbol, account):
+        """Elimina un símbolo de la tabla market para el account dado."""
+        try:
+            conn = self._conectar(tabla="delete.market")
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM market WHERE symbol = %s AND account = %s", (symbol, account))
+            conn.commit()
+            cursor.close()
+            conn.close()
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::delete_market({symbol})]: {error}")
+
 
 class PlanInversion(BDsystem):  # ------------------------------------------------------------------------------------
     """
