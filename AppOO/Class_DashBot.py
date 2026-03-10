@@ -56,6 +56,7 @@ from Modulos_python import (
 sys.path.insert(0, "..")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "AppValuations"))
 from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion
+from Class_Screener import sync_market
 from valuation_edgar_downloader import BASE_DIR, download_filing
 from valuation_xbrl_api import get_zip_files
 from Class_customer import DataHub, TickerInfo
@@ -345,6 +346,18 @@ class ClassAgenteIA:
                         return None
         except Exception as e:
             print(f"Angente_downloads_filings_EDGAR(): {e}")
+
+    # agente Market Screener — descubre símbolos + enriquece con Yahoo, una vez al día
+    @wait_rate(86400)
+    def Agente_MarketScreener(self):
+        try:
+            result = sync_market(account=self.account)
+            self.logger.warning(
+                f"MarketScreener: descargados={result['descargados']} insertados={result['insertados']} "
+                f"omitidos={result['omitidos']} quote={result['quote_actualizados']} fund={result['fund_actualizados']}"
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_MarketScreener(): {e}")
 
     # agente defensivo: protege ganancias con órdenes STOP dinámicas
     async def Agente_ManagerPreservation(self):
@@ -1453,6 +1466,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
                     # Agente for Donloads filings
                     self.Agente_downloads_filings_EDGAR()
+
+                    # Agente Market Screener — descubrimiento + enriquecimiento (una vez al día)
+                    self.Agente_MarketScreener()
 
                     # Agente for Preservation (defensivo estructural)
                     self.exec_modulo_async(self.Agente_ManagerPreservation())
