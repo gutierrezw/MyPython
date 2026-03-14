@@ -63,21 +63,23 @@ class GestionInversion(tk.Frame):
         self.df = 1297
 
         # def de frame
-        win0 = ttk.Frame(self.root, padding=(1, 1, 1, 1), style="C.TFrame")  # principal
+        win0 = ttk.Frame(self.root, padding=(1, 1, 1, 1), style="B.TFrame")  # principal
         win1 = ttk.Frame(win0, padding=(1, 1, 1, 1), style="C.TFrame")  # frame superior
-        win2 = ttk.Frame(win0, padding=(1, 1, 1, 1), style="B.TFrame")  # frame inferior extracto
+        win2 = ttk.Frame(win0, padding=(1, 1, 1, 1), style="B.TFrame")  # frame extracto
 
-        wi10 = ttk.Frame(win1, padding=(1, 1, 1, 1), style="B.TFrame")  # frame izquierda superior
-        wt10 = ttk.Frame(wi10, padding=(1, 1, 1, 1), style="B.TFrame")  # frame izquierda superior
-        wt11 = ttk.Frame(wi10, padding=(1, 1, 1, 1), style="B.TFrame")  # frame izquierda superior
+        wi10 = ttk.Frame(
+            win1, padding=(1, 1, 1, 1), style="B.TFrame"
+        )  # frame izquierda
+        wt10 = ttk.Frame(wi10, padding=(1, 1, 1, 1), style="B.TFrame")  # frame derecha
+        wt11 = ttk.Frame(wi10, padding=(1, 1, 1, 1), style="B.TFrame")  # frame superior
 
-        wi11 = ttk.Frame(win1, padding=(1, 1, 1, 1), style="C.TFrame")  # frame plan y button
+        wi11 = ttk.Frame(win1, padding=(1, 1, 1, 1), style="C.TFrame")  # frame plan
         wr10 = ttk.Frame(wi11, padding=(1, 1, 1, 1), style="C.TFrame")  # frame plan
         wr11 = ttk.Frame(wi11, padding=(1, 1, 1, 1), style="C.TFrame")  # frame button
 
         win0.grid(sticky=N + S + E + W)
         win1.pack(side=tk.TOP, pady=10)
-        win2.pack(side=tk.TOP)
+        win2.pack(side=tk.TOP, fill=tk.X)
         wi10.pack(side=tk.LEFT)
         wi11.pack(side=tk.LEFT)
 
@@ -87,14 +89,14 @@ class GestionInversion(tk.Frame):
         wr11.pack(side=tk.TOP)
 
         # definición de gráfico ------------------------------------------------------------------------------
-        self.fg0 = Figure(figsize=(4.7, 1.9), dpi=110, layout="tight")
+        self.fg0 = Figure(figsize=(5.0, 2.1), dpi=100, layout="tight")
         ax = self.fg0.add_subplot()
         self.fg0.set_facecolor(self.colors["bgcolor"])
         self.cv0 = FigureCanvasTkAgg(self.fg0, master=wt10)
         self.cv0.draw()
         self.cv0.get_tk_widget().pack(side=tk.TOP)
 
-        self.fg1 = Figure(figsize=(4.7, 1.9), dpi=110, layout="tight")
+        self.fg1 = Figure(figsize=(5.0, 2.1), dpi=100, layout="tight")
         ax = self.fg1.add_subplot()
         self.fg1.set_facecolor(self.colors["bgcolor"])
         self.cv1 = FigureCanvasTkAgg(self.fg1, master=wt11)
@@ -166,8 +168,10 @@ class GestionInversion(tk.Frame):
         self.edit.pack(side=tk.LEFT, fill=tk.X)
 
         # definición treeview extractos --------------------------------------------------------------------------
-        self.extract = ttk.Treeview(win2, columns=self.titulo, height=11, style="TFrame")
-        self.extract.pack(side=tk.LEFT, fill=tk.X)
+        self.extract = ttk.Treeview(
+            win2, columns=self.titulo, height=10, style="TFrame"
+        )
+        self.extract.pack(fill=tk.X, expand=True, padx=3)
 
         self.extract.column("#0", width=92, anchor=tk.E)
         self.extract.heading("#0", text="Extracto")
@@ -177,25 +181,32 @@ class GestionInversion(tk.Frame):
 
         # widget plan de inversión ----------------------------------------------------------------------------------
         self.mpl = [[None] * 10 for _ in range(35)]
-        wx11 = tk.Frame(wr10, bg=self.cgcolor)
-        wx12 = tk.Frame(wr10, bg=self.cgcolor, relief="groove", bd=2)
-
+        wx11 = tk.Frame(wr10, bg=self.bgcolor)
         wx11.grid(row=0, column=0, padx=1, pady=1)
-        wx12.grid(row=1, column=0, padx=5, pady=1)
 
         # widget para visión del plan
         tit = ["Visión", "Deseada", "Actual", "Indicador", "Objetivo"]
-        self.mpl[0][0] = ttk.Button(wx11, text=tit[0], width=17, style="TButton", state="disabled")
-        self.mpl[0][1] = ttk.Button(wx11, text=tit[1], width=15, style="TButton", state="disabled")
-        self.mpl[0][2] = ttk.Button(wx11, text=tit[2], width=15, style="TButton", state="disabled")
-        self.mpl[0][3] = ttk.Button(wx11, text=tit[3], width=15, style="TButton", state="disabled")
-        self.mpl[0][4] = ttk.Button(wx11, text=tit[4], width=54, style="TButton", state="disabled")
+        self.mpl[0][0] = ttk.Button(
+            wx11, text=tit[0], width=17, style="TButton", state="disabled"
+        )
+        self.mpl[0][1] = ttk.Button(
+            wx11, text=tit[1], width=15, style="TButton", state="disabled"
+        )
+        self.mpl[0][2] = ttk.Button(
+            wx11, text=tit[2], width=15, style="TButton", state="disabled"
+        )
+        self.mpl[0][3] = ttk.Button(
+            wx11, text=tit[3], width=15, style="TButton", state="disabled"
+        )
+        self.mpl[0][4] = ttk.Button(
+            wx11, text=tit[4], width=44, style="TButton", state="disabled"
+        )
 
         # texto Objetivo
         self.mpl[0][5] = tk.Text(
             wx11,
             height=5,
-            width=43,
+            width=49,
             font=("Segoe UI", 8),
             wrap="word",
             bg=self.bgcolor,
@@ -212,54 +223,63 @@ class GestionInversion(tk.Frame):
         # localiza cada celda objetivo---------------------------------------------------------------------------------
         for i in range(1, 7):
             for j in range(0, 4):
-                self.mpl[i][j] = ttk.Button(wx11, text=" ".rjust(12), width=14, style="TLabel")
+                self.mpl[i][j] = tk.Label(
+                    wx11,
+                    text=" ".rjust(12),
+                    bg=self.bgcolor,
+                    fg="white",
+                    font=("Courier", 8),
+                    anchor="e",
+                )
                 self.mpl[i][j].grid(row=i, column=j)
 
         self.mpl[4][0] = ttk.Separator(wx11, orient="horizontal", style="G.TSeparator")
-        self.mpl[5][5] = ttk.Button(wx11, text=" divisa USD", style="Cb.TLabel")
-        self.mpl[5][6] = ttk.Button(wx11, text=" Ingresos pasivos", style="Cb.TLabel")
+        self.mpl[5][5] = tk.Label(
+            wx11, text=" divisa USD", bg=self.bgcolor, fg="white", font=("Courier", 8)
+        )
+        self.mpl[5][6] = tk.Label(
+            wx11,
+            text=" Ingresos pasivos",
+            bg=self.bgcolor,
+            fg="white",
+            font=("Courier", 8),
+        )
 
         self.mpl[4][0].grid(row=4, column=1, ipadx=140, columnspa=3)
         self.mpl[5][5].grid(row=5, column=3)
         self.mpl[5][6].grid(row=5, column=4, pady=5)
 
-        trz = [
-            "Meta",
-            "Extracto",
-            "Visión",
-            "Capital Inv.",
-            "Div/año",
-            "Efectividad",
-            "Estatus",
-            "Recompensa",
+        # treeview plan metas ---------------------------------------------------------------------------------
+        _trz_cols = [
+            "meta",
+            "extracto",
+            "vision",
+            "capital",
+            "dividendos",
+            "efectividad",
+            "status",
+            "recompensa",
         ]
-        self.mpl[6][0] = ttk.Button(wx12, text=trz[0], width=12, state="disabled")
-        self.mpl[6][1] = ttk.Button(wx12, text=trz[1], width=11, state="disabled")
-        self.mpl[6][2] = ttk.Button(wx12, text=trz[2], width=13, state="disabled")
-        self.mpl[6][3] = ttk.Button(wx12, text=trz[3], width=13, state="disabled")
-        self.mpl[6][4] = ttk.Button(wx12, text=trz[4], width=13, state="disabled")
-        self.mpl[6][5] = ttk.Button(wx12, text=trz[5], width=13, state="disabled")
-        self.mpl[6][6] = ttk.Button(wx12, text=trz[6], width=13, state="disabled")
-        self.mpl[6][7] = ttk.Button(wx12, text=trz[7], width=21, state="disabled")
-
-        self.mpl[6][0].grid(row=6, column=0, padx=1, pady=1)
-        self.mpl[6][1].grid(row=6, column=1, padx=1, pady=1)
-        self.mpl[6][2].grid(row=6, column=2, padx=1, pady=1)
-        self.mpl[6][3].grid(row=6, column=3, padx=1, pady=1)
-        self.mpl[6][4].grid(row=6, column=4, padx=1, pady=1)
-        self.mpl[6][5].grid(row=6, column=5, padx=1, pady=1)
-        self.mpl[6][6].grid(row=6, column=6, padx=1, pady=1)
-        self.mpl[6][7].grid(row=6, column=7, padx=1, pady=1)
-
-        # localiza cada celda metas---------------------------------------------------------------------------------
-        for i in range(7, 18):
-            for j in range(8):
-                if j in (0, 1, 2, 7):
-                    self.mpl[i][j] = ttk.Button(wx12, text=" ".rjust(12), style="TLabel")
-                else:
-                    self.mpl[i][j] = ttk.Button(wx12, text=" ".rjust(12), style="Cb.TLabel")
-
-                self.mpl[i][j].grid(row=i, column=j)
+        self.tree_plan = ttk.Treeview(
+            wr10, columns=_trz_cols, show="headings", height=11
+        )
+        self.tree_plan.heading("meta", text="Meta", anchor=tk.E)
+        self.tree_plan.heading("extracto", text="Extracto", anchor=tk.E)
+        self.tree_plan.heading("vision", text="Visión", anchor=tk.E)
+        self.tree_plan.heading("capital", text="Capital Inv.", anchor=tk.E)
+        self.tree_plan.heading("dividendos", text="Div/año", anchor=tk.E)
+        self.tree_plan.heading("efectividad", text="Efectividad", anchor=tk.E)
+        self.tree_plan.heading("status", text="Estatus", anchor=tk.W)
+        self.tree_plan.heading("recompensa", text="Recompensa", anchor=tk.W)
+        self.tree_plan.column("meta", width=80, anchor=tk.E)
+        self.tree_plan.column("extracto", width=80, anchor=tk.E)
+        self.tree_plan.column("vision", width=90, anchor=tk.E)
+        self.tree_plan.column("capital", width=90, anchor=tk.E)
+        self.tree_plan.column("dividendos", width=90, anchor=tk.E)
+        self.tree_plan.column("efectividad", width=90, anchor=tk.E)
+        self.tree_plan.column("status", width=100, anchor=tk.W)
+        self.tree_plan.column("recompensa", width=130, anchor=tk.W)
+        self.tree_plan.grid(row=1, column=0, padx=2, pady=1)
 
         # Accesos MySql ----------------------------------------------------------------------------------------------
         self.PlaInversion = PlanInversion()
@@ -273,7 +293,9 @@ class GestionInversion(tk.Frame):
         for sesion in lista:
 
             # rechaza los registros q no aplican como vehiculo de inversión
-            if (sesion["Pinvertir"] is None or sesion["Pinvertir"] == 0) and sesion["fefund"] is None:
+            if (sesion["Pinvertir"] is None or sesion["Pinvertir"] == 0) and sesion[
+                "fefund"
+            ] is None:
                 continue
 
             # toma información clave fiscal Year
@@ -311,7 +333,11 @@ class GestionInversion(tk.Frame):
                             nav_cierre = fila["navcierre"]
                             costo_base = fila["costobase"]
                             ilog = False
-                        marge_neto = (fila["beneficios"] / fila["ingresos"]) if fila["ingresos"] > 0 else 0.0
+                        marge_neto = (
+                            (fila["beneficios"] / fila["ingresos"])
+                            if fila["ingresos"] > 0
+                            else 0.0
+                        )
                         self.extract.insert(
                             parent,
                             tk.END,
@@ -446,7 +472,9 @@ class GestionInversion(tk.Frame):
 
             elif self.type_extract["Stock"] == lista[self.indice % len(lista)]:
                 self.load.config(state="normal")
-                datos, f_datos = self.extractos(account=self.sesion["Stock"]["idcuenta"], periodo=self.year)
+                datos, f_datos = self.extractos(
+                    account=self.sesion["Stock"]["idcuenta"], periodo=self.year
+                )
                 stock = self.extract.insert(
                     "",
                     "end",
@@ -475,7 +503,9 @@ class GestionInversion(tk.Frame):
 
             elif self.type_extract["Crypto"] == lista[self.indice % len(lista)]:
 
-                datos, f_datos = self.extractos(account=self.sesion["Crypto"]["idcuenta"], periodo=self.year)
+                datos, f_datos = self.extractos(
+                    account=self.sesion["Crypto"]["idcuenta"], periodo=self.year
+                )
                 crypto = self.extract.insert(
                     "",
                     "end",
@@ -504,7 +534,9 @@ class GestionInversion(tk.Frame):
 
             elif self.type_extract["BotCrypto"] == lista[self.indice % len(lista)]:
 
-                datos, f_datos = self.extractos(account=self.sesion["BotCrypto"]["idcuenta"], periodo=self.year)
+                datos, f_datos = self.extractos(
+                    account=self.sesion["BotCrypto"]["idcuenta"], periodo=self.year
+                )
                 botcrypto = self.extract.insert(
                     "",
                     "end",
@@ -533,7 +565,9 @@ class GestionInversion(tk.Frame):
 
             elif self.type_extract["BBVA.ARS"] == lista[self.indice % len(lista)]:
 
-                datos, f_datos = self.extractos(account=self.sesion["BBVA.ARS"]["idcuenta"], periodo=self.year)
+                datos, f_datos = self.extractos(
+                    account=self.sesion["BBVA.ARS"]["idcuenta"], periodo=self.year
+                )
                 FCI_bbva = self.extract.insert(
                     "",
                     "end",
@@ -562,7 +596,9 @@ class GestionInversion(tk.Frame):
 
             elif self.type_extract["SANT.ARS"] == lista[self.indice % len(lista)]:
 
-                datos, f_datos = self.extractos(account=self.sesion["SANT.ARS"]["idcuenta"], periodo=self.year)
+                datos, f_datos = self.extractos(
+                    account=self.sesion["SANT.ARS"]["idcuenta"], periodo=self.year
+                )
                 FCI_sant = self.extract.insert(
                     "",
                     "end",
@@ -748,13 +784,17 @@ class GestionInversion(tk.Frame):
                 if i == 0:
                     self.mpl[i + 1][3].config(text="{:>12.1%}".format(key["objetivo"]))
                     self.mpl[5][6].config(
-                        text="{:>6.0f} de Ingresos ({:>5.2%} visión actual)".format(key["indicador"], key["objetivo"])
+                        text="{:>6.0f} de Ingresos ({:>5.2%} visión actual)".format(
+                            key["indicador"], key["objetivo"]
+                        )
                     )
                 else:
                     self.mpl[i + 1][3].config(text="{:>12.1%}".format(key["indicador"]))
 
                 if key["proyecto"] != " ":
-                    self.mpl[0][5].insert(tk.END, str(i) + ") " + key["proyecto"] + "\n")
+                    self.mpl[0][5].insert(
+                        tk.END, str(i) + ") " + key["proyecto"] + "\n"
+                    )
 
             # totaliza y justifica a la derecha
             s_deseada = "{:>,.0f}".format(deseada)
@@ -763,24 +803,30 @@ class GestionInversion(tk.Frame):
             self.mpl[5][2].config(text=s_actual.rjust(13))
 
             if traz:
-                i = 7
+                self.tree_plan.delete(*self.tree_plan.get_children())
                 for tkey in traz:
                     vision = "{:>,.0f}".format(tkey["vision"])
-
-                    self.mpl[i][0].config(text="{:>7n} Año".format(tkey["meta"]))
-                    self.mpl[i][1].config(text="{:%Y-%b}".format(tkey["extracto"]))
-                    self.mpl[i][2].config(text=vision.rjust(12))
+                    cap = div = efe = sta = rec = ""
                     if tkey["costobase"] > 0:
-                        tinversion = "{:>,.1f}".format(tkey["tinversion"])
-                        dividendos = "{:>,.1f}".format(tkey["dividendo"])
-                        efectividad = "{:>+11.1%}".format(tkey["efectividad"])
-
-                        self.mpl[i][3].config(text=tinversion.rjust(12))
-                        self.mpl[i][4].config(text=dividendos.rjust(12))
-                        self.mpl[i][5].config(text=efectividad.rjust(12))
-                        self.mpl[i][6].config(text="{:<11}".format(tkey["status"]))
-                        self.mpl[i][7].config(text="{:<17}".format(tkey["recompensa"]))
-                    i += 1
+                        cap = "{:>,.1f}".format(tkey["tinversion"])
+                        div = "{:>,.1f}".format(tkey["dividendo"])
+                        efe = "{:>+.1%}".format(tkey["efectividad"])
+                        sta = tkey["status"] or ""
+                        rec = tkey["recompensa"] or ""
+                    self.tree_plan.insert(
+                        "",
+                        tk.END,
+                        values=(
+                            "{:>n} Año".format(tkey["meta"]),
+                            "{:%Y-%b}".format(tkey["extracto"]),
+                            vision,
+                            cap,
+                            div,
+                            efe,
+                            sta,
+                            rec,
+                        ),
+                    )
 
                 # redibuja gráfico de plan trazado Neto
                 chart_trazaplan(fg=self.fg0, traza=traz, cchart=self.colors["cchart"])
@@ -806,9 +852,15 @@ class GestionInversion(tk.Frame):
             rnb.grab_set()
             rnb.protocol("WM_DELETE_WINDOW", eexit)
 
-            win1 = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")  # variables riesgos
-            win2 = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")  # variables precio a pagar
-            win3 = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")  # variables precio a pagar
+            win1 = ttk.Frame(
+                rnb, padding=(1, 1, 1, 1), style="C.TFrame"
+            )  # variables riesgos
+            win2 = ttk.Frame(
+                rnb, padding=(1, 1, 1, 1), style="C.TFrame"
+            )  # variables precio a pagar
+            win3 = ttk.Frame(
+                rnb, padding=(1, 1, 1, 1), style="C.TFrame"
+            )  # variables precio a pagar
             wi30 = ttk.Frame(win3, padding=(1, 1, 1, 1), style="C.TFrame")  # botones
             wi31 = ttk.Frame(win3, padding=(1, 1, 1, 1), style="C.TFrame")  # botones
             win4 = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")  # botones
@@ -877,15 +929,21 @@ class GestionInversion(tk.Frame):
                 bg="firebrick4",
                 relief=tk.FLAT,
             )
-            tiempo = ttk.Treeview(wi31, columns=prc[1], show="headings", height=5, style="TFrame")
+            tiempo = ttk.Treeview(
+                wi31, columns=prc[1], show="headings", height=5, style="TFrame"
+            )
             tiempo.heading(prc[1], text=prc[1])
             tiempo.column(prc[1], width=480)
 
-            economico = ttk.Treeview(wi31, columns=prc[2], show="headings", height=5, style="TFrame")
+            economico = ttk.Treeview(
+                wi31, columns=prc[2], show="headings", height=5, style="TFrame"
+            )
             economico.heading(prc[2], text=prc[2])
             economico.column(prc[2], width=480)
 
-            personal = ttk.Treeview(wi31, columns=prc[3], show="headings", height=5, style="TFrame")
+            personal = ttk.Treeview(
+                wi31, columns=prc[3], show="headings", height=5, style="TFrame"
+            )
             personal.heading(prc[3], text=prc[3])
             personal.column(prc[3], width=480)
 
@@ -939,7 +997,9 @@ class GestionInversion(tk.Frame):
     def extractos(self, account=None, periodo=None):
         try:
             if account != "sum*":
-                extracto = self.PlaInversion.select_extracto(account=account, extract="select*")
+                extracto = self.PlaInversion.select_extracto(
+                    account=account, extract="select*"
+                )
             else:
                 extracto = self.PlaInversion.select_extracto(extract="sum*")
 
@@ -952,12 +1012,16 @@ class GestionInversion(tk.Frame):
             datos["extracto"] = pd.to_datetime(datos["extracto"])
             datos.set_index("extracto", inplace=True)
 
-            datos["ingresos"] = datos["crecimiento"] + datos["dividendos"] + datos["idevengo"]
+            datos["ingresos"] = (
+                datos["crecimiento"] + datos["dividendos"] + datos["idevengo"]
+            )
 
             datos["costos"] = datos["perdidas"] + datos["fee"] + datos["comisiones"]
 
             datos["beneficios"] = datos["ingresos"] - datos["costos"]
-            datos["beneficiosNeto"] = datos["beneficios"] - (datos["tax"] + datos["imargen"])
+            datos["beneficiosNeto"] = datos["beneficios"] - (
+                datos["tax"] + datos["imargen"]
+            )
 
             # resume por periodo información de extractos
             f_datos["depositos"] = datos["depositos"].resample(periodo).sum()
@@ -1006,7 +1070,9 @@ class GestionInversion(tk.Frame):
             )
 
         # Obtener desempeño del vehículo
-        performa, iy = self.Perfoma.select_performa_inversion(account=account, vehiculo=vehiculo, accion="all")
+        performa, iy = self.Perfoma.select_performa_inversion(
+            account=account, vehiculo=vehiculo, accion="all"
+        )
 
         # dataframe(): para obtener ingresos, costos y comisiones ------------------------------------------------------------
         datos = pd.DataFrame(book, columns=ix)
@@ -1064,13 +1130,19 @@ class GestionInversion(tk.Frame):
         m_idatos.index = m_idatos.index.strftime("%Y-%m")
 
         # identificar en columnas compras y ventas --------------------------------------------------------------------------
-        datos["depositos"] = datos.apply(lambda rows: rows["producto"] if rows["codigo"] == "O" else 0, axis=1)
-        datos["retiros"] = datos.apply(lambda rows: rows["producto"] if rows["codigo"] == "C" else 0, axis=1)
+        datos["depositos"] = datos.apply(
+            lambda rows: rows["producto"] if rows["codigo"] == "O" else 0, axis=1
+        )
+        datos["retiros"] = datos.apply(
+            lambda rows: rows["producto"] if rows["codigo"] == "C" else 0, axis=1
+        )
         datos["perdidas"] = datos.apply(
             lambda rows: -rows["gprealizadas"] if rows["gprealizadas"] < 0 else 0,
             axis=1,
         )
-        datos["crecimiento"] = datos.apply(lambda rows: rows["gprealizadas"] if rows["gprealizadas"] > 0 else 0, axis=1)
+        datos["crecimiento"] = datos.apply(
+            lambda rows: rows["gprealizadas"] if rows["gprealizadas"] > 0 else 0, axis=1
+        )
         datos["costos"] = datos["perdidas"] + datos["tarifacomision"]
         datos["beneficios"] = datos["crecimiento"] - datos["costos"]
         datos["comisiones"] = datos["tarifacomision"]
@@ -1142,7 +1214,9 @@ class GestionInversion(tk.Frame):
             )
 
         # Obtener desempeño del vehículo
-        performa, iy = self.Perfoma.select_performa_inversion(account=account, vehiculo=vehiculo, accion="all")
+        performa, iy = self.Perfoma.select_performa_inversion(
+            account=account, vehiculo=vehiculo, accion="all"
+        )
 
         # dataframe(): para obtener ingresos, costos y comisiones
         datos = pd.DataFrame(book, columns=ix)
@@ -1199,13 +1273,19 @@ class GestionInversion(tk.Frame):
         m_idatos.index = m_idatos.index.strftime("%Y-%m")
 
         # identificar en columnas compras y ventas
-        datos["depositos"] = datos.apply(lambda rows: rows["producto"] if rows["codigo"] == "O" else 0, axis=1)
-        datos["retiros"] = datos.apply(lambda rows: rows["producto"] if rows["codigo"] == "C" else 0, axis=1)
+        datos["depositos"] = datos.apply(
+            lambda rows: rows["producto"] if rows["codigo"] == "O" else 0, axis=1
+        )
+        datos["retiros"] = datos.apply(
+            lambda rows: rows["producto"] if rows["codigo"] == "C" else 0, axis=1
+        )
         datos["perdidas"] = datos.apply(
             lambda rows: -rows["gprealizadas"] if rows["gprealizadas"] < 0 else 0,
             axis=1,
         )
-        datos["crecimiento"] = datos.apply(lambda rows: rows["gprealizadas"] if rows["gprealizadas"] > 0 else 0, axis=1)
+        datos["crecimiento"] = datos.apply(
+            lambda rows: rows["gprealizadas"] if rows["gprealizadas"] > 0 else 0, axis=1
+        )
         datos["costos"] = datos["perdidas"] + datos["tarifacomision"]
         datos["beneficios"] = datos["crecimiento"] - datos["costos"]
         datos["comisiones"] = datos["tarifacomision"]
@@ -1257,10 +1337,14 @@ class GestionInversion(tk.Frame):
     # construye extracto de FCI en ARS
     def construir_extracto_fci(self, account=None, desde=None, hasta=None, insert=True):
 
-        book, ix = self.RepositorioOportunidades.select_booktrading(accion="cartera", account=account, idivisa="ARS")
+        book, ix = self.RepositorioOportunidades.select_booktrading(
+            accion="cartera", account=account, idivisa="ARS"
+        )
 
         # Obtener desempeño del vehículo
-        performa, iy = self.Perfoma.select_performa_inversion(account="U4214563", vehiculo="Stock", accion="all")
+        performa, iy = self.Perfoma.select_performa_inversion(
+            account="U4214563", vehiculo="Stock", accion="all"
+        )
 
         # dataframe(): para obtener ingresos, costos y comisiones ------------------------------------------------------------
         datos = pd.DataFrame(book, columns=ix)
@@ -1319,24 +1403,40 @@ class GestionInversion(tk.Frame):
 
         # identificar en columnas compras y ventas ---------------------------------------------------------------------
         datos["depositos"] = datos.apply(
-            lambda rows: (rows["producto"] / rows["factor_cambio"] if rows["codigo"] == "O" else 0),
+            lambda rows: (
+                rows["producto"] / rows["factor_cambio"] if rows["codigo"] == "O" else 0
+            ),
             axis=1,
         )
         datos["retiros"] = datos.apply(
-            lambda rows: (rows["producto"] / rows["factor_cambio"] if rows["codigo"] == "C" else 0),
+            lambda rows: (
+                rows["producto"] / rows["factor_cambio"] if rows["codigo"] == "C" else 0
+            ),
             axis=1,
         )
         datos["perdidas"] = datos.apply(
-            lambda rows: (-rows["gprealizadas"] / rows["factor_cambio"] if rows["gprealizadas"] < 0 else 0),
+            lambda rows: (
+                -rows["gprealizadas"] / rows["factor_cambio"]
+                if rows["gprealizadas"] < 0
+                else 0
+            ),
             axis=1,
         )
         datos["crecimiento"] = datos.apply(
-            lambda rows: (rows["gprealizadas"] / rows["factor_cambio"] if rows["gprealizadas"] >= 0 else 0),
+            lambda rows: (
+                rows["gprealizadas"] / rows["factor_cambio"]
+                if rows["gprealizadas"] >= 0
+                else 0
+            ),
             axis=1,
         )
 
         datos["gprealizadas"] = datos.apply(
-            lambda rows: (rows["gprealizadas"] / rows["factor_cambio"] if rows["gprealizadas"] >= 0 else 0),
+            lambda rows: (
+                rows["gprealizadas"] / rows["factor_cambio"]
+                if rows["gprealizadas"] >= 0
+                else 0
+            ),
             axis=1,
         )
 
@@ -1366,7 +1466,9 @@ class GestionInversion(tk.Frame):
         resumen.index = pd.to_datetime(resumen.index)
 
         # se construye saldo al final de cada mes
-        resumen["navcierre"] = resumen["costo_base"] + resumen["beneficios"] - resumen["costos"]
+        resumen["navcierre"] = (
+            resumen["costo_base"] + resumen["beneficios"] - resumen["costos"]
+        )
 
         # deja como fin de mes las fechas Dataframe
         resumen.index = resumen.index + pd.offsets.MonthEnd(0)
@@ -1451,7 +1553,9 @@ class GestionInversion(tk.Frame):
                 # actualiza años anteriores --------------------------------
                 if i_traza["extracto"] == s_extracto["extracto"]:
 
-                    efectividad = (s_extracto["costobase"] - i_traza["vision"]) / i_traza["vision"]
+                    efectividad = (
+                        s_extracto["costobase"] - i_traza["vision"]
+                    ) / i_traza["vision"]
                     rendimiento = beneficios / s_extracto["costobase"]
 
                     values = {
@@ -1479,7 +1583,9 @@ class GestionInversion(tk.Frame):
                         0.0,
                         0.0,
                     )
-                    self.PlaInversion.update_trazaplan_inversion(idcuenta=account, meta=i_traza["meta"], values=values)
+                    self.PlaInversion.update_trazaplan_inversion(
+                        idcuenta=account, meta=i_traza["meta"], values=values
+                    )
 
                     # logica para comenzar proximo año fiscal
                     # validar en julio 2026
@@ -1492,7 +1598,9 @@ class GestionInversion(tk.Frame):
                         "status": "Ejecucion",
                     }
                     proxima = i_traza["meta"] + 1
-                    self.PlaInversion.update_trazaplan_inversion(idcuenta=account, meta=proxima, values=values)
+                    self.PlaInversion.update_trazaplan_inversion(
+                        idcuenta=account, meta=proxima, values=values
+                    )
 
                     eof_ibook, i_traza = next(ibook, (None, None))
                     eof_sbook, s_extracto = next(sbook, (None, None))
@@ -1518,11 +1626,15 @@ class GestionInversion(tk.Frame):
                         "efectividad": efectividad,
                         "trendimiento": rendimiento,
                     }
-                    self.PlaInversion.update_trazaplan_inversion(idcuenta=account, meta=i_traza["meta"], values=values)
+                    self.PlaInversion.update_trazaplan_inversion(
+                        idcuenta=account, meta=i_traza["meta"], values=values
+                    )
 
                     # actualiza vision financiera actual sobre tabla plan
                     campos = {"Financiera": costobase}
-                    self.PlaInversion.update_plan_inversion(idcuenta=account, vision="actual", values=campos)
+                    self.PlaInversion.update_plan_inversion(
+                        idcuenta=account, vision="actual", values=campos
+                    )
         except Exception as e:
             print(f"update_plan(): {e} {traceback.print_exc()}")
 
@@ -1540,8 +1652,14 @@ class GestionInversion(tk.Frame):
                 contribucion = int(entry_contribucion.get())
 
                 # Validar que los valores sean mayores o iguales a 1000
-                if vision_financiera < 1000 or estilo_vida < 1000 or contribucion < 1000:
-                    MyMessageBox(self.root).showerror("Error", "Todos los valores deben ser enteros de al menos 1000.")
+                if (
+                    vision_financiera < 1000
+                    or estilo_vida < 1000
+                    or contribucion < 1000
+                ):
+                    MyMessageBox(self.root).showerror(
+                        "Error", "Todos los valores deben ser enteros de al menos 1000."
+                    )
                     return
 
                 campos = {
@@ -1559,7 +1677,9 @@ class GestionInversion(tk.Frame):
                 self.widgets_plan()
 
             except ValueError:
-                MyMessageBox.showerror("Error", "Todos los valores deben ser números enteros válidos.")
+                MyMessageBox.showerror(
+                    "Error", "Todos los valores deben ser números enteros válidos."
+                )
 
         try:
             rnb = tk.Toplevel()
@@ -1575,7 +1695,9 @@ class GestionInversion(tk.Frame):
             rnb.protocol("WM_DELETE_WINDOW", eexit)
 
             # Etiquetas y entradas
-            vision = tk.Label(rnb, text="Visión financiera (mínimo 1000 $USD):", bg=self.bgcolor)
+            vision = tk.Label(
+                rnb, text="Visión financiera (mínimo 1000 $USD):", bg=self.bgcolor
+            )
             vision.grid(row=0, column=0, padx=10, pady=7, sticky=E)
             vision_str = tk.StringVar()
             vision_str.set(str(self.plan["Financiera"]))
@@ -1583,7 +1705,9 @@ class GestionInversion(tk.Frame):
             entry_vision = tk.Entry(rnb, textvariable=vision_str)
             entry_vision.grid(row=0, column=1, padx=10, pady=5)
 
-            estilo = tk.Label(rnb, text="Estilo de vida (mínimo 1000 $USD):", bg=self.bgcolor)
+            estilo = tk.Label(
+                rnb, text="Estilo de vida (mínimo 1000 $USD):", bg=self.bgcolor
+            )
             estilo.grid(row=1, column=0, padx=10, pady=5, sticky=E)
             estilo_str = tk.StringVar()
             estilo_str.set(str(self.plan["Estilo de vida"]))
@@ -1591,7 +1715,9 @@ class GestionInversion(tk.Frame):
             entry_estilo = tk.Entry(rnb, textvariable=estilo_str)
             entry_estilo.grid(row=1, column=1, padx=10, pady=5)
 
-            contrib = tk.Label(rnb, text="Contribución (mínimo 1000 $USD):", bg=self.bgcolor)
+            contrib = tk.Label(
+                rnb, text="Contribución (mínimo 1000 $USD):", bg=self.bgcolor
+            )
             contrib.grid(row=2, column=0, padx=10, pady=5, sticky=E)
 
             contrib_str = tk.StringVar()
@@ -1621,7 +1747,9 @@ class GestionInversion(tk.Frame):
             ct1.grid(row=3, column=3, padx=10, pady=10)
             ct2.grid(row=3, column=4, padx=10, pady=10)
         except ValueError:
-            raise ValueError("Error: {}".format("los valores deben ser números enteros."))
+            raise ValueError(
+                "Error: {}".format("los valores deben ser números enteros.")
+            )
 
     # asegura que esté completo performance crypto para crear extracto
     def check_performance_vehiculo(self, vehiculo=None, account=None, extracto=None):
@@ -1648,7 +1776,9 @@ class GestionInversion(tk.Frame):
             last = hoy - timedelta(days=dias)
             sesion = self.PlaInversion.get_sesion_by_vehiculo(principal=True)
 
-            d_extract, ilog = cagar_archivo(account=sesion["idcuenta"], titulo="Activity Statement", tipo="csv")
+            d_extract, ilog = cagar_archivo(
+                account=sesion["idcuenta"], titulo="Activity Statement", tipo="csv"
+            )
 
             if not ilog:
                 return
@@ -1694,7 +1824,9 @@ class GestionInversion(tk.Frame):
         sesion = self.PlaInversion.get_sesion_by_vehiculo(principal=True)
 
         # get last date extract
-        lastExtracto = self.PlaInversion.select_extracto(account=sesion["idcuenta"], extract="last")
+        lastExtracto = self.PlaInversion.select_extracto(
+            account=sesion["idcuenta"], extract="last"
+        )
 
         hoy = datetime.now()
         dias = hoy.day
@@ -1747,7 +1879,9 @@ class GestionInversion(tk.Frame):
             try:
                 # asegura tomar datos de sesion principal
                 sesion = self.PlaInversion.get_sesion_by_vehiculo(principal=True)
-                a_extracto = self.PlaInversion.select_extracto(account=sesion["idcuenta"], extract="last")
+                a_extracto = self.PlaInversion.select_extracto(
+                    account=sesion["idcuenta"], extract="last"
+                )
 
                 if a_extracto[0]["extracto"] == self.d_extract["extracto"].date():
 
@@ -1756,11 +1890,15 @@ class GestionInversion(tk.Frame):
 
                     # actualiza tabla de plan cuando cierra el año fiscal ---------------------------------------------
                     if self.d_extract["extracto"].month == sesion["fiscalYear"].month:
-                        self.update_plan(account=sesion["idcuenta"], condicion="Cumplido")
+                        self.update_plan(
+                            account=sesion["idcuenta"], condicion="Cumplido"
+                        )
                     else:
                         self.update_plan(account=sesion["idcuenta"], condicion=None)
 
-                    MyMessageBox(self.root).showwarning("Add", "Cargados exitosamente los Extracto")
+                    MyMessageBox(self.root).showwarning(
+                        "Add", "Cargados exitosamente los Extracto"
+                    )
 
                 else:
                     idcuenta = a_extracto[0]["idcuenta"]
@@ -1781,7 +1919,9 @@ class GestionInversion(tk.Frame):
 
                     # chequea si extrato fue cargado
                     if sesion["load_csv"]:
-                        a_extracto = self.PlaInversion.select_extracto(account=sesion["idcuenta"], extract="last")
+                        a_extracto = self.PlaInversion.select_extracto(
+                            account=sesion["idcuenta"], extract="last"
+                        )
                         if a_extracto[0]["extracto"] != last.date():
                             msj = (
                                 f"Debe realizar load CSV de extracto para {classActivo} al ["
@@ -1878,7 +2018,9 @@ if __name__ == "__main__":
     win.geometry(dimension)
     win.config(bg=colors["bgcolor"])
     style = ttk.Style(win)
-    style.configure("TFrame", font=("Segoe UI", 8), foreground="white", background="black")
+    style.configure(
+        "TFrame", font=("Segoe UI", 8), foreground="white", background="black"
+    )
     dpn = ttk.Frame(win, style="TFrame", width=colors["df"], height=700)
     dpn.pack()
 

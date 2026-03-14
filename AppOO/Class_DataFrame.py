@@ -2058,7 +2058,7 @@ def get_dividends(account=None, vehiculo=None):
 
                 # calcula la cantidad de pagos - filtrar cadenas vacías
                 distribuir = [s.strip() for s in a_meses if s.strip()]
-                rata = div / len(distribuir) if len(distribuir) > 0 else last
+                rata = (div / len(distribuir)) if (div is not None and len(distribuir) > 0) else (last or 0)
 
                 # asume pago de dividends son iguales
                 for i, mes in enumerate(distribuir):
@@ -2084,7 +2084,7 @@ def get_dividends(account=None, vehiculo=None):
         return datos, d_dividends, ValueMarket
     except Exception as error:
         print("get_dividends(): {}".format(error))
-        return None, None
+        return None, None, 0
 
 
 # Gráfica Diversificación vs. pago dividendos

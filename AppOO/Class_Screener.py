@@ -20,8 +20,10 @@ from Modulos_python import (
     requests,
     UserAgent,
     ThreadPoolExecutor,
+    logging,
 )
 
+_logger = logging.getLogger("Screener")
 
 def _yahoo_session():
     """Obtiene cookie + crumb para autenticar requests a Yahoo Finance.
@@ -44,15 +46,15 @@ def _yahoo_session():
             if r.ok and r.text.strip():
                 crumb = r.text.strip()
                 break
-            print(f"  [yahoo_session] intento {attempt + 1}: crumb vacío (HTTP {r.status_code})")
+            _logger.warning(f"[yahoo_session] intento {attempt + 1}: crumb vacío (HTTP {r.status_code})")
             time.sleep(2)
         except Exception as e:
-            print(f"  [yahoo_session] intento {attempt + 1} error: {e}")
+            _logger.warning(f"[yahoo_session] intento {attempt + 1} error: {e}")
             time.sleep(2)
     # Actualizar Accept a JSON para las llamadas API
     session.headers.update({"Accept": "application/json"})
     if not crumb:
-        print("  [yahoo_session] WARN: crumb no obtenido — las requests pueden devolver 401")
+        _logger.error("[yahoo_session] crumb no obtenido — las requests pueden devolver 401")
     return session, crumb
 
 
@@ -277,6 +279,11 @@ class Screener(tk.Frame):
                 column_alignments=col_align,
                 show_headings=True,
             )
+
+            # Los tk.Frame internos de CustomTreeview no heredan ttk styles — forzar bg negro
+            self.ctree_widget.master.configure(bg="black")
+            self.ctree_widget.heard.configure(bg="black")
+            self.ctree_widget.right.configure(bg="black")
 
             # Sobrescribir heading text y anchor (CustomTreeview pone text=col_id por defecto)
             # También fijar stretch=NO para que el scrollbar horizontal funcione

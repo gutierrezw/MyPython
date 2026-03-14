@@ -2477,6 +2477,7 @@ class BotCryptoUI:
         self.scoring_tree.tag_configure("Fuera Ctx", foreground="orange")
         self.scoring_tree.tag_configure("Lateral", foreground="#FF69B4")  # rosa/pink
         self.scoring_tree.tag_configure("MomDebil", foreground="#DDA0DD")  # plum/lila
+        self.scoring_tree.tag_configure("Activo", foreground="cyan")
 
     # =========================================
     # CANVAS SCROLLABLE
@@ -3175,8 +3176,24 @@ class BotCryptoUI:
             )
 
             activos_activos = set(self.bots.keys())
+
+            # Primero: bots con posición abierta (al tope, en cyan)
+            for sym in sorted(activos_activos):
+                bot = self.bots.get(sym)
+                if bot is None:
+                    continue
+                position = bot.state.get("position", "NONE")
+                ctx_ok = getattr(bot, "contexto_ok", None)
+                ctx_icon = "OK" if ctx_ok is True else ("?" if ctx_ok is None else "NO")
+                self.scoring_tree.insert(
+                    "",
+                    "end",
+                    values=(sym, "-", "ACTIVO", ctx_icon, "-", "-", position),
+                    tags=("Activo",),
+                )
+
+            # Luego: símbolos en observación (sin bot activo)
             for sym, scoring in ranked:
-                # Solo mostrar activos en observación (no los que tienen bot activo)
                 if sym in activos_activos:
                     continue
 
@@ -3371,10 +3388,11 @@ class BotCryptoUI:
                 },
             }
 
-            self._contexto_cache[symbol] = {"timestamp": now, "resultado": resultado}
             self.logger.info(
-                f"CONTEXTO {symbol} [{superior_interval}]: {condiciones}/4 → {'OK' if contexto_ok else 'FUERA'} | EMA200={ctx_ema200:.4f}"
+                f"CONTEXTO {symbol} [{superior_interval}]: {condiciones}/3 → {'OK' if contexto_ok else 'FUERA'} | "
+                f"EMA20={ctx_ema20:.6f} EMA50={ctx_ema50:.6f} price={ctx_price:.6f}"
             )
+            self._contexto_cache[symbol] = {"timestamp": now, "resultado": resultado}
             return resultado
 
         except Exception as e:
@@ -4129,15 +4147,36 @@ class BotCryptoUI:
 
     def _on_delete_symbol(self, symbol):
         """Detiene bot y quita widget. El símbolo permanece en otros_activos (dominio de rotación)."""
-        respuesta = MyMessageBox(self.right).askquestion(
-            "Quitar símbolo",
-            f"¿Quitar {symbol} del panel activo?\n\nEl bot se detendrá. El símbolo seguirá en observación para rotación.",
-        )
+        bot = self.bots.get(symbol)
+        tiene_posicion = bot is not None and bot.state.get("position") == "LONG"
+
+        if tiene_posicion:
+            respuesta = MyMessageBox(self.right).askquestion(
+                "Quitar símbolo",
+                f"¿Quitar {symbol} del panel activo?\n\n"
+                f"HAY UNA POSICIÓN LONG ABIERTA.\n"
+                f"Se cancelará el SL y se ejecutará MARKET SELL.",
+            )
+        else:
+            respuesta = MyMessageBox(self.right).askquestion(
+                "Quitar símbolo",
+                f"¿Quitar {symbol} del panel activo?\n\nEl bot se detendrá. El símbolo seguirá en observación para rotación.",
+            )
         if respuesta != "yes":
             return
 
         try:
-            # 1. Detener bot
+            # 1. Cerrar posición si existe (cancel SL + market sell)
+            if tiene_posicion and self.bot_manager:
+                def _cerrar_posicion():
+                    try:
+                        self.bot_manager._execute_exit(bot, reason="MANUAL")
+                        self.logger.warning(f"X {symbol}: Posición cerrada (MANUAL)")
+                    except Exception as e:
+                        self.logger.error(f"X {symbol}: Error cerrando posición: {e}")
+                threading.Thread(target=_cerrar_posicion, daemon=True).start()
+
+            # 2. Detener bot
             if symbol in self.bots:
                 del self.bots[symbol]
                 self.logger.info(f"{symbol}: Bot detenido")
@@ -4519,9 +4558,9 @@ class BotCryptoUI:
 
         cerradas = 0
         errores = 0
+        items_data = [(item, tree.item(item, "values")) for item in items if tree.exists(item)]
 
-        for item in items:
-            values = tree.item(item, "values")
+        for item, values in items_data:
             symbol = values[0]
 
             try:
