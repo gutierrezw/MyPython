@@ -391,7 +391,7 @@ class ArsFondosInversion(tk.Frame):
                     )
 
                     # valida que position sea mayor que el umbral
-                    if abs(last_trader[0]["stock"]) > 0.01:
+                    if last_trader and abs(last_trader[0]["stock"]) > 0.01:
                         datos = self.struct_positions_fci(
                             account=account, ticket=symbol, positions=in_positions, last=last_trader
                         )

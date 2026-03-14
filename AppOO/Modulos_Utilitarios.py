@@ -723,6 +723,7 @@ def style_app(main=None) -> object:
     @return: configura colores y style de la aplicación
     """
     style = ttk.Style(main)
+    style.theme_use("clam")  # 'clam' respeta fieldbackground en Treeview — el tema nativo de Windows lo ignora
 
     # TFrame
     style.configure("TFrame", font=("Courier", 8), foreground="white", background="black")
@@ -738,6 +739,12 @@ def style_app(main=None) -> object:
     style.configure("R.TFrame", font=("Courier", 8), background="red")
 
     # Button
+    style.configure("TButton", background="gray30", foreground="white", font=("Courier", 8), padding=0)
+    style.map(
+        "TButton",
+        background=[("disabled", "gray30"), ("active", "gray50")],
+        foreground=[("disabled", "white")],
+    )
     style.configure("W.TButton", foreground="white")
     style.configure("B.TButton", foreground="black")
     style.configure("C.TButton", background="DarkCyan", foreground="black")
@@ -756,6 +763,9 @@ def style_app(main=None) -> object:
     # TLabel
     style.configure("TLabel", font=("Courier", 8), foreground="white", background="black")
     style.configure("C.TLabel", font=("Courier", 8), foreground="white", background="DarkCyan")
+    style.configure("Cb.TLabel", font=("Courier", 8), foreground="black", background="DarkCyan")
+    style.configure("Cw.TLabel", font=("Courier", 8), foreground="white", background="black")
+    style.configure("Sy.TLabel", font=("Courier", 8), foreground="black", background="Silver")
     style.configure("Br.TLabel", font=("Courier", 8), foreground="black", background="red3")
     style.configure("Bg.TLabel", font=("Courier", 8), foreground="black", background="green2")
     style.configure("Wr.TLabel", font=("Courier", 8), foreground="White", background="firebrick4")
@@ -785,6 +795,10 @@ def style_app(main=None) -> object:
         foreground=[("selected", "black")],
     )
 
+    # Treeview.Heading
+    style.configure("Treeview.Heading", background="gray30", foreground="white", font=("Courier", 8), relief="flat")
+    style.map("Treeview.Heading", background=[("active", "gray40")])
+
     # B.Heading
     style.configure("B.Heading", font=("Arial", 10, "bold"), background="blue", foreground="white")
 
@@ -792,6 +806,20 @@ def style_app(main=None) -> object:
     style.configure("R.Heading", font=("Arial", 10, "bold"), background="red", foreground="white")
     # G.Heading
     style.configure("G.Heading", font=("Arial", 10, "bold"), background="green", foreground="white")
+
+    # TCombobox
+    style.configure("TCombobox", fieldbackground="black", background="DarkCyan", foreground="white", selectbackground="DarkCyan", selectforeground="black")
+    style.map(
+        "TCombobox",
+        fieldbackground=[("readonly", "black")],
+        background=[("readonly", "DarkCyan")],
+        foreground=[("readonly", "white")],
+        selectbackground=[("readonly", "DarkCyan")],
+        selectforeground=[("readonly", "black")],
+    )
+
+    # TEntry
+    style.configure("TEntry", fieldbackground="black", foreground="white", insertcolor="white")
 
     # (TRadiobutton)
     style.configure("C.TRadiobutton", background="DarkCyan", foreground="black", font=("Courier", 8))

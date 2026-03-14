@@ -2917,15 +2917,15 @@ class DashMain:
                 (market, ix) = self.Market.select(account="U4214563", symbol=symbol)
 
                 if market:
-                    last = market[0][ix.index("lastDividendValue")]
+                    last = market[0][ix.index("lastDividendValue")] or 0
+                    trallingAnual = market[0][ix.index("trailingAnnualDividendRate")] or 0
 
                     div = 0
-                    if market[0][ix.index("trailingAnnualDividendRate")] > 0:
-                        div = market[0][ix.index("dividendRate")]
+                    if trallingAnual > 0:
+                        div = market[0][ix.index("dividendRate")] or 0
 
                     string = market[0][ix.index("monthDividendsPay")]
                     fecha = market[0][ix.index("exDividendDate")]
-                    trallingAnual = market[0][ix.index("trailingAnnualDividendRate", 0)]
 
                     exdiv = fecha.strftime("%d-%b") if fecha and fecha.month == date else " "
                     avgcost = position["costobase"] / position["position"]
@@ -2935,7 +2935,7 @@ class DashMain:
 
                     # calcula la cantidad de pagos - filtrar cadenas vacías
                     distribuir = [s.strip()[:3] for s in a_meses if s.strip()]
-                    rata = div / len(distribuir) if len(distribuir) > 0 else last
+                    rata = (div / len(distribuir)) if (div and len(distribuir) > 0) else last
 
                     # asume pago de dividends son iguales
                     for i, mes in enumerate(distribuir):
@@ -2972,15 +2972,15 @@ class DashMain:
 
                 exdiv, rend, dividends = "", 0.0, [0] * 12
                 if market:
-                    last = market[0][ix.index("lastDividendValue")]
+                    last = market[0][ix.index("lastDividendValue")] or 0
+                    trallingAnual = market[0][ix.index("trailingAnnualDividendRate")] or 0
 
                     div = 0
-                    if market[0][ix.index("trailingAnnualDividendRate")] > 0:
-                        div = market[0][ix.index("dividendRate")]
+                    if trallingAnual > 0:
+                        div = market[0][ix.index("dividendRate")] or 0
 
                     string = market[0][ix.index("monthDividendsPay")]
                     fecha = market[0][ix.index("exDividendDate")]
-                    trallingAnual = market[0][ix.index("trailingAnnualDividendRate", 0)]
 
                     exdiv = fecha.strftime("%d-%b") if fecha and fecha.month == date else " "
                     avgcost = position["costobase"] / position["position"]
@@ -2991,7 +2991,7 @@ class DashMain:
 
                         # calcula la cantidad de pagos - filtrar cadenas vacías
                         distribuir = [s.strip()[:3] for s in a_meses if s.strip()]
-                        rata = div / len(distribuir) if len(distribuir) > 0 else last
+                        rata = (div / len(distribuir)) if (div and len(distribuir) > 0) else last
 
                         # asume pago de dividends son iguales
                         for i, mes in enumerate(distribuir):
