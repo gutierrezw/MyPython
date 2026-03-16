@@ -341,6 +341,10 @@ class Debugging:
         self.logger["Screener"].setLevel(logging.WARNING)
 
         # manager logging
+        self.logger.update({"InstitucionalScore": logging.getLogger("InstitucionalScore")})
+        self.logger["InstitucionalScore"].setLevel(logging.WARNING)
+
+        # manager logging
         self.logger.update({"ClassAgenteIA": logging.getLogger("ClassAgenteIA")})
         self.logger["ClassAgenteIA"].setLevel(logging.WARNING)
 

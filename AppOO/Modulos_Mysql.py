@@ -1208,41 +1208,40 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql::insert_market()]: {}".format(error))
 
-    def update(self, upd=None, val=None, symbol=None):
+    def update(self, upd=None, val=None, symbol=None, account=None):
         """
-        @param upd:  list() de campos para insertar en market
-        @param val:  list() de valores que acompañan a upd
-        @param symbol: symbol o ticket que se inserta en market
-        @return:  Agrega fila a partir de symbol y campos pasados como parameter
+        @param upd:     list() de campos para actualizar en market
+        @param val:     list() de valores que acompañan a upd
+        @param symbol:  symbol que se actualiza en market
+        @param account: filtra por account si se provee
+        @return:  True si se afectó al menos una fila, False en caso contrario
         """
         try:
             conn = self._conectar(tabla="update.market")
             cursor = conn.cursor()
             listvalues = []
-            cursor.execute("SELECT MAX(id) FROM market")
-            row = cursor.fetchone()
             qry = "UPDATE market SET "
 
             for i, value in enumerate(val):
                 if upd[i] in ("sector", "country"):
-                    if value == "None":
-                        listvalues.append("SV")
-                    else:
-                        listvalues.append(value)
+                    listvalues.append("SV" if value == "None" else value)
                 else:
                     listvalues.append(value)
-
-                # Usar %s sin comillas - el driver de MySQL maneja el tipo correcto
                 qry = qry + upd[i] + "=%s,"
 
             listvalues.append(datetime.now())
             listvalues.append(symbol)
-            valuesins = tuple(listvalues)
-            qry += "timestamp=%s WHERE symbol=%s;"
-            cursor.execute(qry, valuesins)  # Usar parametrización segura
+            qry += "timestamp=%s WHERE symbol=%s"
+            if account:
+                qry += " AND account=%s"
+                listvalues.append(account)
+            qry += ";"
+            cursor.execute(qry, tuple(listvalues))
             conn.commit()
+            return cursor.rowcount > 0
         except (Exception, EncodingWarning, connect.Error) as error:
-            print("[Mysql::insert_market()]: {}".format(error))
+            print("[Mysql::update()]: {}".format(error))
+            return False
 
     def load_symbols(self, account):
         conn = self._conectar(tabla="select.market")
@@ -1265,6 +1264,283 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             conn.close()
         except (Exception, connect.Error) as error:
             print(f"[Mysql::delete_market({symbol})]: {error}")
+
+    def select_top_marketcap(self, account, top_n=200) -> list:
+        """Retorna lista de symbols ordenados por marketCap DESC, limitados a top_n.
+        Excluye categoriaActivo I/S/X y símbolos sin marketCap."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT symbol FROM market WHERE account = %s AND marketCap IS NOT NULL "
+                "AND categoriaActivo NOT IN ('I', 'S', 'X') ORDER BY marketCap DESC LIMIT %s",
+                (account, top_n),
+            )
+            return [row[0] for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::select_top_marketcap()]: {error}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
+
+    def get_cusip_map(self, account: str) -> dict:
+        """Retorna {cusip: symbol} para todos los símbolos con cusip en market."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT cusip, symbol FROM market WHERE cusip IS NOT NULL AND account = %s", (account,))
+            return {row[0]: row[1] for row in cursor.fetchall()}
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::get_cusip_map()]: {error}")
+            return {}
+        finally:
+            cursor.close()
+            conn.close()
+
+    def update_market_cusip(self, symbol: str, account: str, cusip: str) -> None:
+        """Actualiza el campo cusip en market para un símbolo."""
+        conn = self._conectar(tabla="update.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "UPDATE market SET cusip = %s WHERE symbol = %s AND account = %s",
+                (cusip, symbol, account),
+            )
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::update_market_cusip({symbol})]: {error}")
+        finally:
+            cursor.close()
+            conn.close()
+
+    def upsert_fund(self, fund_name: str, frequency: int) -> None:
+        """INSERT o UPDATE en tabla funds. Actualiza frecuencia si el fondo ya existe."""
+        conn = self._conectar(tabla="update.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT id FROM funds WHERE fund_name = %s", (fund_name[:200],))
+            row = cursor.fetchone()
+            if row:
+                cursor.execute(
+                    "UPDATE funds SET frequency = %s, last_update = NOW() WHERE id = %s",
+                    (frequency, row[0]),
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO funds (fund_name, frequency, last_update) VALUES (%s, %s, NOW())",
+                    (fund_name[:200], frequency),
+                )
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::upsert_fund({fund_name})]: {error}")
+        finally:
+            cursor.close()
+            conn.close()
+
+    def load_top_funds_with_cik(self, top_n: int = 50) -> list:
+        """Retorna lista de (fund_name, cik) con CIK asignado, ordenados por frecuencia desc."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT fund_name, cik FROM funds WHERE cik IS NOT NULL ORDER BY frequency DESC LIMIT %s",
+                (top_n,),
+            )
+            return cursor.fetchall()
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::load_top_funds_with_cik()]: {error}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
+    def get_fund_id_by_cik(self, cik: str) -> int | None:
+        """Retorna el id del fondo en tabla funds dado su CIK."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT id FROM funds WHERE cik = %s", (cik,))
+            row = cursor.fetchone()
+            return row[0] if row else None
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::get_fund_id_by_cik({cik})]: {error}")
+            return None
+        finally:
+            cursor.close()
+            conn.close()
+
+    def insert_stock_from_13f(self, symbol: str, name: str, account: str) -> bool:
+        """Inserta un nuevo stock descubierto vía 13F en market (categoriaActivo=N).
+        Filtra: máx 5 chars, sin espacios ni dígitos — descarta bonos, preferreds, ETFs compuestos."""
+        if len(symbol) > 5 or not symbol.isalpha():
+            return False
+        conn = self._conectar(tabla="update.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT id FROM market WHERE symbol = %s AND account = %s", (symbol, account)
+            )
+            if cursor.fetchone():
+                return False
+            cursor.execute(
+                "INSERT INTO market (symbol, shortName, account, categoriaActivo) VALUES (%s, %s, %s, 'T')",
+                (symbol[:20], name[:200], account),
+            )
+            conn.commit()
+            return True
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::insert_stock_from_13f({symbol})]: {error}")
+            return False
+        finally:
+            cursor.close()
+            conn.close()
+
+    def load_funds_without_cik(self) -> list:
+        """Retorna lista de fund_names sin CIK asignado, ordenados por frecuencia desc."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT fund_name FROM funds WHERE cik IS NULL OR cik = '' ORDER BY frequency DESC")
+            return [row[0] for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::load_funds_without_cik()]: {error}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
+    def update_fund_cik(self, fund_name: str, cik: str) -> None:
+        """Actualiza el CIK de un fondo en tabla funds."""
+        conn = self._conectar(tabla="update.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("UPDATE funds SET cik = %s WHERE fund_name = %s", (cik, fund_name[:200]))
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::update_fund_cik({fund_name})]: {error}")
+        finally:
+            cursor.close()
+            conn.close()
+
+    def upsert_fund_holding(self, fund_name: str, symbol: str, shares: int, report_date,
+                            value: int = None, cusip: str = None) -> None:
+        """INSERT o UPDATE en fund_holdings. Calcula operation vs registro anterior.
+        Filtra bonos/preferreds: solo acepta símbolos puros de letras con ≤ 5 chars."""
+        if len(symbol) > 5 or not symbol.isalpha():
+            return
+        conn = self._conectar(tabla="update.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT id FROM funds WHERE fund_name = %s", (fund_name[:200],))
+            row = cursor.fetchone()
+            if not row:
+                return
+            fund_id = row[0]
+
+            cursor.execute(
+                "SELECT shares FROM fund_holdings WHERE fund_id = %s AND symbol = %s "
+                "ORDER BY report_date DESC LIMIT 1",
+                (fund_id, symbol),
+            )
+            prev = cursor.fetchone()
+            shares_prev = int(prev[0]) if prev else None
+
+            if shares_prev is None:
+                operation, shares_delta, pct_change = "NEW", None, None
+            elif shares > shares_prev:
+                operation = "BUY"
+                shares_delta = shares - shares_prev
+                pct_change = round(shares_delta / shares_prev, 4) if shares_prev > 0 else None
+            elif shares < shares_prev:
+                operation = "SELL"
+                shares_delta = shares - shares_prev
+                pct_change = round(shares_delta / shares_prev, 4) if shares_prev > 0 else None
+            else:
+                operation, shares_delta, pct_change = "HOLD", 0, 0.0
+
+            cursor.execute(
+                "SELECT id FROM fund_holdings WHERE fund_id = %s AND symbol = %s AND report_date = %s",
+                (fund_id, symbol, report_date),
+            )
+            existing = cursor.fetchone()
+            if existing:
+                cursor.execute(
+                    "UPDATE fund_holdings SET shares=%s, shares_prev=%s, shares_delta=%s, "
+                    "pct_change=%s, operation=%s, value=%s, cusip=%s WHERE id=%s",
+                    (shares, shares_prev, shares_delta, pct_change, operation, value, cusip, existing[0]),
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO fund_holdings (fund_id, symbol, shares, shares_prev, "
+                    "shares_delta, pct_change, operation, report_date, value, cusip) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (fund_id, symbol, shares, shares_prev, shares_delta, pct_change, operation,
+                     report_date, value, cusip),
+                )
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::upsert_fund_holding({fund_name}, {symbol})]: {error}")
+        finally:
+            cursor.close()
+            conn.close()
+
+
+    def load_fund_holdings_stats(self) -> dict:
+        """Retorna {symbol: {fh_count, fh_total_value, fh_buy_ratio}} con el último filing por fondo."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT fh.symbol,
+                    COUNT(DISTINCT fh.fund_id) AS fh_count,
+                    SUM(fh.value) AS fh_total_value,
+                    SUM(CASE WHEN fh.operation IN ('NEW','BUY') THEN 1 ELSE 0 END) / COUNT(*) AS fh_buy_ratio
+                FROM fund_holdings fh
+                INNER JOIN (
+                    SELECT fund_id, symbol, MAX(report_date) AS max_date
+                    FROM fund_holdings
+                    GROUP BY fund_id, symbol
+                ) latest ON fh.fund_id = latest.fund_id
+                    AND fh.symbol = latest.symbol
+                    AND fh.report_date = latest.max_date
+                WHERE fh.value IS NOT NULL
+                GROUP BY fh.symbol
+            """)
+            result = {}
+            for row in cursor.fetchall():
+                symbol, fh_count, fh_total_value, fh_buy_ratio = row
+                result[symbol] = {
+                    "fh_count": int(fh_count) if fh_count else 0,
+                    "fh_total_value": int(fh_total_value) if fh_total_value else None,
+                    "fh_buy_ratio": float(fh_buy_ratio) if fh_buy_ratio else 0.0,
+                }
+            return result
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::load_fund_holdings_stats]: {error}")
+            return {}
+        finally:
+            cursor.close()
+            conn.close()
+
+    def load_market_inst_fields(self, account: str) -> dict:
+        """Retorna {symbol: (inst_ownership_pct, inst_holders_count)} para todos los símbolos activos."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT symbol, inst_ownership_pct, inst_holders_count FROM market "
+                "WHERE account = %s AND categoriaActivo NOT IN ('I','S','X')",
+                (account,),
+            )
+            return {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::load_market_inst_fields]: {error}")
+            return {}
+        finally:
+            cursor.close()
+            conn.close()
 
 
 class PlanInversion(BDsystem):  # ------------------------------------------------------------------------------------

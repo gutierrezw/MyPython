@@ -52,6 +52,8 @@ from Modulos_Utilitarios import (
     calculate_decimal_places,
     calcular_atr,
     define_FileCache,
+    read_json_tmp,
+    write_json_tmp,
 )
 from Modulos_Comunes import (
     diaria_book_performance,
@@ -2596,18 +2598,24 @@ class TickerInfo(MyOrders):
     # trades del vehículo y procede con update booktrading e inversión
     def schedule_diario(self):
         try:
+            _FILE = "agents_schedule.json"
+            _KEY = f"diaria_{self.vehiculo}"
+            ultimo_cierre = get_ultimo_dia_mercado(market=self.vehiculo)
+            last_processed = read_json_tmp(_FILE).get(_KEY)
+            if last_processed:
+                last_processed = datetime.strptime(last_processed, "%Y-%m-%d").date()
+
+            if ultimo_cierre == last_processed:
+                return
 
             t_wait, update = DataHub.last_process[self.vehiculo], False
             update = diaria_book_performance(account=self.account, vehiculo=self.vehiculo, proces=t_wait)
 
-            # si actualizó tabla diaria, calcula proxima fecha de update
             if update:
-                hoy = datetime.now().replace(hour=6, minute=0, second=0, microsecond=0)
-                wait = hoy + timedelta(days=1)
-                DataHub.last_process[self.vehiculo]["diaria_book_performance"] = wait
+                data = read_json_tmp(_FILE)
+                data[_KEY] = ultimo_cierre.strftime("%Y-%m-%d")
+                write_json_tmp(_FILE, data)
                 DataHub.last_process["graph_performace_portafolio"] = False
-
-                # agrega performance a la tabla
                 proceso_update_performance(account=self.account, vehiculo=self.vehiculo)
 
             # contabiliza ejecución del schedule
