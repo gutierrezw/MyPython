@@ -57,11 +57,13 @@ sys.path.insert(0, "..")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "AppValuations"))
 from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion
 from Class_Screener import sync_market
+from Class_InstitucionalScore import sync_institutional, sync_fund_ciks, sync_13f_scores
+from edgar_13f import sync_fund_filings, sync_13f_holdings
 from valuation_edgar_downloader import BASE_DIR, download_filing
 from valuation_xbrl_api import get_zip_files
 from Class_customer import DataHub, TickerInfo
 from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
-from Modulos_Utilitarios import define_FileCache
+from Modulos_Utilitarios import define_FileCache, read_json_tmp, write_json_tmp
 
 
 # Admistrador de Agentes IA
@@ -97,44 +99,46 @@ class ClassAgenteIA:
         self.preservation_last_run = {}  # {vehiculo: datetime} — última evaluación por vehículo
 
     # decorador para limitar ejecuciones
-    def wait_rate(intervalo_segundos: int):
+    def wait_rate(intervalo_segundos: int, persist: bool = False):
         """
         Fábrica de Decoradores: Restringe la ejecución de la función
         a un máximo de una vez por el intervalo de tiempo especificado.
 
         Args:
             intervalo_segundos (int): Tiempo mínimo de espera entre llamadas (en segundos).
+            persist (bool): Si True, persiste last_run en tmp/agents_schedule.json
+                            para sobrevivir reinicios. Usar para intervalos > 12h.
         """
+        _FILE = "agents_schedule.json"
 
         def decorator(func):
-            # 1. Almacenamos la hora de la última ejecución en el objeto de la función
             func.last_run = 0
 
             @wraps(func)
             def wrapper(*args, **kwargs):
                 tiempo_actual = time.time()
+                if func.last_run == 0 and persist:
+                    func.last_run = read_json_tmp(_FILE).get(func.__name__, 0)
                 tiempo_transcurrido = tiempo_actual - func.last_run
 
-                # 2. Usamos la variable 'intervalo_segundos' del ámbito externo
                 if tiempo_transcurrido < intervalo_segundos:
-
                     tiempo_restante = intervalo_segundos - tiempo_transcurrido
                     td = timedelta(seconds=int(tiempo_restante))
                     return None
-
                 else:
-                    # El tiempo ha transcurrido, ejecutar la función
                     resultado = func(*args, **kwargs)
-
-                    # 3. Actualizar el tiempo de la última ejecución
                     func.last_run = tiempo_actual
+                    if persist:
+                        data = read_json_tmp(_FILE)
+                        data[func.__name__] = tiempo_actual
+                        write_json_tmp(_FILE, data)
                     logger = logging.getLogger("ClassAgenteIA")
                     logger.warning(
                         textwrap.dedent(
                             f"""
                             ==============================================================================================
-                            Agente_downloads_filings_EDGAR(): 
-                            = 
+                            Agente_downloads_filings_EDGAR():
+                            =
                             🛑 BLOQUEADO: La función '{func.__name__}' está limitada a 1 llamada cada {intervalo_segundos}s.
                             ==============================================================================================
 
@@ -348,16 +352,75 @@ class ClassAgenteIA:
             print(f"Angente_downloads_filings_EDGAR(): {e}")
 
     # agente Market Screener — descubre símbolos + enriquece con Yahoo, una vez al día
-    @wait_rate(86400)
+    @wait_rate(86400, persist=True)
     def Agente_MarketScreener(self):
         try:
             result = sync_market(account=self.account)
             self.logger.warning(
                 f"MarketScreener: descargados={result['descargados']} insertados={result['insertados']} "
-                f"omitidos={result['omitidos']} quote={result['quote_actualizados']} fund={result['fund_actualizados']}"
+                f"omitidos={result['omitidos']} actualizados={result['actualizados']}"
             )
         except Exception as e:
             self.logger.error(f"Agente_MarketScreener(): {e}")
+
+    # agente Institutional Score — enriquece Market con ownership institucional, una vez a la semana
+    @wait_rate(604800, persist=True)
+    def Agente_InstitucionalScore(self):
+        try:
+            result = sync_institutional(account=self.account)
+            self.logger.warning(
+                f"InstitucionalScore: procesados={result['symbols_processed']} "
+                f"actualizados={result['updated']} eliminados={result['deleted']} "
+                f"fondos={result['funds_discovered']}"
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_InstitucionalScore(): {e}")
+
+    # agente Fund CIKs — resuelve CIK EDGAR para fondos sin CIK, una vez por semana
+    @wait_rate(604800, persist=True)
+    def Agente_FundCIKs(self):
+        try:
+            result = sync_fund_ciks()
+            self.logger.warning(
+                f"FundCIKs: total={result['total']} encontrados={result['found']} fallidos={result['failed']}"
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_FundCIKs(): {e}")
+
+    # agente Fund Filings — descarga XMLs 13F-HR para top 50 fondos, una vez por semana
+    @wait_rate(604800, persist=True)
+    def Agente_FundFilings(self):
+        try:
+            result = sync_fund_filings(top_n=50)
+            self.logger.warning(
+                f"FundFilings: fondos={result['funds']} descargados={result['downloaded']} "
+                f"skipped={result['skipped']} fallidos={result['failed']}"
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_FundFilings(): {e}")
+
+    # agente 13F Scores — recalcula inst_score con señales 13F, una vez por semana
+    @wait_rate(604800, persist=True)
+    def Agente_13FScores(self):
+        try:
+            result = sync_13f_scores(account=self.account)
+            self.logger.warning(
+                f"13FScores: símbolos={result['symbols']} actualizados={result['updated']} skipped={result['skipped']}"
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_13FScores(): {e}")
+
+    # agente 13F Holdings — parsea XMLs descargados y pobla fund_holdings, una vez por semana
+    @wait_rate(604800, persist=True)
+    def Agente_13FHoldings(self):
+        try:
+            result = sync_13f_holdings(account=self.account)
+            self.logger.warning(
+                f"13FHoldings: archivos={result['xml_files']} cusips={result['unknown_cusips']} "
+                f"holdings={result['inserted_holdings']} nuevos={result['new_stocks']}"
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_13FHoldings(): {e}")
 
     # agente defensivo: protege ganancias con órdenes STOP dinámicas
     async def Agente_ManagerPreservation(self):
@@ -1469,6 +1532,21 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
                     # Agente Market Screener — descubrimiento + enriquecimiento (una vez al día)
                     self.Agente_MarketScreener()
+
+                    # Agente Institutional Score — ownership institucional (una vez al día)
+                    self.Agente_InstitucionalScore()
+
+                    # Agente Fund CIKs — resuelve CIK EDGAR para fondos sin CIK (una vez por semana)
+                    self.Agente_FundCIKs()
+
+                    # Agente Fund Filings — descarga 13F-HR XMLs top 50 fondos (una vez por semana)
+                    self.Agente_FundFilings()
+
+                    # Agente 13F Holdings — parsea XMLs y pobla fund_holdings (una vez por semana)
+                    self.Agente_13FHoldings()
+
+                    # Agente 13F Scores — recalcula inst_score con señales 13F (una vez por semana)
+                    self.Agente_13FScores()
 
                     # Agente for Preservation (defensivo estructural)
                     self.exec_modulo_async(self.Agente_ManagerPreservation())
