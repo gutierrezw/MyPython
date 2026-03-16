@@ -6,6 +6,7 @@ import sys
 import csv
 import ast
 import math
+import xml.etree.ElementTree as ET
 
 import hmac
 import copy

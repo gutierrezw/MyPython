@@ -4,6 +4,7 @@ from Modulos_python import (
     pd,
     ttk,
     os,
+    json,
     E,
     W,
     N,
@@ -922,6 +923,24 @@ def define_FileCache(name=None):
         temp = datetime.now().strftime("%Y%m%d_%H%M%S")
         cache = ipath + "\\tmp\\cache_{temp}"
     return cache
+
+
+def read_json_tmp(name: str) -> dict:
+    """Lee un JSON del directorio tmp. Retorna {} si no existe o hay error."""
+    try:
+        with open(define_FileCache(name), "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def write_json_tmp(name: str, data: dict) -> None:
+    """Escribe un dict como JSON en el directorio tmp."""
+    try:
+        with open(define_FileCache(name), "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

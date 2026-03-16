@@ -33,8 +33,9 @@ from Modulos_python import (
 )
 import os
 from Modulos_Mysql import BDsystem, RepositorioOportunidadesBuySell, PlanInversion
-from Modulos_Utilitarios import calcular_indicadores_df, define_FileCache
+from Modulos_Utilitarios import calcular_indicadores_df, define_FileCache, read_json_tmp, write_json_tmp
 from Class_ApiBinnace import BinanceClient, BinanceStreamClient
+from Class_DataFrame import get_ultimo_dia_mercado
 from Class_customer import DataHub, MyMessageBox
 from Modulos_Comunes import diaria_book_performance, proceso_update_performance
 
@@ -111,6 +112,7 @@ class TradingBotSpot:
             "position_qty": 0.0,
             "remaining_qty": 0.0,
             "stop_loss": None,
+            "tp1_target": None,
             "tp1_done": False,
             "tp2_done": False,
             # Trailing stop (se activa después de TP1)
@@ -356,7 +358,15 @@ class TradingBotSpot:
         if self.state["entry_price"] is None:
             return False
 
-        target = self.state["entry_price"] * (1 + self.risk_cfg["tp1_pct"])
+        target = self.state.get("tp1_target")
+        if target is None:
+            atr = self._calc_atr14()
+            mult = self.risk_cfg.get("tp1_atr_mult", 2.0)
+            if atr > 0:
+                target = self.state["entry_price"] + (atr * mult)
+            else:
+                target = self.state["entry_price"] * (1 + self.risk_cfg.get("tp1_pct", 0.015))
+            self.state["tp1_target"] = round(target, 8)
         return price >= target
 
     def _should_take_tp2(self, price: float) -> bool:
@@ -431,6 +441,12 @@ class TradingBotSpot:
             self.state["position_qty"] += filled_qty
             self.state["remaining_qty"] += filled_qty
             self.state["stop_loss"] = self._calc_stop_loss(price)
+            atr = self._calc_atr14()
+            mult = self.risk_cfg.get("tp1_atr_mult", 2.0)
+            if atr > 0:
+                self.state["tp1_target"] = round(price + (atr * mult), 8)
+            else:
+                self.state["tp1_target"] = round(price * (1 + self.risk_cfg.get("tp1_pct", 0.015)), 8)
 
         elif side == "SELL":
             self.state["remaining_qty"] -= filled_qty
@@ -445,6 +461,7 @@ class TradingBotSpot:
             "position_qty": 0.0,
             "remaining_qty": 0.0,
             "stop_loss": None,
+            "tp1_target": None,
             "tp1_done": False,
             "tp2_done": False,
             "trailing_active": False,
@@ -1446,7 +1463,7 @@ class BotCryptoUI:
         "5m": {"tp1": 0.015, "sl": 0.01, "trail_mult": 1.2},
         "15m": {"tp1": 0.02, "sl": 0.015, "trail_mult": 1.5},
         "30m": {"tp1": 0.025, "sl": 0.02, "trail_mult": 1.5},
-        "1h": {"tp1": 0.03, "sl": 0.025, "trail_mult": 1.5},
+        "1h": {"tp1": 0.015, "sl": 0.025, "trail_mult": 1.5},
         "4h": {"tp1": 0.05, "sl": 0.035, "trail_mult": 2.0},
         "1d": {"tp1": 0.08, "sl": 0.05, "trail_mult": 2.5},
     }
@@ -1583,7 +1600,8 @@ class BotCryptoUI:
         config = {
             "capital": 100.0,
             "risk_per_trade": 0.02,
-            "tp1_pct": 0.03,
+            "tp1_pct": 0.015,
+            "tp1_atr_mult": 2.0,
             "stop_loss_pct": 0.02,
             "tp1_size": 0.33,
             "trail_mult": 1.5,
@@ -1760,19 +1778,25 @@ class BotCryptoUI:
                 print(f"  {symbol}: {sym_insertados} insertados, {sym_existentes} ya existían")
 
     def _schedule_diaria_performace(self):
+        if not self.ACCOUNT:
+            return
+        _FILE = "agents_schedule.json"
+        _KEY = f"diaria_{self.VEHICULO}"
+        ultimo_cierre = get_ultimo_dia_mercado(market="Crypto")
+        last_processed = read_json_tmp(_FILE).get(_KEY)
+        if last_processed:
+            last_processed = datetime.strptime(last_processed, "%Y-%m-%d").date()
+        if ultimo_cierre == last_processed:
+            return
 
-        update = False
-        if self.ACCOUNT:
-            # for account BotCrypto
-            t_wait, update = DataHub.last_process[self.VEHICULO], False
-
-            self._get_insert_fallidos(desde=t_wait["diaria_book_performance"])
-            update = diaria_book_performance(account=self.ACCOUNT, vehiculo=self.VEHICULO, proces=t_wait)
-
-            # si actualizó tabla diaria, calcula proxima fecha de update
-            if update:
-                # agrega performance a la tabla
-                proceso_update_performance(account=self.ACCOUNT, vehiculo=self.VEHICULO)
+        t_wait = DataHub.last_process[self.VEHICULO]
+        self._get_insert_fallidos(desde=t_wait["diaria_book_performance"])
+        update = diaria_book_performance(account=self.ACCOUNT, vehiculo=self.VEHICULO, proces=t_wait)
+        if update:
+            data = read_json_tmp(_FILE)
+            data[_KEY] = ultimo_cierre.strftime("%Y-%m-%d")
+            write_json_tmp(_FILE, data)
+            proceso_update_performance(account=self.ACCOUNT, vehiculo=self.VEHICULO)
 
     # =========================================
     # PANEL DE GRAFICOS gwi001
@@ -1979,9 +2003,10 @@ class BotCryptoUI:
 
         ax0.bar(range(n), valores[-n:], color=colores[-n:], width=0.7, linewidth=0)
         ax0.axhline(0, color="0.5", linewidth=0.5)
-        ax0.set_xticks(range(n))
-        ax0.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
-        ax0.set_xticklabels(fechas[-n:], fontsize=5, rotation=60, color="0.6")
+        step = max(1, n // 8)
+        tick_pos = list(range(0, n, step))
+        ax0.set_xticks(tick_pos)
+        ax0.set_xticklabels([fechas[-n:][i] for i in tick_pos], fontsize=5, rotation=90, color="0.6")
         ax0.tick_params(axis="y", labelsize=6, colors="0.6")
         ax0.spines[["top", "right"]].set_visible(False)
         ax0.grid(True, color="0.5", linewidth=0.1)
@@ -2748,7 +2773,7 @@ class BotCryptoUI:
                                 "intent": order.get("type", side),
                                 "entry_price": entry,
                                 "sl_price": bot.state.get("stop_loss"),
-                                "tp1_target": round(entry * (1 + tp1_pct), 6) if entry else None,
+                                "tp1_target": bot.state.get("tp1_target") or (round(entry * (1 + tp1_pct), 6) if entry else None),
                                 "tp2_target": round(entry * (1 + tp2_pct), 6) if entry and tp2_pct else None,
                                 "pnl_pct": pnl_pct,
                                 "tp1_done": bot.state.get("tp1_done"),
@@ -5461,6 +5486,12 @@ class BotCryptoUI:
             bot.state["position_qty"] = balance
             bot.state["remaining_qty"] = balance
             bot.state["stop_loss"] = entry_price * (1 - bot.risk_cfg["stop_loss_pct"])
+            atr = bot._calc_atr14()
+            mult = bot.risk_cfg.get("tp1_atr_mult", 2.0)
+            if atr > 0:
+                bot.state["tp1_target"] = round(entry_price + (atr * mult), 8)
+            else:
+                bot.state["tp1_target"] = round(entry_price * (1 + bot.risk_cfg.get("tp1_pct", 0.015)), 8)
             bot.state["tp1_done"] = False
             bot.state["tp2_done"] = False
             bot.state["trailing_active"] = False
@@ -5739,7 +5770,13 @@ class WidgetBotSymbol:
             self.lbl_entry.config(text=f"{entry:.4f}" if entry else "--")
 
         # TP + Trailing
-        tp1 = "✓" if state.get("tp1_done") else "○"
+        tp1_target = state.get("tp1_target")
+        if state.get("tp1_done"):
+            tp1 = "✓"
+        elif tp1_target:
+            tp1 = f"{tp1_target:.4f}"
+        else:
+            tp1 = "○"
         tp2 = "✓" if state.get("tp2_done") else "○"
         if state.get("trailing_active"):
             trail_stop = state.get("trailing_stop")

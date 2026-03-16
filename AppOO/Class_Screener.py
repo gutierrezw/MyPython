@@ -21,13 +21,24 @@ from Modulos_python import (
     UserAgent,
     ThreadPoolExecutor,
     logging,
+    yf,
+    math,
 )
 
 _logger = logging.getLogger("Screener")
 
 def _yahoo_session():
     """Obtiene cookie + crumb para autenticar requests a Yahoo Finance.
-    Usa headers de navegador real para evitar 401/429. Reintenta hasta 3 veces."""
+    Nuevo flujo: fc.yahoo.com primero (cambia de autenticación Yahoo ~2024).
+    Fallback a finance.yahoo.com. Alterna query1/query2 para el crumb."""
+    _INIT_URLS = [
+        "https://fc.yahoo.com",
+        "https://finance.yahoo.com/",
+    ]
+    _CRUMB_URLS = [
+        "https://query1.finance.yahoo.com/v1/test/getcrumb",
+        "https://query2.finance.yahoo.com/v1/test/getcrumb",
+    ]
     ua = UserAgent().random
     session = requests.Session()
     session.headers.update({
@@ -36,22 +47,36 @@ def _yahoo_session():
         "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
     })
     crumb = ""
     for attempt in range(3):
         try:
-            session.get("https://finance.yahoo.com/", timeout=10)
-            time.sleep(1)
-            r = session.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=10)
-            if r.ok and r.text.strip():
-                crumb = r.text.strip()
+            # Obtener cookies — probar fc.yahoo.com primero (nuevo flujo)
+            for init_url in _INIT_URLS:
+                try:
+                    session.get(init_url, timeout=10)
+                    break
+                except Exception:
+                    continue
+            time.sleep(2 + attempt)
+            session.headers.update({"Referer": "https://finance.yahoo.com/"})
+            # Intentar obtener crumb alternando entre query1 y query2
+            for crumb_url in _CRUMB_URLS:
+                try:
+                    r = session.get(crumb_url, timeout=10)
+                    if r.ok and r.text.strip():
+                        crumb = r.text.strip()
+                        break
+                    _logger.warning(f"[yahoo_session] intento {attempt + 1} ({crumb_url[-7:]}): HTTP {r.status_code}")
+                except Exception as e:
+                    _logger.warning(f"[yahoo_session] intento {attempt + 1}: {e}")
+            if crumb:
                 break
-            _logger.warning(f"[yahoo_session] intento {attempt + 1}: crumb vacío (HTTP {r.status_code})")
-            time.sleep(2)
+            time.sleep(3 + attempt * 2)
         except Exception as e:
             _logger.warning(f"[yahoo_session] intento {attempt + 1} error: {e}")
-            time.sleep(2)
-    # Actualizar Accept a JSON para las llamadas API
+            time.sleep(3 + attempt * 2)
     session.headers.update({"Accept": "application/json"})
     if not crumb:
         _logger.error("[yahoo_session] crumb no obtenido — las requests pueden devolver 401")
@@ -245,6 +270,9 @@ class Screener(tk.Frame):
                 ("grossMargins", "Gross M", 65, "e"),
                 ("ebitdaMargins", "EBITDA M", 70, "e"),
                 ("operatingMargins", "Op M", 60, "e"),
+                ("inst_score", "Inst Score", 75, "e"),
+                ("inst_ownership_pct", "Inst %", 65, "e"),
+                ("inst_top_holder", "Top Holder", 160, "w"),
                 ("totalDebt", "Total Debt", 85, "e"),
                 ("lastFiscalYearEnd", "FY End", 75, "w"),
                 ("firstTradeDateEpochUtc", "IPO", 75, "w"),
@@ -618,6 +646,9 @@ class Screener(tk.Frame):
                     _pct(_g("grossMargins")),
                     _pct(_g("ebitdaMargins")),
                     _pct(_g("operatingMargins")),
+                    _price(_g("inst_score")),
+                    _pct(_g("inst_ownership_pct")),
+                    _g("inst_top_holder") or "",
                     _big(_g("totalDebt")),
                     _date(_g("lastFiscalYearEnd")),
                     _date(_g("firstTradeDateEpochUtc")),
@@ -659,25 +690,16 @@ class Screener(tk.Frame):
 
 def sync_market(account):
     """
-    Sincroniza la tabla market en 3 fases:
+    Sincroniza la tabla market en 2 fases:
       Phase 1 — NASDAQ : descubre símbolos nuevos de dividendos (INSERT mínimo)
-      Phase 2 — Yahoo Quote      : actualiza precio/mercado para todos (batch 250, paralelo)
-      Phase 3 — Yahoo Fundamentals: actualiza sector/dividendos/financieros (paralelo)
-    Los campos de datos los provee Yahoo; NASDAQ solo sirve para descubrimiento.
+      Phase 2 — yfinance: actualiza precio, mercado y fundamentales por símbolo (paralelo)
+    Reemplaza HTTP directo + crumb por yf.Ticker().info — más robusto ante cambios de Yahoo.
     """
-    _QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
-    _FUND_URL = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/{}"
-    _FUND_MODULES = "summaryDetail,defaultKeyStatistics,financialData,assetProfile"
-    _session, _crumb = _yahoo_session()
-
-    # ── helpers comunes ──────────────────────────────────────────────────────
-    def _chunks(lst, n):
-        for i in range(0, len(lst), n):
-            yield lst[i : i + n]
 
     def _safe_float(val):
         try:
-            return float(val) if val is not None else None
+            f = float(val) if val is not None else None
+            return None if f is not None and (math.isnan(f) or math.isinf(f)) else f
         except (TypeError, ValueError):
             return None
 
@@ -695,17 +717,12 @@ def sync_market(account):
     def _nasdaq_fetch():
         ua = UserAgent()
         headers = {"User-Agent": ua.random, "Accept": "application/json"}
-        base_url = (
-            "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=5000"
-        )
+        base_url = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=5000"
         rows, offset = [], 0
         while True:
-            resp = requests.get(
-                f"{base_url}&offset={offset}", headers=headers, timeout=30
-            )
+            resp = requests.get(f"{base_url}&offset={offset}", headers=headers, timeout=30)
             resp.raise_for_status()
             data = resp.json().get("data", {})
-            # La API puede devolver rows en data.table.rows o directamente en data.rows
             table = data.get("table") or data
             page = table.get("rows") or []
             rows.extend(page)
@@ -721,146 +738,85 @@ def sync_market(account):
         name = row.get("name", "") or ""
         return sector == "Real Estate" or "REIT" in industry or "Trust" in name
 
-    # ── Phase 2: Yahoo Quote ─────────────────────────────────────────────────
-    def _fetch_quote_batch(symbols):
-        time.sleep(1.0)  # 1 s entre batches para respetar rate limit de Yahoo
+    # ── Phase 2: yfinance por símbolo ────────────────────────────────────────
+    def _fetch_symbol_data(symbol):
+        time.sleep(0.3)
         try:
-            resp = _session.get(
-                _QUOTE_URL,
-                params={"symbols": ",".join(symbols), "crumb": _crumb},
-                timeout=15,
-            )
-            resp.raise_for_status()
-            return resp.json().get("quoteResponse", {}).get("result", [])
-        except Exception:
-            return []
-
-    def _map_quote(s):
-        campos = [
-            "shortName",
-            "lastPrice",
-            "previousClose",
-            "open",
-            "volume",
-            "marketCap",
-            "currency",
-            "averageVolume",
-            "fiftyTwoWeekHigh",
-            "fiftyTwoWeekLow",
-            "fiftyDayAverage",
-            "twoHundredDayAverage",
-            "trailingPE",
-            "forwardPE",
-            "trailingEps",
-            "beta",
-        ]
-        valores = [
-            str(s.get("shortName") or "")[:60],
-            _safe_float(s.get("regularMarketPrice")),
-            _safe_float(s.get("regularMarketPreviousClose")),
-            _safe_float(s.get("regularMarketOpen")),
-            _safe_float(s.get("regularMarketVolume")),
-            _safe_float(s.get("marketCap")),
-            str(s.get("currency") or "")[:6],
-            _safe_float(s.get("averageDailyVolume3Month")),
-            _safe_float(s.get("fiftyTwoWeekHigh")),
-            _safe_float(s.get("fiftyTwoWeekLow")),
-            _safe_float(s.get("fiftyDayAverage")),
-            _safe_float(s.get("twoHundredDayAverage")),
-            _safe_float(s.get("trailingPE")),
-            _safe_float(s.get("forwardPE")),
-            _safe_float(s.get("epsTrailingTwelveMonths")),
-            _safe_float(s.get("beta")),
-        ]
-        return campos, valores
-
-    # ── Phase 3: Yahoo Fundamentals ──────────────────────────────────────────
-    def _fetch_fundamentals(symbol):
-        time.sleep(0.5)  # 0.5 s entre requests para respetar rate limit de Yahoo
-        try:
-            resp = _session.get(
-                _FUND_URL.format(symbol),
-                params={"modules": _FUND_MODULES, "crumb": _crumb},
-                timeout=15,
-            )
-            resp.raise_for_status()
-            data = resp.json().get("quoteSummary", {}).get("result", [{}])[0]
-            sd = data.get("summaryDetail", {})
-            ks = data.get("defaultKeyStatistics", {})
-            fd = data.get("financialData", {})
-            ap = data.get("assetProfile", {})
-
+            info = yf.Ticker(symbol.replace("^", "-")).info
+            if not info:
+                return symbol, [], []
             campos = [
-                "sector",
-                "industry",
-                "country",
-                "dividendRate",
-                "dividendYield",
-                "exDividendDate",
-                "payoutRatio",
-                "fiveYearAvgDividendYield",
-                "trailingAnnualDividendRate",
-                "trailingAnnualDividendYield",
-                "pegRatio",
-                "priceToBook",
-                "forwardEps",
-                "trailingPegRatio",
-                "lastFiscalYearEnd",
-                "firstTradeDateEpochUtc",
-                "targetHighPrice",
-                "targetLowPrice",
-                "targetMeanPrice",
-                "returnOnAssets",
-                "returnOnEquity",
-                "earningsGrowth",
-                "revenueGrowth",
-                "freeCashflow",
-                "grossMargins",
-                "ebitdaMargins",
-                "operatingMargins",
-                "financialCurrency",
-                "website",
+                "shortName", "lastPrice", "previousClose", "open", "volume",
+                "marketCap", "currency", "averageVolume", "fiftyTwoWeekHigh",
+                "fiftyTwoWeekLow", "fiftyDayAverage", "twoHundredDayAverage",
+                "trailingPE", "forwardPE", "trailingEps", "beta",
+                "sector", "industry", "country",
+                "dividendRate", "dividendYield", "exDividendDate", "payoutRatio",
+                "fiveYearAvgDividendYield", "trailingAnnualDividendRate",
+                "trailingAnnualDividendYield", "pegRatio", "priceToBook",
+                "forwardEps", "trailingPegRatio", "lastFiscalYearEnd",
+                "firstTradeDateEpochUtc", "targetHighPrice", "targetLowPrice",
+                "targetMeanPrice", "returnOnAssets", "returnOnEquity",
+                "earningsGrowth", "revenueGrowth", "freeCashflow",
+                "grossMargins", "ebitdaMargins", "operatingMargins",
+                "financialCurrency", "website",
             ]
             valores = [
-                str(ap.get("sector") or "")[:50],
-                str(ap.get("industry") or "")[:80],
-                str(ap.get("country") or "")[:50],
-                _safe_float(sd.get("dividendRate", {}).get("raw")),
-                _safe_float(sd.get("dividendYield", {}).get("raw")),
-                _safe_date(sd.get("exDividendDate", {}).get("raw")),
-                _safe_float(sd.get("payoutRatio", {}).get("raw")),
-                _safe_float(sd.get("fiveYearAvgDividendYield", {}).get("raw")),
-                _safe_float(sd.get("trailingAnnualDividendRate", {}).get("raw")),
-                _safe_float(sd.get("trailingAnnualDividendYield", {}).get("raw")),
-                _safe_float(ks.get("pegRatio", {}).get("raw")),
-                _safe_float(ks.get("priceToBook", {}).get("raw")),
-                _safe_float(ks.get("forwardEps", {}).get("raw")),
-                _safe_float(ks.get("trailingPegRatio", {}).get("raw")),
-                _safe_date(ks.get("lastFiscalYearEnd", {}).get("raw")),
-                _safe_date(ks.get("firstTradeDateEpochUtc", {}).get("raw")),
-                _safe_float(fd.get("targetHighPrice", {}).get("raw")),
-                _safe_float(fd.get("targetLowPrice", {}).get("raw")),
-                _safe_float(fd.get("targetMeanPrice", {}).get("raw")),
-                _safe_float(fd.get("returnOnAssets", {}).get("raw")),
-                _safe_float(fd.get("returnOnEquity", {}).get("raw")),
-                _safe_float(fd.get("earningsGrowth", {}).get("raw")),
-                _safe_float(fd.get("revenueGrowth", {}).get("raw")),
-                _safe_float(fd.get("freeCashflow", {}).get("raw")),
-                _safe_float(fd.get("grossMargins", {}).get("raw")),
-                _safe_float(fd.get("ebitdaMargins", {}).get("raw")),
-                _safe_float(fd.get("operatingMargins", {}).get("raw")),
-                str(fd.get("financialCurrency") or "")[:6],
-                str(ap.get("website") or "")[:200],
+                str(info.get("shortName") or "")[:60],
+                _safe_float(info.get("currentPrice") or info.get("regularMarketPrice")),
+                _safe_float(info.get("previousClose")),
+                _safe_float(info.get("open")),
+                _safe_float(info.get("volume")),
+                _safe_float(info.get("marketCap")),
+                str(info.get("currency") or "")[:6],
+                _safe_float(info.get("averageVolume")),
+                _safe_float(info.get("fiftyTwoWeekHigh")),
+                _safe_float(info.get("fiftyTwoWeekLow")),
+                _safe_float(info.get("fiftyDayAverage")),
+                _safe_float(info.get("twoHundredDayAverage")),
+                _safe_float(info.get("trailingPE")),
+                _safe_float(info.get("forwardPE")),
+                _safe_float(info.get("trailingEps")),
+                _safe_float(info.get("beta")),
+                str(info.get("sector") or "")[:50],
+                str(info.get("industry") or "")[:80],
+                str(info.get("country") or "")[:50],
+                _safe_float(info.get("dividendRate")),
+                _safe_float(info.get("dividendYield")),
+                _safe_date(info.get("exDividendDate")),
+                _safe_float(info.get("payoutRatio")),
+                _safe_float(info.get("fiveYearAvgDividendYield")),
+                _safe_float(info.get("trailingAnnualDividendRate")),
+                _safe_float(info.get("trailingAnnualDividendYield")),
+                _safe_float(info.get("pegRatio")),
+                _safe_float(info.get("priceToBook")),
+                _safe_float(info.get("forwardEps")),
+                _safe_float(info.get("trailingPegRatio")),
+                _safe_date(info.get("lastFiscalYearEnd")),
+                _safe_date(info.get("firstTradeDateEpochUtc")),
+                _safe_float(info.get("targetHighPrice")),
+                _safe_float(info.get("targetLowPrice")),
+                _safe_float(info.get("targetMeanPrice")),
+                _safe_float(info.get("returnOnAssets")),
+                _safe_float(info.get("returnOnEquity")),
+                _safe_float(info.get("earningsGrowth")),
+                _safe_float(info.get("revenueGrowth")),
+                _safe_float(info.get("freeCashflow")),
+                _safe_float(info.get("grossMargins")),
+                _safe_float(info.get("ebitdaMargins")),
+                _safe_float(info.get("operatingMargins")),
+                str(info.get("financialCurrency") or "")[:6],
+                str(info.get("website") or "")[:200],
             ]
-            return campos, valores
+            return symbol, campos, valores
         except Exception:
-            return [], []
+            return symbol, [], []
 
     # ── Ejecución ────────────────────────────────────────────────────────────
     market = MarketScreen()
     existing = market.load_symbols(account=account)
 
-    # Phase 1: NASDAQ — solo INSERT símbolos nuevos (Yahoo proveerá los datos)
+    # Phase 1: NASDAQ — solo INSERT símbolos nuevos
     rows = _nasdaq_fetch()
     insertados, omitidos = 0, 0
     for row in rows:
@@ -870,44 +826,28 @@ def sync_market(account):
         if not symbol:
             continue
         if symbol not in existing:
-            market.insert(
-                upd=["account", "tipo"], val=[account, "Dividends"], symbol=symbol
-            )
-            existing[symbol] = "N"  # disponible para fases 2 y 3
+            market.insert(upd=["account", "tipo"], val=[account, "Dividends"], symbol=symbol)
+            existing[symbol] = "N"
             insertados += 1
         elif existing[symbol] in ("I", "S", "X"):
             omitidos += 1
 
-    # Phase 2: Yahoo Quote — todos los símbolos, batches de 250
-    all_symbols = list(existing.keys())
-    quote_ok = 0
+    # Phase 2: yfinance — todos los símbolos activos, paralelo
+    active_symbols = [s for s, cat in existing.items() if cat not in ("I", "S", "X", "T")]
+    data_ok = 0
     with ThreadPoolExecutor(max_workers=3) as ex:
-        for page in ex.map(_fetch_quote_batch, list(_chunks(all_symbols, 250))):
-            for s in page:
-                symbol = s.get("symbol", "").strip()
-                if not symbol or existing.get(symbol) in ("I", "S", "X"):
-                    continue
-                campos, valores = _map_quote(s)
-                market.update(upd=campos, val=valores, symbol=symbol)
-                quote_ok += 1
-
-    # Phase 3: Yahoo Fundamentals — símbolos activos, paralelo
-    active_symbols = [s for s, cat in existing.items() if cat not in ("I", "S", "X")]
-    fund_ok = 0
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        futures = {ex.submit(_fetch_fundamentals, sym): sym for sym in active_symbols}
-        for future, symbol in futures.items():
-            campos, valores = future.result()
+        futures = {ex.submit(_fetch_symbol_data, sym): sym for sym in active_symbols}
+        for future in futures:
+            symbol, campos, valores = future.result()
             if campos:
                 market.update(upd=campos, val=valores, symbol=symbol)
-                fund_ok += 1
+                data_ok += 1
 
     return {
         "descargados": len(rows),
         "insertados": insertados,
         "omitidos": omitidos,
-        "quote_actualizados": quote_ok,
-        "fund_actualizados": fund_ok,
+        "actualizados": data_ok,
     }
 
 
@@ -928,7 +868,8 @@ def cleanup_market(account):
 
     def _safe_float(val):
         try:
-            return float(val) if val is not None else None
+            f = float(val) if val is not None else None
+            return None if f is not None and (math.isnan(f) or math.isinf(f)) else f
         except (TypeError, ValueError):
             return None
 
@@ -1078,18 +1019,12 @@ def cleanup_market(account):
             print(f"  batch skip (error: {e}) — no se procesan {len(batch)} símbolos")
             continue
 
-    # ── Phase 2: Eliminar no encontrados, salvo los que están en cartera ──────
+    # ── Phase 2: Eliminar no encontrados ─────────────────────────────────────
     eliminados = 0
-    salvados = 0
     for sym in not_found:
-        info = existing.get(sym, {})
-        if info.get("encartera") == "Y":
-            salvados += 1
-            print(f"  en cartera — no eliminado: {sym}")
-        else:
-            market.delete(symbol=sym, account=account)
-            eliminados += 1
-            print(f"  eliminado: {sym}")
+        market.delete(symbol=sym, account=account)
+        eliminados += 1
+        print(f"  eliminado: {sym}")
 
     # ── Phase 3: Fundamentals — completar campos vacíos ───────────────────────
     needs_fund = [
@@ -1110,7 +1045,6 @@ def cleanup_market(account):
         "batches_ok": batches_ok,
         "quote_actualizados": quote_ok,
         "eliminados": eliminados,
-        "en_cartera_salvados": salvados,
         "fund_completados": fund_ok,
     }
 
