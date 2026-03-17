@@ -1061,7 +1061,7 @@ class DataHub:
         """Construye la trama de orden STOP según el vehículo (IB o Binance)."""
 
         hash_id = DataHub.RepositorioOportunidades.generar_hash_id(
-            account=account, symbol=symbol, tipo="STP", subtipo="LMT", recomendado="PRESERVATION_STOP"
+            account=account, symbol=symbol, option=vehiculo, tipo="STP", subtipo="LMT", recomendado="PRESERVATION_STOP"
         )
         if vehiculo == "Stock":
             return {
@@ -2601,6 +2601,8 @@ class TickerInfo(MyOrders):
             _FILE = "agents_schedule.json"
             _KEY = f"diaria_{self.vehiculo}"
             ultimo_cierre = get_ultimo_dia_mercado(market=self.vehiculo)
+            if ultimo_cierre is None:
+                return
             last_processed = read_json_tmp(_FILE).get(_KEY)
             if last_processed:
                 last_processed = datetime.strptime(last_processed, "%Y-%m-%d").date()

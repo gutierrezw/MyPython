@@ -50,8 +50,9 @@ from Modulos_python import (
 )
 from Class_ApiBinnace import BinanceClient
 
+_logger = logging.getLogger("DataFrame")
 
-import yfinance as yf
+import yfinance as yf  # import diferido — evita ciclo con módulos que importan Class_DataFrame
 from cachetools import TTLCache
 from functools import wraps
 import pandas as pd
@@ -544,18 +545,17 @@ def get_ultimo_dia_mercado(market="Stock"):
     elif market == "BBVA.ARS":
         (activo, datos) = get_yfinance(ticket="^MERV", period="7d", vehiculo="download")
 
-    # Obtén el último día hábil
+    # Obtén el último día hábil como datetime.date
     if not datos.empty:
         hoy = datetime.now().date()
         datos_inverted = datos.iloc[::-1]
         for index, row in datos_inverted.iterrows():
-            if index.date() < hoy:
-                return index
+            idx_date = index.date() if hasattr(index, "date") else index
+            if idx_date < hoy:
+                return idx_date
         return hoy
     else:
-        fecha = "9999-12-31"
-        max_datetime = datetime.strptime(fecha, "%Y-%m-%d")
-        return max_datetime
+        return None
 
 
 # método para cargar archivos
@@ -1193,7 +1193,7 @@ def chart_symbol(fg=None, datos=None, keys=None):
 
         # Validar que hay datos suficientes para graficar
         if pdatos.empty or len(pdatos) < 10:
-            print(f"[chart_symbol()]: Datos insuficientes para graficar: {len(pdatos)} filas (mínimo 10)")
+            _logger.warning(f"chart_symbol(): datos insuficientes {len(pdatos)} filas (mínimo 10)")
             return None
 
         pclose = pdatos["Close"]

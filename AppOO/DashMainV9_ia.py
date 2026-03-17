@@ -996,7 +996,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                             self.RepositorioOportunidades.insert_booktrading(values=registro, symbol=simbolo)
             except Exception as e:
-                print(f"trader_iteractive(): {e}")
+                self.logger.error(f"trader_iteractive(): {e}")
 
         try:
             if self.vehiculo == "Crypto":

@@ -492,7 +492,7 @@ class system_status(tk.Frame):
                     lista.insert(
                         parent,
                         "end",
-                        text=f" {key}: {campo['diaria_book_performance'].date()}",
+                        text=f" {key}: {campo['diaria_book_performance']}",
                         tags=("colorTex",),
                     )
 
