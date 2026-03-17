@@ -361,7 +361,7 @@ class TradingBotSpot:
         target = self.state.get("tp1_target")
         if target is None:
             atr = self._calc_atr14()
-            mult = self.risk_cfg.get("tp1_atr_mult", 2.0)
+            mult = self.risk_cfg.get("tp1_atr_mult", 1.5)
             if atr > 0:
                 target = self.state["entry_price"] + (atr * mult)
             else:
@@ -442,7 +442,7 @@ class TradingBotSpot:
             self.state["remaining_qty"] += filled_qty
             self.state["stop_loss"] = self._calc_stop_loss(price)
             atr = self._calc_atr14()
-            mult = self.risk_cfg.get("tp1_atr_mult", 2.0)
+            mult = self.risk_cfg.get("tp1_atr_mult", 1.5)
             if atr > 0:
                 self.state["tp1_target"] = round(price + (atr * mult), 8)
             else:
@@ -1601,7 +1601,7 @@ class BotCryptoUI:
             "capital": 100.0,
             "risk_per_trade": 0.02,
             "tp1_pct": 0.015,
-            "tp1_atr_mult": 2.0,
+            "tp1_atr_mult": 1.5,
             "stop_loss_pct": 0.02,
             "tp1_size": 0.33,
             "trail_mult": 1.5,
@@ -1669,6 +1669,18 @@ class BotCryptoUI:
         )
 
         return config
+
+    def _build_risk_config(self) -> dict:
+        """Construye risk_config desde self.config. Única fuente de verdad para todos los bots."""
+        return {
+            "risk_per_trade": self.config.get("risk_per_trade", 0.02),
+            "tp1_pct":        self.config.get("tp1_pct",        0.015),
+            "tp1_atr_mult":   self.config.get("tp1_atr_mult",   1.5),
+            "stop_loss_pct":  self.config.get("stop_loss_pct",  0.02),
+            "tp1_size":       self.config.get("tp1_size",       0.33),
+            "trail_mult":     self.config.get("trail_mult",     1.5),
+            "cooldown_hours": self.config.get("cooldown_hours", 4),
+        }
 
     def inicializar(self):
         """Inicializa la UI completa"""  # gwi001
@@ -3113,14 +3125,7 @@ class BotCryptoUI:
                     "rsi_buy": self.config.get("rsi_buy", 35),
                     "rsi_sell": self.config.get("rsi_sell", 65),
                 }
-                risk_config = {
-                    "risk_per_trade": self.config.get("risk_per_trade", 0.02),
-                    "tp1_pct": self.config.get("tp1_pct", 0.03),
-                    "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
-                    "tp1_size": self.config.get("tp1_size", 0.33),
-                    "trail_mult": self.config.get("trail_mult", 1.5),
-                    "cooldown_hours": self.config.get("cooldown_hours", 4),
-                }
+                risk_config = self._build_risk_config()
                 tmp_bot = TradingBotSpot(
                     symbol=symbol,
                     interval=self.interval,
@@ -3151,14 +3156,7 @@ class BotCryptoUI:
                 "rsi_buy": self.config.get("rsi_buy", 35),
                 "rsi_sell": self.config.get("rsi_sell", 65),
             }
-            risk_config = {
-                "risk_per_trade": self.config.get("risk_per_trade", 0.02),
-                "tp1_pct": self.config.get("tp1_pct", 0.03),
-                "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
-                "tp1_size": self.config.get("tp1_size", 0.33),
-                "trail_mult": self.config.get("trail_mult", 1.5),
-                "cooldown_hours": self.config.get("cooldown_hours", 4),
-            }
+            risk_config = self._build_risk_config()
             for activo in self.all_activos:
                 symbol = activo.get("symbol")
                 if not symbol or symbol in activos_activos:
@@ -3610,14 +3608,7 @@ class BotCryptoUI:
                     "rsi_buy": self.config.get("rsi_buy", 35),
                     "rsi_sell": self.config.get("rsi_sell", 65),
                 }
-                risk_config = {
-                    "risk_per_trade": self.config.get("risk_per_trade", 0.02),
-                    "tp1_pct": self.config.get("tp1_pct", 0.03),
-                    "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
-                    "tp1_size": self.config.get("tp1_size", 0.33),
-                    "trail_mult": self.config.get("trail_mult", 1.5),
-                    "cooldown_hours": self.config.get("cooldown_hours", 4),
-                }
+                risk_config = self._build_risk_config()
 
                 # 3a. Detectar posiciones existentes en Binance (prioridad absoluta)
                 symbols_con_posicion = self._detectar_posiciones_binance()
@@ -3661,7 +3652,10 @@ class BotCryptoUI:
                         self.logger.error(f"{symbol}: Error preparando bot: {e}")
 
                 # Delegar solo UI al main thread
-                self.parent.after(0, lambda: self._fase_ui_bots(pre_bots))
+                try:
+                    self.parent.after(0, lambda: self._fase_ui_bots(pre_bots))
+                except RuntimeError:
+                    pass
 
             except Exception as e:
                 self.logger.error(f"_trabajo_pesado: {e}")
@@ -3755,14 +3749,7 @@ class BotCryptoUI:
             "rsi_buy": self.config.get("rsi_buy", 35),
             "rsi_sell": self.config.get("rsi_sell", 65),
         }
-        risk_config = {
-            "risk_per_trade": self.config.get("risk_per_trade", 0.02),
-            "tp1_pct": self.config.get("tp1_pct", 0.03),
-            "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
-            "tp1_size": self.config.get("tp1_size", 0.33),
-            "trail_mult": self.config.get("trail_mult", 1.5),
-            "cooldown_hours": self.config.get("cooldown_hours", 4),
-        }
+        risk_config = self._build_risk_config()
 
         for activo in self.all_activos:
             symbol = activo.get("symbol")
@@ -3938,9 +3925,10 @@ class BotCryptoUI:
                 # Sin posición o antes del primer trade: usar config
                 sl_price = entry * (1 - sl_pct)
 
-            tp1_price = entry * (1 + tp1_pct)
-            rally_price = entry * (1 + tp1_pct * 2.5)
-            avg_trail_exit = entry * (1 + tp1_pct * 1.5)
+            # Usar tp1_target real del bot si existe (ATR-based), sino fallback a % fijo
+            tp1_price = state.get("tp1_target") or entry * (1 + tp1_pct)
+            rally_price = entry + (tp1_price - entry) * 2.5
+            avg_trail_exit = entry + (tp1_price - entry) * 1.5
 
             # Ganancias estimadas
             loss_sl = qty * (sl_price - entry)
@@ -5084,17 +5072,7 @@ class BotCryptoUI:
                                 "rsi_buy": self.config.get("rsi_buy", 35),
                                 "rsi_sell": self.config.get("rsi_sell", 65),
                             }
-                            risk_config = {
-                                k: self.config.get(k, v)
-                                for k, v in {
-                                    "risk_per_trade": 0.02,
-                                    "tp1_pct": 0.03,
-                                    "stop_loss_pct": 0.02,
-                                    "tp1_size": 0.33,
-                                    "trail_mult": 1.5,
-                                    "cooldown_hours": 4,
-                                }.items()
-                            }
+                            risk_config = self._build_risk_config()
                             tmp_bot = TradingBotSpot(
                                 symbol=symbol,
                                 interval=self.interval,
@@ -5269,14 +5247,7 @@ class BotCryptoUI:
                 "rsi_buy": self.config.get("rsi_buy", 35),
                 "rsi_sell": self.config.get("rsi_sell", 65),
             }
-            risk_config = {
-                "risk_per_trade": self.config.get("risk_per_trade", 0.02),
-                "tp1_pct": self.config.get("tp1_pct", 0.03),
-                "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
-                "tp1_size": self.config.get("tp1_size", 0.33),
-                "trail_mult": self.config.get("trail_mult", 1.5),
-                "cooldown_hours": self.config.get("cooldown_hours", 4),
-            }
+            risk_config = self._build_risk_config()
             if symbol in self.bots:
                 return
             bot = TradingBotSpot(
@@ -5487,7 +5458,7 @@ class BotCryptoUI:
             bot.state["remaining_qty"] = balance
             bot.state["stop_loss"] = entry_price * (1 - bot.risk_cfg["stop_loss_pct"])
             atr = bot._calc_atr14()
-            mult = bot.risk_cfg.get("tp1_atr_mult", 2.0)
+            mult = bot.risk_cfg.get("tp1_atr_mult", 1.5)
             if atr > 0:
                 bot.state["tp1_target"] = round(entry_price + (atr * mult), 8)
             else:
