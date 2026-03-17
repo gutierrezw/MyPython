@@ -1795,6 +1795,8 @@ class BotCryptoUI:
         _FILE = "agents_schedule.json"
         _KEY = f"diaria_{self.VEHICULO}"
         ultimo_cierre = get_ultimo_dia_mercado(market="Crypto")
+        if ultimo_cierre is None:
+            return
         last_processed = read_json_tmp(_FILE).get(_KEY)
         if last_processed:
             last_processed = datetime.strptime(last_processed, "%Y-%m-%d").date()
@@ -1806,7 +1808,7 @@ class BotCryptoUI:
         update = diaria_book_performance(account=self.ACCOUNT, vehiculo=self.VEHICULO, proces=t_wait)
         if update:
             data = read_json_tmp(_FILE)
-            data[_KEY] = ultimo_cierre.strftime("%Y-%m-%d")
+            data[_KEY] = ultimo_cierre.strftime("%Y-%m-%d") if hasattr(ultimo_cierre, "strftime") else str(ultimo_cierre)
             write_json_tmp(_FILE, data)
             proceso_update_performance(account=self.ACCOUNT, vehiculo=self.VEHICULO)
 
@@ -2901,8 +2903,10 @@ class BotCryptoUI:
                 self._ws_reconnect_timer = None
             if self.ws_client:
                 self.ws_client._on_close_callback = None  # Evitar reconnect al detener manualmente
-                self.ws_client.stop()
+                ws = self.ws_client
                 self.ws_client = None
+                # stop() bloquea en join() — ejecutar en daemon thread para no freezar el cierre
+                threading.Thread(target=ws.stop, daemon=True).start()
         except Exception as e:
             self.logger.error(f"Error deteniendo WebSocket: {e}")
 
@@ -3593,7 +3597,9 @@ class BotCryptoUI:
                 max_bots = self.config.get("max_active_bots", 3)
 
                 # 1. Calcular scoring universo
+                self.logger.warning(f"_trabajo_pesado: paso 1 — scoring universo ({len(self.all_activos)} símbolos)")
                 self._calcular_scoring_universo()
+                self.logger.warning(f"_trabajo_pesado: paso 1 OK — scoring={len(self.scoring_data)}")
 
                 # 2. Ordenar por score
                 ranked = sorted(
@@ -3611,7 +3617,9 @@ class BotCryptoUI:
                 risk_config = self._build_risk_config()
 
                 # 3a. Detectar posiciones existentes en Binance (prioridad absoluta)
+                self.logger.warning("_trabajo_pesado: paso 2 — detectar posiciones Binance")
                 symbols_con_posicion = self._detectar_posiciones_binance()
+                self.logger.warning(f"_trabajo_pesado: paso 2 OK — posiciones={symbols_con_posicion}")
                 self._symbols_con_posicion_binance = set(symbols_con_posicion)
                 for sym in symbols_con_posicion:
                     if sym not in top_symbols:
@@ -3625,10 +3633,13 @@ class BotCryptoUI:
                         continue
                     top_symbols.append(symbol)
 
+                self.logger.warning(f"_trabajo_pesado: paso 3 — crear bots top={top_symbols}")
+
                 # Pre-crear bots + todo REST en background
                 pre_bots = {}
                 for symbol in top_symbols:
                     try:
+                        self.logger.warning(f"_trabajo_pesado: {symbol} — creando bot")
                         bot = TradingBotSpot(
                             symbol=symbol,
                             interval=self.interval,
@@ -3637,20 +3648,24 @@ class BotCryptoUI:
                             state_repo=None,
                             order_manager=self.order_manager,
                         )
+                        self.logger.warning(f"_trabajo_pesado: {symbol} — cargando historico")
                         self._cargar_historico(bot, symbol, limit=500)
 
                         # Registrar en BotManager (carga lot_sizes via REST)
+                        self.logger.warning(f"_trabajo_pesado: {symbol} — register_bot")
                         if self.bot_manager:
                             self.bot_manager.register_bot(bot)
 
                         # Cargar posición existente (REST)
+                        self.logger.warning(f"_trabajo_pesado: {symbol} — cargar posicion")
                         self._cargar_posicion_existente(bot, symbol)
 
                         pre_bots[symbol] = bot
-                        self.logger.info(f"{symbol}: Bot listo | df={len(bot.df) if bot.df is not None else 0}")
+                        self.logger.warning(f"_trabajo_pesado: {symbol} OK | df={len(bot.df) if bot.df is not None else 0}")
                     except Exception as e:
                         self.logger.error(f"{symbol}: Error preparando bot: {e}")
 
+                self.logger.warning(f"_trabajo_pesado: paso 4 — delegando UI | pre_bots={list(pre_bots.keys())}")
                 # Delegar solo UI al main thread
                 try:
                     self.parent.after(0, lambda: self._fase_ui_bots(pre_bots))

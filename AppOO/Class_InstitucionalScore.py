@@ -104,15 +104,13 @@ def sync_institutional(account) -> dict:
     all_symbols = inst.market.load_symbols(account)
     symbols = list(all_symbols.keys())
     fund_freq = {}
-    updated, deleted = 0, 0
+    updated = 0
 
     for symbol in symbols:
         if all_symbols.get(symbol) in ("T", "N"):
             continue
         raw = inst._fetch_ownership(symbol)
         if not raw:
-            inst.market.delete(symbol, account)
-            deleted += 1
             continue
 
         for name in raw.get("fund_names", []):
@@ -146,7 +144,6 @@ def sync_institutional(account) -> dict:
     return {
         "symbols_processed": len(symbols),
         "updated": updated,
-        "deleted": deleted,
         "funds_discovered": len(fund_freq),
     }
 

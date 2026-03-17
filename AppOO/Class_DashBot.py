@@ -370,8 +370,7 @@ class ClassAgenteIA:
             result = sync_institutional(account=self.account)
             self.logger.warning(
                 f"InstitucionalScore: procesados={result['symbols_processed']} "
-                f"actualizados={result['updated']} eliminados={result['deleted']} "
-                f"fondos={result['funds_discovered']}"
+                f"actualizados={result['updated']} fondos={result['funds_discovered']}"
             )
         except Exception as e:
             self.logger.error(f"Agente_InstitucionalScore(): {e}")
