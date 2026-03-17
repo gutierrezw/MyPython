@@ -107,7 +107,7 @@ def sync_institutional(account) -> dict:
     updated, deleted = 0, 0
 
     for symbol in symbols:
-        if all_symbols.get(symbol) == "T":
+        if all_symbols.get(symbol) in ("T", "N"):
             continue
         raw = inst._fetch_ownership(symbol)
         if not raw:
