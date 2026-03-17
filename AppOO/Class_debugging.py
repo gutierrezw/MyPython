@@ -277,7 +277,7 @@ class Debugging:
 
         # manager logging
         self.logger.update({"yfinance": logging.getLogger("yfinance")})
-        self.logger["yfinance"].setLevel(logging.WARNING)
+        self.logger["yfinance"].setLevel(logging.CRITICAL)
 
         # manager logging
         self.logger.update({"IBroks_Client": logging.getLogger("IBroks_Client")})
@@ -339,12 +339,20 @@ class Debugging:
         self.logger["DataFrameCache"].setLevel(logging.WARNING)
 
         # manager logging
+        self.logger.update({"DataFrame": logging.getLogger("DataFrame")})
+        self.logger["DataFrame"].setLevel(logging.WARNING)
+
+        # manager logging
         self.logger.update({"Screener": logging.getLogger("Screener")})
         self.logger["Screener"].setLevel(logging.WARNING)
 
         # manager logging
         self.logger.update({"InstitucionalScore": logging.getLogger("InstitucionalScore")})
         self.logger["InstitucionalScore"].setLevel(logging.WARNING)
+
+        # manager logging
+        self.logger.update({"Mysql": logging.getLogger("Mysql")})
+        self.logger["Mysql"].setLevel(logging.WARNING)
 
         # manager logging
         self.logger.update({"ClassAgenteIA": logging.getLogger("ClassAgenteIA")})

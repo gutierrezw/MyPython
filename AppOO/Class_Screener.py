@@ -1,5 +1,5 @@
 from Modulos_Mysql import MarketScreen, BDsystem
-from Modulos_Utilitarios import style_app, is_null, is_none, mask_numero
+from Modulos_Utilitarios import style_app, is_null, is_none, mask_numero, define_FileCache
 from Class_customer import CustomTreeview
 from Modulos_python import (
     tk,
@@ -23,6 +23,8 @@ from Modulos_python import (
     logging,
     yf,
     math,
+    pd,
+    EmptyDataError,
 )
 
 _logger = logging.getLogger("Screener")
@@ -50,8 +52,12 @@ def _yahoo_session():
         "Upgrade-Insecure-Requests": "1",
     })
     crumb = ""
+    _BACKOFF = [0, 30, 90]  # segundos de espera antes de cada intento
     for attempt in range(3):
         try:
+            if _BACKOFF[attempt]:
+                _logger.warning(f"[yahoo_session] backoff {_BACKOFF[attempt]}s antes de intento {attempt + 1}")
+                time.sleep(_BACKOFF[attempt])
             # Obtener cookies — probar fc.yahoo.com primero (nuevo flujo)
             for init_url in _INIT_URLS:
                 try:
@@ -59,24 +65,27 @@ def _yahoo_session():
                     break
                 except Exception:
                     continue
-            time.sleep(2 + attempt)
+            time.sleep(3)
             session.headers.update({"Referer": "https://finance.yahoo.com/"})
             # Intentar obtener crumb alternando entre query1 y query2
+            got_429 = False
             for crumb_url in _CRUMB_URLS:
                 try:
                     r = session.get(crumb_url, timeout=10)
                     if r.ok and r.text.strip():
                         crumb = r.text.strip()
                         break
+                    if r.status_code == 429:
+                        got_429 = True
                     _logger.warning(f"[yahoo_session] intento {attempt + 1} ({crumb_url[-7:]}): HTTP {r.status_code}")
                 except Exception as e:
                     _logger.warning(f"[yahoo_session] intento {attempt + 1}: {e}")
             if crumb:
                 break
-            time.sleep(3 + attempt * 2)
+            if got_429 and attempt < 2:
+                _logger.warning(f"[yahoo_session] 429 detectado — esperando {_BACKOFF[attempt + 1]}s")
         except Exception as e:
             _logger.warning(f"[yahoo_session] intento {attempt + 1} error: {e}")
-            time.sleep(3 + attempt * 2)
     session.headers.update({"Accept": "application/json"})
     if not crumb:
         _logger.error("[yahoo_session] crumb no obtenido — las requests pueden devolver 401")
@@ -272,6 +281,8 @@ class Screener(tk.Frame):
                 ("operatingMargins", "Op M", 60, "e"),
                 ("inst_score", "Inst Score", 75, "e"),
                 ("inst_ownership_pct", "Inst %", 65, "e"),
+                ("fh_count", "13F Funds", 65, "e"),
+                ("fh_total_value", "13F Value", 90, "e"),
                 ("inst_top_holder", "Top Holder", 160, "w"),
                 ("totalDebt", "Total Debt", 85, "e"),
                 ("lastFiscalYearEnd", "FY End", 75, "w"),
@@ -541,6 +552,18 @@ class Screener(tk.Frame):
 
             apply.grid(column=0, row=20, sticky=E, padx=20, pady=20)
             reset.grid(column=1, row=20, sticky=E, columnspa=2, pady=20)
+
+            btn_inst = tk.Button(
+                self.options,
+                text="Institucionales",
+                width=16,
+                bg="#005f5f",
+                fg="cyan",
+                font=("Arial", 9, "bold"),
+                relief=tk.FLAT,
+                command=self._show_institucionales_cartera,
+            )
+            btn_inst.grid(column=0, row=21, sticky=W, padx=10, pady=(10, 4))
         except EncodingWarning as e:
             print("widgets_screener(): {}".format(e))
 
@@ -648,6 +671,8 @@ class Screener(tk.Frame):
                     _pct(_g("operatingMargins")),
                     _price(_g("inst_score")),
                     _pct(_g("inst_ownership_pct")),
+                    str(_g("fh_count")) if _g("fh_count") else "",
+                    _big(_g("fh_total_value")),
                     _g("inst_top_holder") or "",
                     _big(_g("totalDebt")),
                     _date(_g("lastFiscalYearEnd")),
@@ -687,6 +712,135 @@ class Screener(tk.Frame):
         if not is_none(self.s_market):
             pass
 
+    def _show_institucionales_cartera(self):
+        def _senal_inst(inst_score, fh_buy_ratio, fh_count):
+            score = inst_score or 0.0
+            buy_r = fh_buy_ratio or 0.0
+            count = fh_count or 0
+            if score >= 0.4 and buy_r >= 0.5 and count >= 20:
+                return "ACOMPAÑAR"
+            elif score >= 0.25 or count >= 10:
+                return "MANTENER"
+            else:
+                return "REVISAR"
+
+        def _read_csv_signals(filename):
+            """Retorna dict {symbol: señal} leyendo CSV de buy o sell."""
+            try:
+                path = define_FileCache(name=f"{filename}.CSV")
+                df = pd.read_csv(path, header=0, sep=",", encoding="utf-8", index_col=False)
+                df.columns = df.columns.str.strip()
+                return set(df["Symbol"].dropna().str.strip().tolist()) if "Symbol" in df.columns else set()
+            except (EmptyDataError, FileNotFoundError):
+                return set()
+            except Exception:
+                return set()
+
+        def _senal_analyst(rec):
+            mapa = {
+                "strong_buy":  "▲▲ FUERTE",
+                "buy":         "▲ COMPRAR",
+                "hold":        "→ MANTENER",
+                "sell":        "▼ VENDER",
+                "strong_sell": "▼▼ FUERTE",
+            }
+            return mapa.get((rec or "").lower().replace(" ", "_"), "")
+
+        def _alineacion(senal_inst, en_buy, en_sell, rec):
+            bullish_analyst = rec in ("strong_buy", "buy")
+            bearish_analyst = rec in ("sell", "strong_sell")
+            bullish_inst = senal_inst == "ACOMPAÑAR"
+            bearish_inst = senal_inst == "REVISAR"
+
+            # Señales convergentes en las 3 fuentes
+            if bullish_inst and en_buy and bullish_analyst:
+                return "✓✓ TRIPLE BUY"
+            if bearish_inst and en_sell and bearish_analyst:
+                return "✓✓ TRIPLE SELL"
+            # Coincidencia inst + modelo
+            if bullish_inst and en_buy:
+                return "✓ INST+MOD BUY"
+            if bearish_inst and en_sell:
+                return "✓ INST+MOD SELL"
+            # Coincidencia inst + analista
+            if bullish_inst and bullish_analyst:
+                return "✓ INST+ANA BUY"
+            if bearish_inst and bearish_analyst:
+                return "✓ INST+ANA SELL"
+            # Divergencias
+            if bullish_inst and en_sell:
+                return "⚠ DIVERGE"
+            if bearish_inst and en_buy:
+                return "⚠ ALERTA"
+            return "— NEUTRO"
+
+        cartera = self.ScMarket.load_cartera_inst(self.account)
+        fh_stats = self.ScMarket.load_fund_holdings_stats()
+        syms_buy = _read_csv_signals("csv_datosIA_buy")
+        syms_sell = _read_csv_signals("csv_datosIA_sell")
+
+        win = tk.Toplevel(self)
+        win.title("Inst + Analistas vs Modelo — En Cartera")
+        win.configure(bg="black")
+        win.geometry("1100x540")
+
+        hdr = tk.Label(
+            win,
+            text=f"Inst + Analistas vs Modelo — Cartera ({len(cartera)} activos)",
+            bg="black", fg="cyan", font=("Arial", 11, "bold"),
+        )
+        hdr.pack(pady=(8, 4))
+
+        cols    = ("symbol", "nombre",   "inst_pct", "buy_ratio", "senal_inst", "analista",  "n_ana", "modelo",   "alineacion")
+        headers = ("Symbol", "Nombre",   "Inst %",   "13F Buy%",  "Inst Señal", "Analistas", "N",     "Modelo",   "Alineación")
+        widths  = (65,        170,         65,          70,          100,          105,          40,      80,          140)
+        anchors = ("w",       "w",         "e",         "e",         "w",          "w",          "e",     "center",    "w")
+
+        frame = tk.Frame(win, bg="black")
+        frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+
+        vsb = ttk.Scrollbar(frame, orient=VERTICAL)
+        tree = ttk.Treeview(frame, columns=cols, show="headings", yscrollcommand=vsb.set, height=22)
+        vsb.config(command=tree.yview)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        for col_id, hdr_text, w, anc in zip(cols, headers, widths, anchors):
+            tree.heading(col_id, text=hdr_text)
+            tree.column(col_id, width=w, minwidth=40, stretch=tk.NO, anchor=anc)
+
+        tree.tag_configure("TRIPLE",   foreground="#00FF88")
+        tree.tag_configure("ALINEADO", foreground="cyan")
+        tree.tag_configure("DIVERGE",  foreground="#FF6060")
+        tree.tag_configure("ALERTA",   foreground="#FFA500")
+        tree.tag_configure("NEUTRO",   foreground="#888888")
+
+        for row in cartera:
+            sym = row["symbol"]
+            stats = fh_stats.get(sym, {})
+            fh_buy_ratio = stats.get("fh_buy_ratio", 0.0)
+            rec = (row.get("analyst_rec") or "").lower().replace(" ", "_")
+            senal_inst = _senal_inst(row.get("inst_score"), fh_buy_ratio, row.get("fh_count"))
+            senal_ana = _senal_analyst(rec)
+            n_ana = str(row["analyst_count"]) if row.get("analyst_count") else ""
+            en_buy = sym in syms_buy
+            en_sell = sym in syms_sell
+            modelo = "▲ COMPRAR" if en_buy else ("▼ VENDER" if en_sell else "—")
+            alineacion = _alineacion(senal_inst, en_buy, en_sell, rec)
+            if "TRIPLE" in alineacion:
+                tag = "TRIPLE"
+            elif "✓" in alineacion:
+                tag = "ALINEADO"
+            elif "DIVERGE" in alineacion:
+                tag = "DIVERGE"
+            elif "ALERTA" in alineacion:
+                tag = "ALERTA"
+            else:
+                tag = "NEUTRO"
+            inst_pct = f"{row['inst_ownership_pct']:.1%}" if row.get("inst_ownership_pct") else ""
+            buy_r_str = f"{fh_buy_ratio:.0%}" if fh_buy_ratio else ""
+            nombre = (row.get("shortName") or "")[:28]
+            tree.insert("", tk.END, values=(sym, nombre, inst_pct, buy_r_str, senal_inst, senal_ana, n_ana, modelo, alineacion), tags=(tag,))
 
 def sync_market(account):
     """
@@ -825,6 +979,9 @@ def sync_market(account):
         symbol = (row.get("symbol", "") or "").strip()
         if not symbol:
             continue
+        # Filtrar preferreds, warrants, rights, units (símbolo con guión: ABR-D, AHT-F, etc.)
+        if "-" in symbol:
+            continue
         if symbol not in existing:
             market.insert(upd=["account", "tipo"], val=[account, "Dividends"], symbol=symbol)
             existing[symbol] = "N"
@@ -935,6 +1092,7 @@ def cleanup_market(account):
                 "targetLowPrice", "targetMeanPrice", "returnOnAssets", "returnOnEquity",
                 "earningsGrowth", "revenueGrowth", "freeCashflow", "grossMargins",
                 "ebitdaMargins", "operatingMargins", "financialCurrency", "website",
+                "analyst_rec", "analyst_mean", "analyst_count",
             ]
             valores = [
                 str(ap.get("sector") or "")[:50],
@@ -966,6 +1124,9 @@ def cleanup_market(account):
                 _safe_float(fd.get("operatingMargins", {}).get("raw")),
                 str(fd.get("financialCurrency") or "")[:6],
                 str(ap.get("website") or "")[:200],
+                str(fd.get("recommendationKey") or "")[:20] or None,
+                _safe_float(fd.get("recommendationMean", {}).get("raw")),
+                int(fd["numberOfAnalystOpinions"]["raw"]) if fd.get("numberOfAnalystOpinions", {}).get("raw") else None,
             ]
             return campos, valores
         except Exception:
@@ -979,10 +1140,18 @@ def cleanup_market(account):
         existing[d["symbol"]] = {
             "categoriaActivo": d.get("categoriaActivo"),
             "encartera": d.get("encartera"),
-            "shortName": d.get("shortName"),
-            "country": d.get("country"),
         }
     all_symbols = list(existing.keys())
+
+    # ── Phase 0: Eliminar preferreds/warrants/rights ya existentes ────────────
+    preferreds_eliminados = 0
+    for sym in list(all_symbols):
+        if "-" in sym and existing[sym].get("encartera") != "Y":
+            market.delete(symbol=sym, account=account)
+            existing.pop(sym)
+            all_symbols.remove(sym)
+            preferreds_eliminados += 1
+            _logger.warning(f"cleanup_market: preferred eliminado {sym}")
 
     # ── Phase 1: Quote — actualizar precios y detectar no encontrados ─────────
     not_found = []
@@ -1026,11 +1195,8 @@ def cleanup_market(account):
         eliminados += 1
         print(f"  eliminado: {sym}")
 
-    # ── Phase 3: Fundamentals — completar campos vacíos ───────────────────────
-    needs_fund = [
-        sym for sym, info in existing.items()
-        if not (info.get("country") or "").strip() or not (info.get("shortName") or "").strip()
-    ]
+    # ── Phase 3: Fundamentals — cualquier campo fundamental ausente ──────────────
+    needs_fund = market.load_symbols_needing_fundamentals(account)
     fund_ok = 0
     with ThreadPoolExecutor(max_workers=3) as ex:
         futures = {ex.submit(_fetch_fundamentals, sym): sym for sym in needs_fund}
@@ -1045,6 +1211,7 @@ def cleanup_market(account):
         "batches_ok": batches_ok,
         "quote_actualizados": quote_ok,
         "eliminados": eliminados,
+        "preferreds_eliminados": preferreds_eliminados,
         "fund_completados": fund_ok,
     }
 

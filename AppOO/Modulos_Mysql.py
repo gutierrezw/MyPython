@@ -22,6 +22,7 @@ from Modulos_Utilitarios import (
     sort_positions,
 )
 
+_logger = logging.getLogger("Mysql")
 
 class BDsystem:  # ----------------------------------------------------------------------------------------------------
     """
@@ -1265,6 +1266,68 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         except (Exception, connect.Error) as error:
             print(f"[Mysql::delete_market({symbol})]: {error}")
 
+    def load_cartera_inst(self, account) -> list:
+        """Retorna lista de dicts con campos institucionales para activos en cartera (encartera='Y')."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT symbol, shortName, lastPrice, inst_ownership_pct, inst_score, "
+                "fh_count, fh_total_value, analyst_rec, analyst_mean, analyst_count "
+                "FROM market WHERE account = %s AND encartera = 'Y' "
+                "AND categoriaActivo NOT IN ('I','S','X') "
+                "ORDER BY inst_score DESC",
+                (account,),
+            )
+            cols = [c[0] for c in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"load_cartera_inst({account}): {error}")
+            return []
+        finally:
+            conn.close()
+
+    def load_symbols_needing_fundamentals(self, account) -> list:
+        """Retorna símbolos activos con cualquier campo fundamental NULL o vacío."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT symbol FROM market
+                WHERE account = %s
+                  AND categoriaActivo NOT IN ('I','S','X','T')
+                  AND (
+                    country       IS NULL OR country       = ''  OR
+                    sector        IS NULL OR sector        = ''  OR
+                    shortName     IS NULL OR shortName     = ''  OR
+                    website       IS NULL OR website       = ''  OR
+                    targetMeanPrice     IS NULL OR
+                    returnOnEquity      IS NULL OR
+                    returnOnAssets      IS NULL OR
+                    pegRatio            IS NULL OR
+                    priceToBook         IS NULL OR
+                    earningsGrowth      IS NULL OR
+                    revenueGrowth       IS NULL OR
+                    freeCashflow        IS NULL OR
+                    grossMargins        IS NULL OR
+                    ebitdaMargins       IS NULL OR
+                    operatingMargins    IS NULL OR
+                    lastFiscalYearEnd   IS NULL OR
+                    analyst_rec   IS NULL OR analyst_rec   = ''  OR
+                    analyst_mean  IS NULL OR
+                    analyst_count IS NULL
+                  )
+                """,
+                (account,),
+            )
+            return [row[0] for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"load_symbols_needing_fundamentals({account}): {error}")
+            return []
+        finally:
+            conn.close()
+
     def select_top_marketcap(self, account, top_n=200) -> list:
         """Retorna lista de symbols ordenados por marketCap DESC, limitados a top_n.
         Excluye categoriaActivo I/S/X y símbolos sin marketCap."""
@@ -1293,7 +1356,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.execute("SELECT cusip, symbol FROM market WHERE cusip IS NOT NULL AND account = %s", (account,))
             return {row[0]: row[1] for row in cursor.fetchall()}
         except (Exception, connect.Error) as error:
-            print(f"[Mysql::get_cusip_map()]: {error}")
+            _logger.error(f"[Mysql::get_cusip_map()]: {error}")
             return {}
         finally:
             cursor.close()
@@ -1310,7 +1373,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             )
             conn.commit()
         except (Exception, connect.Error) as error:
-            print(f"[Mysql::update_market_cusip({symbol})]: {error}")
+            _logger.error(f"[Mysql::update_market_cusip({symbol})]: {error}")
         finally:
             cursor.close()
             conn.close()
@@ -1334,7 +1397,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 )
             conn.commit()
         except (Exception, connect.Error) as error:
-            print(f"[Mysql::upsert_fund({fund_name})]: {error}")
+            _logger.error(f"[Mysql::upsert_fund({fund_name})]: {error}")
         finally:
             cursor.close()
             conn.close()
@@ -1350,7 +1413,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             )
             return cursor.fetchall()
         except (Exception, connect.Error) as error:
-            print(f"[Mysql::load_top_funds_with_cik()]: {error}")
+            _logger.error(f"[Mysql::load_top_funds_with_cik()]: {error}")
             return []
         finally:
             cursor.close()
@@ -1365,7 +1428,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             row = cursor.fetchone()
             return row[0] if row else None
         except (Exception, connect.Error) as error:
-            print(f"[Mysql::get_fund_id_by_cik({cik})]: {error}")
+            _logger.error(f"[Mysql::get_fund_id_by_cik({cik})]: {error}")
             return None
         finally:
             cursor.close()
@@ -1391,7 +1454,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             conn.commit()
             return True
         except (Exception, connect.Error) as error:
-            print(f"[Mysql::insert_stock_from_13f({symbol})]: {error}")
+            _logger.error(f"[Mysql::insert_stock_from_13f({symbol})]: {error}")
             return False
         finally:
             cursor.close()
@@ -1405,7 +1468,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.execute("SELECT fund_name FROM funds WHERE cik IS NULL OR cik = '' ORDER BY frequency DESC")
             return [row[0] for row in cursor.fetchall()]
         except (Exception, connect.Error) as error:
-            print(f"[Mysql::load_funds_without_cik()]: {error}")
+            _logger.error(f"[Mysql::load_funds_without_cik()]: {error}")
             return []
         finally:
             cursor.close()
@@ -1419,7 +1482,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.execute("UPDATE funds SET cik = %s WHERE fund_name = %s", (cik, fund_name[:200]))
             conn.commit()
         except (Exception, connect.Error) as error:
-            print(f"[Mysql::update_fund_cik({fund_name})]: {error}")
+            _logger.error(f"[Mysql::update_fund_cik({fund_name})]: {error}")
         finally:
             cursor.close()
             conn.close()
@@ -1481,7 +1544,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 )
             conn.commit()
         except (Exception, connect.Error) as error:
-            print(f"[Mysql::upsert_fund_holding({fund_name}, {symbol})]: {error}")
+            _logger.error(f"[Mysql::upsert_fund_holding({fund_name}, {symbol})]: {error}")
         finally:
             cursor.close()
             conn.close()
@@ -1501,7 +1564,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             conn.commit()
             return cursor.rowcount
         except (Exception, connect.Error) as error:
-            print(f"[Mysql::cleanup_fund_holdings_nulls]: {error}")
+            _logger.error(f"[Mysql::cleanup_fund_holdings_nulls]: {error}")
             return 0
         finally:
             cursor.close()
@@ -1538,7 +1601,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 }
             return result
         except (Exception, connect.Error) as error:
-            print(f"[Mysql::load_fund_holdings_stats]: {error}")
+            _logger.error(f"[Mysql::load_fund_holdings_stats]: {error}")
             return {}
         finally:
             cursor.close()
@@ -1556,7 +1619,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             )
             return {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
         except (Exception, connect.Error) as error:
-            print(f"[Mysql::load_market_inst_fields]: {error}")
+            _logger.error(f"[Mysql::load_market_inst_fields]: {error}")
             return {}
         finally:
             cursor.close()
