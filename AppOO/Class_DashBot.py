@@ -379,6 +379,8 @@ class ClassAgenteIA:
     # agente Fund CIKs — resuelve CIK EDGAR para fondos sin CIK, una vez por semana
     @wait_rate(604800, persist=True)
     def Agente_FundCIKs(self):
+        if not (0 <= datetime.now().hour < 6):
+            return
         try:
             result = sync_fund_ciks()
             self.logger.warning(
@@ -390,6 +392,8 @@ class ClassAgenteIA:
     # agente Fund Filings — descarga XMLs 13F-HR para top 50 fondos, una vez por semana
     @wait_rate(604800, persist=True)
     def Agente_FundFilings(self):
+        if not (0 <= datetime.now().hour < 6):
+            return
         try:
             result = sync_fund_filings(top_n=50)
             self.logger.warning(
@@ -402,6 +406,8 @@ class ClassAgenteIA:
     # agente 13F Scores — recalcula inst_score con señales 13F, una vez por semana
     @wait_rate(604800, persist=True)
     def Agente_13FScores(self):
+        if not (0 <= datetime.now().hour < 6):
+            return
         try:
             result = sync_13f_scores(account=self.account)
             self.logger.warning(
@@ -413,12 +419,16 @@ class ClassAgenteIA:
     # agente 13F Holdings — parsea XMLs descargados y pobla fund_holdings, una vez por semana
     @wait_rate(604800, persist=True)
     def Agente_13FHoldings(self):
+        if not (0 <= datetime.now().hour < 6):
+            return
         try:
             result = sync_13f_holdings(account=self.account)
             self.logger.warning(
                 f"13FHoldings: archivos={result['xml_files']} cusips={result['unknown_cusips']} "
                 f"holdings={result['inserted_holdings']} nuevos={result['new_stocks']}"
             )
+            deleted = self.market.cleanup_fund_holdings_nulls()
+            self.logger.warning(f"13FHoldings cleanup: eliminadas={deleted} filas NULL")
         except Exception as e:
             self.logger.error(f"Agente_13FHoldings(): {e}")
 
@@ -1536,18 +1546,6 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     # Agente Institutional Score — ownership institucional (una vez al día)
                     self.Agente_InstitucionalScore()
 
-                    # Agente Fund CIKs — resuelve CIK EDGAR para fondos sin CIK (una vez por semana)
-                    self.Agente_FundCIKs()
-
-                    # Agente Fund Filings — descarga 13F-HR XMLs top 50 fondos (una vez por semana)
-                    self.Agente_FundFilings()
-
-                    # Agente 13F Holdings — parsea XMLs y pobla fund_holdings (una vez por semana)
-                    self.Agente_13FHoldings()
-
-                    # Agente 13F Scores — recalcula inst_score con señales 13F (una vez por semana)
-                    self.Agente_13FScores()
-
                     # Agente for Preservation (defensivo estructural)
                     self.exec_modulo_async(self.Agente_ManagerPreservation())
 
@@ -1564,6 +1562,20 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             DataHub.manager_events.register_thread(
                 name=task_name,
                 target=agentesIA,
+            )
+
+            # Agentes lentos — registrados una sola vez fuera del loop principal
+            DataHub.manager_events.register_thread(
+                name="Agente_FundCIKs", target=self.Agente_FundCIKs, loop_sleep=300
+            )
+            DataHub.manager_events.register_thread(
+                name="Agente_FundFilings", target=self.Agente_FundFilings, loop_sleep=300
+            )
+            DataHub.manager_events.register_thread(
+                name="Agente_13FHoldings", target=self.Agente_13FHoldings, loop_sleep=300
+            )
+            DataHub.manager_events.register_thread(
+                name="Agente_13FScores", target=self.Agente_13FScores, loop_sleep=300
             )
         except Exception as error:
             print(f"agentesIA(): {error}")

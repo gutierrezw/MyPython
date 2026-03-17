@@ -1386,7 +1386,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 return False
             cursor.execute(
                 "INSERT INTO market (symbol, shortName, account, categoriaActivo) VALUES (%s, %s, %s, 'T')",
-                (symbol[:20], name[:200], account),
+                (symbol[:20], name[:60], account),
             )
             conn.commit()
             return True
@@ -1486,6 +1486,26 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+
+    def cleanup_fund_holdings_nulls(self) -> int:
+        """Elimina filas con cusip IS NULL cuando ya existe otra fila del mismo (fund_id, symbol) con cusip."""
+        conn = self._conectar(tabla="update.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "DELETE fh1 FROM fund_holdings fh1 "
+                "INNER JOIN fund_holdings fh2 "
+                "  ON fh2.fund_id = fh1.fund_id AND fh2.symbol = fh1.symbol AND fh2.cusip IS NOT NULL "
+                "WHERE fh1.cusip IS NULL"
+            )
+            conn.commit()
+            return cursor.rowcount
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::cleanup_fund_holdings_nulls]: {error}")
+            return 0
+        finally:
+            cursor.close()
+            conn.close()
 
     def load_fund_holdings_stats(self) -> dict:
         """Retorna {symbol: {fh_count, fh_total_value, fh_buy_ratio}} con el último filing por fondo."""

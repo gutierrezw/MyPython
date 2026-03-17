@@ -33,7 +33,7 @@ class ManagerEvents:
         self.logger.info("✅ ManagerEvents inicializado correctamente.")
 
     # ---------------- Threads ----------------
-    def register_thread(self, name, target, *args, **kwargs):
+    def register_thread(self, name, target, *args, loop_sleep=0, **kwargs):
         if name in self.threads and self.threads[name].is_alive():
             self.logger.warning(f"🔄 Thread {name} ya estaba activo.")
             return
@@ -46,6 +46,8 @@ class ManagerEvents:
             while self.running_flags[name]:
                 try:
                     target(*args, **kwargs)
+                    if loop_sleep > 0:
+                        time.sleep(loop_sleep)
                 except Exception as e:
                     self.logger.error(f"❌ Error en thread {name}: {e}")
                     break
