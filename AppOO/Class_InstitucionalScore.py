@@ -61,14 +61,20 @@ class InstitucionalScore:
                     if name and sh is not None:
                         fund_holders.append((name, int(sh), rd))
 
+            analyst_rec   = info.get("recommendationKey")
+            analyst_mean  = _safe_float(info.get("recommendationMean"))
+            analyst_count = info.get("numberOfAnalystOpinions")
+
             return {
                 "inst_ownership_pct": inst_pct,
                 "insider_ownership_pct": insider_pct,
                 "inst_top_holder": top_holder[:120] if top_holder else None,
                 "inst_top_holder_shares": top_shares,
-                "inst_holders_count": holders_count,
                 "fund_names": fund_names,
                 "fund_holders": fund_holders,
+                "analyst_rec": analyst_rec[:20] if analyst_rec else None,
+                "analyst_mean": analyst_mean,
+                "analyst_count": int(analyst_count) if analyst_count else None,
             }
         except Exception as e:
             _logger.warning(f"_fetch_ownership [{symbol}]: {e}")
@@ -80,16 +86,12 @@ class InstitucionalScore:
         if not data:
             return {}
         inst_pct = data.get("inst_ownership_pct")
-        holders_count = data.get("inst_holders_count", 0)
-        score = None
-        if inst_pct is not None and holders_count > 0:
-            score = round(inst_pct * 0.6 + math.log(max(holders_count, 1)) * 0.4, 4)
+        score = round(inst_pct, 4) if inst_pct is not None else None
         return {
             "inst_ownership_pct": inst_pct,
             "insider_ownership_pct": data.get("insider_ownership_pct"),
             "inst_top_holder": data.get("inst_top_holder"),
             "inst_top_holder_shares": data.get("inst_top_holder_shares"),
-            "inst_holders_count": holders_count,
             "inst_score": score,
         }
 
@@ -117,19 +119,18 @@ def sync_institutional(account) -> dict:
             fund_freq[name] = fund_freq.get(name, 0) + 1
 
         inst_pct = raw.get("inst_ownership_pct")
-        holders_count = raw.get("inst_holders_count", 0)
-        score = None
-        if inst_pct is not None and holders_count > 0:
-            score = round(inst_pct * 0.6 + math.log(max(holders_count, 1)) * 0.4, 4)
+        score = round(inst_pct, 4) if inst_pct is not None else None
 
         campos = [
             "inst_ownership_pct", "insider_ownership_pct", "inst_top_holder",
-            "inst_top_holder_shares", "inst_holders_count", "inst_score", "inst_funds",
+            "inst_top_holder_shares", "inst_score", "inst_funds",
+            "analyst_rec", "analyst_mean", "analyst_count",
         ]
         valores = [
             inst_pct, raw.get("insider_ownership_pct"), raw.get("inst_top_holder"),
-            raw.get("inst_top_holder_shares"), holders_count, score,
+            raw.get("inst_top_holder_shares"), score,
             len(raw.get("fund_holders", [])),
+            raw.get("analyst_rec"), raw.get("analyst_mean"), raw.get("analyst_count"),
         ]
         ok = inst.market.update(upd=campos, val=valores, symbol=symbol, account=account)
         if ok:
@@ -201,22 +202,21 @@ def _search_edgar_cik(fund_name: str) -> str | None:
 
 def sync_13f_scores(account: str) -> dict:
     """
-    Recalcula inst_score blendando yfinance (inst_ownership_pct, inst_holders_count)
-    con señales 13F (fh_count, fh_buy_ratio) y actualiza market.
-    Nuevas columnas requeridas en market: fh_count INT, fh_total_value BIGINT.
+    Recalcula inst_score blendando yfinance (inst_ownership_pct 40%)
+    con señales 13F (fh_count 40%, fh_buy_ratio 20%) y actualiza market.
     """
     inst = InstitucionalScore()
     fh_stats = inst.market.load_fund_holdings_stats()
     inst_fields = inst.market.load_market_inst_fields(account)
     updated, skipped = 0, 0
 
-    for symbol, (inst_pct, holders_count) in inst_fields.items():
+    for symbol, inst_pct in inst_fields.items():
         stats = fh_stats.get(symbol, {})
         fh_count = stats.get("fh_count", 0)
         fh_total_value = stats.get("fh_total_value")
         fh_buy_ratio = stats.get("fh_buy_ratio", 0.0)
 
-        has_yf = inst_pct is not None and holders_count
+        has_yf = inst_pct is not None
         has_13f = fh_count > 0
 
         if not has_yf and not has_13f:
@@ -225,8 +225,7 @@ def sync_13f_scores(account: str) -> dict:
 
         score = round(
             (inst_pct or 0.0) * 0.40
-            + math.log(max(holders_count or 0, 1)) * 0.20
-            + math.log(max(fh_count, 1)) * 0.20
+            + math.log(max(fh_count, 1)) * 0.40
             + fh_buy_ratio * 0.20,
             4,
         )

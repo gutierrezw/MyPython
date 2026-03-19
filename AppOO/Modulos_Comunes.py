@@ -1,7 +1,7 @@
 from Class_DataFrame import get_yfinance
 from Modulos_Mysql import BDsystem, IPerformance, RepositorioOportunidadesBuySell
 from Modulos_Utilitarios import vehiculo_parm, convierte_ticket_crypto, define_FileCache
-from Modulos_python import datetime, pd, timedelta, os, csv, traceback
+from Modulos_python import datetime, date, pd, timedelta, os, csv, traceback
 
 
 # construye e inserta diaria para los assets del vehiculo
@@ -13,7 +13,9 @@ def diaria_book_performance(account=None, vehiculo=None, proces=None):
         # print(
         #    f"diaria_book_performance() {vehiculo} {proces['diaria_book_performance'].date()} < {ahora.date()}"
         # )
-        if proces["diaria_book_performance"].date() < ahora.date():
+        dbp = proces["diaria_book_performance"]
+        dbp_date = dbp if isinstance(dbp, date) else dbp.date()
+        if dbp_date < ahora.date():
 
             # itera para recorrer booktrading  e insertar performance dia(s) anteriores
             book, ix = RepositorioOportunidades.select_booktrading(accion="diaria_app", account=account, idivisa="USD")

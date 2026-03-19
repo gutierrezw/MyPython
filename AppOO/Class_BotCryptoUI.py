@@ -23,6 +23,7 @@ from Modulos_python import (
     json,
     pd,
     datetime,
+    date,
     Figure,
     FigureCanvasTkAgg,
     logging,
@@ -1714,7 +1715,12 @@ class BotCryptoUI:
 
         for keys in book:
             symbol = keys["symbol"]
-            efecha = desde
+            if isinstance(desde, datetime):
+                efecha = desde
+            elif isinstance(desde, date):
+                efecha = datetime(desde.year, desde.month, desde.day)
+            else:
+                continue
             hoy = datetime.now()
             sym_insertados = 0
             sym_existentes = 0
