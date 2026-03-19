@@ -1266,6 +1266,25 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         except (Exception, connect.Error) as error:
             print(f"[Mysql::delete_market({symbol})]: {error}")
 
+    def load_cartera_symbols(self, account) -> list:
+        """Retorna lista de dicts {symbol, shortName, lastPrice, categoriaActivo} para activos encartera='Y'."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT symbol, shortName, lastPrice, categoriaActivo "
+                "FROM market WHERE account = %s AND encartera = 'Y' "
+                "ORDER BY symbol",
+                (account,),
+            )
+            cols = [c[0] for c in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"load_cartera_symbols({account}): {error}")
+            return []
+        finally:
+            conn.close()
+
     def load_cartera_inst(self, account) -> list:
         """Retorna lista de dicts con campos institucionales para activos en cartera (encartera='Y')."""
         conn = self._conectar(tabla="select.market")
@@ -1273,9 +1292,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         try:
             cursor.execute(
                 "SELECT symbol, shortName, lastPrice, inst_ownership_pct, inst_score, "
-                "fh_count, fh_total_value, analyst_rec, analyst_mean, analyst_count "
+                "fh_count, fh_total_value, analyst_rec, analyst_mean, analyst_count, categoriaActivo "
                 "FROM market WHERE account = %s AND encartera = 'Y' "
-                "AND categoriaActivo NOT IN ('I','S','X') "
                 "ORDER BY inst_score DESC",
                 (account,),
             )
@@ -1286,6 +1304,25 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             return []
         finally:
             conn.close()
+
+    def mark_booktrading_delisted(self, symbol, account) -> int:
+        """Marca delisted=1 en todos los registros de booktrading para symbol+account."""
+        try:
+            conn = self._conectar(tabla="update.booktrading")
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE booktrading SET delisted = 1, updateStamp = %s "
+                "WHERE simbolo = %s AND cuenta = %s",
+                (datetime.now(), symbol, account),
+            )
+            conn.commit()
+            affected = cursor.rowcount
+            cursor.close()
+            conn.close()
+            return affected
+        except (Exception, connect.Error) as error:
+            _logger.error(f"mark_booktrading_delisted({symbol}): {error}")
+            return 0
 
     def load_symbols_needing_fundamentals(self, account) -> list:
         """Retorna símbolos activos con cualquier campo fundamental NULL o vacío."""
@@ -1488,66 +1525,71 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             conn.close()
 
     def upsert_fund_holding(self, fund_name: str, symbol: str, shares: int, report_date,
-                            value: int = None, cusip: str = None) -> None:
+                            value: int = None, cusip: str = None, option_type: str = None) -> None:
         """INSERT o UPDATE en fund_holdings. Calcula operation vs registro anterior.
-        Filtra bonos/preferreds: solo acepta símbolos puros de letras con ≤ 5 chars."""
+        Filtra bonos/preferreds: solo acepta símbolos puros de letras con ≤ 5 chars.
+        option_type: None=acciones directas, 'CALL'/'PUT'=opciones."""
         if len(symbol) > 5 or not symbol.isalpha():
             return
-        conn = self._conectar(tabla="update.market")
-        cursor = conn.cursor()
-        try:
-            cursor.execute("SELECT id FROM funds WHERE fund_name = %s", (fund_name[:200],))
-            row = cursor.fetchone()
-            if not row:
-                return
-            fund_id = row[0]
+        for attempt in range(3):
+            conn = self._conectar(tabla="update.market")
+            cursor = conn.cursor()
+            try:
+                cursor.execute("SELECT id FROM funds WHERE fund_name = %s", (fund_name[:200],))
+                row = cursor.fetchone()
+                if not row:
+                    return
+                fund_id = row[0]
 
-            cursor.execute(
-                "SELECT shares FROM fund_holdings WHERE fund_id = %s AND symbol = %s "
-                "ORDER BY report_date DESC LIMIT 1",
-                (fund_id, symbol),
-            )
-            prev = cursor.fetchone()
-            shares_prev = int(prev[0]) if prev else None
-
-            if shares_prev is None:
-                operation, shares_delta, pct_change = "NEW", None, None
-            elif shares > shares_prev:
-                operation = "BUY"
-                shares_delta = shares - shares_prev
-                pct_change = round(shares_delta / shares_prev, 4) if shares_prev > 0 else None
-            elif shares < shares_prev:
-                operation = "SELL"
-                shares_delta = shares - shares_prev
-                pct_change = round(shares_delta / shares_prev, 4) if shares_prev > 0 else None
-            else:
-                operation, shares_delta, pct_change = "HOLD", 0, 0.0
-
-            cursor.execute(
-                "SELECT id FROM fund_holdings WHERE fund_id = %s AND symbol = %s AND report_date = %s",
-                (fund_id, symbol, report_date),
-            )
-            existing = cursor.fetchone()
-            if existing:
                 cursor.execute(
-                    "UPDATE fund_holdings SET shares=%s, shares_prev=%s, shares_delta=%s, "
-                    "pct_change=%s, operation=%s, value=%s, cusip=%s WHERE id=%s",
-                    (shares, shares_prev, shares_delta, pct_change, operation, value, cusip, existing[0]),
+                    "SELECT shares FROM fund_holdings WHERE fund_id = %s AND symbol = %s "
+                    "AND COALESCE(option_type, '') = COALESCE(%s, '') "
+                    "ORDER BY report_date DESC LIMIT 1",
+                    (fund_id, symbol, option_type),
                 )
-            else:
+                prev = cursor.fetchone()
+                shares_prev = int(prev[0]) if prev else None
+
+                if shares_prev is None:
+                    operation, shares_delta, pct_change = "NEW", None, None
+                elif shares > shares_prev:
+                    operation = "BUY"
+                    shares_delta = shares - shares_prev
+                    pct_change = round(shares_delta / shares_prev, 4) if shares_prev > 0 else None
+                elif shares < shares_prev:
+                    operation = "SELL"
+                    shares_delta = shares - shares_prev
+                    pct_change = round(shares_delta / shares_prev, 4) if shares_prev > 0 else None
+                else:
+                    operation, shares_delta, pct_change = "HOLD", 0, 0.0
+
                 cursor.execute(
                     "INSERT INTO fund_holdings (fund_id, symbol, shares, shares_prev, "
-                    "shares_delta, pct_change, operation, report_date, value, cusip) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "shares_delta, pct_change, operation, report_date, value, cusip, option_type) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    "ON DUPLICATE KEY UPDATE "
+                    "shares=%s, shares_prev=%s, shares_delta=%s, "
+                    "pct_change=%s, operation=%s, value=%s",
                     (fund_id, symbol, shares, shares_prev, shares_delta, pct_change, operation,
-                     report_date, value, cusip),
+                     report_date, value, cusip, option_type,
+                     shares, shares_prev, shares_delta, pct_change, operation, value),
                 )
-            conn.commit()
-        except (Exception, connect.Error) as error:
-            _logger.error(f"[Mysql::upsert_fund_holding({fund_name}, {symbol})]: {error}")
-        finally:
-            cursor.close()
-            conn.close()
+                conn.commit()
+                return
+            except connect.Error as error:
+                if error.errno in (1213, 1412) and attempt < 2:  # deadlock / table def changed
+                    cursor.close()
+                    conn.close()
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                _logger.error(f"[Mysql::upsert_fund_holding({fund_name}, {symbol})]: {error}")
+                return
+            except Exception as error:
+                _logger.error(f"[Mysql::upsert_fund_holding({fund_name}, {symbol})]: {error}")
+                return
+            finally:
+                cursor.close()
+                conn.close()
 
 
     def cleanup_fund_holdings_nulls(self) -> int:
@@ -1571,33 +1613,45 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             conn.close()
 
     def load_fund_holdings_stats(self) -> dict:
-        """Retorna {symbol: {fh_count, fh_total_value, fh_buy_ratio}} con el último filing por fondo."""
+        """Retorna {symbol: {fh_count, fh_total_value, fh_buy_ratio, fh_sell_ratio,
+        fh_call_count, fh_put_count}} con el último filing por fondo y tipo de posición.
+        fh_count/buy_ratio/sell_ratio: solo posiciones directas (option_type IS NULL).
+        fh_call_count/fh_put_count: fondos únicos con opciones sobre el símbolo."""
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
         try:
             cursor.execute("""
                 SELECT fh.symbol,
-                    COUNT(DISTINCT fh.fund_id) AS fh_count,
-                    SUM(fh.value) AS fh_total_value,
-                    SUM(CASE WHEN fh.operation IN ('NEW','BUY') THEN 1 ELSE 0 END) / COUNT(*) AS fh_buy_ratio
+                    COUNT(DISTINCT CASE WHEN fh.option_type IS NULL THEN fh.fund_id END) AS fh_count,
+                    SUM(CASE WHEN fh.option_type IS NULL THEN fh.value ELSE 0 END) AS fh_total_value,
+                    SUM(CASE WHEN fh.option_type IS NULL AND fh.operation IN ('NEW','BUY') THEN 1 ELSE 0 END)
+                        / NULLIF(SUM(CASE WHEN fh.option_type IS NULL THEN 1 ELSE 0 END), 0) AS fh_buy_ratio,
+                    SUM(CASE WHEN fh.option_type IS NULL AND fh.operation = 'SELL' THEN 1 ELSE 0 END)
+                        / NULLIF(SUM(CASE WHEN fh.option_type IS NULL THEN 1 ELSE 0 END), 0) AS fh_sell_ratio,
+                    COUNT(DISTINCT CASE WHEN fh.option_type = 'CALL' THEN fh.fund_id END) AS fh_call_count,
+                    COUNT(DISTINCT CASE WHEN fh.option_type = 'PUT'  THEN fh.fund_id END) AS fh_put_count
                 FROM fund_holdings fh
                 INNER JOIN (
-                    SELECT fund_id, symbol, MAX(report_date) AS max_date
+                    SELECT fund_id, symbol, COALESCE(option_type, 'SHARE') AS opt_grp,
+                        MAX(report_date) AS max_date
                     FROM fund_holdings
-                    GROUP BY fund_id, symbol
+                    GROUP BY fund_id, symbol, COALESCE(option_type, 'SHARE')
                 ) latest ON fh.fund_id = latest.fund_id
                     AND fh.symbol = latest.symbol
+                    AND COALESCE(fh.option_type, 'SHARE') = latest.opt_grp
                     AND fh.report_date = latest.max_date
-                WHERE fh.value IS NOT NULL
                 GROUP BY fh.symbol
             """)
             result = {}
             for row in cursor.fetchall():
-                symbol, fh_count, fh_total_value, fh_buy_ratio = row
+                symbol, fh_count, fh_total_value, fh_buy_ratio, fh_sell_ratio, fh_call_count, fh_put_count = row
                 result[symbol] = {
-                    "fh_count": int(fh_count) if fh_count else 0,
+                    "fh_count"      : int(fh_count) if fh_count else 0,
                     "fh_total_value": int(fh_total_value) if fh_total_value else None,
-                    "fh_buy_ratio": float(fh_buy_ratio) if fh_buy_ratio else 0.0,
+                    "fh_buy_ratio"  : float(fh_buy_ratio) if fh_buy_ratio else 0.0,
+                    "fh_sell_ratio" : float(fh_sell_ratio) if fh_sell_ratio else 0.0,
+                    "fh_call_count" : int(fh_call_count) if fh_call_count else 0,
+                    "fh_put_count"  : int(fh_put_count) if fh_put_count else 0,
                 }
             return result
         except (Exception, connect.Error) as error:
@@ -1607,17 +1661,76 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+    def load_fund_holdings_prev(self) -> dict:
+        """Carga el último registro por (fund_id, cusip, option_type) en memoria.
+        Retorna {(fund_id, cusip, opt_grp): shares} donde opt_grp='' para acciones directas."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT fh.fund_id, fh.cusip, COALESCE(fh.option_type, ''), fh.shares
+                FROM fund_holdings fh
+                INNER JOIN (
+                    SELECT fund_id, cusip, COALESCE(option_type, '') AS opt_grp,
+                        MAX(report_date) AS max_date
+                    FROM fund_holdings
+                    GROUP BY fund_id, cusip, COALESCE(option_type, '')
+                ) latest ON fh.fund_id = latest.fund_id
+                    AND fh.cusip = latest.cusip
+                    AND COALESCE(fh.option_type, '') = latest.opt_grp
+                    AND fh.report_date = latest.max_date
+            """)
+            return {(fund_id, cusip, opt): shares for fund_id, cusip, opt, shares in cursor.fetchall()}
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_fund_holdings_prev]: {error}")
+            return {}
+        finally:
+            cursor.close()
+            conn.close()
+
+    def bulk_upsert_fund_holdings(self, records: list, chunk_size: int = 5000) -> int:
+        """INSERT ... ON DUPLICATE KEY UPDATE masivo usando executemany en chunks.
+        Cada record: (fund_id, symbol, shares, shares_prev, shares_delta, pct_change,
+                      operation, report_date, value, cusip, option_type)"""
+        if not records:
+            return 0
+        sql = (
+            "INSERT INTO fund_holdings "
+            "(fund_id, symbol, shares, shares_prev, shares_delta, pct_change, "
+            "operation, report_date, value, cusip, option_type) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "ON DUPLICATE KEY UPDATE "
+            "shares=%s, shares_prev=%s, shares_delta=%s, pct_change=%s, operation=%s, value=%s"
+        )
+        total = 0
+        for i in range(0, len(records), chunk_size):
+            chunk = records[i:i + chunk_size]
+            # duplicar valores para ON DUPLICATE KEY UPDATE
+            params = [r + (r[2], r[3], r[4], r[5], r[6], r[8]) for r in chunk]
+            conn = self._conectar(tabla="update.market")
+            cursor = conn.cursor()
+            try:
+                cursor.executemany(sql, params)
+                conn.commit()
+                total += cursor.rowcount
+            except (Exception, connect.Error) as error:
+                _logger.error(f"[Mysql::bulk_upsert_fund_holdings chunk {i}]: {error}")
+            finally:
+                cursor.close()
+                conn.close()
+        return total
+
     def load_market_inst_fields(self, account: str) -> dict:
-        """Retorna {symbol: (inst_ownership_pct, inst_holders_count)} para todos los símbolos activos."""
+        """Retorna {symbol: inst_ownership_pct} para todos los símbolos activos."""
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "SELECT symbol, inst_ownership_pct, inst_holders_count FROM market "
-                "WHERE account = %s AND categoriaActivo NOT IN ('I','S','X')",
+                "SELECT symbol, inst_ownership_pct FROM market "
+                "WHERE account = %s",
                 (account,),
             )
-            return {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
+            return {row[0]: row[1] for row in cursor.fetchall()}
         except (Exception, connect.Error) as error:
             _logger.error(f"[Mysql::load_market_inst_fields]: {error}")
             return {}
@@ -3033,19 +3146,21 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
                 # ultima diaria para un determinado symbol
                 if symbol is not None:
-                    qry = """SELECT a.* FROM (SELECT sec, fechahora, stock, basico, gprealizadas, cantidad, 
+                    qry = """SELECT a.* FROM (SELECT sec, fechahora, stock, basico, gprealizadas, cantidad,
                                                     tarifacomision, idtrans, position_inversion, factor_cambio
-                                            FROM booktrading WHERE cuenta = '%s' AND divisa = '%s' 
-                                                                AND simbolo = '%s' AND activa = 'Y') AS a
+                                            FROM booktrading WHERE cuenta = '%s' AND divisa = '%s'
+                                                                AND simbolo = '%s' AND activa = 'Y'
+                                                                AND delisted = 0) AS a
                             ORDER BY fechahora DESC, sec DESC;"""
                     cursor.execute(qry % (account, idivisa, symbol))
                     sql = cursor.fetchone()
 
                 # ultima diaria registrada
                 if symbol is None:
-                    qry = """SELECT a.* FROM (SELECT sec, fechahora, stock, basico, gprealizadas, cantidad, 
-                                                    tarifacomision, idtrans, position_inversion FROM booktrading 
-                                            WHERE cuenta = '%s' AND divisa = '%s' AND activa = 'Y') AS a
+                    qry = """SELECT a.* FROM (SELECT sec, fechahora, stock, basico, gprealizadas, cantidad,
+                                                    tarifacomision, idtrans, position_inversion FROM booktrading
+                                            WHERE cuenta = '%s' AND divisa = '%s' AND activa = 'Y'
+                                            AND delisted = 0) AS a
                             ORDER BY fechahora DESC, sec DESC;"""
                     cursor.execute(qry % (account, idivisa))
                     sql = cursor.fetchone()
@@ -3065,9 +3180,10 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 sql = cursor.fetchone()
 
             elif accion == "select":
-                qry = """SELECT a.* FROM (SELECT DATE(fechahora), basico, stock, gprealizadas, sec FROM booktrading  
-                                        WHERE cuenta = '%s'  AND divisa = '%s' 
-                                            AND simbolo = '%s' AND activa = 'Y') AS a
+                qry = """SELECT a.* FROM (SELECT DATE(fechahora), basico, stock, gprealizadas, sec FROM booktrading
+                                        WHERE cuenta = '%s'  AND divisa = '%s'
+                                            AND simbolo = '%s' AND activa = 'Y'
+                                            AND delisted = 0) AS a
                                             ORDER BY DATE(fechahora) ASC, sec ASC;"""
 
                 cursor.execute(qry % (account, idivisa, symbol))
@@ -3099,16 +3215,18 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 sql = cursor.fetchall()
 
             elif accion == "timestamp":
-                qry = """SELECT max(a.fechahora) as fechahora FROM 
-                                (SELECT fechahora FROM booktrading  
-                                WHERE cuenta = '%s' AND divisa = '%s' AND activa = 'Y') AS a;"""
+                qry = """SELECT max(a.fechahora) as fechahora FROM
+                                (SELECT fechahora FROM booktrading
+                                WHERE cuenta = '%s' AND divisa = '%s' AND activa = 'Y'
+                                AND delisted = 0) AS a;"""
 
                 cursor.execute(qry % (account, idivisa))
                 sql = cursor.fetchone()
 
             elif accion == "select*":
-                qry = """SELECT a.* FROM (SELECT * FROM booktrading WHERE cuenta = '%s'  AND divisa = '%s' 
-                                                                    AND simbolo = '%s' AND activa = 'Y') AS a 
+                qry = """SELECT a.* FROM (SELECT * FROM booktrading WHERE cuenta = '%s'  AND divisa = '%s'
+                                                                    AND simbolo = '%s' AND activa = 'Y'
+                                                                    AND delisted = 0) AS a
                                                                     ORDER BY preciotrans ASC, fechahora ASC, sec ASC;"""
 
                 cursor.execute(qry % (account, idivisa, symbol))
@@ -3116,8 +3234,9 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
             # para obtener tasa de cambio mas reciente
             elif accion == "tasa_cambio":
-                qry = """SELECT a.* FROM (SELECT * FROM booktrading WHERE cuenta = '%s'  AND divisa = '%s' 
-                                                                    AND simbolo = '%s' AND activa = 'Y') AS a 
+                qry = """SELECT a.* FROM (SELECT * FROM booktrading WHERE cuenta = '%s'  AND divisa = '%s'
+                                                                    AND simbolo = '%s' AND activa = 'Y'
+                                                                    AND delisted = 0) AS a
                                                                     ORDER BY fechahora DESC, sec DESC;"""
 
                 cursor.execute(qry % (account, idivisa, symbol))
@@ -3150,9 +3269,10 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
             # opción para obtener maxima ganancia en Trade de venta
             elif accion == "ganancias":
-                qry = """SELECT a.* FROM (SELECT * FROM booktrading  
+                qry = """SELECT a.* FROM (SELECT * FROM booktrading
                                         WHERE cuenta = '%s' AND divisa = '%s' AND activa = 'Y'
-                                            AND codigo = 'O'  AND simbolo = '%s') AS a 
+                                            AND codigo = 'O'  AND simbolo = '%s'
+                                            AND delisted = 0) AS a
                         ORDER BY preciotrans ASC, fechahora DESC, sec DESC;"""
 
                 cursor.execute(qry % (account, idivisa, symbol))
@@ -3160,9 +3280,10 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
             # opción para obtener ganancia en BOTTrade de venta
             elif accion == "bottrader":
-                qry = """SELECT a.* FROM (SELECT * FROM booktrading  
+                qry = """SELECT a.* FROM (SELECT * FROM booktrading
                                         WHERE cuenta = '%s' AND divisa = '%s' AND activa = 'Y'
-                                            AND codigo = 'O'  AND simbolo = '%s') AS a 
+                                            AND codigo = 'O'  AND simbolo = '%s'
+                                            AND delisted = 0) AS a
                         ORDER BY fechahora DESC, sec DESC;"""
 
                 cursor.execute(qry % (account, idivisa, symbol))
