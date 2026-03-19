@@ -169,7 +169,8 @@ def resolve_cusips_openfigi(cusips: list) -> dict:
 
 
 def parse_13f_xml(filepath: str) -> list:
-    """Parsea un XML 13F-HR y retorna lista de {cusip, name, shares, value}."""
+    """Parsea un XML 13F-HR y retorna lista de {cusip, name, shares, value, option_type}.
+    option_type: None=acciones directas, 'CALL'/'PUT'=opciones sobre acciones."""
     positions = []
     try:
         tree = ET.parse(filepath)
@@ -181,8 +182,13 @@ def parse_13f_xml(filepath: str) -> list:
             shares = int(shares_elem.text) if shares_elem is not None and shares_elem.text else None
             value_text = info.findtext("tf:value", namespaces=_13F_NS)
             value = int(value_text) * 1000 if value_text else None
+            put_call = (info.findtext("tf:putCall", namespaces=_13F_NS) or "").strip().upper()
+            option_type = put_call if put_call in ("CALL", "PUT") else None
             if cusip and shares:
-                positions.append({"cusip": cusip, "name": name, "shares": shares, "value": value})
+                positions.append({
+                    "cusip": cusip, "name": name, "shares": shares,
+                    "value": value, "option_type": option_type,
+                })
     except Exception as e:
         _logger.warning(f"parse_13f_xml [{filepath}]: {e}")
     return positions
@@ -222,29 +228,54 @@ def sync_13f_holdings(account: str) -> dict:
             cusip_map[cusip] = ticker
             market.update_market_cusip(ticker, account, cusip)
 
-    # Paso 3: upsert fund_holdings; insertar nuevos stocks en market
-    inserted_holdings, new_stocks = 0, 0
-    total_files = len(all_positions)
-    for idx, (xml_file, (fund_id, filing_date, positions)) in enumerate(all_positions.items(), 1):
-        if idx % 50 == 0 or idx == total_files:
-            _logger.warning(f"  holdings: [{idx}/{total_files}] insertados={inserted_holdings} nuevos_stocks={new_stocks}")
-        fund_name = metadata[xml_file]["fund_name"]
+    # Paso 3: bulk upsert fund_holdings
+    # Cargar estado previo en memoria: {(fund_id, cusip, opt_grp): shares}
+    _logger.warning("sync_13f_holdings: cargando estado previo de fund_holdings...")
+    prev_map = market.load_fund_holdings_prev()
+
+    records = []
+    inserted_holdings = 0
+    inserted_options = 0
+    for xml_file, (fund_id, filing_date, positions) in all_positions.items():
         for pos in positions:
             symbol = cusip_map.get(pos["cusip"])
             if not symbol:
                 continue
-            added = market.insert_stock_from_13f(symbol, pos["name"], account)
-            if added:
-                new_stocks += 1
-            market.upsert_fund_holding(
-                fund_name, symbol, pos["shares"], filing_date,
-                value=pos["value"], cusip=pos["cusip"],
-            )
-            inserted_holdings += 1
+            opt       = pos.get("option_type")
+            opt_grp   = opt or ""
+            shares    = pos["shares"]
+            prev_key  = (fund_id, pos["cusip"], opt_grp)
+            shares_prev = prev_map.get(prev_key)
+
+            if shares_prev is None:
+                operation, shares_delta, pct_change = "NEW", None, None
+            elif shares > shares_prev:
+                operation   = "BUY"
+                shares_delta = shares - shares_prev
+                pct_change  = round(shares_delta / shares_prev, 4) if shares_prev > 0 else None
+            elif shares < shares_prev:
+                operation   = "SELL"
+                shares_delta = shares - shares_prev
+                pct_change  = round(shares_delta / shares_prev, 4) if shares_prev > 0 else None
+            else:
+                operation, shares_delta, pct_change = "HOLD", 0, 0.0
+
+            records.append((
+                fund_id, symbol, shares, shares_prev, shares_delta, pct_change,
+                operation, filing_date, pos["value"], pos["cusip"], opt,
+            ))
+            if opt:
+                inserted_options += 1
+            else:
+                inserted_holdings += 1
+
+    _logger.warning(f"sync_13f_holdings: bulk insert {len(records)} registros "
+                    f"({inserted_holdings} directos, {inserted_options} opciones)...")
+    market.bulk_upsert_fund_holdings(records)
 
     return {
-        "xml_files": len(xml_files),
-        "unknown_cusips": len(unknown_cusips),
+        "xml_files"        : len(xml_files),
+        "unknown_cusips"   : len(unknown_cusips),
         "inserted_holdings": inserted_holdings,
-        "new_stocks": new_stocks,
+        "inserted_options" : inserted_options,
     }

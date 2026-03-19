@@ -553,17 +553,22 @@ class Screener(tk.Frame):
             apply.grid(column=0, row=20, sticky=E, padx=20, pady=20)
             reset.grid(column=1, row=20, sticky=E, columnspa=2, pady=20)
 
-            btn_inst = tk.Button(
-                self.options,
-                text="Institucionales",
-                width=16,
-                bg="#005f5f",
-                fg="cyan",
-                font=("Arial", 9, "bold"),
-                relief=tk.FLAT,
+            btn_frame = ttk.Frame(self.panel, style="B.TFrame")
+            btn_frame.grid(column=0, row=10, columnspan=3, sticky=W, padx=8, pady=(6, 4))
+
+            ttk.Button(
+                btn_frame,
+                text="Inst. Intro",
+                style="C.TButton",
                 command=self._show_institucionales_cartera,
-            )
-            btn_inst.grid(column=0, row=21, sticky=W, padx=10, pady=(10, 4))
+            ).pack(side=tk.LEFT, padx=(0, 6))
+
+            ttk.Button(
+                btn_frame,
+                text="Inst. Out",
+                style="C.TButton",
+                state=tk.DISABLED,
+            ).pack(side=tk.LEFT)
         except EncodingWarning as e:
             print("widgets_screener(): {}".format(e))
 
@@ -713,6 +718,8 @@ class Screener(tk.Frame):
             pass
 
     def _show_institucionales_cartera(self):
+        _TAG_ORDER = {"CUADRUPLE": 0, "TRIPLE": 1, "ALINEADO": 2, "DIVERGE": 3, "ALERTA": 4, "NEUTRO": 5}
+
         def _senal_inst(inst_score, fh_buy_ratio, fh_count):
             score = inst_score or 0.0
             buy_r = fh_buy_ratio or 0.0
@@ -725,7 +732,6 @@ class Screener(tk.Frame):
                 return "REVISAR"
 
         def _read_csv_signals(filename):
-            """Retorna dict {symbol: señal} leyendo CSV de buy o sell."""
             try:
                 path = define_FileCache(name=f"{filename}.CSV")
                 df = pd.read_csv(path, header=0, sep=",", encoding="utf-8", index_col=False)
@@ -746,27 +752,50 @@ class Screener(tk.Frame):
             }
             return mapa.get((rec or "").lower().replace(" ", "_"), "")
 
-        def _alineacion(senal_inst, en_buy, en_sell, rec):
+        def _alineacion(senal_inst, en_buy, en_sell, rec, categ):
             bullish_analyst = rec in ("strong_buy", "buy")
             bearish_analyst = rec in ("sell", "strong_sell")
-            bullish_inst = senal_inst == "ACOMPAÑAR"
-            bearish_inst = senal_inst == "REVISAR"
+            bullish_inst    = senal_inst == "ACOMPAÑAR"
+            bearish_inst    = senal_inst == "REVISAR"
+            bullish_div     = categ == "I"
+            bearish_div     = categ == "S"
+            has_div         = categ not in ("X", None, "")
 
-            # Señales convergentes en las 3 fuentes
+            # 4 fuentes alineadas (solo cuando div aplica)
+            if has_div and bullish_inst and en_buy and bullish_analyst and bullish_div:
+                return "★ CUÁDRUPLE BUY"
+            if has_div and bearish_inst and en_sell and bearish_analyst and bearish_div:
+                return "★ CUÁDRUPLE SELL"
+            # 3 fuentes — inst + analyst + modelo
             if bullish_inst and en_buy and bullish_analyst:
                 return "✓✓ TRIPLE BUY"
             if bearish_inst and en_sell and bearish_analyst:
                 return "✓✓ TRIPLE SELL"
-            # Coincidencia inst + modelo
+            # 3 fuentes — inst + modelo + div
+            if has_div and bullish_inst and en_buy and bullish_div:
+                return "✓✓ TRIPLE BUY"
+            if has_div and bearish_inst and en_sell and bearish_div:
+                return "✓✓ TRIPLE SELL"
+            # 3 fuentes — inst + analyst + div
+            if has_div and bullish_inst and bullish_analyst and bullish_div:
+                return "✓✓ TRIPLE BUY"
+            if has_div and bearish_inst and bearish_analyst and bearish_div:
+                return "✓✓ TRIPLE SELL"
+            # 2 fuentes — inst + modelo
             if bullish_inst and en_buy:
                 return "✓ INST+MOD BUY"
             if bearish_inst and en_sell:
                 return "✓ INST+MOD SELL"
-            # Coincidencia inst + analista
+            # 2 fuentes — inst + analista
             if bullish_inst and bullish_analyst:
                 return "✓ INST+ANA BUY"
             if bearish_inst and bearish_analyst:
                 return "✓ INST+ANA SELL"
+            # 2 fuentes — inst + div
+            if has_div and bullish_inst and bullish_div:
+                return "✓ INST+DIV BUY"
+            if has_div and bearish_inst and bearish_div:
+                return "✓ INST+DIV SELL"
             # Divergencias
             if bullish_inst and en_sell:
                 return "⚠ DIVERGE"
@@ -779,55 +808,34 @@ class Screener(tk.Frame):
         syms_buy = _read_csv_signals("csv_datosIA_buy")
         syms_sell = _read_csv_signals("csv_datosIA_sell")
 
-        win = tk.Toplevel(self)
-        win.title("Inst + Analistas vs Modelo — En Cartera")
-        win.configure(bg="black")
-        win.geometry("1100x540")
-
-        hdr = tk.Label(
-            win,
-            text=f"Inst + Analistas vs Modelo — Cartera ({len(cartera)} activos)",
-            bg="black", fg="cyan", font=("Arial", 11, "bold"),
-        )
-        hdr.pack(pady=(8, 4))
-
-        cols    = ("symbol", "nombre",   "inst_pct", "buy_ratio", "senal_inst", "analista",  "n_ana", "modelo",   "alineacion")
-        headers = ("Symbol", "Nombre",   "Inst %",   "13F Buy%",  "Inst Señal", "Analistas", "N",     "Modelo",   "Alineación")
-        widths  = (65,        170,         65,          70,          100,          105,          40,      80,          140)
-        anchors = ("w",       "w",         "e",         "e",         "w",          "w",          "e",     "center",    "w")
-
-        frame = tk.Frame(win, bg="black")
-        frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
-
-        vsb = ttk.Scrollbar(frame, orient=VERTICAL)
-        tree = ttk.Treeview(frame, columns=cols, show="headings", yscrollcommand=vsb.set, height=22)
-        vsb.config(command=tree.yview)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        for col_id, hdr_text, w, anc in zip(cols, headers, widths, anchors):
-            tree.heading(col_id, text=hdr_text)
-            tree.column(col_id, width=w, minwidth=40, stretch=tk.NO, anchor=anc)
-
-        tree.tag_configure("TRIPLE",   foreground="#00FF88")
-        tree.tag_configure("ALINEADO", foreground="cyan")
-        tree.tag_configure("DIVERGE",  foreground="#FF6060")
-        tree.tag_configure("ALERTA",   foreground="#FFA500")
-        tree.tag_configure("NEUTRO",   foreground="#888888")
-
+        # Construir filas y ordenar por prioridad de alineación
+        filas = []
         for row in cartera:
+            if (row.get("categoriaActivo") or "") == "X":
+                continue
             sym = row["symbol"]
             stats = fh_stats.get(sym, {})
-            fh_buy_ratio = stats.get("fh_buy_ratio", 0.0)
-            rec = (row.get("analyst_rec") or "").lower().replace(" ", "_")
+            fh_buy_ratio  = stats.get("fh_buy_ratio", 0.0)
+            fh_sell_ratio = stats.get("fh_sell_ratio", 0.0)
+            rec    = (row.get("analyst_rec") or "").lower().replace(" ", "_")
+            categ  = row.get("categoriaActivo") or ""
             senal_inst = _senal_inst(row.get("inst_score"), fh_buy_ratio, row.get("fh_count"))
-            senal_ana = _senal_analyst(rec)
-            n_ana = str(row["analyst_count"]) if row.get("analyst_count") else ""
-            en_buy = sym in syms_buy
-            en_sell = sym in syms_sell
-            modelo = "▲ COMPRAR" if en_buy else ("▼ VENDER" if en_sell else "—")
-            alineacion = _alineacion(senal_inst, en_buy, en_sell, rec)
-            if "TRIPLE" in alineacion:
+            senal_ana  = _senal_analyst(rec)
+            n_ana      = str(row["analyst_count"]) if row.get("analyst_count") else ""
+            en_buy     = sym in syms_buy
+            en_sell    = sym in syms_sell
+            modelo     = "▲ COMPRAR" if en_buy else ("▼ VENDER" if en_sell else "—")
+            alineacion = _alineacion(senal_inst, en_buy, en_sell, rec, categ)
+            inst_val   = min(row["inst_ownership_pct"], 1.0) if row.get("inst_ownership_pct") else None
+            inst_pct   = f"{inst_val:.1%}" if inst_val else ""
+            buy_r_str  = f"{fh_buy_ratio:.0%}" if fh_buy_ratio else ""
+            sell_r_str = f"{fh_sell_ratio:.0%}" if fh_sell_ratio else ""
+            n_inst     = str(stats["fh_count"]) if stats.get("fh_count") else ""
+            nombre     = (row.get("shortName") or "")[:28]
+
+            if "CUÁDRUPLE" in alineacion:
+                tag = "CUADRUPLE"
+            elif "TRIPLE" in alineacion:
                 tag = "TRIPLE"
             elif "✓" in alineacion:
                 tag = "ALINEADO"
@@ -837,10 +845,81 @@ class Screener(tk.Frame):
                 tag = "ALERTA"
             else:
                 tag = "NEUTRO"
-            inst_pct = f"{row['inst_ownership_pct']:.1%}" if row.get("inst_ownership_pct") else ""
-            buy_r_str = f"{fh_buy_ratio:.0%}" if fh_buy_ratio else ""
-            nombre = (row.get("shortName") or "")[:28]
-            tree.insert("", tk.END, values=(sym, nombre, inst_pct, buy_r_str, senal_inst, senal_ana, n_ana, modelo, alineacion), tags=(tag,))
+
+            filas.append({
+                "values": (sym, categ, nombre, inst_pct, n_inst, buy_r_str, sell_r_str, senal_inst, senal_ana, n_ana, modelo, alineacion),
+                "tag": tag,
+                "categ": categ,
+            })
+
+        filas.sort(key=lambda r: _TAG_ORDER.get(r["tag"], 99))
+
+        # Contadores por categoría de alineación
+        contadores = {}
+        for f in filas:
+            contadores[f["tag"]] = contadores.get(f["tag"], 0) + 1
+
+        win = tk.Toplevel(self)
+        win.title("Inst + Analistas vs Modelo — En Cartera")
+        win.configure(bg="black")
+        offset_x = max(0, self.winfo_rootx() + self.winfo_width() // 2)
+        offset_y = max(0, self.winfo_rooty() + 60)
+        win.geometry(f"1200x580+{offset_x}+{offset_y}")
+
+        hdr = tk.Label(
+            win,
+            text=f"Inst + Analistas vs Modelo — Cartera ({len(filas)} activos)",
+            bg="black", fg="cyan", font=("Arial", 11, "bold"),
+        )
+        hdr.pack(pady=(8, 4))
+
+        cols    = ("symbol", "div",    "nombre", "inst_pct", "n_inst",  "buy_ratio", "sell_ratio", "senal_inst", "analista",  "n_ana", "modelo",   "alineacion")
+        headers = ("Symbol", "Div",    "Nombre", "Inst %",   "# Inst",  "13F Buy%",  "13F Sell%",  "Inst Señal", "Analistas", "N",     "Modelo",   "Alineación")
+        widths  = (65,        38,       170,       65,          55,        70,           70,           100,          105,          40,      80,          150)
+        anchors = ("w",       "center", "w",       "e",         "e",       "e",          "e",          "w",          "w",          "e",     "center",    "w")
+
+        frame = tk.Frame(win, bg="black")
+        frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+
+        vsb = ttk.Scrollbar(frame, orient=VERTICAL)
+        tree = ttk.Treeview(frame, columns=cols, show="headings", yscrollcommand=vsb.set, height=20)
+        vsb.config(command=tree.yview)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        for col_id, hdr_text, w, anc in zip(cols, headers, widths, anchors):
+            tree.heading(col_id, text=hdr_text)
+            tree.column(col_id, width=w, minwidth=40, stretch=tk.NO, anchor=anc)
+
+        tree.tag_configure("CUADRUPLE", foreground="#FFD700")
+        tree.tag_configure("TRIPLE",    foreground="#00FF88")
+        tree.tag_configure("ALINEADO",  foreground="cyan")
+        tree.tag_configure("DIVERGE",   foreground="#FF6060")
+        tree.tag_configure("ALERTA",    foreground="#FFA500")
+        tree.tag_configure("NEUTRO",    foreground="#888888")
+
+        for f in filas:
+            tree.insert("", tk.END, values=f["values"], tags=(f["tag"],))
+
+        # Barra resumen
+        resumen_frame = tk.Frame(win, bg="#111111")
+        resumen_frame.pack(fill=tk.X, padx=8, pady=(2, 6))
+        etiquetas = [
+            ("CUADRUPLE", "★ CUÁD",  "#FFD700"),
+            ("TRIPLE",    "✓✓ TRIPLE", "#00FF88"),
+            ("ALINEADO",  "✓ ALIN",  "cyan"),
+            ("DIVERGE",   "⚠ DIV",   "#FF6060"),
+            ("ALERTA",    "⚠ ALERT", "#FFA500"),
+            ("NEUTRO",    "— NEUT",  "#888888"),
+        ]
+        for key, label, color in etiquetas:
+            n = contadores.get(key, 0)
+            tk.Label(
+                resumen_frame, text=f"{label}: {n}",
+                bg="#111111", fg=color, font=("Arial", 9),
+            ).pack(side=tk.LEFT, padx=10, pady=2)
+
+        ttk.Button(resumen_frame, text="Ver Modelo", style="C.TButton", state=tk.DISABLED).pack(side=tk.RIGHT, padx=(0, 8))
 
 def sync_market(account):
     """
@@ -1177,6 +1256,9 @@ def cleanup_market(account):
                 sym = s.get("symbol", "").strip()
                 if not sym:
                     continue
+                if not _safe_float(s.get("regularMarketPrice")) and existing.get(sym, {}).get("encartera") != "Y":
+                    not_found.append(sym)
+                    continue
                 campos, valores = _map_quote(s)
                 market.update(upd=campos, val=valores, symbol=sym)
                 quote_ok += 1
@@ -1188,12 +1270,16 @@ def cleanup_market(account):
             print(f"  batch skip (error: {e}) — no se procesan {len(batch)} símbolos")
             continue
 
-    # ── Phase 2: Eliminar no encontrados ─────────────────────────────────────
+    # ── Phase 2: Eliminar no encontrados (preserva encartera='Y' → los maneja audit_portfolio)
     eliminados = 0
+    en_cartera_salvados = 0
     for sym in not_found:
+        if existing.get(sym, {}).get("encartera") == "Y":
+            en_cartera_salvados += 1
+            continue
         market.delete(symbol=sym, account=account)
         eliminados += 1
-        print(f"  eliminado: {sym}")
+        _logger.warning(f"cleanup_market: eliminado {sym}")
 
     # ── Phase 3: Fundamentals — cualquier campo fundamental ausente ──────────────
     needs_fund = market.load_symbols_needing_fundamentals(account)
@@ -1211,8 +1297,128 @@ def cleanup_market(account):
         "batches_ok": batches_ok,
         "quote_actualizados": quote_ok,
         "eliminados": eliminados,
+        "en_cartera_salvados": en_cartera_salvados,
         "preferreds_eliminados": preferreds_eliminados,
         "fund_completados": fund_ok,
+    }
+
+
+def _resolve_cusip_from_edgar(symbol, short_name):
+    """
+    Busca el CUSIP de un símbolo en 13F recientes de EDGAR usando el nombre del emisor.
+    Retorna el CUSIP (str 9 chars) o None si no lo encuentra.
+    """
+    _EDGAR_SEARCH = "https://efts.sec.gov/LATEST/search-index"
+    _13F_NS = "com/ns/edgar/document/13f/information/2009-01-31"
+
+    query_name = (short_name or symbol).split(" ")[0]
+    try:
+        r = requests.get(
+            _EDGAR_SEARCH,
+            params={"q": f'"{query_name}"', "forms": "13F-HR",
+                    "dateRange": "custom", "startdt": "2025-07-01"},
+            headers={"User-Agent": "AppOO research@appoo.com"},
+            timeout=15,
+        )
+        hits = r.json().get("hits", {}).get("hits", [])
+        if not hits:
+            return None
+
+        for hit in hits[:5]:
+            hit_id = hit.get("_id", "")
+            if ":" not in hit_id:
+                continue
+            accession, xmlfile = hit_id.split(":", 1)
+            ciks = hit.get("_source", {}).get("ciks", [])
+            if not ciks:
+                continue
+            acc_clean = accession.replace("-", "")
+            url = f"https://www.sec.gov/Archives/edgar/data/{int(ciks[0])}/{acc_clean}/{xmlfile}"
+            r2 = requests.get(url, headers={"User-Agent": "AppOO research@appoo.com"}, timeout=15)
+            if not r2.ok:
+                continue
+
+            import re as _re
+            text = r2.text
+            idx = text.lower().find(query_name.lower())
+            if idx == -1:
+                continue
+            snippet = text[max(0, idx - 300):idx + 300]
+            cusips = _re.findall(r"<cusip>([A-Z0-9]{9})</cusip>", snippet, _re.I)
+            if cusips:
+                return cusips[0]
+            time.sleep(0.5)
+
+    except Exception as e:
+        _logger.warning(f"_resolve_cusip_from_edgar({symbol}): {e}")
+    return None
+
+
+def audit_portfolio(account):
+    """
+    Audita activos en cartera (encartera='Y') contra Yahoo Finance y EDGAR.
+    - Delistado (sin datos Yahoo): delisted=1 en booktrading + delete en market.
+    - Nombre cambió: actualiza shortName en market.
+    - Sin precio (datos parciales): solo log, sin acción.
+    - CUSIP faltante: resuelve via EDGAR 13F y actualiza market.
+    Retorna dict con contadores.
+    """
+    market   = MarketScreen()
+    cartera  = market.load_cartera_symbols(account)
+
+    delistados    = 0
+    nombres_upd   = 0
+    sin_precio    = 0
+    cusips_upd    = 0
+    errores       = 0
+
+    for row in cartera:
+        sym       = row["symbol"]
+        nombre_db = (row.get("shortName") or "")
+
+        try:
+            info      = yf.Ticker(sym).info
+            qt        = (info.get("quoteType") or "").upper()
+            nombre_yf = (info.get("shortName") or info.get("longName") or "").strip()
+            precio_yf = info.get("regularMarketPrice") or info.get("previousClose")
+
+            if not qt or qt == "NONE":
+                # Sin datos Yahoo → delistado: eliminar de market + marcar booktrading
+                market.mark_booktrading_delisted(sym, account)
+                market.delete(sym, account)
+                delistados += 1
+                _logger.warning(f"audit_portfolio: delistado {sym} — eliminado market + booktrading marcado")
+
+            elif not precio_yf:
+                sin_precio += 1
+                _logger.warning(f"audit_portfolio: sin precio {sym}  qt={qt}")
+
+            elif nombre_yf and nombre_db and nombre_yf[:25] != nombre_db[:25]:
+                market.update(upd=["shortName"], val=[nombre_yf], symbol=sym, account=account)
+                nombres_upd += 1
+                _logger.warning(f"audit_portfolio: nombre actualizado {sym}  '{nombre_db}' → '{nombre_yf}'")
+
+            # CUSIP faltante → resolver via EDGAR
+            if not row.get("cusip"):
+                cusip = _resolve_cusip_from_edgar(sym, nombre_yf or nombre_db)
+                if cusip:
+                    market.update_market_cusip(sym, account, cusip)
+                    cusips_upd += 1
+                    _logger.warning(f"audit_portfolio: cusip resuelto {sym} → {cusip}")
+
+        except Exception as e:
+            errores += 1
+            _logger.error(f"audit_portfolio({sym}): {e}")
+
+        time.sleep(1.5)
+
+    return {
+        "total":       len(cartera),
+        "delistados":  delistados,
+        "nombres_upd": nombres_upd,
+        "cusips_upd":  cusips_upd,
+        "sin_precio":  sin_precio,
+        "errores":     errores,
     }
 
 
