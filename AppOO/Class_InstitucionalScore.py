@@ -15,8 +15,9 @@ from Modulos_Mysql import MarketScreen
 
 
 _logger = logging.getLogger("InstitucionalScore")
-_EDGAR_BROWSE_URL = "https://www.sec.gov/cgi-bin/browse-edgar"
-_EDGAR_HEADERS = {"User-Agent": "InversionesWildaga Research Bot (gutierrez.madrid.wilmer@example.com)"}
+_EDGAR_EFTS_URL  = "https://efts.sec.gov/LATEST/search-index"
+_EDGAR_SUBS_URL  = "https://data.sec.gov/submissions/CIK{cik}.json"
+_EDGAR_HEADERS   = {"User-Agent": "InversionesWildaga Research Bot (gutierrez.madrid.wilmer@example.com)"}
 
 
 def _safe_float(val):
@@ -109,7 +110,7 @@ def sync_institutional(account) -> dict:
     updated = 0
 
     for symbol in symbols:
-        if all_symbols.get(symbol) in ("T", "N"):
+        if all_symbols.get(symbol) == "T":
             continue
         raw = inst._fetch_ownership(symbol)
         if not raw:
@@ -149,54 +150,53 @@ def sync_institutional(account) -> dict:
     }
 
 
-def _cik_from_urn(urn: str) -> str | None:
-    """Extrae CIK de los dos formatos URN que devuelve EDGAR.
-    - Company: urn:tag:www.sec.gov:cik=0001086364
-    - Filing:  urn:tag:sec.gov,2008:accession-number=0001086364-24-008417
-    """
-    urn_low = urn.lower()
-    if "cik=" in urn_low:
-        return urn_low.split("cik=")[1].split("&")[0].zfill(10)
-    if "accession-number=" in urn_low:
-        acc = urn.split("accession-number=")[1]
-        return acc.split("-")[0].zfill(10)
-    return None
+def _normalize_name(name: str) -> str:
+    """Normaliza nombre para comparación: minúsculas, sin puntuación ni stop words."""
+    import re as _re
+    name = name.lower()
+    name = _re.sub(r"[,\.&/\-]", " ", name)
+    name = _re.sub(r"\b(inc|llc|lp|ltd|corp|co|the|group|management|advisors?|associates?|fund|capital)\b", "", name)
+    return _re.sub(r"\s+", " ", name).strip()
+
+
+def _names_match(a: str, b: str) -> bool:
+    """True si los nombres comparten al menos 2 palabras clave o uno contiene al otro."""
+    na, nb = _normalize_name(a), _normalize_name(b)
+    if not na or not nb:
+        return True
+    wa, wb = set(na.split()), set(nb.split())
+    return len(wa & wb) >= 2 or nb in na or na in nb
 
 
 def _search_edgar_cik(fund_name: str) -> str | None:
-    """Busca CIK en EDGAR company search (Atom XML) para un fondo institucional (form 13F-HR).
-    Intenta con nombre completo → 2 palabras → 1 palabra hasta encontrar resultados.
-    Reintenta hasta 3 veces con backoff en caso de 503 o timeout."""
-    words = [w.strip(".,;") for w in fund_name.split()]
-    seen = []
-    for q in [fund_name, " ".join(words[:2]), words[0]]:
-        if q not in seen:
-            seen.append(q)
-    for query in seen:
-        params = {"company": query, "CIK": "", "type": "13F-HR", "dateb": "",
-                  "owner": "include", "count": "5", "action": "getcompany", "output": "atom"}
-        for attempt in range(3):
-            if attempt > 0:
-                time.sleep(5 * attempt)
-            try:
-                r = requests.get(_EDGAR_BROWSE_URL, params=params, headers=_EDGAR_HEADERS, timeout=20)
-                if r.status_code == 503:
-                    continue
-                r.raise_for_status()
-                root = ET.fromstring(r.text)
-                ns = {"atom": "http://www.w3.org/2005/Atom"}
-                for entry in root.findall("atom:entry", ns):
-                    id_elem = entry.find("atom:id", ns)
-                    if id_elem is not None:
-                        cik = _cik_from_urn(id_elem.text or "")
-                        if cik:
-                            return cik
-                break
-            except requests.exceptions.Timeout:
+    """Busca el CIK correcto en EDGAR para un fondo institucional.
+    Estrategia: EFTS entity search para 13F-HR → valida nombre contra submissions API.
+    Solo retorna CIK si el nombre de EDGAR coincide con el nombre del fondo."""
+    try:
+        r = requests.get(
+            _EDGAR_EFTS_URL,
+            params={"entity": fund_name, "forms": "13F-HR",
+                    "dateRange": "custom", "startdt": "2025-01-01"},
+            headers=_EDGAR_HEADERS,
+            timeout=15,
+        )
+        r.raise_for_status()
+        hits = r.json().get("hits", {}).get("hits", [])
+        for hit in hits[:5]:
+            ciks = hit.get("_source", {}).get("ciks", [])
+            if not ciks:
                 continue
-            except Exception as e:
-                _logger.warning(f"_search_edgar_cik [{fund_name}]: {e}")
-                return None
+            cik = str(ciks[0]).zfill(10)
+            # Verificar nombre real del CIK contra el nombre del fondo
+            time.sleep(0.1)
+            r2 = requests.get(_EDGAR_SUBS_URL.format(cik=cik), headers=_EDGAR_HEADERS, timeout=10)
+            if not r2.ok:
+                continue
+            edgar_name = r2.json().get("name", "")
+            if _names_match(fund_name, edgar_name):
+                return cik
+    except Exception as e:
+        _logger.warning(f"_search_edgar_cik [{fund_name}]: {e}")
     return None
 
 

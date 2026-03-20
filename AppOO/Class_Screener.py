@@ -17,6 +17,7 @@ from Modulos_python import (
     datetime,
     timezone,
     time,
+    re,
     requests,
     UserAgent,
     ThreadPoolExecutor,
@@ -1069,7 +1070,7 @@ def sync_market(account):
             omitidos += 1
 
     # Phase 2: yfinance — todos los símbolos activos, paralelo
-    active_symbols = [s for s, cat in existing.items() if cat not in ("I", "S", "X", "T")]
+    active_symbols = [s for s, cat in existing.items() if cat not in ("I", "S", "X")]
     data_ok = 0
     with ThreadPoolExecutor(max_workers=3) as ex:
         futures = {ex.submit(_fetch_symbol_data, sym): sym for sym in active_symbols}
@@ -1305,52 +1306,67 @@ def cleanup_market(account):
 
 def _resolve_cusip_from_edgar(symbol, short_name):
     """
-    Busca el CUSIP de un símbolo en 13F recientes de EDGAR usando el nombre del emisor.
+    Busca el CUSIP de un símbolo en los propios filings 10-K/20-F de la compañía en EDGAR.
+    Estrategia 1: buscar por ticker/nombre via entity search → descargar header .hdr.sgml.
+    Estrategia 2: descargar primeros 64KB del documento principal y buscar patrón CUSIP.
     Retorna el CUSIP (str 9 chars) o None si no lo encuentra.
     """
-    _EDGAR_SEARCH = "https://efts.sec.gov/LATEST/search-index"
-    _13F_NS = "com/ns/edgar/document/13f/information/2009-01-31"
+    _HEADERS  = {"User-Agent": "AppOO research@appoo.com"}
+    _SEARCH   = "https://efts.sec.gov/LATEST/search-index"
+    _CUSIP_RE = re.compile(r"CUSIP[:\s#]*([A-Z0-9]{9})", re.I)
 
-    query_name = (short_name or symbol).split(" ")[0]
-    try:
-        r = requests.get(
-            _EDGAR_SEARCH,
-            params={"q": f'"{query_name}"', "forms": "13F-HR",
-                    "dateRange": "custom", "startdt": "2025-07-01"},
-            headers={"User-Agent": "AppOO research@appoo.com"},
-            timeout=15,
-        )
-        hits = r.json().get("hits", {}).get("hits", [])
-        if not hits:
-            return None
+    queries = [symbol]
+    if short_name and short_name.upper() != symbol.upper():
+        queries.append(short_name)
 
-        for hit in hits[:5]:
-            hit_id = hit.get("_id", "")
-            if ":" not in hit_id:
-                continue
-            accession, xmlfile = hit_id.split(":", 1)
-            ciks = hit.get("_source", {}).get("ciks", [])
-            if not ciks:
-                continue
-            acc_clean = accession.replace("-", "")
-            url = f"https://www.sec.gov/Archives/edgar/data/{int(ciks[0])}/{acc_clean}/{xmlfile}"
-            r2 = requests.get(url, headers={"User-Agent": "AppOO research@appoo.com"}, timeout=15)
-            if not r2.ok:
-                continue
+    for query in queries:
+        try:
+            r = requests.get(
+                _SEARCH,
+                params={"entity": query, "forms": "10-K,20-F",
+                        "dateRange": "custom", "startdt": "2022-01-01"},
+                headers=_HEADERS,
+                timeout=15,
+            )
+            hits = r.json().get("hits", {}).get("hits", [])
 
-            import re as _re
-            text = r2.text
-            idx = text.lower().find(query_name.lower())
-            if idx == -1:
-                continue
-            snippet = text[max(0, idx - 300):idx + 300]
-            cusips = _re.findall(r"<cusip>([A-Z0-9]{9})</cusip>", snippet, _re.I)
-            if cusips:
-                return cusips[0]
-            time.sleep(0.5)
+            for hit in hits[:4]:
+                src   = hit.get("_source", {})
+                ciks  = src.get("ciks", [])
+                hit_id = hit.get("_id", "")
+                if not ciks or ":" not in hit_id:
+                    continue
+                accn, xmlfile = hit_id.split(":", 1)
+                cik       = int(ciks[0])
+                acc_clean = accn.replace("-", "")
 
-    except Exception as e:
-        _logger.warning(f"_resolve_cusip_from_edgar({symbol}): {e}")
+                # Intentar primero el header SGML (archivo pequeño, ~2-10KB)
+                hdr_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_clean}/{accn}.hdr.sgml"
+                r2 = requests.get(hdr_url, headers=_HEADERS, timeout=10)
+                if r2.ok:
+                    m = _CUSIP_RE.search(r2.text)
+                    if m:
+                        return m.group(1).upper()
+
+                # Fallback: primeros 64KB del documento principal (cover page del 10-K)
+                doc_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_clean}/{xmlfile}"
+                r3 = requests.get(doc_url, headers=_HEADERS, stream=True, timeout=20)
+                if r3.ok:
+                    raw = b""
+                    for chunk in r3.iter_content(8192):
+                        raw += chunk
+                        if len(raw) >= 65536:
+                            break
+                    r3.close()
+                    m = _CUSIP_RE.search(raw.decode("utf-8", errors="ignore"))
+                    if m:
+                        return m.group(1).upper()
+
+                time.sleep(0.4)
+
+        except Exception as e:
+            _logger.warning(f"_resolve_cusip_from_edgar({symbol}, q={query!r}): {e}")
+
     return None
 
 
@@ -1366,10 +1382,12 @@ def audit_portfolio(account):
     market   = MarketScreen()
     cartera  = market.load_cartera_symbols(account)
 
+    _ETF_TYPES    = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
     delistados    = 0
     nombres_upd   = 0
     sin_precio    = 0
     cusips_upd    = 0
+    etfs_upd      = 0
     errores       = 0
 
     for row in cartera:
@@ -1381,6 +1399,12 @@ def audit_portfolio(account):
             qt        = (info.get("quoteType") or "").upper()
             nombre_yf = (info.get("shortName") or info.get("longName") or "").strip()
             precio_yf = info.get("regularMarketPrice") or info.get("previousClose")
+
+            # ETF/fondo → forzar categoriaActivo='X' (sin estudio de dividendo individual)
+            if qt in _ETF_TYPES and row.get("categoriaActivo") != "X":
+                market.update(upd=["categoriaActivo"], val=["X"], symbol=sym, account=account)
+                etfs_upd += 1
+                _logger.warning(f"audit_portfolio: ETF detectado {sym} qt={qt} → categoriaActivo=X")
 
             if not qt or qt == "NONE":
                 # Sin datos Yahoo → delistado: eliminar de market + marcar booktrading
@@ -1417,6 +1441,7 @@ def audit_portfolio(account):
         "delistados":  delistados,
         "nombres_upd": nombres_upd,
         "cusips_upd":  cusips_upd,
+        "etfs_upd":    etfs_upd,
         "sin_precio":  sin_precio,
         "errores":     errores,
     }
