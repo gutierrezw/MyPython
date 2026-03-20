@@ -1333,7 +1333,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 """
                 SELECT symbol FROM market
                 WHERE account = %s
-                  AND categoriaActivo NOT IN ('I','S','X','T')
+                  AND categoriaActivo NOT IN ('I','S','X')
                   AND (
                     country       IS NULL OR country       = ''  OR
                     sector        IS NULL OR sector        = ''  OR
@@ -1386,12 +1386,22 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
 
 
     def get_cusip_map(self, account: str) -> dict:
-        """Retorna {cusip: symbol} para todos los símbolos con cusip en market."""
+        """Retorna {cusip: symbol} combinando market + fund_holdings.
+        fund_holdings ya tiene el mapeo completo de runs anteriores — evita
+        re-llamar OpenFIGI para CUSIPs ya resueltos."""
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
         try:
             cursor.execute("SELECT cusip, symbol FROM market WHERE cusip IS NOT NULL AND account = %s", (account,))
-            return {row[0]: row[1] for row in cursor.fetchall()}
+            result = {row[0]: row[1] for row in cursor.fetchall()}
+            cursor.execute(
+                "SELECT DISTINCT cusip, symbol FROM fund_holdings "
+                "WHERE cusip IS NOT NULL AND symbol IS NOT NULL"
+            )
+            for cusip, symbol in cursor.fetchall():
+                if cusip not in result:
+                    result[cusip] = symbol
+            return result
         except (Exception, connect.Error) as error:
             _logger.error(f"[Mysql::get_cusip_map()]: {error}")
             return {}
@@ -1439,6 +1449,19 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+    def update_fund_cik(self, fund_name: str, cik: str) -> None:
+        """Actualiza el CIK de un fondo en tabla funds por nombre."""
+        conn = self._conectar(tabla="update.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("UPDATE funds SET cik = %s WHERE fund_name = %s", (cik, fund_name[:200]))
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::update_fund_cik({fund_name})]: {error}")
+        finally:
+            cursor.close()
+            conn.close()
+
     def load_top_funds_with_cik(self, top_n: int = 50) -> list:
         """Retorna lista de (fund_name, cik) con CIK asignado, ordenados por frecuencia desc."""
         conn = self._conectar(tabla="select.market")
@@ -1467,32 +1490,6 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         except (Exception, connect.Error) as error:
             _logger.error(f"[Mysql::get_fund_id_by_cik({cik})]: {error}")
             return None
-        finally:
-            cursor.close()
-            conn.close()
-
-    def insert_stock_from_13f(self, symbol: str, name: str, account: str) -> bool:
-        """Inserta un nuevo stock descubierto vía 13F en market (categoriaActivo=N).
-        Filtra: máx 5 chars, sin espacios ni dígitos — descarta bonos, preferreds, ETFs compuestos."""
-        if len(symbol) > 5 or not symbol.isalpha():
-            return False
-        conn = self._conectar(tabla="update.market")
-        cursor = conn.cursor()
-        try:
-            cursor.execute(
-                "SELECT id FROM market WHERE symbol = %s AND account = %s", (symbol, account)
-            )
-            if cursor.fetchone():
-                return False
-            cursor.execute(
-                "INSERT INTO market (symbol, shortName, account, categoriaActivo) VALUES (%s, %s, %s, 'T')",
-                (symbol[:20], name[:60], account),
-            )
-            conn.commit()
-            return True
-        except (Exception, connect.Error) as error:
-            _logger.error(f"[Mysql::insert_stock_from_13f({symbol})]: {error}")
-            return False
         finally:
             cursor.close()
             conn.close()
@@ -1689,28 +1686,32 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             conn.close()
 
     def bulk_upsert_fund_holdings(self, records: list, chunk_size: int = 5000) -> int:
-        """INSERT ... ON DUPLICATE KEY UPDATE masivo usando executemany en chunks.
+        """INSERT ... ON DUPLICATE KEY UPDATE masivo usando execute con multi-row VALUES.
         Cada record: (fund_id, symbol, shares, shares_prev, shares_delta, pct_change,
                       operation, report_date, value, cusip, option_type)"""
         if not records:
             return 0
-        sql = (
+        _SQL_BASE = (
             "INSERT INTO fund_holdings "
             "(fund_id, symbol, shares, shares_prev, shares_delta, pct_change, "
-            "operation, report_date, value, cusip, option_type) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
-            "ON DUPLICATE KEY UPDATE "
-            "shares=%s, shares_prev=%s, shares_delta=%s, pct_change=%s, operation=%s, value=%s"
+            "operation, report_date, value, cusip, option_type) VALUES "
         )
+        _SQL_UPDATE = (
+            " ON DUPLICATE KEY UPDATE "
+            "shares=VALUES(shares), shares_prev=VALUES(shares_prev), "
+            "shares_delta=VALUES(shares_delta), pct_change=VALUES(pct_change), "
+            "operation=VALUES(operation), value=VALUES(value)"
+        )
+        _ROW_PH = "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
         total = 0
         for i in range(0, len(records), chunk_size):
             chunk = records[i:i + chunk_size]
-            # duplicar valores para ON DUPLICATE KEY UPDATE
-            params = [r + (r[2], r[3], r[4], r[5], r[6], r[8]) for r in chunk]
+            sql = _SQL_BASE + ",".join([_ROW_PH] * len(chunk)) + _SQL_UPDATE
+            flat = [v for r in chunk for v in r]
             conn = self._conectar(tabla="update.market")
             cursor = conn.cursor()
             try:
-                cursor.executemany(sql, params)
+                cursor.execute(sql, flat)
                 conn.commit()
                 total += cursor.rowcount
             except (Exception, connect.Error) as error:

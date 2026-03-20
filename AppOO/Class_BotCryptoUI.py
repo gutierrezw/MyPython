@@ -185,6 +185,10 @@ class TradingBotSpot:
         # Ya en posición
         price = self._last_price()
 
+        # Si régimen gira a BEAR mientras hay LONG → exit inmediato
+        if self._check_market_regime() == "BEAR":
+            return "EXIT", conditions
+
         if not self.state["tp1_done"] and self._should_take_tp1(price):
             return "TP1", conditions
 
@@ -5382,6 +5386,19 @@ class BotCryptoUI:
             saved = self.state_repo.load_state(symbol)
             if saved and saved.get("position") == "LONG" and saved.get("entry_price"):
                 bot.state.update(saved)
+                # Verificar régimen actual — si BEAR, salir inmediatamente
+                regime = self.bot_manager._check_market_regime(bot.df) if self.bot_manager else "RANGE"
+                if regime == "BEAR":
+                    self.logger.warning(
+                        f"📥 {symbol}: Estado restaurado pero régimen BEAR → EXIT inmediato"
+                    )
+                    def _exit_bear_saved():
+                        try:
+                            self.bot_manager._execute_exit(bot, reason="BEAR_LOAD")
+                        except Exception as e:
+                            self.logger.error(f"{symbol}: Error en EXIT por régimen BEAR (saved): {e}")
+                    threading.Thread(target=_exit_bear_saved, daemon=True).start()
+                    return
                 notional = bot.state.get("remaining_qty", 0) * bot.state["entry_price"]
                 if self.capital_manager and notional > 0:
                     self.capital_manager.reserve(notional)
@@ -5489,6 +5506,20 @@ class BotCryptoUI:
             bot.state["trailing_active"] = False
             bot.state["trail_high"] = None
             bot.state["trailing_stop"] = None
+
+            # Verificar régimen actual — si BEAR, salir inmediatamente
+            regime = self.bot_manager._check_market_regime(bot.df) if self.bot_manager else "RANGE"
+            if regime == "BEAR":
+                self.logger.warning(
+                    f"📥 {symbol}: Posición existente detectada pero régimen BEAR → EXIT inmediato"
+                )
+                def _exit_bear():
+                    try:
+                        self.bot_manager._execute_exit(bot, reason="BEAR_LOAD")
+                    except Exception as e:
+                        self.logger.error(f"{symbol}: Error en EXIT por régimen BEAR: {e}")
+                threading.Thread(target=_exit_bear, daemon=True).start()
+                return
 
             # Reservar capital de la posición existente
             notional = balance * entry_price

@@ -427,8 +427,8 @@ class ClassAgenteIA:
         try:
             result = sync_13f_holdings(account=self.account)
             self.logger.warning(
-                f"13FHoldings: archivos={result['xml_files']} cusips={result['unknown_cusips']} "
-                f"holdings={result['inserted_holdings']} nuevos={0}"
+                f"13FHoldings: archivos={result['xml_files']} "
+                f"holdings={result['inserted_holdings']} opciones={result['inserted_options']}"
             )
             deleted = self.market.cleanup_fund_holdings_nulls()
             self.logger.warning(f"13FHoldings cleanup: eliminadas={deleted} filas NULL")
@@ -445,7 +445,7 @@ class ClassAgenteIA:
             self.logger.warning(
                 f"AuditPortfolio: total={result['total']} delistados={result['delistados']} "
                 f"nombres_upd={result['nombres_upd']} cusips_upd={result['cusips_upd']} "
-                f"sin_precio={result['sin_precio']} errores={result['errores']}"
+                f"etfs_upd={result['etfs_upd']} sin_precio={result['sin_precio']} errores={result['errores']}"
             )
         except Exception as e:
             self.logger.error(f"Agente_AuditPortfolio(): {e}")
@@ -825,49 +825,47 @@ class Telegram:
     # envio de mensaje a Telegram
     async def send_Telegram(self, texto, hash_id=None, reply_markup=None):
         try:
-            # Crear bot temporal para el event loop actual (evita error de event loop diferente)
-            bot = Bot(token=self.TOKEN)
+            async with Bot(token=self.TOKEN) as bot:
+                for CHAT_ID in self.userAuth:
+                    if reply_markup is not None:
+                        sent_message = await bot.send_message(
+                            chat_id=CHAT_ID,
+                            text=texto,
+                            reply_markup=reply_markup,
+                            parse_mode="Markdown",
+                        )
+                        await self._save_message(sent_message, CHAT_ID)
+                        return
 
-            for CHAT_ID in self.userAuth:
-                if reply_markup is not None:
-                    sent_message = await bot.send_message(
-                        chat_id=CHAT_ID,
-                        text=texto,
-                        reply_markup=reply_markup,
-                        parse_mode="Markdown",
-                    )
-                    await self._save_message(sent_message, CHAT_ID)
-                    return
+                    # si hash_id no es proporcionado, envía mensaje simple
+                    elif hash_id is None:
+                        sent_message = await bot.send_message(
+                            chat_id=CHAT_ID, text=texto, parse_mode="Markdown"
+                        )
+                        await self._save_message(sent_message, CHAT_ID)
+                        return
 
-                # si hash_id no es proporcionado, envía mensaje simple
-                elif hash_id is None:
-                    sent_message = await bot.send_message(
-                        chat_id=CHAT_ID, text=texto, parse_mode="Markdown"
-                    )
-                    await self._save_message(sent_message, CHAT_ID)
-                    return
-
-                # si hash_id es proporcionado, crea botones de aprobación/rechazo
-                elif hash_id is not None:
-                    botones = [
-                        [
-                            InlineKeyboardButton(
-                                "✅ Aprobar", callback_data=f"aprobar|{hash_id}"
-                            ),
-                            InlineKeyboardButton(
-                                "❌ Rechazar", callback_data=f"rechazar|{hash_id}"
-                            ),
+                    # si hash_id es proporcionado, crea botones de aprobación/rechazo
+                    elif hash_id is not None:
+                        botones = [
+                            [
+                                InlineKeyboardButton(
+                                    "✅ Aprobar", callback_data=f"aprobar|{hash_id}"
+                                ),
+                                InlineKeyboardButton(
+                                    "❌ Rechazar", callback_data=f"rechazar|{hash_id}"
+                                ),
+                            ]
                         ]
-                    ]
-                    reply_markup = InlineKeyboardMarkup(botones)
-                    sent_message = await bot.send_message(
-                        chat_id=CHAT_ID,
-                        text=texto,
-                        reply_markup=reply_markup,
-                        parse_mode="Markdown",
-                    )
-                    await self._save_message(sent_message, CHAT_ID, hash_id=hash_id)
-                    return
+                        reply_markup = InlineKeyboardMarkup(botones)
+                        sent_message = await bot.send_message(
+                            chat_id=CHAT_ID,
+                            text=texto,
+                            reply_markup=reply_markup,
+                            parse_mode="Markdown",
+                        )
+                        await self._save_message(sent_message, CHAT_ID, hash_id=hash_id)
+                        return
         except Exception as e:
             self.logger.warning(f"send_Telegram(): {e}")
 
@@ -1667,23 +1665,23 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 target=agentesIA,
             )
 
-            # Agentes lentos — registrados una sola vez fuera del loop principal
-            DataHub.manager_events.register_thread(
-                name="Agente_FundCIKs", target=self.Agente_FundCIKs, loop_sleep=300
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_FundFilings",
-                target=self.Agente_FundFilings,
-                loop_sleep=300,
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_13FHoldings",
-                target=self.Agente_13FHoldings,
-                loop_sleep=300,
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_13FScores", target=self.Agente_13FScores, loop_sleep=300
-            )
+            # Agentes lentos — BLOQUEADOS: reset pipeline institucional en curso
+            # DataHub.manager_events.register_thread(
+            #     name="Agente_FundCIKs", target=self.Agente_FundCIKs, loop_sleep=300
+            # )
+            # DataHub.manager_events.register_thread(
+            #     name="Agente_FundFilings",
+            #     target=self.Agente_FundFilings,
+            #     loop_sleep=300,
+            # )
+            # DataHub.manager_events.register_thread(
+            #     name="Agente_13FHoldings",
+            #     target=self.Agente_13FHoldings,
+            #     loop_sleep=300,
+            # )
+            # DataHub.manager_events.register_thread(
+            #     name="Agente_13FScores", target=self.Agente_13FScores, loop_sleep=300
+            # )
             DataHub.manager_events.register_thread(
                 name="Agente_AuditPortfolio",
                 target=self.Agente_AuditPortfolio,
