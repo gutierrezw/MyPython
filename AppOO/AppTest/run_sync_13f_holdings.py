@@ -15,7 +15,6 @@ print("=" * 70)
 result = sync_13f_holdings(ACCOUNT)
 
 print(f"\n  xml_files         : {result['xml_files']}")
-print(f"  unknown_cusips    : {result['unknown_cusips']}")
 print(f"  inserted_holdings : {result['inserted_holdings']}  (acciones directas)")
 print(f"  inserted_options  : {result['inserted_options']}  (CALL/PUT)")
 print(f"  total             : {result['inserted_holdings'] + result['inserted_options']}")

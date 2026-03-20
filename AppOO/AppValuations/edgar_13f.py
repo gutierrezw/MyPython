@@ -215,20 +215,7 @@ def sync_13f_holdings(account: str) -> dict:
         positions = parse_13f_xml(filepath)
         all_positions[xml_file] = (fund_id, meta["filing_date"], positions)
 
-    unknown_cusips = list({
-        pos["cusip"] for _, (_, _, positions) in all_positions.items()
-        for pos in positions if pos["cusip"] not in cusip_map
-    })
-
-    # Paso 2: resolver CUSIPs desconocidos via OpenFIGI
-    if unknown_cusips:
-        _logger.warning(f"sync_13f_holdings: resolviendo {len(unknown_cusips)} CUSIPs via OpenFIGI")
-        resolved = resolve_cusips_openfigi(unknown_cusips)
-        for cusip, ticker in resolved.items():
-            cusip_map[cusip] = ticker
-            market.update_market_cusip(ticker, account, cusip)
-
-    # Paso 3: bulk upsert fund_holdings
+    # Paso 2: bulk upsert fund_holdings
     # Cargar estado previo en memoria: {(fund_id, cusip, opt_grp): shares}
     _logger.warning("sync_13f_holdings: cargando estado previo de fund_holdings...")
     prev_map = market.load_fund_holdings_prev()
@@ -275,7 +262,6 @@ def sync_13f_holdings(account: str) -> dict:
 
     return {
         "xml_files"        : len(xml_files),
-        "unknown_cusips"   : len(unknown_cusips),
         "inserted_holdings": inserted_holdings,
         "inserted_options" : inserted_options,
     }
