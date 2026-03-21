@@ -1719,6 +1719,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 self.logger.error("construct_info_dividends({}): {}".format(x_symbol, error), exc_info=True)
 
         try:
+            if self.vehiculo != "Stock":
+                return
             for symbol in activos:
                 ticket = convierte_ticket_crypto(symbol)
                 yf_activo, datos, ind_update = self.ts_yfinance_symbol(symbol=ticket, vehiculo=self.vehiculo)
