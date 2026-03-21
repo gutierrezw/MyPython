@@ -4,7 +4,6 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "AppValuations"))
 
 from Modulos_python import (
-    ET,
     yf,
     logging,
     math,
@@ -15,9 +14,11 @@ from Modulos_Mysql import MarketScreen
 
 
 _logger = logging.getLogger("InstitucionalScore")
-_EDGAR_EFTS_URL  = "https://efts.sec.gov/LATEST/search-index"
-_EDGAR_SUBS_URL  = "https://data.sec.gov/submissions/CIK{cik}.json"
-_EDGAR_HEADERS   = {"User-Agent": "InversionesWildaga Research Bot (gutierrez.madrid.wilmer@example.com)"}
+_EDGAR_HEADERS = {"User-Agent": "InversionesWildaga Research Bot (gutierrez.madrid.wilmer@example.com)"}
+_EDGAR_IDX_URLS = [
+    "https://www.sec.gov/Archives/edgar/full-index/2026/QTR1/company.idx",
+    "https://www.sec.gov/Archives/edgar/full-index/2025/QTR4/company.idx",
+]
 
 
 def _safe_float(val):
@@ -52,15 +53,6 @@ class InstitucionalScore:
             holders_count = int(raw_count) if raw_count is not None else holders_df_count
             top_holder = str(holders.iloc[0]["Holder"]) if holders_count > 0 else None
             top_shares = int(holders.iloc[0]["Shares"]) if holders_count > 0 else None
-            fund_names = list(holders["Holder"].dropna()) if holders_count > 0 else []
-            fund_holders = []
-            if holders_count > 0:
-                for _, row in holders.iterrows():
-                    name = str(row.get("Holder", ""))
-                    sh = row.get("Shares")
-                    rd = row.get("Date Reported")
-                    if name and sh is not None:
-                        fund_holders.append((name, int(sh), rd))
 
             analyst_rec   = info.get("recommendationKey")
             analyst_mean  = _safe_float(info.get("recommendationMean"))
@@ -71,8 +63,7 @@ class InstitucionalScore:
                 "insider_ownership_pct": insider_pct,
                 "inst_top_holder": top_holder[:120] if top_holder else None,
                 "inst_top_holder_shares": top_shares,
-                "fund_names": fund_names,
-                "fund_holders": fund_holders,
+                "inst_funds": holders_count,
                 "analyst_rec": analyst_rec[:20] if analyst_rec else None,
                 "analyst_mean": analyst_mean,
                 "analyst_count": int(analyst_count) if analyst_count else None,
@@ -99,25 +90,21 @@ class InstitucionalScore:
 
 def sync_institutional(account) -> dict:
     """
-    Descubre fondos institucionales y enriquece tabla Market con señales de ownership.
-    Procesa TODOS los símbolos activos de market.
-    Un único pass por símbolo: fund discovery + inst_* update.
+    Enriquece tabla Market con señales de ownership vía yfinance.
+    Procesa todos los símbolos activos de market (excluye categoría T).
+    Solo actualiza market — el descubrimiento de fondos lo hace sync_edgar_funds.
     """
     inst = InstitucionalScore()
     all_symbols = inst.market.load_symbols(account)
     symbols = list(all_symbols.keys())
-    fund_freq = {}
     updated = 0
 
     for symbol in symbols:
-        if all_symbols.get(symbol) == "T":
+        if all_symbols.get(symbol) in ("T", "X"):
             continue
         raw = inst._fetch_ownership(symbol)
         if not raw:
             continue
-
-        for name in raw.get("fund_names", []):
-            fund_freq[name] = fund_freq.get(name, 0) + 1
 
         inst_pct = raw.get("inst_ownership_pct")
         score = round(inst_pct, 4) if inst_pct is not None else None
@@ -129,75 +116,61 @@ def sync_institutional(account) -> dict:
         ]
         valores = [
             inst_pct, raw.get("insider_ownership_pct"), raw.get("inst_top_holder"),
-            raw.get("inst_top_holder_shares"), score,
-            len(raw.get("fund_holders", [])),
+            raw.get("inst_top_holder_shares"), score, raw.get("inst_funds"),
             raw.get("analyst_rec"), raw.get("analyst_mean"), raw.get("analyst_count"),
         ]
         ok = inst.market.update(upd=campos, val=valores, symbol=symbol, account=account)
         if ok:
             updated += 1
 
-        for name, shares, report_date in raw.get("fund_holders", []):
-            inst.market.upsert_fund_holding(name, symbol, shares, report_date)
-
-    for fund_name, freq in fund_freq.items():
-        inst.market.upsert_fund(fund_name, freq)
-
-    return {
-        "symbols_processed": len(symbols),
-        "updated": updated,
-        "funds_discovered": len(fund_freq),
-    }
+    return {"symbols_processed": len(symbols), "updated": updated}
 
 
-def _normalize_name(name: str) -> str:
-    """Normaliza nombre para comparación: minúsculas, sin puntuación ni stop words."""
-    import re as _re
-    name = name.lower()
-    name = _re.sub(r"[,\.&/\-]", " ", name)
-    name = _re.sub(r"\b(inc|llc|lp|ltd|corp|co|the|group|management|advisors?|associates?|fund|capital)\b", "", name)
-    return _re.sub(r"\s+", " ", name).strip()
-
-
-def _names_match(a: str, b: str) -> bool:
-    """True si los nombres comparten al menos 2 palabras clave o uno contiene al otro."""
-    na, nb = _normalize_name(a), _normalize_name(b)
-    if not na or not nb:
-        return True
-    wa, wb = set(na.split()), set(nb.split())
-    return len(wa & wb) >= 2 or nb in na or na in nb
-
-
-def _search_edgar_cik(fund_name: str) -> str | None:
-    """Busca el CIK correcto en EDGAR para un fondo institucional.
-    Estrategia: EFTS entity search para 13F-HR → valida nombre contra submissions API.
-    Solo retorna CIK si el nombre de EDGAR coincide con el nombre del fondo."""
-    try:
-        r = requests.get(
-            _EDGAR_EFTS_URL,
-            params={"entity": fund_name, "forms": "13F-HR",
-                    "dateRange": "custom", "startdt": "2025-01-01"},
-            headers=_EDGAR_HEADERS,
-            timeout=15,
-        )
-        r.raise_for_status()
-        hits = r.json().get("hits", {}).get("hits", [])
-        for hit in hits[:5]:
-            ciks = hit.get("_source", {}).get("ciks", [])
-            if not ciks:
+def _parse_edgar_13f_funds() -> list:
+    """Descarga company.idx de EDGAR y retorna lista de (fund_name, cik)
+    para todos los filers 13F-HR. Un solo download (~5MB)."""
+    seen_ciks = set()
+    funds = []
+    for url in _EDGAR_IDX_URLS:
+        try:
+            r = requests.get(url, headers=_EDGAR_HEADERS, timeout=60)
+            if not r.ok:
                 continue
-            cik = str(ciks[0]).zfill(10)
-            # Verificar nombre real del CIK contra el nombre del fondo
-            time.sleep(0.1)
-            r2 = requests.get(_EDGAR_SUBS_URL.format(cik=cik), headers=_EDGAR_HEADERS, timeout=10)
-            if not r2.ok:
-                continue
-            edgar_name = r2.json().get("name", "")
-            if _names_match(fund_name, edgar_name):
-                return cik
-    except Exception as e:
-        _logger.warning(f"_search_edgar_cik [{fund_name}]: {e}")
-    return None
+            for line in r.text.splitlines():
+                if "13F-HR" not in line:
+                    continue
+                idx = line.find("13F-HR")
+                if idx < 2:
+                    continue
+                company_name = line[:idx].strip()
+                rest = line[idx + len("13F-HR"):].strip().split()
+                if not rest:
+                    continue
+                cik = rest[0].strip().zfill(10)
+                if not cik.isdigit() or not company_name or cik in seen_ciks:
+                    continue
+                seen_ciks.add(cik)
+                funds.append((company_name[:200], cik))
+            _logger.warning(f"_parse_edgar_13f_funds: {len(funds)} filers 13F-HR desde {url}")
+        except Exception as e:
+            _logger.warning(f"_parse_edgar_13f_funds [{url}]: {e}")
+    return funds
+
+
+def sync_edgar_funds() -> dict:
+    """Carga todos los filers 13F-HR de EDGAR en la tabla funds.
+    INSERT IGNORE — no pisa registros existentes.
+    Fuente autoritativa de CIK y nombre oficial de cada fondo."""
+    inst = InstitucionalScore()
+    _logger.warning("sync_edgar_funds: descargando índice EDGAR...")
+    funds = _parse_edgar_13f_funds()
+    if not funds:
+        _logger.warning("sync_edgar_funds: índice vacío, abortando")
+        return {"total": 0, "inserted": 0}
+    _logger.warning(f"sync_edgar_funds: {len(funds)} filers encontrados, insertando en BD...")
+    inserted = inst.market.bulk_insert_edgar_funds(funds)
+    _logger.warning(f"sync_edgar_funds: {inserted} nuevos fondos insertados")
+    return {"total": len(funds), "inserted": inserted}
 
 
 def sync_13f_scores(account: str) -> dict:
@@ -239,20 +212,3 @@ def sync_13f_scores(account: str) -> dict:
             updated += 1
 
     return {"symbols": len(inst_fields), "updated": updated, "skipped": skipped}
-
-
-def sync_fund_ciks() -> dict:
-    """Busca CIK en EDGAR para todos los fondos sin CIK en tabla funds."""
-    inst = InstitucionalScore()
-    funds = inst.market.load_funds_without_cik()
-    total = len(funds)
-    found, failed = 0, 0
-    for fund_name in funds:
-        time.sleep(1.0)
-        cik = _search_edgar_cik(fund_name)
-        if cik:
-            inst.market.update_fund_cik(fund_name, cik)
-            found += 1
-        else:
-            failed += 1
-    return {"total": total, "found": found, "failed": failed}

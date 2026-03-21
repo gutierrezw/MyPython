@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(find C:UsersInversionesWildagaDocumentsMyPythonEDGAR13F -name *.xml -path *0000102909*)"
     ]
   }
 }
