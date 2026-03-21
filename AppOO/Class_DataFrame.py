@@ -532,7 +532,7 @@ def get_klines_info(symbol=None, period="5y", interval="1d", desde=None, hasta=N
         return datos
 
     except (Exception, AttributeError, Exception) as e:
-        print(f"[Error:: get_klines_info()]: {e}")
+        print(f"[Error:: get_klines_info({symbol})]: {e}")
         return pd.DataFrame()
 
 
