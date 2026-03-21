@@ -510,12 +510,16 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                 break
                     if order_id and status:
                         values = {"status": status}
-                        self.RepositorioOportunidades.update_order_trader(
-                            account=self.account,
-                            values=values,
-                            symbol=symbol,
-                            orderid=order_id,
-                        )
+                        threading.Thread(
+                            target=self.RepositorioOportunidades.update_order_trader,
+                            kwargs={
+                                "account": self.account,
+                                "values": values,
+                                "symbol": symbol,
+                                "orderid": order_id,
+                            },
+                            daemon=True,
+                        ).start()
                         for orden in self.orders.get("Stock", []):
                             if str(orden.get("id_order")) == order_id:
                                 orden["status"] = status
@@ -531,7 +535,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 pass
         except Exception as error:
             print("[on_message_IBrks_websocket({})]: {}".format(self.vehiculo, error))
-            time.sleep(1)
 
     def update_symbol_en_positions(self, struct):
         def update_position():
@@ -2533,6 +2536,29 @@ class DashMain:
 
         # construye treeview con todas las orders
         def config_treeview_ordenes(tree, heard):
+            def sort_children_by_col(col, reverse, btn):
+                try:
+                    for parent in tree.get_children(""):
+                        children = tree.get_children(parent)
+                        data = []
+                        for k in children:
+                            raw = tree.set(k, col)
+                            try:
+                                val = float(raw) if raw not in ("", None) else None
+                            except (ValueError, TypeError):
+                                val = raw or None
+                            data.append((val, k))
+                        data.sort(
+                            key=lambda x: (x[0] is None, x[0] if isinstance(x[0], (int, float)) else str(x[0] or "")),
+                            reverse=reverse,
+                        )
+                        for index, (_, k) in enumerate(data):
+                            tree.move(k, parent, index)
+                    arrow = " ▲" if not reverse else " ▼"
+                    heard.heading(btn, text=btn + arrow, command=lambda: sort_children_by_col(col, not reverse, btn))
+                except Exception as e:
+                    print(f"sort_children_by_col({col}): {e}")
+
             try:
                 heard.column("#0", width=70, minwidth=70, anchor=tk.W)
                 heard.heading("#0", text="Nro.")
@@ -2550,7 +2576,8 @@ class DashMain:
                     tree.heading(key, text=cols[i])
 
                     heard.column(key, width=width, minwidth=width, anchor=tk.E)
-                    heard.heading(key, text=cols[i])
+                    heard.heading(key, text=cols[i],
+                                  command=lambda _k=key, _i=i: sort_children_by_col(_k, False, cols[_i]))
 
                 tree.tag_configure("green", background="green", foreground="white")
                 tree.tag_configure("red", background="red", foreground="white")
@@ -2673,20 +2700,57 @@ class DashMain:
         # refresca ordenes en treeview
         def update_treeview_ordenes():
             try:
-                # Obtener todos los elementos padres del Treeview
                 padres = tree.get_children()
                 for padre in padres:
-                    # print(f"Padre: {padre}, Valores: {tree.item(padre)['values']}")
-
-                    # Obtener los hijos del padre
-                    hijos = tree.get_children(padre)
-                    for hijo in hijos:
-                        # print(f"  Hijo: {hijo}, Valores: {tree.item(hijo)['values']}")
+                    for hijo in tree.get_children(padre):
                         tree.delete(hijo)
-
                 insert_ordenes_treeview(tree)
             except Exception as e:
                 print("update_treeview_ordenes(): {}".format(e))
+
+        # carga órdenes ejecutadas hoy en treeview
+        # Stock: directo de IB API (frescos); Crypto: desde booktrading (bot escribe ahí al cerrar)
+        def insert_ejecutadas_treeview():
+            try:
+                for padre in tree.get_children():
+                    for hijo in tree.get_children(padre):
+                        tree.delete(hijo)
+                nro = 1
+                today = datetime.now().date()
+
+                # --- Stock: IB API ---
+                trades_ib = self.stock_ts.IClient.trades(account_id=self.stock_ts.account, days=1) or []
+                for t in trades_ib:
+                    ts = int(t.get("trade_time_r", 0)) / 1000
+                    fh = datetime.fromtimestamp(ts)
+                    if fh.date() != today:
+                        continue
+                    simbolo = t.get("symbol", "")
+                    side    = "BUY" if t.get("side", "") == "B" else "SELL"
+                    precio  = t.get("price", "")
+                    cant    = t.get("size", "")
+                    values  = ["", "", simbolo, side, "", precio, cant, "", str(fh), "", "", "", ""]
+                    tree.insert(Stock, "end", text="{:>3.0f}".format(nro), values=values)
+                    nro += 1
+
+                # --- Crypto: booktrading hoy ---
+                rows, ix = self.RepositorioOportunidades.select_booktrading(accion="hoy")
+                for row in rows:
+                    cuenta = row[ix.index("cuenta")]
+                    if cuenta == self.stock_ts.account:
+                        continue
+                    simbolo = row[ix.index("simbolo")]
+                    raw_cod = row[ix.index("codigo")]
+                    codigo  = "BUY" if raw_cod == "O" else "SELL" if raw_cod == "C" else raw_cod
+                    cant    = row[ix.index("cantidad")]
+                    basico  = row[ix.index("basico")]
+                    gp      = row[ix.index("gprealizadas")]
+                    fh      = row[ix.index("fechahora")]
+                    values  = ["", "", simbolo, codigo, "", basico, cant, "", str(fh), "", "", gp, ""]
+                    tree.insert(Crypto, "end", text="{:>3.0f}".format(nro), values=values)
+                    nro += 1
+            except Exception as e:
+                print("insert_ejecutadas_treeview(): {}".format(e))
 
         def envia_orders_stock(vehiculo, fields, values):
             try:
@@ -2787,6 +2851,15 @@ class DashMain:
 
             ct5 = tk.Button(
                 win3,
+                text="Ejecutadas",
+                width=10,
+                bg="gray",
+                fg="white",
+                command=lambda: insert_ejecutadas_treeview(),
+            )
+
+            ct6 = tk.Button(
+                win3,
                 text="Cancel",
                 width=8,
                 bg="gray",
@@ -2798,7 +2871,8 @@ class DashMain:
             ct2.pack(side=tk.LEFT, padx=5, pady=20)
             ct3.pack(side=tk.LEFT, padx=5, pady=20)
             ct4.pack(side=tk.LEFT, padx=5, pady=20)
-            ct5.pack(side=tk.LEFT, padx=40, pady=20)
+            ct5.pack(side=tk.LEFT, padx=5, pady=20)
+            ct6.pack(side=tk.LEFT, padx=40, pady=20)
 
             ct2.config(state="disabled")
 

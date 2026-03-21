@@ -57,7 +57,11 @@ sys.path.insert(0, "..")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "AppValuations"))
 from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion
 from Class_Screener import sync_market, audit_portfolio
-from Class_InstitucionalScore import sync_institutional, sync_fund_ciks, sync_13f_scores
+from Class_InstitucionalScore import (
+    sync_institutional,
+    sync_edgar_funds,
+    sync_13f_scores,
+)
 from edgar_13f import sync_fund_filings, sync_13f_holdings
 from valuation_edgar_downloader import BASE_DIR, download_filing
 from valuation_xbrl_api import get_zip_files
@@ -373,24 +377,23 @@ class ClassAgenteIA:
         try:
             result = sync_institutional(account=self.account)
             self.logger.warning(
-                f"InstitucionalScore: procesados={result['symbols_processed']} "
-                f"actualizados={result['updated']} fondos={result['funds_discovered']}"
+                f"InstitucionalScore: procesados={result['symbols_processed']} actualizados={result['updated']}"
             )
         except Exception as e:
             self.logger.error(f"Agente_InstitucionalScore(): {e}")
 
-    # agente Fund CIKs — resuelve CIK EDGAR para fondos sin CIK, una vez por semana
-    @wait_rate(604800, persist=True)
-    def Agente_FundCIKs(self):
+    # agente Edgar Funds — carga todos los filers 13F-HR de EDGAR en tabla funds, una vez por mes
+    @wait_rate(2592000, persist=True)
+    def Agente_EdgarFunds(self):
         if not (0 <= datetime.now().hour < 6):
             return
         try:
-            result = sync_fund_ciks()
+            result = sync_edgar_funds()
             self.logger.warning(
-                f"FundCIKs: total={result['total']} encontrados={result['found']} fallidos={result['failed']}"
+                f"EdgarFunds: total={result['total']} insertados={result['inserted']}"
             )
         except Exception as e:
-            self.logger.error(f"Agente_FundCIKs(): {e}")
+            self.logger.error(f"Agente_EdgarFunds(): {e}")
 
     # agente Fund Filings — descarga XMLs 13F-HR para top 50 fondos, una vez por semana
     @wait_rate(604800, persist=True)
@@ -1666,22 +1669,22 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             )
 
             # Agentes lentos — BLOQUEADOS: reset pipeline institucional en curso
-            # DataHub.manager_events.register_thread(
-            #     name="Agente_FundCIKs", target=self.Agente_FundCIKs, loop_sleep=300
-            # )
-            # DataHub.manager_events.register_thread(
-            #     name="Agente_FundFilings",
-            #     target=self.Agente_FundFilings,
-            #     loop_sleep=300,
-            # )
-            # DataHub.manager_events.register_thread(
-            #     name="Agente_13FHoldings",
-            #     target=self.Agente_13FHoldings,
-            #     loop_sleep=300,
-            # )
-            # DataHub.manager_events.register_thread(
-            #     name="Agente_13FScores", target=self.Agente_13FScores, loop_sleep=300
-            # )
+            DataHub.manager_events.register_thread(
+                name="Agente_EdgarFunds", target=self.Agente_EdgarFunds, loop_sleep=300
+            )
+            DataHub.manager_events.register_thread(
+                name="Agente_FundFilings",
+                target=self.Agente_FundFilings,
+                loop_sleep=300,
+            )
+            DataHub.manager_events.register_thread(
+                name="Agente_13FHoldings",
+                target=self.Agente_13FHoldings,
+                loop_sleep=300,
+            )
+            DataHub.manager_events.register_thread(
+                name="Agente_13FScores", target=self.Agente_13FScores, loop_sleep=300
+            )
             DataHub.manager_events.register_thread(
                 name="Agente_AuditPortfolio",
                 target=self.Agente_AuditPortfolio,

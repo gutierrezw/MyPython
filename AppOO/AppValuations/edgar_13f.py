@@ -3,8 +3,9 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from Modulos_python import ET, json, logging, requests, time
+from Modulos_python import ET, logging, requests, time
 from Modulos_Mysql import MarketScreen
+from Modulos_Utilitarios import read_json_tmp, write_json_tmp
 
 
 _logger = logging.getLogger("InstitucionalScore")
@@ -13,7 +14,6 @@ _EDGAR_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 _EDGAR_ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dashes}/{filename}"
 _OPENFIGI_URL = "https://api.openfigi.com/v3/mapping"
 _13F_SAVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "EDGAR", "13F")
-_13F_METADATA_FILE = os.path.join(_13F_SAVE_DIR, "metadata.json")
 _13F_NS = {"tf": "http://www.sec.gov/edgar/document/thirteenf/informationtable"}
 
 
@@ -36,20 +36,21 @@ def _sec_get(url: str, timeout: int = 20) -> requests.Response | None:
 
 
 def _load_13f_metadata() -> dict:
-    try:
-        os.makedirs(_13F_SAVE_DIR, exist_ok=True)
-        with open(_13F_METADATA_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    os.makedirs(_13F_SAVE_DIR, exist_ok=True)
+    return read_json_tmp("13f_metadata.json")
 
 
 def _save_13f_metadata(data: dict) -> None:
-    try:
-        with open(_13F_METADATA_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        _logger.warning(f"_save_13f_metadata: {e}")
+    write_json_tmp("13f_metadata.json", data)
+
+
+def _load_holdings_processed() -> set:
+    data = read_json_tmp("13f_holdings_processed.json")
+    return set(data.get("files", []))
+
+
+def _save_holdings_processed(processed: set) -> None:
+    write_json_tmp("13f_holdings_processed.json", {"files": list(processed)})
 
 
 def _get_latest_13f_accession(cik: str) -> tuple | None:
@@ -89,17 +90,22 @@ def _find_holdings_xml(cik: str, accession: str) -> str | None:
     return None
 
 
-def sync_fund_filings(top_n: int = 50) -> dict:
-    """Descarga el último 13F-HR XML para los top_n fondos con CIK en tabla funds."""
+def sync_fund_filings() -> dict:
+    """Descarga el último 13F-HR XML para todos los fondos con CIK en tabla funds.
+    Omite fondos que ya tienen XML en disco. Guarda metadata cada 100 descargas."""
     market = MarketScreen()
-    funds = market.load_top_funds_with_cik(top_n)
+    funds = market.load_all_funds_with_cik()
     os.makedirs(_13F_SAVE_DIR, exist_ok=True)
     metadata = _load_13f_metadata()
     total = len(funds)
     downloaded, skipped, failed = 0, 0, 0
+    ciks_with_xml = {v["cik"] for v in metadata.values()}
     for i, (fund_name, cik) in enumerate(funds, 1):
-        if i % 50 == 0 or i == total:
+        if i % 100 == 0 or i == total:
             _logger.warning(f"sync_fund_filings: [{i}/{total}] descargados={downloaded} skipped={skipped} fallidos={failed}")
+        if cik in ciks_with_xml:
+            skipped += 1
+            continue
         time.sleep(0.5)
         result = _get_latest_13f_accession(cik)
         if not result:
@@ -129,12 +135,14 @@ def sync_fund_filings(top_n: int = 50) -> dict:
                 "cik": cik, "fund_name": fund_name, "filing_date": filing_date,
             }
             downloaded += 1
+            if downloaded % 100 == 0:
+                _save_13f_metadata(metadata)
             time.sleep(0.5)
         except Exception as e:
             _logger.warning(f"sync_fund_filings [{fund_name}]: {e}")
             failed += 1
     _save_13f_metadata(metadata)
-    return {"funds": len(funds), "downloaded": downloaded, "skipped": skipped, "failed": failed}
+    return {"funds": total, "downloaded": downloaded, "skipped": skipped, "failed": failed}
 
 
 def resolve_cusips_openfigi(cusips: list) -> dict:
@@ -195,13 +203,18 @@ def parse_13f_xml(filepath: str) -> list:
 
 
 def sync_13f_holdings(account: str) -> dict:
-    """Parsea todos los 13F XMLs descargados y pobla fund_holdings + market con nuevos stocks."""
+    """Parsea XMLs 13F nuevos (no procesados aún) y pobla fund_holdings.
+    Usa holdings_processed.json para no reprocesar XMLs ya cargados."""
     market = MarketScreen()
     metadata = _load_13f_metadata()
-    xml_files = [f for f in os.listdir(_13F_SAVE_DIR) if f.endswith(".xml")]
+    processed = _load_holdings_processed()
+    all_xml = [f for f in os.listdir(_13F_SAVE_DIR) if f.endswith(".xml")]
+    xml_files = [f for f in all_xml if f not in processed]
     cusip_map = market.get_cusip_map(account)
 
-    # Paso 1: recolectar posiciones de todos los XMLs con metadata
+    _logger.warning(f"sync_13f_holdings: {len(xml_files)} XMLs nuevos de {len(all_xml)} totales")
+
+    # Paso 1: recolectar posiciones de los XMLs nuevos
     all_positions = {}
     for xml_file in xml_files:
         meta = metadata.get(xml_file)
@@ -259,6 +272,9 @@ def sync_13f_holdings(account: str) -> dict:
     _logger.warning(f"sync_13f_holdings: bulk insert {len(records)} registros "
                     f"({inserted_holdings} directos, {inserted_options} opciones)...")
     market.bulk_upsert_fund_holdings(records)
+
+    processed.update(all_positions.keys())
+    _save_holdings_processed(processed)
 
     return {
         "xml_files"        : len(xml_files),

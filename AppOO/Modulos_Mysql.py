@@ -1255,10 +1255,11 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             return {}
 
     def delete(self, symbol, account):
-        """Elimina un símbolo de la tabla market para el account dado."""
+        """Elimina un símbolo de fund_holdings y luego de market."""
         try:
             conn = self._conectar(tabla="delete.market")
             cursor = conn.cursor()
+            cursor.execute("DELETE FROM fund_holdings WHERE symbol = %s", (symbol,))
             cursor.execute("DELETE FROM market WHERE symbol = %s AND account = %s", (symbol, account))
             conn.commit()
             cursor.close()
@@ -1292,7 +1293,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         try:
             cursor.execute(
                 "SELECT symbol, shortName, lastPrice, inst_ownership_pct, inst_score, "
-                "fh_count, fh_total_value, analyst_rec, analyst_mean, analyst_count, categoriaActivo "
+                "fh_count, fh_total_value, analyst_rec, analyst_mean, analyst_count, categoriaActivo, "
+                "sharesOutstanding, volume, insider_ownership_pct "
                 "FROM market WHERE account = %s AND encartera = 'Y' "
                 "ORDER BY inst_score DESC",
                 (account,),
@@ -1351,9 +1353,10 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                     ebitdaMargins       IS NULL OR
                     operatingMargins    IS NULL OR
                     lastFiscalYearEnd   IS NULL OR
-                    analyst_rec   IS NULL OR analyst_rec   = ''  OR
-                    analyst_mean  IS NULL OR
-                    analyst_count IS NULL
+                    analyst_rec      IS NULL OR analyst_rec   = ''  OR
+                    analyst_mean     IS NULL OR
+                    analyst_count    IS NULL OR
+                    sharesOutstanding IS NULL
                   )
                 """,
                 (account,),
@@ -1425,29 +1428,31 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
-    def upsert_fund(self, fund_name: str, frequency: int) -> None:
-        """INSERT o UPDATE en tabla funds. Actualiza frecuencia si el fondo ya existe."""
+    def bulk_insert_edgar_funds(self, funds_list: list) -> int:
+        """INSERT IGNORE masivo de fondos EDGAR en tabla funds.
+        funds_list: lista de (fund_name, cik). No pisa registros existentes.
+        Retorna cantidad de filas insertadas."""
+        if not funds_list:
+            return 0
+        _CHUNK = 500
+        inserted = 0
         conn = self._conectar(tabla="update.market")
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT id FROM funds WHERE fund_name = %s", (fund_name[:200],))
-            row = cursor.fetchone()
-            if row:
-                cursor.execute(
-                    "UPDATE funds SET frequency = %s, last_update = NOW() WHERE id = %s",
-                    (frequency, row[0]),
-                )
-            else:
-                cursor.execute(
-                    "INSERT INTO funds (fund_name, frequency, last_update) VALUES (%s, %s, NOW())",
-                    (fund_name[:200], frequency),
-                )
+            for i in range(0, len(funds_list), _CHUNK):
+                chunk = funds_list[i:i + _CHUNK]
+                placeholders = ",".join(["(%s,%s)"] * len(chunk))
+                sql = f"INSERT IGNORE INTO funds (fund_name, cik) VALUES {placeholders}"
+                flat = [v for row in chunk for v in row]
+                cursor.execute(sql, flat)
+                inserted += cursor.rowcount
             conn.commit()
         except (Exception, connect.Error) as error:
-            _logger.error(f"[Mysql::upsert_fund({fund_name})]: {error}")
+            _logger.error(f"[Mysql::bulk_insert_edgar_funds()]: {error}")
         finally:
             cursor.close()
             conn.close()
+        return inserted
 
     def update_fund_cik(self, fund_name: str, cik: str) -> None:
         """Actualiza el CIK de un fondo en tabla funds por nombre."""
@@ -1475,6 +1480,17 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         except (Exception, connect.Error) as error:
             _logger.error(f"[Mysql::load_top_funds_with_cik()]: {error}")
             return []
+
+    def load_all_funds_with_cik(self) -> list:
+        """Retorna lista completa de (fund_name, cik) con CIK asignado."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT fund_name, cik FROM funds WHERE cik IS NOT NULL")
+            return cursor.fetchall()
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_all_funds_with_cik()]: {error}")
+            return []
         finally:
             cursor.close()
             conn.close()
@@ -1490,33 +1506,6 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         except (Exception, connect.Error) as error:
             _logger.error(f"[Mysql::get_fund_id_by_cik({cik})]: {error}")
             return None
-        finally:
-            cursor.close()
-            conn.close()
-
-    def load_funds_without_cik(self) -> list:
-        """Retorna lista de fund_names sin CIK asignado, ordenados por frecuencia desc."""
-        conn = self._conectar(tabla="select.market")
-        cursor = conn.cursor()
-        try:
-            cursor.execute("SELECT fund_name FROM funds WHERE cik IS NULL OR cik = '' ORDER BY frequency DESC")
-            return [row[0] for row in cursor.fetchall()]
-        except (Exception, connect.Error) as error:
-            _logger.error(f"[Mysql::load_funds_without_cik()]: {error}")
-            return []
-        finally:
-            cursor.close()
-            conn.close()
-
-    def update_fund_cik(self, fund_name: str, cik: str) -> None:
-        """Actualiza el CIK de un fondo en tabla funds."""
-        conn = self._conectar(tabla="update.market")
-        cursor = conn.cursor()
-        try:
-            cursor.execute("UPDATE funds SET cik = %s WHERE fund_name = %s", (cik, fund_name[:200]))
-            conn.commit()
-        except (Exception, connect.Error) as error:
-            _logger.error(f"[Mysql::update_fund_cik({fund_name})]: {error}")
         finally:
             cursor.close()
             conn.close()
@@ -1728,7 +1717,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         try:
             cursor.execute(
                 "SELECT symbol, inst_ownership_pct FROM market "
-                "WHERE account = %s",
+                "WHERE account = %s AND categoriaActivo != 'X'",
                 (account,),
             )
             return {row[0]: row[1] for row in cursor.fetchall()}
@@ -3244,10 +3233,18 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 sql = cursor.fetchall()
 
             elif accion == "cuenta":
-                qry = """SELECT a.* FROM (SELECT * FROM booktrading WHERE cuenta = '%s'  AND divisa = '%s') AS a 
+                qry = """SELECT a.* FROM (SELECT * FROM booktrading WHERE cuenta = '%s'  AND divisa = '%s') AS a
                                         ORDER BY fechahora ASC, sec ASC;"""
 
                 cursor.execute(qry % (account, idivisa))
+                sql = cursor.fetchall()
+
+            elif accion == "hoy":
+                qry = """SELECT cuenta, simbolo, codigo, cantidad, basico, gprealizadas, fechahora
+                         FROM booktrading
+                         WHERE DATE(fechahora) = CURDATE()
+                         ORDER BY cuenta, fechahora DESC;"""
+                cursor.execute(qry)
                 sql = cursor.fetchall()
 
             elif accion == "performa":
@@ -3946,3 +3943,4 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             return sql, ix
         except conn.ProgrammingError as error:
             print("[Mysql:: select_order_trader({})]: {}".format(vehiculo, error))
+
