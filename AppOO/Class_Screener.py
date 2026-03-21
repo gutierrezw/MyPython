@@ -957,83 +957,57 @@ class Screener(tk.Frame):
         )
         hdr.pack(pady=(8, 4))
 
-        cols = (
-            "symbol",
-            "div",
-            "nombre",
-            "inst_pct",
-            "n_inst",
-            "buy_ratio",
-            "sell_ratio",
-            "calls",
-            "puts",
-            "float_sig",
-            "senal_inst",
-            "analista",
-            "n_ana",
-            "modelo",
-            "alineacion",
+        _FIXED_COLS = ("Symbol", "Div", "Nombre")
+        _COL_DEFS = (
+            ("Symbol",      65,  "w"),
+            ("Div",         38,  "center"),
+            ("Nombre",      170, "w"),
+            ("Inst %",      65,  "e"),
+            ("# Inst",      55,  "e"),
+            ("13F Buy%",    70,  "e"),
+            ("13F Sell%",   70,  "e"),
+            ("CALL",        60,  "e"),
+            ("PUT",         60,  "e"),
+            ("Float",       80,  "center"),
+            ("Inst Señal",  100, "w"),
+            ("Analistas",   105, "w"),
+            ("N",           40,  "e"),
+            ("Modelo",      80,  "center"),
+            ("Alineacion",  150, "w"),
         )
-        headers = (
-            "Symbol",
-            "Div",
-            "Nombre",
-            "Inst %",
-            "# Inst",
-            "13F Buy%",
-            "13F Sell%",
-            "CALL ↑",
-            "PUT ↓",
-            "Float",
-            "Inst Señal",
-            "Analistas",
-            "N",
-            "Modelo",
-            "Alineación",
-        )
-        widths = (65, 38, 170, 65, 55, 70, 70, 60, 60, 80, 100, 105, 40, 80, 150)
-        anchors = (
-            "w",
-            "center",
-            "w",
-            "e",
-            "e",
-            "e",
-            "e",
-            "e",
-            "e",
-            "center",
-            "w",
-            "w",
-            "e",
-            "center",
-            "w",
-        )
+        all_cols      = tuple(d[0] for d in _COL_DEFS)
+        col_align     = {d[0]: {"anchor": d[2], "width": d[1]} for d in _COL_DEFS}
 
         frame = tk.Frame(win, bg="black")
         frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
-        vsb = ttk.Scrollbar(frame, orient=VERTICAL)
-        tree = ttk.Treeview(
-            frame, columns=cols, show="headings", yscrollcommand=vsb.set, height=20
+        ct = CustomTreeview(
+            master=frame,
+            columns=all_cols,
+            fixed_columns=_FIXED_COLS,
+            sort_columns=True,
+            height=20,
+            column_alignments=col_align,
         )
-        vsb.config(command=tree.yview)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        ct.master.config(bg="black")
+        ct.heard.config(bg="black")
+        ct.right.config(bg="black")
 
-        for col_id, hdr_text, w, anc in zip(cols, headers, widths, anchors):
-            tree.heading(col_id, text=hdr_text)
-            tree.column(col_id, width=w, minwidth=40, stretch=tk.NO, anchor=anc)
+        for tag, color in (
+            ("CUADRUPLE", "#FFD700"),
+            ("TRIPLE",    "#00FF88"),
+            ("ALINEADO",  "cyan"),
+            ("DIVERGE",   "#FF6060"),
+            ("ALERTA",    "#FFA500"),
+            ("NEUTRO",    "#888888"),
+        ):
+            ct.tree_fixed.tag_configure(tag, foreground=color)
+            ct.tree_scroll.tag_configure(tag, foreground=color)
 
-        tree.tag_configure("CUADRUPLE", foreground="#FFD700")
-        tree.tag_configure("TRIPLE", foreground="#00FF88")
-        tree.tag_configure("ALINEADO", foreground="cyan")
-        tree.tag_configure("DIVERGE", foreground="#FF6060")
-        tree.tag_configure("ALERTA", foreground="#FFA500")
-        tree.tag_configure("NEUTRO", foreground="#888888")
-
+        n_fixed = len(_FIXED_COLS)
         for f in filas:
-            tree.insert("", tk.END, values=f["values"], tags=(f["tag"],))
+            ct.tree_fixed.insert("", tk.END, values=f["values"][:n_fixed], tags=(f["tag"],))
+            ct.tree_scroll.insert("", tk.END, values=f["values"][n_fixed:], tags=(f["tag"],))
 
         # Barra resumen
         resumen_frame = tk.Frame(win, bg="#111111")
