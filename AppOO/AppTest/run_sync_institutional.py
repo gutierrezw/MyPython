@@ -13,8 +13,6 @@ print("=" * 70)
 
 result = sync_institutional(ACCOUNT)
 
-print(f"\n  symbols_processed : {result['symbols_processed']}")
-print(f"  updated           : {result['updated']}")
-print(f"  deleted           : {result['deleted']}")
-print(f"  funds_discovered  : {result['funds_discovered']}")
+print(f"\n  symbols   : {result['symbols_processed']}")
+print(f"  updated   : {result['updated']}")
 print("\nListo.")

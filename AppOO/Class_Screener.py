@@ -1,5 +1,11 @@
 from Modulos_Mysql import MarketScreen, BDsystem
-from Modulos_Utilitarios import style_app, is_null, is_none, mask_numero, define_FileCache
+from Modulos_Utilitarios import (
+    style_app,
+    is_null,
+    is_none,
+    mask_numero,
+    define_FileCache,
+)
 from Class_customer import CustomTreeview
 from Modulos_python import (
     tk,
@@ -30,6 +36,7 @@ from Modulos_python import (
 
 _logger = logging.getLogger("Screener")
 
+
 def _yahoo_session():
     """Obtiene cookie + crumb para autenticar requests a Yahoo Finance.
     Nuevo flujo: fc.yahoo.com primero (cambia de autenticación Yahoo ~2024).
@@ -44,20 +51,24 @@ def _yahoo_session():
     ]
     ua = UserAgent().random
     session = requests.Session()
-    session.headers.update({
-        "User-Agent": ua,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-    })
+    session.headers.update(
+        {
+            "User-Agent": ua,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+        }
+    )
     crumb = ""
     _BACKOFF = [0, 30, 90]  # segundos de espera antes de cada intento
     for attempt in range(3):
         try:
             if _BACKOFF[attempt]:
-                _logger.warning(f"[yahoo_session] backoff {_BACKOFF[attempt]}s antes de intento {attempt + 1}")
+                _logger.warning(
+                    f"[yahoo_session] backoff {_BACKOFF[attempt]}s antes de intento {attempt + 1}"
+                )
                 time.sleep(_BACKOFF[attempt])
             # Obtener cookies — probar fc.yahoo.com primero (nuevo flujo)
             for init_url in _INIT_URLS:
@@ -78,18 +89,24 @@ def _yahoo_session():
                         break
                     if r.status_code == 429:
                         got_429 = True
-                    _logger.warning(f"[yahoo_session] intento {attempt + 1} ({crumb_url[-7:]}): HTTP {r.status_code}")
+                    _logger.warning(
+                        f"[yahoo_session] intento {attempt + 1} ({crumb_url[-7:]}): HTTP {r.status_code}"
+                    )
                 except Exception as e:
                     _logger.warning(f"[yahoo_session] intento {attempt + 1}: {e}")
             if crumb:
                 break
             if got_429 and attempt < 2:
-                _logger.warning(f"[yahoo_session] 429 detectado — esperando {_BACKOFF[attempt + 1]}s")
+                _logger.warning(
+                    f"[yahoo_session] 429 detectado — esperando {_BACKOFF[attempt + 1]}s"
+                )
         except Exception as e:
             _logger.warning(f"[yahoo_session] intento {attempt + 1} error: {e}")
     session.headers.update({"Accept": "application/json"})
     if not crumb:
-        _logger.error("[yahoo_session] crumb no obtenido — las requests pueden devolver 401")
+        _logger.error(
+            "[yahoo_session] crumb no obtenido — las requests pueden devolver 401"
+        )
     return session, crumb
 
 
@@ -114,6 +131,7 @@ class Screener(tk.Frame):
         self.root.pack(side=tk.LEFT)
         self.market = None
         self.counter = 0
+        self._inst_win = None
         self.ix = []
         self.ctree = []  # poblado en widgets_screener vía _COL_DEFS
         self.ctree_widget = None  # instancia CustomTreeview
@@ -409,13 +427,6 @@ class Screener(tk.Frame):
                 value="Trend",
                 style="C.TRadiobutton",
             )
-            tp4 = ttk.Radiobutton(
-                self.options,
-                text="ETF's Funds",
-                variable=tipo,
-                value="ETF",
-                style="C.TRadiobutton",
-            )
             tp5 = ttk.Checkbutton(
                 self.options,
                 text="En Cartera",
@@ -426,8 +437,7 @@ class Screener(tk.Frame):
             tp1.grid(column=0, row=0, sticky=W, pady=1)
             tp2.grid(column=0, row=1, sticky=W, padx=10)
             tp3.grid(column=0, row=2, sticky=W, padx=10)
-            tp4.grid(column=0, row=3, sticky=W, padx=10)
-            tp5.grid(column=0, row=4, sticky=W, padx=10)
+            tp5.grid(column=0, row=3, sticky=W, padx=10)
 
             # filtro Beta de activo rnb2
             beta = tk.StringVar()
@@ -555,11 +565,13 @@ class Screener(tk.Frame):
             reset.grid(column=1, row=20, sticky=E, columnspa=2, pady=20)
 
             btn_frame = ttk.Frame(self.panel, style="B.TFrame")
-            btn_frame.grid(column=0, row=10, columnspan=3, sticky=W, padx=8, pady=(6, 4))
+            btn_frame.grid(
+                column=0, row=10, columnspan=3, sticky=W, padx=8, pady=(6, 4)
+            )
 
             ttk.Button(
                 btn_frame,
-                text="Inst. Intro",
+                text="Consenso",
                 style="C.TButton",
                 command=self._show_institucionales_cartera,
             ).pack(side=tk.LEFT, padx=(0, 6))
@@ -719,7 +731,18 @@ class Screener(tk.Frame):
             pass
 
     def _show_institucionales_cartera(self):
-        _TAG_ORDER = {"CUADRUPLE": 0, "TRIPLE": 1, "ALINEADO": 2, "DIVERGE": 3, "ALERTA": 4, "NEUTRO": 5}
+        if self._inst_win is not None and self._inst_win.winfo_exists():
+            self._inst_win.lift()
+            return
+
+        _TAG_ORDER = {
+            "CUADRUPLE": 0,
+            "TRIPLE": 1,
+            "ALINEADO": 2,
+            "DIVERGE": 3,
+            "ALERTA": 4,
+            "NEUTRO": 5,
+        }
 
         def _senal_inst(inst_score, fh_buy_ratio, fh_count):
             score = inst_score or 0.0
@@ -735,20 +758,48 @@ class Screener(tk.Frame):
         def _read_csv_signals(filename):
             try:
                 path = define_FileCache(name=f"{filename}.CSV")
-                df = pd.read_csv(path, header=0, sep=",", encoding="utf-8", index_col=False)
+                df = pd.read_csv(
+                    path, header=0, sep=",", encoding="utf-8", index_col=False
+                )
                 df.columns = df.columns.str.strip()
-                return set(df["Symbol"].dropna().str.strip().tolist()) if "Symbol" in df.columns else set()
+                return (
+                    set(df["Symbol"].dropna().str.strip().tolist())
+                    if "Symbol" in df.columns
+                    else set()
+                )
             except (EmptyDataError, FileNotFoundError):
                 return set()
             except Exception:
                 return set()
 
+        def _float_ratio(row):
+            shares = row.get("sharesOutstanding") or 0
+            vol    = row.get("volume") or 0
+            inst   = min(row.get("inst_ownership_pct") or 0.0, 1.0)
+            insider = min(row.get("insider_ownership_pct") or 0.0, 1.0)
+            float_pct = max(0.0, 1.0 - inst - insider)
+            float_shares = shares * float_pct
+            if float_shares <= 0 or vol <= 0:
+                return None
+            return vol / float_shares
+
+        def _senal_float(ratio):
+            if ratio is None:
+                return ""
+            if ratio >= 3.0:
+                return "⚡ EXTREMA"
+            if ratio >= 1.0:
+                return "↑↑ ALTA"
+            if ratio >= 0.3:
+                return "↑ MEDIA"
+            return "— BAJA"
+
         def _senal_analyst(rec):
             mapa = {
-                "strong_buy":  "▲▲ FUERTE",
-                "buy":         "▲ COMPRAR",
-                "hold":        "→ MANTENER",
-                "sell":        "▼ VENDER",
+                "strong_buy": "▲▲ FUERTE",
+                "buy": "▲ COMPRAR",
+                "hold": "→ MANTENER",
+                "sell": "▼ VENDER",
                 "strong_sell": "▼▼ FUERTE",
             }
             return mapa.get((rec or "").lower().replace(" ", "_"), "")
@@ -756,11 +807,11 @@ class Screener(tk.Frame):
         def _alineacion(senal_inst, en_buy, en_sell, rec, categ):
             bullish_analyst = rec in ("strong_buy", "buy")
             bearish_analyst = rec in ("sell", "strong_sell")
-            bullish_inst    = senal_inst == "ACOMPAÑAR"
-            bearish_inst    = senal_inst == "REVISAR"
-            bullish_div     = categ == "I"
-            bearish_div     = categ == "S"
-            has_div         = categ not in ("X", None, "")
+            bullish_inst = senal_inst == "ACOMPAÑAR"
+            bearish_inst = senal_inst == "REVISAR"
+            bullish_div = categ == "I"
+            bearish_div = categ == "S"
+            has_div = categ not in ("X", None, "")
 
             # 4 fuentes alineadas (solo cuando div aplica)
             if has_div and bullish_inst and en_buy and bullish_analyst and bullish_div:
@@ -816,23 +867,31 @@ class Screener(tk.Frame):
                 continue
             sym = row["symbol"]
             stats = fh_stats.get(sym, {})
-            fh_buy_ratio  = stats.get("fh_buy_ratio", 0.0)
+            fh_buy_ratio = stats.get("fh_buy_ratio", 0.0)
             fh_sell_ratio = stats.get("fh_sell_ratio", 0.0)
-            rec    = (row.get("analyst_rec") or "").lower().replace(" ", "_")
-            categ  = row.get("categoriaActivo") or ""
-            senal_inst = _senal_inst(row.get("inst_score"), fh_buy_ratio, row.get("fh_count"))
-            senal_ana  = _senal_analyst(rec)
-            n_ana      = str(row["analyst_count"]) if row.get("analyst_count") else ""
-            en_buy     = sym in syms_buy
-            en_sell    = sym in syms_sell
-            modelo     = "▲ COMPRAR" if en_buy else ("▼ VENDER" if en_sell else "—")
+            rec = (row.get("analyst_rec") or "").lower().replace(" ", "_")
+            categ = row.get("categoriaActivo") or ""
+            senal_inst = _senal_inst(
+                row.get("inst_score"), fh_buy_ratio, row.get("fh_count")
+            )
+            senal_ana = _senal_analyst(rec)
+            n_ana = str(row["analyst_count"]) if row.get("analyst_count") else ""
+            en_buy = sym in syms_buy
+            en_sell = sym in syms_sell
+            modelo = "▲ COMPRAR" if en_buy else ("▼ VENDER" if en_sell else "—")
+            ratio = _float_ratio(row)
+            float_str = _senal_float(ratio)
             alineacion = _alineacion(senal_inst, en_buy, en_sell, rec, categ)
-            inst_val   = min(row["inst_ownership_pct"], 1.0) if row.get("inst_ownership_pct") else None
-            inst_pct   = f"{inst_val:.1%}" if inst_val else ""
-            buy_r_str  = f"{fh_buy_ratio:.0%}" if fh_buy_ratio else ""
+            inst_val = (
+                min(row["inst_ownership_pct"], 1.0)
+                if row.get("inst_ownership_pct")
+                else None
+            )
+            inst_pct = f"{inst_val:.1%}" if inst_val else ""
+            buy_r_str = f"{fh_buy_ratio:.0%}" if fh_buy_ratio else ""
             sell_r_str = f"{fh_sell_ratio:.0%}" if fh_sell_ratio else ""
-            n_inst     = str(stats["fh_count"]) if stats.get("fh_count") else ""
-            nombre     = (row.get("shortName") or "")[:28]
+            n_inst = str(stats["fh_count"]) if stats.get("fh_count") else ""
+            nombre = (row.get("shortName") or "")[:28]
 
             if "CUÁDRUPLE" in alineacion:
                 tag = "CUADRUPLE"
@@ -847,11 +906,33 @@ class Screener(tk.Frame):
             else:
                 tag = "NEUTRO"
 
-            filas.append({
-                "values": (sym, categ, nombre, inst_pct, n_inst, buy_r_str, sell_r_str, senal_inst, senal_ana, n_ana, modelo, alineacion),
-                "tag": tag,
-                "categ": categ,
-            })
+            calls_str = (
+                str(stats["fh_call_count"]) if stats.get("fh_call_count") else ""
+            )
+            puts_str = str(stats["fh_put_count"]) if stats.get("fh_put_count") else ""
+            filas.append(
+                {
+                    "values": (
+                        sym,
+                        categ,
+                        nombre,
+                        inst_pct,
+                        n_inst,
+                        buy_r_str,
+                        sell_r_str,
+                        calls_str,
+                        puts_str,
+                        float_str,
+                        senal_inst,
+                        senal_ana,
+                        n_ana,
+                        modelo,
+                        alineacion,
+                    ),
+                    "tag": tag,
+                    "categ": categ,
+                }
+            )
 
         filas.sort(key=lambda r: _TAG_ORDER.get(r["tag"], 99))
 
@@ -861,29 +942,81 @@ class Screener(tk.Frame):
             contadores[f["tag"]] = contadores.get(f["tag"], 0) + 1
 
         win = tk.Toplevel(self)
-        win.title("Inst + Analistas vs Modelo — En Cartera")
+        self._inst_win = win
+        win.protocol("WM_DELETE_WINDOW", lambda: (win.destroy(), setattr(self, "_inst_win", None)))
+        win.title("Señales de Consenso — En Cartera")
         win.configure(bg="black")
-        offset_x = max(0, self.winfo_rootx() + self.winfo_width() // 2)
-        offset_y = max(0, self.winfo_rooty() + 60)
-        win.geometry(f"1200x580+{offset_x}+{offset_y}")
+        win.geometry(f"1320x580+{650}+{400}")
 
         hdr = tk.Label(
             win,
-            text=f"Inst + Analistas vs Modelo — Cartera ({len(filas)} activos)",
-            bg="black", fg="cyan", font=("Arial", 11, "bold"),
+            text=f"Señales de Consenso — Cartera ({len(filas)} activos)",
+            bg="black",
+            fg="cyan",
+            font=("Arial", 11, "bold"),
         )
         hdr.pack(pady=(8, 4))
 
-        cols    = ("symbol", "div",    "nombre", "inst_pct", "n_inst",  "buy_ratio", "sell_ratio", "senal_inst", "analista",  "n_ana", "modelo",   "alineacion")
-        headers = ("Symbol", "Div",    "Nombre", "Inst %",   "# Inst",  "13F Buy%",  "13F Sell%",  "Inst Señal", "Analistas", "N",     "Modelo",   "Alineación")
-        widths  = (65,        38,       170,       65,          55,        70,           70,           100,          105,          40,      80,          150)
-        anchors = ("w",       "center", "w",       "e",         "e",       "e",          "e",          "w",          "w",          "e",     "center",    "w")
+        cols = (
+            "symbol",
+            "div",
+            "nombre",
+            "inst_pct",
+            "n_inst",
+            "buy_ratio",
+            "sell_ratio",
+            "calls",
+            "puts",
+            "float_sig",
+            "senal_inst",
+            "analista",
+            "n_ana",
+            "modelo",
+            "alineacion",
+        )
+        headers = (
+            "Symbol",
+            "Div",
+            "Nombre",
+            "Inst %",
+            "# Inst",
+            "13F Buy%",
+            "13F Sell%",
+            "CALL ↑",
+            "PUT ↓",
+            "Float",
+            "Inst Señal",
+            "Analistas",
+            "N",
+            "Modelo",
+            "Alineación",
+        )
+        widths = (65, 38, 170, 65, 55, 70, 70, 60, 60, 80, 100, 105, 40, 80, 150)
+        anchors = (
+            "w",
+            "center",
+            "w",
+            "e",
+            "e",
+            "e",
+            "e",
+            "e",
+            "e",
+            "center",
+            "w",
+            "w",
+            "e",
+            "center",
+            "w",
+        )
 
         frame = tk.Frame(win, bg="black")
         frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
         vsb = ttk.Scrollbar(frame, orient=VERTICAL)
-        tree = ttk.Treeview(frame, columns=cols, show="headings", yscrollcommand=vsb.set, height=20)
+        tree = ttk.Treeview(
+            frame, columns=cols, show="headings", yscrollcommand=vsb.set, height=20
+        )
         vsb.config(command=tree.yview)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -893,11 +1026,11 @@ class Screener(tk.Frame):
             tree.column(col_id, width=w, minwidth=40, stretch=tk.NO, anchor=anc)
 
         tree.tag_configure("CUADRUPLE", foreground="#FFD700")
-        tree.tag_configure("TRIPLE",    foreground="#00FF88")
-        tree.tag_configure("ALINEADO",  foreground="cyan")
-        tree.tag_configure("DIVERGE",   foreground="#FF6060")
-        tree.tag_configure("ALERTA",    foreground="#FFA500")
-        tree.tag_configure("NEUTRO",    foreground="#888888")
+        tree.tag_configure("TRIPLE", foreground="#00FF88")
+        tree.tag_configure("ALINEADO", foreground="cyan")
+        tree.tag_configure("DIVERGE", foreground="#FF6060")
+        tree.tag_configure("ALERTA", foreground="#FFA500")
+        tree.tag_configure("NEUTRO", foreground="#888888")
 
         for f in filas:
             tree.insert("", tk.END, values=f["values"], tags=(f["tag"],))
@@ -906,21 +1039,27 @@ class Screener(tk.Frame):
         resumen_frame = tk.Frame(win, bg="#111111")
         resumen_frame.pack(fill=tk.X, padx=8, pady=(2, 6))
         etiquetas = [
-            ("CUADRUPLE", "★ CUÁD",  "#FFD700"),
-            ("TRIPLE",    "✓✓ TRIPLE", "#00FF88"),
-            ("ALINEADO",  "✓ ALIN",  "cyan"),
-            ("DIVERGE",   "⚠ DIV",   "#FF6060"),
-            ("ALERTA",    "⚠ ALERT", "#FFA500"),
-            ("NEUTRO",    "— NEUT",  "#888888"),
+            ("CUADRUPLE", "★ CUÁD", "#FFD700"),
+            ("TRIPLE", "✓✓ TRIPLE", "#00FF88"),
+            ("ALINEADO", "✓ ALIN", "cyan"),
+            ("DIVERGE", "⚠ DIV", "#FF6060"),
+            ("ALERTA", "⚠ ALERT", "#FFA500"),
+            ("NEUTRO", "— NEUT", "#888888"),
         ]
         for key, label, color in etiquetas:
             n = contadores.get(key, 0)
             tk.Label(
-                resumen_frame, text=f"{label}: {n}",
-                bg="#111111", fg=color, font=("Arial", 9),
+                resumen_frame,
+                text=f"{label}: {n}",
+                bg="#111111",
+                fg=color,
+                font=("Arial", 9),
             ).pack(side=tk.LEFT, padx=10, pady=2)
 
-        ttk.Button(resumen_frame, text="Ver Modelo", style="C.TButton", state=tk.DISABLED).pack(side=tk.RIGHT, padx=(0, 8))
+        ttk.Button(
+            resumen_frame, text="Ver Modelo", style="C.TButton", state=tk.DISABLED
+        ).pack(side=tk.RIGHT, padx=(0, 8))
+
 
 def sync_market(account):
     """
@@ -951,10 +1090,14 @@ def sync_market(account):
     def _nasdaq_fetch():
         ua = UserAgent()
         headers = {"User-Agent": ua.random, "Accept": "application/json"}
-        base_url = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=5000"
+        base_url = (
+            "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=5000"
+        )
         rows, offset = [], 0
         while True:
-            resp = requests.get(f"{base_url}&offset={offset}", headers=headers, timeout=30)
+            resp = requests.get(
+                f"{base_url}&offset={offset}", headers=headers, timeout=30
+            )
             resp.raise_for_status()
             data = resp.json().get("data", {})
             table = data.get("table") or data
@@ -980,20 +1123,51 @@ def sync_market(account):
             if not info:
                 return symbol, [], []
             campos = [
-                "shortName", "lastPrice", "previousClose", "open", "volume",
-                "marketCap", "currency", "averageVolume", "fiftyTwoWeekHigh",
-                "fiftyTwoWeekLow", "fiftyDayAverage", "twoHundredDayAverage",
-                "trailingPE", "forwardPE", "trailingEps", "beta",
-                "sector", "industry", "country",
-                "dividendRate", "dividendYield", "exDividendDate", "payoutRatio",
-                "fiveYearAvgDividendYield", "trailingAnnualDividendRate",
-                "trailingAnnualDividendYield", "pegRatio", "priceToBook",
-                "forwardEps", "trailingPegRatio", "lastFiscalYearEnd",
-                "firstTradeDateEpochUtc", "targetHighPrice", "targetLowPrice",
-                "targetMeanPrice", "returnOnAssets", "returnOnEquity",
-                "earningsGrowth", "revenueGrowth", "freeCashflow",
-                "grossMargins", "ebitdaMargins", "operatingMargins",
-                "financialCurrency", "website",
+                "shortName",
+                "lastPrice",
+                "previousClose",
+                "open",
+                "volume",
+                "marketCap",
+                "currency",
+                "averageVolume",
+                "fiftyTwoWeekHigh",
+                "fiftyTwoWeekLow",
+                "fiftyDayAverage",
+                "twoHundredDayAverage",
+                "trailingPE",
+                "forwardPE",
+                "trailingEps",
+                "beta",
+                "sector",
+                "industry",
+                "country",
+                "dividendRate",
+                "dividendYield",
+                "exDividendDate",
+                "payoutRatio",
+                "fiveYearAvgDividendYield",
+                "trailingAnnualDividendRate",
+                "trailingAnnualDividendYield",
+                "pegRatio",
+                "priceToBook",
+                "forwardEps",
+                "trailingPegRatio",
+                "lastFiscalYearEnd",
+                "firstTradeDateEpochUtc",
+                "targetHighPrice",
+                "targetLowPrice",
+                "targetMeanPrice",
+                "returnOnAssets",
+                "returnOnEquity",
+                "earningsGrowth",
+                "revenueGrowth",
+                "freeCashflow",
+                "grossMargins",
+                "ebitdaMargins",
+                "operatingMargins",
+                "financialCurrency",
+                "website",
             ]
             valores = [
                 str(info.get("shortName") or "")[:60],
@@ -1063,7 +1237,9 @@ def sync_market(account):
         if "-" in symbol:
             continue
         if symbol not in existing:
-            market.insert(upd=["account", "tipo"], val=[account, "Dividends"], symbol=symbol)
+            market.insert(
+                upd=["account", "tipo"], val=[account, "Dividends"], symbol=symbol
+            )
             existing[symbol] = "N"
             insertados += 1
         elif existing[symbol] in ("I", "S", "X"):
@@ -1099,9 +1275,10 @@ def cleanup_market(account):
     _QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
     _FUND_URL = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/{}"
     _FUND_MODULES = "summaryDetail,defaultKeyStatistics,financialData,assetProfile"
+
     def _chunks(lst, n):
         for i in range(0, len(lst), n):
-            yield lst[i:i + n]
+            yield lst[i : i + n]
 
     def _safe_float(val):
         try:
@@ -1124,10 +1301,22 @@ def cleanup_market(account):
 
     def _map_quote(s):
         campos = [
-            "shortName", "lastPrice", "previousClose", "open", "volume",
-            "marketCap", "currency", "averageVolume", "fiftyTwoWeekHigh",
-            "fiftyTwoWeekLow", "fiftyDayAverage", "twoHundredDayAverage",
-            "trailingPE", "forwardPE", "trailingEps", "beta",
+            "shortName",
+            "lastPrice",
+            "previousClose",
+            "open",
+            "volume",
+            "marketCap",
+            "currency",
+            "averageVolume",
+            "fiftyTwoWeekHigh",
+            "fiftyTwoWeekLow",
+            "fiftyDayAverage",
+            "twoHundredDayAverage",
+            "trailingPE",
+            "forwardPE",
+            "trailingEps",
+            "beta",
         ]
         valores = [
             str(s.get("shortName") or "")[:60],
@@ -1164,15 +1353,39 @@ def cleanup_market(account):
             fd = data.get("financialData", {})
             ap = data.get("assetProfile", {})
             campos = [
-                "sector", "industry", "country", "dividendRate", "dividendYield",
-                "exDividendDate", "payoutRatio", "fiveYearAvgDividendYield",
-                "trailingAnnualDividendRate", "trailingAnnualDividendYield",
-                "pegRatio", "priceToBook", "forwardEps", "trailingPegRatio",
-                "lastFiscalYearEnd", "firstTradeDateEpochUtc", "targetHighPrice",
-                "targetLowPrice", "targetMeanPrice", "returnOnAssets", "returnOnEquity",
-                "earningsGrowth", "revenueGrowth", "freeCashflow", "grossMargins",
-                "ebitdaMargins", "operatingMargins", "financialCurrency", "website",
-                "analyst_rec", "analyst_mean", "analyst_count",
+                "sector",
+                "industry",
+                "country",
+                "dividendRate",
+                "dividendYield",
+                "exDividendDate",
+                "payoutRatio",
+                "fiveYearAvgDividendYield",
+                "trailingAnnualDividendRate",
+                "trailingAnnualDividendYield",
+                "pegRatio",
+                "priceToBook",
+                "forwardEps",
+                "trailingPegRatio",
+                "lastFiscalYearEnd",
+                "firstTradeDateEpochUtc",
+                "targetHighPrice",
+                "targetLowPrice",
+                "targetMeanPrice",
+                "returnOnAssets",
+                "returnOnEquity",
+                "earningsGrowth",
+                "revenueGrowth",
+                "freeCashflow",
+                "grossMargins",
+                "ebitdaMargins",
+                "operatingMargins",
+                "financialCurrency",
+                "website",
+                "analyst_rec",
+                "analyst_mean",
+                "analyst_count",
+                "sharesOutstanding",
             ]
             valores = [
                 str(ap.get("sector") or "")[:50],
@@ -1206,7 +1419,16 @@ def cleanup_market(account):
                 str(ap.get("website") or "")[:200],
                 str(fd.get("recommendationKey") or "")[:20] or None,
                 _safe_float(fd.get("recommendationMean", {}).get("raw")),
-                int(fd["numberOfAnalystOpinions"]["raw"]) if fd.get("numberOfAnalystOpinions", {}).get("raw") else None,
+                (
+                    int(fd["numberOfAnalystOpinions"]["raw"])
+                    if fd.get("numberOfAnalystOpinions", {}).get("raw")
+                    else None
+                ),
+                (
+                    int(ks["sharesOutstanding"]["raw"])
+                    if ks.get("sharesOutstanding", {}).get("raw")
+                    else None
+                ),
             ]
             return campos, valores
         except Exception:
@@ -1215,7 +1437,7 @@ def cleanup_market(account):
     market = MarketScreen()
     rows, ix = market.select(account=account, tipo="Dividends") or ([], [])
     existing = {}
-    for row in (rows or []):
+    for row in rows or []:
         d = dict(zip(ix, row))
         existing[d["symbol"]] = {
             "categoriaActivo": d.get("categoriaActivo"),
@@ -1247,7 +1469,9 @@ def cleanup_market(account):
                 timeout=15,
             )
             if not resp.ok:
-                print(f"  batch skip HTTP {resp.status_code} — no se procesan {len(batch)} símbolos")
+                print(
+                    f"  batch skip HTTP {resp.status_code} — no se procesan {len(batch)} símbolos"
+                )
                 continue
             result = resp.json().get("quoteResponse", {}).get("result", [])
             returned = {s["symbol"] for s in result}
@@ -1257,7 +1481,10 @@ def cleanup_market(account):
                 sym = s.get("symbol", "").strip()
                 if not sym:
                     continue
-                if not _safe_float(s.get("regularMarketPrice")) and existing.get(sym, {}).get("encartera") != "Y":
+                if (
+                    not _safe_float(s.get("regularMarketPrice"))
+                    and existing.get(sym, {}).get("encartera") != "Y"
+                ):
                     not_found.append(sym)
                     continue
                 campos, valores = _map_quote(s)
@@ -1271,13 +1498,9 @@ def cleanup_market(account):
             print(f"  batch skip (error: {e}) — no se procesan {len(batch)} símbolos")
             continue
 
-    # ── Phase 2: Eliminar no encontrados (preserva encartera='Y' → los maneja audit_portfolio)
+    # ── Phase 2: Eliminar no encontrados — deslistados salen siempre, cartera o no
     eliminados = 0
-    en_cartera_salvados = 0
     for sym in not_found:
-        if existing.get(sym, {}).get("encartera") == "Y":
-            en_cartera_salvados += 1
-            continue
         market.delete(symbol=sym, account=account)
         eliminados += 1
         _logger.warning(f"cleanup_market: eliminado {sym}")
@@ -1298,7 +1521,6 @@ def cleanup_market(account):
         "batches_ok": batches_ok,
         "quote_actualizados": quote_ok,
         "eliminados": eliminados,
-        "en_cartera_salvados": en_cartera_salvados,
         "preferreds_eliminados": preferreds_eliminados,
         "fund_completados": fund_ok,
     }
@@ -1311,8 +1533,8 @@ def _resolve_cusip_from_edgar(symbol, short_name):
     Estrategia 2: descargar primeros 64KB del documento principal y buscar patrón CUSIP.
     Retorna el CUSIP (str 9 chars) o None si no lo encuentra.
     """
-    _HEADERS  = {"User-Agent": "AppOO research@appoo.com"}
-    _SEARCH   = "https://efts.sec.gov/LATEST/search-index"
+    _HEADERS = {"User-Agent": "AppOO research@appoo.com"}
+    _SEARCH = "https://efts.sec.gov/LATEST/search-index"
     _CUSIP_RE = re.compile(r"CUSIP[:\s#]*([A-Z0-9]{9})", re.I)
 
     queries = [symbol]
@@ -1323,21 +1545,25 @@ def _resolve_cusip_from_edgar(symbol, short_name):
         try:
             r = requests.get(
                 _SEARCH,
-                params={"entity": query, "forms": "10-K,20-F",
-                        "dateRange": "custom", "startdt": "2022-01-01"},
+                params={
+                    "entity": query,
+                    "forms": "10-K,20-F",
+                    "dateRange": "custom",
+                    "startdt": "2022-01-01",
+                },
                 headers=_HEADERS,
                 timeout=15,
             )
             hits = r.json().get("hits", {}).get("hits", [])
 
             for hit in hits[:4]:
-                src   = hit.get("_source", {})
-                ciks  = src.get("ciks", [])
+                src = hit.get("_source", {})
+                ciks = src.get("ciks", [])
                 hit_id = hit.get("_id", "")
                 if not ciks or ":" not in hit_id:
                     continue
                 accn, xmlfile = hit_id.split(":", 1)
-                cik       = int(ciks[0])
+                cik = int(ciks[0])
                 acc_clean = accn.replace("-", "")
 
                 # Intentar primero el header SGML (archivo pequeño, ~2-10KB)
@@ -1379,48 +1605,55 @@ def audit_portfolio(account):
     - CUSIP faltante: resuelve via EDGAR 13F y actualiza market.
     Retorna dict con contadores.
     """
-    market   = MarketScreen()
-    cartera  = market.load_cartera_symbols(account)
+    market = MarketScreen()
+    cartera = market.load_cartera_symbols(account)
 
-    _ETF_TYPES    = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
-    delistados    = 0
-    nombres_upd   = 0
-    sin_precio    = 0
-    cusips_upd    = 0
-    etfs_upd      = 0
-    errores       = 0
+    _ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
+    delistados = 0
+    nombres_upd = 0
+    sin_precio = 0
+    cusips_upd = 0
+    etfs_upd = 0
+    errores = 0
 
     for row in cartera:
-        sym       = row["symbol"]
-        nombre_db = (row.get("shortName") or "")
+        sym = row["symbol"]
+        nombre_db = row.get("shortName") or ""
 
         try:
-            info      = yf.Ticker(sym).info
-            qt        = (info.get("quoteType") or "").upper()
+            info = yf.Ticker(sym).info
+            qt = (info.get("quoteType") or "").upper()
             nombre_yf = (info.get("shortName") or info.get("longName") or "").strip()
             precio_yf = info.get("regularMarketPrice") or info.get("previousClose")
 
-            # ETF/fondo → forzar categoriaActivo='X' (sin estudio de dividendo individual)
-            if qt in _ETF_TYPES and row.get("categoriaActivo") != "X":
-                market.update(upd=["categoriaActivo"], val=["X"], symbol=sym, account=account)
+            # ETF/fondo → eliminar de market, solo acciones
+            if qt in _ETF_TYPES:
+                market.delete(sym, account)
                 etfs_upd += 1
-                _logger.warning(f"audit_portfolio: ETF detectado {sym} qt={qt} → categoriaActivo=X")
+                _logger.warning(f"audit_portfolio: ETF eliminado {sym} qt={qt}")
+                continue
 
             if not qt or qt == "NONE":
                 # Sin datos Yahoo → delistado: eliminar de market + marcar booktrading
                 market.mark_booktrading_delisted(sym, account)
                 market.delete(sym, account)
                 delistados += 1
-                _logger.warning(f"audit_portfolio: delistado {sym} — eliminado market + booktrading marcado")
+                _logger.warning(
+                    f"audit_portfolio: delistado {sym} — eliminado market + booktrading marcado"
+                )
 
             elif not precio_yf:
                 sin_precio += 1
                 _logger.warning(f"audit_portfolio: sin precio {sym}  qt={qt}")
 
             elif nombre_yf and nombre_db and nombre_yf[:25] != nombre_db[:25]:
-                market.update(upd=["shortName"], val=[nombre_yf], symbol=sym, account=account)
+                market.update(
+                    upd=["shortName"], val=[nombre_yf], symbol=sym, account=account
+                )
                 nombres_upd += 1
-                _logger.warning(f"audit_portfolio: nombre actualizado {sym}  '{nombre_db}' → '{nombre_yf}'")
+                _logger.warning(
+                    f"audit_portfolio: nombre actualizado {sym}  '{nombre_db}' → '{nombre_yf}'"
+                )
 
             # CUSIP faltante → resolver via EDGAR
             if not row.get("cusip"):
@@ -1437,13 +1670,13 @@ def audit_portfolio(account):
         time.sleep(1.5)
 
     return {
-        "total":       len(cartera),
-        "delistados":  delistados,
+        "total": len(cartera),
+        "delistados": delistados,
         "nombres_upd": nombres_upd,
-        "cusips_upd":  cusips_upd,
-        "etfs_upd":    etfs_upd,
-        "sin_precio":  sin_precio,
-        "errores":     errores,
+        "cusips_upd": cusips_upd,
+        "etfs_upd": etfs_upd,
+        "sin_precio": sin_precio,
+        "errores": errores,
     }
 
 
@@ -1454,6 +1687,5 @@ if __name__ == "__main__":
     print(f"  batches exitosos    : {result['batches_ok']}")
     print(f"  quote actualizados  : {result['quote_actualizados']}")
     print(f"  eliminados          : {result['eliminados']}")
-    print(f"  en cartera salvados : {result['en_cartera_salvados']}")
     print(f"  fund completados    : {result['fund_completados']}")
     print("cleanup_market completado.")
