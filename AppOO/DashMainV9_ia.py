@@ -1687,147 +1687,60 @@ class DatosVehivulo(TickerInfo, MyOrders):
             return [], 0, 0.0
 
     def dividends_en_market_stock(self, activos):
-        """
-        Actualiza información de dividendos en la tabla market usando yfinance.
-
-        Mejoras basadas en test_yfinance_dividends_fields.py:
-        - Usa trailingAnnualDividendRate para dividendos anuales (TTM)
-        - Detecta meses de pago desde historial real de dividends
-        - Valida que los datos de dividendos estén actualizados
-        - Maneja correctamente dividendRate (pago individual, NO anual)
-
-        Args:
-            activos (list): Lista de símbolos a actualizar
-
-        Returns:
-            None (actualiza tabla market directamente)
-        """
-
-        # update tabla market
         def update_tabla_market(x_symbol, campo, value):
             try:
-                found, iy = self.Market.select(account="U4214563", symbol=x_symbol)
-
+                found, iy = self.Market.select(account=self.account, symbol=x_symbol)
                 if not found:
                     self.Market.insert(upd=campo, val=value, symbol=x_symbol)
                 else:
                     self.Market.update(upd=campo, val=value, symbol=x_symbol)
             except Exception as error:
-                print("[update_tabla_market()]: {}".format(error))
+                self.logger.error("update_tabla_market({}): {}".format(x_symbol, error))
 
-        # estructura información de dividendos
-        def construct_info_dividends(x_symbol, activo, pdatos, campos):
-            """
-            Construye información estructurada de dividendos.
-
-            Cambios clave:
-            - Extrae meses de pago desde historial real (último año)
-            - Valida que haya pagos recientes (últimos 12 meses)
-            - Retorna información completa para análisis de rebalanceo
-            """
+        def construct_info_dividends(x_symbol, activo, pdatos):
             try:
                 campos = {}
                 ddatos, x_categoria, x_meses = self.rendimiento_dividends(activo=activo, datos=pdatos, symbol=x_symbol)
                 if not ddatos.empty:
-                    d_json = ddatos.to_json(orient="split")
                     campos.update({"categoriaActivo": x_categoria[0]})
-                    campos.update({"trazaDividends": d_json})
+                    campos.update({"trazaDividends": ddatos.to_json(orient="split")})
                 else:
                     campos.update({"categoriaActivo": "X"})
-
-                # se agregan otros campos de intres para actualzair market
                 campos.update({"trailingAnnualDividendRate": activo.get("trailingAnnualDividendRate", 0)})
                 campos.update({"dividendYield": activo.get("dividendYield", 0)})
-
                 timestamp = activo.get("exDividendDate")
                 exdivi = "9999-12-31"
                 if timestamp is not None:
-                    fecha = datetime.fromtimestamp(timestamp)
-                    exdivi = fecha.strftime("%Y-%m-%d")
+                    exdivi = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
                 campos.update({"exDividendDate": exdivi})
                 campos.update({"previousClose": activo.get("previousClose", 0)})
-
                 return campos, x_categoria[0], x_meses
             except Exception as error:
-                print("[construct_info_dividends()]: {}".format(error))
-                traceback.print_exc()
+                self.logger.error("construct_info_dividends({}): {}".format(x_symbol, error), exc_info=True)
 
         try:
-            columnas, values, meses = [], [], []
-            if self.vehiculo == "Stock":
-                for symbol in activos:
-                    # actualiza lista
-                    ticket = convierte_ticket_crypto(symbol)
-                    (yf_activo, datos, ind_update) = self.ts_yfinance_symbol(symbol=ticket, vehiculo=self.vehiculo)
-
-                    # ============================================================================================================
-                    # MEJORA: Procesar dividendos solo si:
-                    # 1. No está actualizado (ind_update=False)
-                    # 2. Tiene información de dividendYield
-                    # 3. Tiene historial de dividendos en datos
-                    # ============================================================================================================
-                    if not ind_update and ("dividendYield" in yf_activo) and ("Dividends" in datos):
-                        # VALIDACIÓN: Verificar frescura de datos de dividendos
-                        dividends_history = datos["Dividends"]
-                        is_valid, warning = self._validate_dividend_data_freshness(symbol, yf_activo, dividends_history)
-
-                        (market, ix) = self.Market.select(account=self.account, symbol=ticket)
-
-                        # obtiene información del activo usando InfoYfinance
-                        # NOTA: InfoYfinance ya extrae campos clave como:
-                        #   - dividendRate (pago individual)
-                        #   - dividendYield (%)
-                        #   - trailingAnnualDividendRate (TTM - el correcto para anual)
-                        #   - exDividendDate, payoutRatio, fiveYearAvgDividendYield
-                        x_campos = InfoYfinance(symbol, yf_activo)
-
-                        # Construye información estructurada de dividendos
-                        # Llama a rendimiento_dividends() que calcula estrategia de inversión
-                        fields, categoria, meses = construct_info_dividends(ticket, yf_activo, datos, x_campos.info)
-
-                        columnas, values = [], []
-                        for keys, info in fields.items():
-
-                            if isinstance(info, (int, float)):
-                                columnas.append(keys)
-                                values.append(info)
-                            else:
-                                info = info if info not in ("Infinity", "nan", "NaN") else 0
-                                columnas.append(keys)
-                                values.append(info)
-
-                        # ============================================================================================================
-                        # MEJORA: Agregar meses de pago de dividendos
-                        # Los meses vienen de rendimiento_dividends() que analiza el año anterior
-                        # ALTERNATIVA MEJORADA: Usar _extract_dividend_payment_months() para últimos 12 meses
-                        # ============================================================================================================
-                        columnas.append("monthDividendsPay")
-                        values.append(", ".join(meses))
-
-                        columnas.append("lastPrice")
-                        values.append(yf_activo.get("currentPrice", 0))
-
-                        # OPCIONAL: Agregar frecuencia de pago y TTM calculado desde historial
-                        # Descomentar si se quiere almacenar esta información adicional:
-                        # meses_ttm, freq_ttm, total_ttm = (
-                        #    self._extract_dividend_payment_months(dividends_history)
-                        # )
-                        # columnas.append("dividendFrequency")
-                        # values.append(freq_ttm)
-                        # columnas.append("dividendTTM_calculated")
-                        # values.append(total_ttm)
-
-                        # indicador de que esta o estuvo en cartera
-                        columnas.append("encartera")
-                        values.append("Y")
-
-                        # update en tabla market
-                        update_tabla_market(symbol, columnas, values)
-                        if symbol in self.info.keys():
-                            # gwi001  eliminar self.analisis.info[symbol]['update'] = True
-                            self.info[symbol]["update"] = True
+            for symbol in activos:
+                ticket = convierte_ticket_crypto(symbol)
+                yf_activo, datos, ind_update = self.ts_yfinance_symbol(symbol=ticket, vehiculo=self.vehiculo)
+                if not ind_update and ("dividendYield" in yf_activo) and ("Dividends" in datos):
+                    self._validate_dividend_data_freshness(symbol, yf_activo, datos["Dividends"])
+                    fields, categoria, meses = construct_info_dividends(ticket, yf_activo, datos)
+                    columnas, values = [], []
+                    for keys, info in fields.items():
+                        info = info if not isinstance(info, str) or info not in ("Infinity", "nan", "NaN") else 0
+                        columnas.append(keys)
+                        values.append(info)
+                    columnas.append("monthDividendsPay")
+                    values.append(", ".join(meses))
+                    columnas.append("lastPrice")
+                    values.append(yf_activo.get("currentPrice", 0))
+                    columnas.append("encartera")
+                    values.append("Y")
+                    update_tabla_market(symbol, columnas, values)
+                    if symbol in self.info.keys():
+                        self.info[symbol]["update"] = True
         except Exception as e:
-            print("[dividends_en_market_stock()]: {}".format(e))
+            self.logger.error("dividends_en_market_stock(): {}".format(e))
 
     def run(self):
         def run_cryptos():
