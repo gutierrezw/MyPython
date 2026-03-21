@@ -572,18 +572,18 @@ class Screener(tk.Frame):
             ttk.Button(
                 btn_frame,
                 text="Consenso",
-                style="C.TButton",
+                width=10,
                 command=self._show_institucionales_cartera,
-            ).pack(side=tk.LEFT, padx=(0, 6))
+            ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
 
             ttk.Button(
                 btn_frame,
                 text="Inst. Out",
-                style="C.TButton",
+                width=10,
                 state=tk.DISABLED,
             ).pack(side=tk.LEFT)
-        except EncodingWarning as e:
-            print("widgets_screener(): {}".format(e))
+        except Exception as e:
+            _logger.error("widgets_screener(): {}".format(e))
 
     def update_screener(self):
 
@@ -774,8 +774,8 @@ class Screener(tk.Frame):
 
         def _float_ratio(row):
             shares = row.get("sharesOutstanding") or 0
-            vol    = row.get("volume") or 0
-            inst   = min(row.get("inst_ownership_pct") or 0.0, 1.0)
+            vol = row.get("volume") or 0
+            inst = min(row.get("inst_ownership_pct") or 0.0, 1.0)
             insider = min(row.get("insider_ownership_pct") or 0.0, 1.0)
             float_pct = max(0.0, 1.0 - inst - insider)
             float_shares = shares * float_pct
@@ -916,8 +916,8 @@ class Screener(tk.Frame):
                         sym,
                         categ,
                         nombre,
-                        inst_pct,
                         n_inst,
+                        inst_pct,
                         buy_r_str,
                         sell_r_str,
                         calls_str,
@@ -943,10 +943,13 @@ class Screener(tk.Frame):
 
         win = tk.Toplevel(self)
         self._inst_win = win
-        win.protocol("WM_DELETE_WINDOW", lambda: (win.destroy(), setattr(self, "_inst_win", None)))
+        win.protocol(
+            "WM_DELETE_WINDOW",
+            lambda: (win.destroy(), setattr(self, "_inst_win", None)),
+        )
         win.title("Señales de Consenso — En Cartera")
         win.configure(bg="black")
-        win.geometry(f"1320x580+{650}+{400}")
+        win.geometry(f"1200x580+{650}+{400}")
 
         hdr = tk.Label(
             win,
@@ -957,29 +960,29 @@ class Screener(tk.Frame):
         )
         hdr.pack(pady=(8, 4))
 
-        _FIXED_COLS = ("Symbol", "Div", "Nombre")
+        _FIXED_COLS = ("Symbol", "Div", "Nombre", "# Inst", "Inst %")
         _COL_DEFS = (
-            ("Symbol",      65,  "w"),
-            ("Div",         38,  "center"),
-            ("Nombre",      170, "w"),
-            ("Inst %",      65,  "e"),
-            ("# Inst",      55,  "e"),
-            ("13F Buy%",    70,  "e"),
-            ("13F Sell%",   70,  "e"),
-            ("CALL",        60,  "e"),
-            ("PUT",         60,  "e"),
-            ("Float",       80,  "center"),
-            ("Inst Señal",  100, "w"),
-            ("Analistas",   105, "w"),
-            ("N",           40,  "e"),
-            ("Modelo",      80,  "center"),
-            ("Alineacion",  150, "w"),
+            ("Symbol", 65, "w"),
+            ("Div", 38, "center"),
+            ("Nombre", 170, "w"),
+            ("# Inst", 55, "e"),
+            ("Inst %", 65, "e"),
+            ("13F Buy%", 70, "e"),
+            ("13F Sell%", 70, "e"),
+            ("CALL", 60, "e"),
+            ("PUT", 60, "e"),
+            ("Float", 80, "center"),
+            ("Inst Señal", 100, "w"),
+            ("Analistas", 105, "w"),
+            ("N", 40, "e"),
+            ("Modelo", 80, "center"),
+            ("Alineacion", 150, "w"),
         )
-        all_cols      = tuple(d[0] for d in _COL_DEFS)
-        col_align     = {d[0]: {"anchor": d[2], "width": d[1]} for d in _COL_DEFS}
+        all_cols = tuple(d[0] for d in _COL_DEFS)
+        col_align = {d[0]: {"anchor": d[2], "width": d[1]} for d in _COL_DEFS}
 
         frame = tk.Frame(win, bg="black")
-        frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        frame.pack(fill=tk.X, padx=8, pady=4)
 
         ct = CustomTreeview(
             master=frame,
@@ -995,19 +998,23 @@ class Screener(tk.Frame):
 
         for tag, color in (
             ("CUADRUPLE", "#FFD700"),
-            ("TRIPLE",    "#00FF88"),
-            ("ALINEADO",  "cyan"),
-            ("DIVERGE",   "#FF6060"),
-            ("ALERTA",    "#FFA500"),
-            ("NEUTRO",    "#888888"),
+            ("TRIPLE", "#00FF88"),
+            ("ALINEADO", "cyan"),
+            ("DIVERGE", "#FF6060"),
+            ("ALERTA", "#FFA500"),
+            ("NEUTRO", "#888888"),
         ):
             ct.tree_fixed.tag_configure(tag, foreground=color)
             ct.tree_scroll.tag_configure(tag, foreground=color)
 
         n_fixed = len(_FIXED_COLS)
         for f in filas:
-            ct.tree_fixed.insert("", tk.END, values=f["values"][:n_fixed], tags=(f["tag"],))
-            ct.tree_scroll.insert("", tk.END, values=f["values"][n_fixed:], tags=(f["tag"],))
+            ct.tree_fixed.insert(
+                "", tk.END, values=f["values"][:n_fixed], tags=(f["tag"],)
+            )
+            ct.tree_scroll.insert(
+                "", tk.END, values=f["values"][n_fixed:], tags=(f["tag"],)
+            )
 
         # Barra resumen
         resumen_frame = tk.Frame(win, bg="#111111")
@@ -1030,9 +1037,11 @@ class Screener(tk.Frame):
                 font=("Arial", 9),
             ).pack(side=tk.LEFT, padx=10, pady=2)
 
-        ttk.Button(
-            resumen_frame, text="Ver Modelo", style="C.TButton", state=tk.DISABLED
-        ).pack(side=tk.RIGHT, padx=(0, 8))
+        btn_frame = tk.Frame(win, bg="#111111")
+        btn_frame.pack(fill=tk.X, padx=8, pady=(0, 6))
+        ttk.Button(btn_frame, text="Modelo", width=10, state=tk.DISABLED).pack(
+            side=tk.LEFT, padx=8, pady=2
+        )
 
 
 def sync_market(account):
@@ -1443,8 +1452,8 @@ def cleanup_market(account):
                 timeout=15,
             )
             if not resp.ok:
-                print(
-                    f"  batch skip HTTP {resp.status_code} — no se procesan {len(batch)} símbolos"
+                _logger.warning(
+                    f"cleanup_market batch skip HTTP {resp.status_code} — no se procesan {len(batch)} símbolos"
                 )
                 continue
             result = resp.json().get("quoteResponse", {}).get("result", [])
@@ -1469,7 +1478,7 @@ def cleanup_market(account):
                 if sym not in returned:
                     not_found.append(sym)
         except Exception as e:
-            print(f"  batch skip (error: {e}) — no se procesan {len(batch)} símbolos")
+            _logger.warning(f"cleanup_market batch skip ({e}) — no se procesan {len(batch)} símbolos")
             continue
 
     # ── Phase 2: Eliminar no encontrados — deslistados salen siempre, cartera o no

@@ -2122,6 +2122,11 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 # da baja si position == 0 or retorno < .001
                 Debaja = keys["position"] <= 0 or (1 - keys["retorno"]) < 0.001
                 xlistvalues.append("N" if Debaja else "Y")
+                if Debaja:
+                    cursor.execute(
+                        "UPDATE market SET encartera = 'N' WHERE symbol = %s AND account = %s",
+                        (ticket, account),
+                    )
                 xlistvalues.append(keys["empresa"])
                 xlistvalues.append(keys["region"] if "region" in keys else "")
                 xlistvalues.append(keys["country"] if "country" in keys else "")
