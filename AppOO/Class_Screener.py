@@ -62,7 +62,7 @@ def _yahoo_session():
         }
     )
     crumb = ""
-    _BACKOFF = [0, 30, 90]  # segundos de espera antes de cada intento
+    _BACKOFF = [0, 5, 15]  # segundos de espera antes de cada intento
     for attempt in range(3):
         try:
             if _BACKOFF[attempt]:
@@ -578,6 +578,13 @@ class Screener(tk.Frame):
 
             ttk.Button(
                 btn_frame,
+                text="Modelo",
+                width=10,
+                command=self._show_screener_doc,
+            ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
+
+            ttk.Button(
+                btn_frame,
                 text="Inst. Out",
                 width=10,
                 state=tk.DISABLED,
@@ -730,18 +737,151 @@ class Screener(tk.Frame):
         if not is_none(self.s_market):
             pass
 
+    def _show_screener_doc(self):
+        doc_win = tk.Toplevel(self)
+        doc_win.title("Documentación — Modelo Screener & Consenso Score")
+        doc_win.geometry("720x560")
+        doc_win.configure(bg="black")
+
+        doc_frame = tk.Frame(doc_win, bg="black")
+        doc_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        sb = tk.Scrollbar(doc_frame)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        doc_text = tk.Text(
+            doc_frame,
+            wrap=tk.WORD,
+            bg="#0d0d0d",
+            fg="#cccccc",
+            font=("Consolas", 10),
+            yscrollcommand=sb.set,
+        )
+        doc_text.pack(fill=tk.BOTH, expand=True)
+        sb.config(command=doc_text.yview)
+
+        _DOC = """\
+# MODELO DE SEÑALES DE CONSENSO — CARTERA DE DIVIDENDOS
+
+## Estrategia
+Cartera orientada a ingresos pasivos (dividendos). Se analiza cada activo
+en cartera cruzando 4 fuentes independientes: flujo institucional 13F,
+recomendaciones de Wall Street, señal del modelo IA propio y clasificación
+fundamental. El Consenso Score sintetiza estas fuentes en una sola señal.
+
+────────────────────────────────────────────────────────────────
+## CÓMO SE ARMA EL SCREENER
+
+Phase 0 — Limpieza
+  • cleanup_market(): elimina preferreds/warrants (símbolo con "-")
+    salvo que estén en cartera (encartera='Y').
+
+Phase 1 — Descubrimiento NASDAQ
+  • API NASDAQ screener (dividends only) con paginación offset.
+  • INSERT mínimo: symbol, encartera, dividendYield, exDividendDate, account.
+  • Filtra symbols con "-" (preferreds) antes de insertar.
+
+Phase 2 — Enriquecimiento Yahoo Finance
+  • Batch de 250 símbolos por request (Yahoo Quote API + crumb).
+  • Actualiza precio, volume, marketCap, sharesOutstanding, beta, etc.
+  • Retry x3 con backoff 0s→5s→15s ante 429.
+  • Aborta si no hay crumb válido (Yahoo no disponible).
+
+Phase 3 — Fundamentals
+  • load_symbols_needing_fundamentals(): detecta cualquier campo NULL.
+  • yf.Ticker().info → country, shortName, sector, analyst_rec,
+    analyst_mean, analyst_count, PE, PB, márgenes operativos, deuda, etc.
+
+────────────────────────────────────────────────────────────────
+## CATEGORIZACIÓN DE ACTIVOS (categoriaActivo)
+
+  I = Infravalorado    → participa en análisis, voto Val = +1
+  S = Sobrevalorado    → participa en análisis, voto Val = -1
+  N = Neutral          → en análisis sin dividendo (ej: PLUG, XIFR), voto Val = 0
+  X = Excluido         → ETFs / fondos, abstiene en voto Val
+  T = Descubierto 13F  → detectado por pipeline, aún sin análisis, abstiene
+
+────────────────────────────────────────────────────────────────
+## PIPELINE 13F
+
+  1. sync_edgar_funds   (mensual)  — descarga company.idx EDGAR, carga ~9K
+                                    fondos con CIK en tabla funds.
+  2. sync_fund_filings  (semanal)  — descarga XML 13F-HR de cada fondo.
+                                    Refresh trimestral: re-descarga si filing_date
+                                    ≥ 80 días y la accession cambió en EDGAR.
+                                    Metadata persistente en tabla fund_filings.
+  3. sync_13f_holdings  (semanal)  — parsea XMLs nuevos (processed=0),
+                                    mapea CUSIP → symbol, calcula operation
+                                    (NEW/BUY/SELL/HOLD), bulk upsert fund_holdings.
+  4. sync_13f_scores    (semanal)  — recalcula inst_score blendado:
+                                    inst_score = inst_ownership_pct × 0.40
+                                              + log(max(fh_count,1)) × 0.40
+                                              + fh_buy_ratio           × 0.20
+
+────────────────────────────────────────────────────────────────
+## SEÑAL INSTITUCIONAL COMPUESTA (columna "Inst Señal")
+
+  ACOMPAÑAR  — inst_score ≥ 0.40  AND  buy_ratio ≥ 0.50  AND  fh_count ≥ 20
+  MANTENER   — inst_score ≥ 0.25  OR   fh_count ≥ 10
+  REVISAR    — resto
+
+────────────────────────────────────────────────────────────────
+## SEÑALES DE CONSENSO — 6 VOTOS
+
+Cada señal vota:  +1 (favorable) | 0 (neutral) | -1 (desfavorable) | None (abstiene)
+
+  1. Net (flujo neto 13F)
+     Ranking relativo sobre cartera: top 33% → +1 | medio → 0 | bottom 33% → -1
+     net = fh_buy_ratio − fh_sell_ratio
+     p33 y p67 se calculan dinámicamente sobre los activos de cartera con datos 13F.
+
+  2. Options (CALL/PUT acciones totales 13F)
+     ratio = call_shares / (call_shares + put_shares)
+     ≥ 0.60 → +1 | ≥ 0.40 → 0 | < 0.40 → -1 | sin opciones → abstiene
+
+  3. Analistas (Wall Street — yfinance recommendationKey)
+     strong_buy / buy → +1 | hold → 0 | sell / strong_sell → -1 | sin datos → abstiene
+
+  4. Modelo IA (señal propia)
+     CSV buy  → +1 | CSV sell → -1 | sin señal → 0
+
+  5. Valuación (categoriaActivo)
+     I → +1 | N → 0 | S → -1 | X / T → abstiene
+
+  6. Cobertura (fh_count — fondos con posición)
+     ≥ 20 fondos → +1 | ≥ 5 → 0 | < 5 → -1
+
+────────────────────────────────────────────────────────────────
+## TABLA DE DECISIÓN
+
+  pct = suma_votos / n_votos_activos
+
+  ★ UNÁNIME   — todos los votos activos = +1         → máxima convicción, acumular
+  ▲ CONSENSO  — pct ≥  0.60                          → comprar / aumentar posición
+  ↗ TENDENCIA — pct ≥  0.20                          → mantener / pequeños aumentos
+  → NEUTRO    — pct >  -0.20                         → observar, sin movimiento
+  ↘ ALERTA    — pct >  -0.60                         → reducir, revisar tesis
+  ▼ SALIDA    — pct ≤  -0.60                         → salir o no entrar
+
+Columna Consenso muestra:  <nivel>  <suma:+d>/<n_activos>
+  Ejemplo:  ↗ TENDENCIA  +3/5  (suma=+3 sobre 5 señales activas)
+"""
+        doc_text.insert("1.0", _DOC)
+        doc_text.configure(state="disabled")
+        ttk.Button(doc_win, text="Cerrar", command=doc_win.destroy, width=10).pack(pady=6)
+
     def _show_institucionales_cartera(self):
         if self._inst_win is not None and self._inst_win.winfo_exists():
             self._inst_win.lift()
             return
 
         _TAG_ORDER = {
-            "CUADRUPLE": 0,
-            "TRIPLE": 1,
-            "ALINEADO": 2,
-            "DIVERGE": 3,
+            "UNANIME": 0,
+            "CONSENSO": 1,
+            "TENDENCIA": 2,
+            "NEUTRO": 3,
             "ALERTA": 4,
-            "NEUTRO": 5,
+            "SALIDA": 5,
         }
 
         def _senal_inst(inst_score, fh_buy_ratio, fh_count):
@@ -804,67 +944,95 @@ class Screener(tk.Frame):
             }
             return mapa.get((rec or "").lower().replace(" ", "_"), "")
 
-        def _alineacion(senal_inst, en_buy, en_sell, rec, categ):
-            bullish_analyst = rec in ("strong_buy", "buy")
-            bearish_analyst = rec in ("sell", "strong_sell")
-            bullish_inst = senal_inst == "ACOMPAÑAR"
-            bearish_inst = senal_inst == "REVISAR"
-            bullish_div = categ == "I"
-            bearish_div = categ == "S"
-            has_div = categ not in ("X", None, "")
+        def _build_net_percentiles(stats_subset):
+            nets = sorted(
+                [
+                    (v.get("fh_buy_ratio") or 0.0) - (v.get("fh_sell_ratio") or 0.0)
+                    for v in stats_subset.values()
+                ]
+            )
+            if len(nets) < 3:
+                return 0.2, 0.5
+            n = len(nets)
+            return nets[n // 3], nets[(2 * n) // 3]
 
-            # 4 fuentes alineadas (solo cuando div aplica)
-            if has_div and bullish_inst and en_buy and bullish_analyst and bullish_div:
-                return "★ CUÁDRUPLE BUY"
-            if has_div and bearish_inst and en_sell and bearish_analyst and bearish_div:
-                return "★ CUÁDRUPLE SELL"
-            # 3 fuentes — inst + analyst + modelo
-            if bullish_inst and en_buy and bullish_analyst:
-                return "✓✓ TRIPLE BUY"
-            if bearish_inst and en_sell and bearish_analyst:
-                return "✓✓ TRIPLE SELL"
-            # 3 fuentes — inst + modelo + div
-            if has_div and bullish_inst and en_buy and bullish_div:
-                return "✓✓ TRIPLE BUY"
-            if has_div and bearish_inst and en_sell and bearish_div:
-                return "✓✓ TRIPLE SELL"
-            # 3 fuentes — inst + analyst + div
-            if has_div and bullish_inst and bullish_analyst and bullish_div:
-                return "✓✓ TRIPLE BUY"
-            if has_div and bearish_inst and bearish_analyst and bearish_div:
-                return "✓✓ TRIPLE SELL"
-            # 2 fuentes — inst + modelo
-            if bullish_inst and en_buy:
-                return "✓ INST+MOD BUY"
-            if bearish_inst and en_sell:
-                return "✓ INST+MOD SELL"
-            # 2 fuentes — inst + analista
-            if bullish_inst and bullish_analyst:
-                return "✓ INST+ANA BUY"
-            if bearish_inst and bearish_analyst:
-                return "✓ INST+ANA SELL"
-            # 2 fuentes — inst + div
-            if has_div and bullish_inst and bullish_div:
-                return "✓ INST+DIV BUY"
-            if has_div and bearish_inst and bearish_div:
-                return "✓ INST+DIV SELL"
-            # Divergencias
-            if bullish_inst and en_sell:
-                return "⚠ DIVERGE"
-            if bearish_inst and en_buy:
-                return "⚠ ALERTA"
-            return "— NEUTRO"
+        def voto_net_relativo(buy_r, sell_r, p33, p67):
+            net = (buy_r or 0.0) - (sell_r or 0.0)
+            if net >= p67:
+                return 1
+            if net >= p33:
+                return 0
+            return -1
+
+        def voto_options(call_shares, put_shares):
+            total = (call_shares or 0) + (put_shares or 0)
+            if total == 0:
+                return None
+            ratio = (call_shares or 0) / total
+            if ratio >= 0.6:
+                return 1
+            if ratio >= 0.4:
+                return 0
+            return -1
+
+        def voto_analistas(rec):
+            r = (rec or "").lower().replace(" ", "_")
+            if r in ("strong_buy", "buy"):
+                return 1
+            if r in ("sell", "strong_sell"):
+                return -1
+            if r == "hold":
+                return 0
+            return None
+
+        def voto_valuacion(categ):
+            if categ == "I":
+                return 1
+            if categ == "S":
+                return -1
+            if categ == "N":
+                return 0
+            return None
+
+        def voto_cobertura(fh_count):
+            c = fh_count or 0
+            if c >= 20:
+                return 1
+            if c >= 5:
+                return 0
+            return -1
+
+        def senal_consenso(votos_activos, suma):
+            n = len(votos_activos)
+            if n == 0:
+                return "— S/D", 0, 0
+            pct = suma / n
+            if suma == n:
+                etiqueta = "★ UNÁNIME"
+            elif pct >= 0.6:
+                etiqueta = "▲ CONSENSO"
+            elif pct >= 0.2:
+                etiqueta = "↗ TENDENCIA"
+            elif pct > -0.2:
+                etiqueta = "→ NEUTRO"
+            elif pct > -0.6:
+                etiqueta = "↘ ALERTA"
+            else:
+                etiqueta = "▼ SALIDA"
+            return etiqueta, suma, n
 
         cartera = self.ScMarket.load_cartera_inst(self.account)
         fh_stats = self.ScMarket.load_fund_holdings_stats()
         syms_buy = _read_csv_signals("csv_datosIA_buy")
         syms_sell = _read_csv_signals("csv_datosIA_sell")
 
-        # Construir filas y ordenar por prioridad de alineación
+        cartera_syms = {r["symbol"] for r in cartera}
+        fh_cartera = {s: v for s, v in fh_stats.items() if s in cartera_syms}
+        p33_net, p67_net = _build_net_percentiles(fh_cartera)
+
+        # Construir filas y ordenar por prioridad de consenso
         filas = []
         for row in cartera:
-            if (row.get("categoriaActivo") or "") == "X":
-                continue
             sym = row["symbol"]
             stats = fh_stats.get(sym, {})
             fh_buy_ratio = stats.get("fh_buy_ratio", 0.0)
@@ -874,14 +1042,14 @@ class Screener(tk.Frame):
             senal_inst = _senal_inst(
                 row.get("inst_score"), fh_buy_ratio, row.get("fh_count")
             )
-            senal_ana = _senal_analyst(rec)
-            n_ana = str(row["analyst_count"]) if row.get("analyst_count") else ""
+            _senal = _senal_analyst(rec)
+            _n_ana = str(row["analyst_count"]) if row.get("analyst_count") else ""
+            senal_ana = f"{_senal:<10}  {_n_ana:>3}" if _senal and _n_ana else _senal
             en_buy = sym in syms_buy
             en_sell = sym in syms_sell
             modelo = "▲ COMPRAR" if en_buy else ("▼ VENDER" if en_sell else "—")
             ratio = _float_ratio(row)
             float_str = _senal_float(ratio)
-            alineacion = _alineacion(senal_inst, en_buy, en_sell, rec, categ)
             inst_val = (
                 min(row["inst_ownership_pct"], 1.0)
                 if row.get("inst_ownership_pct")
@@ -891,25 +1059,40 @@ class Screener(tk.Frame):
             buy_r_str = f"{fh_buy_ratio:.0%}" if fh_buy_ratio else ""
             sell_r_str = f"{fh_sell_ratio:.0%}" if fh_sell_ratio else ""
             n_inst = str(stats["fh_count"]) if stats.get("fh_count") else ""
-            nombre = (row.get("shortName") or "")[:28]
+            nombre = (row.get("shortName") or "")[:35]
 
-            if "CUÁDRUPLE" in alineacion:
-                tag = "CUADRUPLE"
-            elif "TRIPLE" in alineacion:
-                tag = "TRIPLE"
-            elif "✓" in alineacion:
-                tag = "ALINEADO"
-            elif "DIVERGE" in alineacion:
-                tag = "DIVERGE"
-            elif "ALERTA" in alineacion:
+            votos = {
+                "Net": voto_net_relativo(fh_buy_ratio, fh_sell_ratio, p33_net, p67_net),
+                "Opt": voto_options(
+                    stats.get("fh_call_shares"), stats.get("fh_put_shares")
+                ),
+                "Ana": voto_analistas(rec),
+                "Mod": (1 if en_buy else (-1 if en_sell else 0)),
+                "Val": voto_valuacion(categ),
+                "Cob": voto_cobertura(stats.get("fh_count")),
+            }
+            activos = {k: v for k, v in votos.items() if v is not None}
+            suma = sum(activos.values())
+            _etiq, _suma, _n = senal_consenso(list(activos.values()), suma)
+            consenso = f"{_etiq:<12}  {_suma:+d}/{_n}" if _n else _etiq
+
+            if "UNÁNIME" in consenso:
+                tag = "UNANIME"
+            elif "CONSENSO" in consenso:
+                tag = "CONSENSO"
+            elif "TENDENCIA" in consenso:
+                tag = "TENDENCIA"
+            elif "ALERTA" in consenso:
                 tag = "ALERTA"
+            elif "SALIDA" in consenso:
+                tag = "SALIDA"
             else:
                 tag = "NEUTRO"
 
-            calls_str = (
-                str(stats["fh_call_count"]) if stats.get("fh_call_count") else ""
-            )
-            puts_str = str(stats["fh_put_count"]) if stats.get("fh_put_count") else ""
+            _call_sh = stats.get("fh_call_shares") or 0
+            _put_sh = stats.get("fh_put_shares") or 0
+            calls_str = f"{_call_sh / 1_000_000:.1f}M" if _call_sh else ""
+            puts_str = f"{_put_sh  / 1_000_000:.1f}M" if _put_sh else ""
             filas.append(
                 {
                     "values": (
@@ -925,9 +1108,8 @@ class Screener(tk.Frame):
                         float_str,
                         senal_inst,
                         senal_ana,
-                        n_ana,
                         modelo,
-                        alineacion,
+                        consenso,
                     ),
                     "tag": tag,
                     "categ": categ,
@@ -949,7 +1131,7 @@ class Screener(tk.Frame):
         )
         win.title("Señales de Consenso — En Cartera")
         win.configure(bg="black")
-        win.geometry(f"1200x580+{650}+{400}")
+        win.geometry(f"1200x530+{650}+{400}")
 
         hdr = tk.Label(
             win,
@@ -964,19 +1146,18 @@ class Screener(tk.Frame):
         _COL_DEFS = (
             ("Symbol", 65, "w"),
             ("Div", 38, "center"),
-            ("Nombre", 170, "w"),
+            ("Nombre", 200, "w"),
             ("# Inst", 55, "e"),
             ("Inst %", 65, "e"),
             ("13F Buy%", 70, "e"),
             ("13F Sell%", 70, "e"),
             ("CALL", 60, "e"),
             ("PUT", 60, "e"),
-            ("Float", 80, "center"),
+            ("Rotación", 80, "center"),
             ("Inst Señal", 100, "w"),
-            ("Analistas", 105, "w"),
-            ("N", 40, "e"),
+            ("Analistas", 140, "w"),
             ("Modelo", 80, "center"),
-            ("Alineacion", 150, "w"),
+            ("Consenso", 160, "w"),
         )
         all_cols = tuple(d[0] for d in _COL_DEFS)
         col_align = {d[0]: {"anchor": d[2], "width": d[1]} for d in _COL_DEFS}
@@ -997,12 +1178,12 @@ class Screener(tk.Frame):
         ct.right.config(bg="black")
 
         for tag, color in (
-            ("CUADRUPLE", "#FFD700"),
-            ("TRIPLE", "#00FF88"),
-            ("ALINEADO", "cyan"),
-            ("DIVERGE", "#FF6060"),
-            ("ALERTA", "#FFA500"),
+            ("UNANIME", "#FFD700"),
+            ("CONSENSO", "#00FF88"),
+            ("TENDENCIA", "cyan"),
             ("NEUTRO", "#888888"),
+            ("ALERTA", "#FFA500"),
+            ("SALIDA", "#FF6060"),
         ):
             ct.tree_fixed.tag_configure(tag, foreground=color)
             ct.tree_scroll.tag_configure(tag, foreground=color)
@@ -1020,12 +1201,12 @@ class Screener(tk.Frame):
         resumen_frame = tk.Frame(win, bg="#111111")
         resumen_frame.pack(fill=tk.X, padx=8, pady=(2, 6))
         etiquetas = [
-            ("CUADRUPLE", "★ CUÁD", "#FFD700"),
-            ("TRIPLE", "✓✓ TRIPLE", "#00FF88"),
-            ("ALINEADO", "✓ ALIN", "cyan"),
-            ("DIVERGE", "⚠ DIV", "#FF6060"),
-            ("ALERTA", "⚠ ALERT", "#FFA500"),
-            ("NEUTRO", "— NEUT", "#888888"),
+            ("UNANIME", "★ UNÁNIME", "#FFD700"),
+            ("CONSENSO", "▲ CONSENSO", "#00FF88"),
+            ("TENDENCIA", "↗ TENDENCIA", "cyan"),
+            ("NEUTRO", "→ NEUTRO", "#888888"),
+            ("ALERTA", "↘ ALERTA", "#FFA500"),
+            ("SALIDA", "▼ SALIDA", "#FF6060"),
         ]
         for key, label, color in etiquetas:
             n = contadores.get(key, 0)
@@ -1039,7 +1220,7 @@ class Screener(tk.Frame):
 
         btn_frame = tk.Frame(win, bg="#111111")
         btn_frame.pack(fill=tk.X, padx=8, pady=(0, 6))
-        ttk.Button(btn_frame, text="Modelo", width=10, state=tk.DISABLED).pack(
+        ttk.Button(btn_frame, text="Modelo", width=10, command=self._show_screener_doc).pack(
             side=tk.LEFT, padx=8, pady=2
         )
 
@@ -1281,6 +1462,16 @@ def cleanup_market(account):
             return None
 
     _session, _crumb = _yahoo_session()
+    if not _crumb:
+        _logger.error("cleanup_market: Yahoo no disponible (429/sin crumb) — abortando")
+        return {
+            "total": 0,
+            "batches_ok": 0,
+            "quote_actualizados": 0,
+            "eliminados": 0,
+            "preferreds_eliminados": 0,
+            "fund_completados": 0,
+        }
 
     def _map_quote(s):
         campos = [
@@ -1478,7 +1669,9 @@ def cleanup_market(account):
                 if sym not in returned:
                     not_found.append(sym)
         except Exception as e:
-            _logger.warning(f"cleanup_market batch skip ({e}) — no se procesan {len(batch)} símbolos")
+            _logger.warning(
+                f"cleanup_market batch skip ({e}) — no se procesan {len(batch)} símbolos"
+            )
             continue
 
     # ── Phase 2: Eliminar no encontrados — deslistados salen siempre, cartera o no
