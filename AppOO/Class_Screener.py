@@ -572,7 +572,7 @@ class Screener(tk.Frame):
             btn_frame = tk.Frame(btn_line, bg="black")
             health_frame = tk.Frame(btn_line, bg="black")
             btn_frame.pack(side=tk.LEFT)
-            health_frame.pack(side=tk.RIGHT, padx=350)
+            health_frame.pack(side=tk.RIGHT, padx=10)
 
             ttk.Button(
                 btn_frame,
