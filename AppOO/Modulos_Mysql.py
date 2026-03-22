@@ -1510,6 +1510,52 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+    def load_screener_health(self, account: str) -> dict:
+        """Retorna métricas de salud del pipeline 13F para el status bar del Screener:
+        - pendientes     : fund_filings con processed=0
+        - por_renovar    : fondos con filing_date >= 70 días (próximos al umbral 80d)
+        - fh_sin_symbol  : fund_holdings con symbol no en market
+        - market_sin_cusip: symbols en market sin cusip (invisibles al pipeline 13F)"""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT COUNT(*) FROM fund_filings WHERE processed = 0")
+            pendientes = cursor.fetchone()[0] or 0
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM fund_filings "
+                "WHERE filing_date <= DATE_SUB(CURDATE(), INTERVAL 70 DAY)"
+            )
+            por_renovar = cursor.fetchone()[0] or 0
+
+            cursor.execute(
+                "SELECT COUNT(DISTINCT fh.symbol) FROM fund_holdings fh "
+                "LEFT JOIN market m ON m.symbol = fh.symbol AND m.account = %s "
+                "WHERE m.symbol IS NULL",
+                (account,),
+            )
+            fh_sin_symbol = cursor.fetchone()[0] or 0
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM market "
+                "WHERE account = %s AND cusip IS NULL AND encartera = 'Y'",
+                (account,),
+            )
+            market_sin_cusip = cursor.fetchone()[0] or 0
+
+            return {
+                "pendientes"      : pendientes,
+                "por_renovar"     : por_renovar,
+                "fh_sin_symbol"   : fh_sin_symbol,
+                "market_sin_cusip": market_sin_cusip,
+            }
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_screener_health]: {error}")
+            return {"pendientes": 0, "por_renovar": 0, "fh_sin_symbol": 0, "market_sin_cusip": 0}
+        finally:
+            cursor.close()
+            conn.close()
+
     def load_fund_filings_cik_meta(self) -> dict:
         """Retorna {cik: {filing_date, accession, filename}} con el filing más reciente
         por fondo. Reemplaza el JSON 13f_metadata temporal."""
