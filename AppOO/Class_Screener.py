@@ -5,6 +5,7 @@ from Modulos_Utilitarios import (
     is_none,
     mask_numero,
     define_FileCache,
+    documentar_estructura,
 )
 from Class_customer import CustomTreeview
 from Modulos_python import (
@@ -27,6 +28,7 @@ from Modulos_python import (
     requests,
     UserAgent,
     ThreadPoolExecutor,
+    threading,
     logging,
     yf,
     math,
@@ -564,10 +566,13 @@ class Screener(tk.Frame):
             apply.grid(column=0, row=20, sticky=E, padx=20, pady=20)
             reset.grid(column=1, row=20, sticky=E, columnspa=2, pady=20)
 
-            btn_frame = ttk.Frame(self.panel, style="B.TFrame")
-            btn_frame.grid(
-                column=0, row=10, columnspan=3, sticky=W, padx=8, pady=(6, 4)
-            )
+            btn_line = ttk.Frame(self.panel, style="B.TFrame")
+            btn_line.grid(column=0, row=10, columnspan=3, sticky=W, padx=8, pady=(6, 4))
+
+            btn_frame = tk.Frame(btn_line, bg="black")
+            health_frame = tk.Frame(btn_line, bg="black")
+            btn_frame.pack(side=tk.LEFT)
+            health_frame.pack(side=tk.RIGHT, padx=350)
 
             ttk.Button(
                 btn_frame,
@@ -578,17 +583,36 @@ class Screener(tk.Frame):
 
             ttk.Button(
                 btn_frame,
-                text="Modelo",
+                text="Inst. Out",
                 width=10,
-                command=self._show_screener_doc,
+                state=tk.DISABLED,
             ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
 
             ttk.Button(
                 btn_frame,
-                text="Inst. Out",
+                text="Modelo",
                 width=10,
-                state=tk.DISABLED,
-            ).pack(side=tk.LEFT)
+                command=lambda: documentar_estructura("Screener", self, self.colors),
+            ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
+
+            # Status bar — health check pipeline 13F (derecha)
+            self._health_labels = {}
+            for key, texto in (
+                ("pendientes", "📋 pendientes"),
+                ("por_renovar", "🔄 por renovar"),
+                ("inconsistencias", "⚠ inconsistencias"),
+            ):
+                lbl = tk.Label(
+                    health_frame,
+                    text=f"— {texto}",
+                    bg="black",
+                    fg="#555555",
+                    font=("Arial", 8),
+                )
+                lbl.pack(side=tk.RIGHT, padx=6)
+                self._health_labels[key] = lbl
+
+            self.after(200, self._refresh_screener_health)
         except Exception as e:
             _logger.error("widgets_screener(): {}".format(e))
 
@@ -737,138 +761,31 @@ class Screener(tk.Frame):
         if not is_none(self.s_market):
             pass
 
-    def _show_screener_doc(self):
-        doc_win = tk.Toplevel(self)
-        doc_win.title("Documentación — Modelo Screener & Consenso Score")
-        doc_win.geometry("720x560")
-        doc_win.configure(bg="black")
+    def _refresh_screener_health(self):
+        def _color_count(n, warn=10):
+            if n == 0:
+                return "#00FF88", "0"
+            return ("#FFA500" if n < warn else "#FF6060"), str(n)
 
-        doc_frame = tk.Frame(doc_win, bg="black")
-        doc_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        def _fetch():
+            try:
+                h = self.ScMarket.load_screener_health(self.account)
+                inconsistencias = h["fh_sin_symbol"] + h["market_sin_cusip"]
+                self.after(0, lambda: _apply(h, inconsistencias))
+            except Exception as e:
+                _logger.warning(f"_refresh_screener_health: {e}")
 
-        sb = tk.Scrollbar(doc_frame)
-        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        def _apply(h, inconsistencias):
+            c, v = _color_count(h["pendientes"])
+            self._health_labels["pendientes"].config(text=f"📋 {v} pendientes", fg=c)
+            c, v = _color_count(h["por_renovar"], warn=50)
+            self._health_labels["por_renovar"].config(text=f"🔄 {v} por renovar", fg=c)
+            c, v = _color_count(inconsistencias)
+            self._health_labels["inconsistencias"].config(
+                text=f"⚠ {v} inconsistencias", fg=c
+            )
 
-        doc_text = tk.Text(
-            doc_frame,
-            wrap=tk.WORD,
-            bg="#0d0d0d",
-            fg="#cccccc",
-            font=("Consolas", 10),
-            yscrollcommand=sb.set,
-        )
-        doc_text.pack(fill=tk.BOTH, expand=True)
-        sb.config(command=doc_text.yview)
-
-        _DOC = """\
-# MODELO DE SEÑALES DE CONSENSO — CARTERA DE DIVIDENDOS
-
-## Estrategia
-Cartera orientada a ingresos pasivos (dividendos). Se analiza cada activo
-en cartera cruzando 4 fuentes independientes: flujo institucional 13F,
-recomendaciones de Wall Street, señal del modelo IA propio y clasificación
-fundamental. El Consenso Score sintetiza estas fuentes en una sola señal.
-
-────────────────────────────────────────────────────────────────
-## CÓMO SE ARMA EL SCREENER
-
-Phase 0 — Limpieza
-  • cleanup_market(): elimina preferreds/warrants (símbolo con "-")
-    salvo que estén en cartera (encartera='Y').
-
-Phase 1 — Descubrimiento NASDAQ
-  • API NASDAQ screener (dividends only) con paginación offset.
-  • INSERT mínimo: symbol, encartera, dividendYield, exDividendDate, account.
-  • Filtra symbols con "-" (preferreds) antes de insertar.
-
-Phase 2 — Enriquecimiento Yahoo Finance
-  • Batch de 250 símbolos por request (Yahoo Quote API + crumb).
-  • Actualiza precio, volume, marketCap, sharesOutstanding, beta, etc.
-  • Retry x3 con backoff 0s→5s→15s ante 429.
-  • Aborta si no hay crumb válido (Yahoo no disponible).
-
-Phase 3 — Fundamentals
-  • load_symbols_needing_fundamentals(): detecta cualquier campo NULL.
-  • yf.Ticker().info → country, shortName, sector, analyst_rec,
-    analyst_mean, analyst_count, PE, PB, márgenes operativos, deuda, etc.
-
-────────────────────────────────────────────────────────────────
-## CATEGORIZACIÓN DE ACTIVOS (categoriaActivo)
-
-  I = Infravalorado    → participa en análisis, voto Val = +1
-  S = Sobrevalorado    → participa en análisis, voto Val = -1
-  N = Neutral          → en análisis sin dividendo (ej: PLUG, XIFR), voto Val = 0
-  X = Excluido         → ETFs / fondos, abstiene en voto Val
-  T = Descubierto 13F  → detectado por pipeline, aún sin análisis, abstiene
-
-────────────────────────────────────────────────────────────────
-## PIPELINE 13F
-
-  1. sync_edgar_funds   (mensual)  — descarga company.idx EDGAR, carga ~9K
-                                    fondos con CIK en tabla funds.
-  2. sync_fund_filings  (semanal)  — descarga XML 13F-HR de cada fondo.
-                                    Refresh trimestral: re-descarga si filing_date
-                                    ≥ 80 días y la accession cambió en EDGAR.
-                                    Metadata persistente en tabla fund_filings.
-  3. sync_13f_holdings  (semanal)  — parsea XMLs nuevos (processed=0),
-                                    mapea CUSIP → symbol, calcula operation
-                                    (NEW/BUY/SELL/HOLD), bulk upsert fund_holdings.
-  4. sync_13f_scores    (semanal)  — recalcula inst_score blendado:
-                                    inst_score = inst_ownership_pct × 0.40
-                                              + log(max(fh_count,1)) × 0.40
-                                              + fh_buy_ratio           × 0.20
-
-────────────────────────────────────────────────────────────────
-## SEÑAL INSTITUCIONAL COMPUESTA (columna "Inst Señal")
-
-  ACOMPAÑAR  — inst_score ≥ 0.40  AND  buy_ratio ≥ 0.50  AND  fh_count ≥ 20
-  MANTENER   — inst_score ≥ 0.25  OR   fh_count ≥ 10
-  REVISAR    — resto
-
-────────────────────────────────────────────────────────────────
-## SEÑALES DE CONSENSO — 6 VOTOS
-
-Cada señal vota:  +1 (favorable) | 0 (neutral) | -1 (desfavorable) | None (abstiene)
-
-  1. Net (flujo neto 13F)
-     Ranking relativo sobre cartera: top 33% → +1 | medio → 0 | bottom 33% → -1
-     net = fh_buy_ratio − fh_sell_ratio
-     p33 y p67 se calculan dinámicamente sobre los activos de cartera con datos 13F.
-
-  2. Options (CALL/PUT acciones totales 13F)
-     ratio = call_shares / (call_shares + put_shares)
-     ≥ 0.60 → +1 | ≥ 0.40 → 0 | < 0.40 → -1 | sin opciones → abstiene
-
-  3. Analistas (Wall Street — yfinance recommendationKey)
-     strong_buy / buy → +1 | hold → 0 | sell / strong_sell → -1 | sin datos → abstiene
-
-  4. Modelo IA (señal propia)
-     CSV buy  → +1 | CSV sell → -1 | sin señal → 0
-
-  5. Valuación (categoriaActivo)
-     I → +1 | N → 0 | S → -1 | X / T → abstiene
-
-  6. Cobertura (fh_count — fondos con posición)
-     ≥ 20 fondos → +1 | ≥ 5 → 0 | < 5 → -1
-
-────────────────────────────────────────────────────────────────
-## TABLA DE DECISIÓN
-
-  pct = suma_votos / n_votos_activos
-
-  ★ UNÁNIME   — todos los votos activos = +1         → máxima convicción, acumular
-  ▲ CONSENSO  — pct ≥  0.60                          → comprar / aumentar posición
-  ↗ TENDENCIA — pct ≥  0.20                          → mantener / pequeños aumentos
-  → NEUTRO    — pct >  -0.20                         → observar, sin movimiento
-  ↘ ALERTA    — pct >  -0.60                         → reducir, revisar tesis
-  ▼ SALIDA    — pct ≤  -0.60                         → salir o no entrar
-
-Columna Consenso muestra:  <nivel>  <suma:+d>/<n_activos>
-  Ejemplo:  ↗ TENDENCIA  +3/5  (suma=+3 sobre 5 señales activas)
-"""
-        doc_text.insert("1.0", _DOC)
-        doc_text.configure(state="disabled")
-        ttk.Button(doc_win, text="Cerrar", command=doc_win.destroy, width=10).pack(pady=6)
+        threading.Thread(target=_fetch, daemon=True).start()
 
     def _show_institucionales_cartera(self):
         if self._inst_win is not None and self._inst_win.winfo_exists():
@@ -1156,7 +1073,7 @@ Columna Consenso muestra:  <nivel>  <suma:+d>/<n_activos>
             ("Rotación", 80, "center"),
             ("Inst Señal", 100, "w"),
             ("Analistas", 140, "w"),
-            ("Modelo", 80, "center"),
+            ("IA Signal", 90, "center"),
             ("Consenso", 160, "w"),
         )
         all_cols = tuple(d[0] for d in _COL_DEFS)
@@ -1217,12 +1134,6 @@ Columna Consenso muestra:  <nivel>  <suma:+d>/<n_activos>
                 fg=color,
                 font=("Arial", 9),
             ).pack(side=tk.LEFT, padx=10, pady=2)
-
-        btn_frame = tk.Frame(win, bg="#111111")
-        btn_frame.pack(fill=tk.X, padx=8, pady=(0, 6))
-        ttk.Button(btn_frame, text="Modelo", width=10, command=self._show_screener_doc).pack(
-            side=tk.LEFT, padx=8, pady=2
-        )
 
 
 def sync_market(account):
