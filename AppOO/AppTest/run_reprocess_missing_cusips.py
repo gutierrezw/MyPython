@@ -9,12 +9,7 @@ import subprocess
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from Modulos_Mysql import MarketScreen
-from AppValuations.edgar_13f import (
-    _load_13f_metadata,
-    _load_holdings_processed,
-    parse_13f_xml,
-    _13F_SAVE_DIR,
-)
+from AppValuations.edgar_13f import parse_13f_xml, _13F_SAVE_DIR
 
 ACCOUNT = "U4214563"
 
@@ -30,8 +25,8 @@ print(f"Targets: {TARGET_CUSIPS}")
 print("=" * 70)
 
 market = MarketScreen()
-metadata = _load_13f_metadata()
-processed = _load_holdings_processed()
+# Metadata desde BD (reemplaza 13f_metadata.json)
+metadata = {row["filename"]: row for row in market.load_fund_filings_all()}
 
 # Obtener mapa completo de CUSIPs desde market (para load_fund_holdings_prev)
 cusip_map = market.get_cusip_map(ACCOUNT)
