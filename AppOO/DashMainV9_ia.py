@@ -5060,7 +5060,7 @@ class DashMain:
 
         self.system = system_status(master=self.win5, colores=self.colors)
 
-        self.screener = Screener(master=self.win2, account=self.sesion_stock["idcuenta"], colors=self.colors, fn_documentar=self.system._documentar_estructura)
+        self.screener = Screener(master=self.win2, account=self.sesion_stock["idcuenta"], colors=self.colors)
         self.screener.pack()
 
         # Start ayudante y agentes del sistema------------------------------------------------------------
