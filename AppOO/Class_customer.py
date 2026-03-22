@@ -5783,11 +5783,20 @@ class CustomTreeview:
     # creación de treeview, con o sin fixed row
     def create_treeview(self, master=None, show=None, height=None, style=None):
         def ordenar_columnas(col_tree, col, reverse):
-            # Obtener valores de la columna que va a ser ordenada
-            data = [(col_tree.set(k, col), k) for k in col_tree.get_children("")]
+            def sort_key(val):
+                v = (val or "").strip()
+                if v.endswith("%"):
+                    try:
+                        return (0, float(v[:-1]))
+                    except ValueError:
+                        pass
+                try:
+                    return (0, float(v))
+                except (ValueError, TypeError):
+                    return (1, v.lower())
 
-            # Ordenar los valores
-            data.sort(reverse=reverse)
+            data = [(col_tree.set(k, col), k) for k in col_tree.get_children("")]
+            data.sort(key=lambda x: sort_key(x[0]), reverse=reverse)
 
             # Reorganizar los valores de cada Treeview sincronizadamente
             for index, (val, k) in enumerate(data):

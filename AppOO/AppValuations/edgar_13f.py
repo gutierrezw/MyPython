@@ -3,9 +3,8 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from Modulos_python import ET, logging, requests, time
+from Modulos_python import ET, logging, requests, time, date, timedelta
 from Modulos_Mysql import MarketScreen
-from Modulos_Utilitarios import read_json_tmp, write_json_tmp
 
 
 _logger = logging.getLogger("InstitucionalScore")
@@ -15,6 +14,7 @@ _EDGAR_ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_das
 _OPENFIGI_URL = "https://api.openfigi.com/v3/mapping"
 _13F_SAVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "EDGAR", "13F")
 _13F_NS = {"tf": "http://www.sec.gov/edgar/document/thirteenf/informationtable"}
+_FILING_REFRESH_DAYS = 80   # umbral para re-chequear EDGAR (< 1 trimestre)
 
 
 def _sec_get(url: str, timeout: int = 20) -> requests.Response | None:
@@ -35,24 +35,6 @@ def _sec_get(url: str, timeout: int = 20) -> requests.Response | None:
     return None
 
 
-def _load_13f_metadata() -> dict:
-    os.makedirs(_13F_SAVE_DIR, exist_ok=True)
-    return read_json_tmp("13f_metadata.json")
-
-
-def _save_13f_metadata(data: dict) -> None:
-    write_json_tmp("13f_metadata.json", data)
-
-
-def _load_holdings_processed() -> set:
-    data = read_json_tmp("13f_holdings_processed.json")
-    return set(data.get("files", []))
-
-
-def _save_holdings_processed(processed: set) -> None:
-    write_json_tmp("13f_holdings_processed.json", {"files": list(processed)})
-
-
 def _get_latest_13f_accession(cik: str) -> tuple | None:
     """Retorna (accession, filing_date) del último 13F-HR para el CIK dado."""
     r = _sec_get(_EDGAR_SUBMISSIONS_URL.format(cik=int(cik)))
@@ -60,10 +42,10 @@ def _get_latest_13f_accession(cik: str) -> tuple | None:
         return None
     try:
         filings = r.json().get("filings", {}).get("recent", {})
-        for form, acc, date in zip(filings.get("form", []), filings.get("accessionNumber", []),
-                                   filings.get("filingDate", [])):
+        for form, acc, filing_date in zip(filings.get("form", []), filings.get("accessionNumber", []),
+                                          filings.get("filingDate", [])):
             if form == "13F-HR":
-                return acc, date
+                return acc, filing_date
     except Exception as e:
         _logger.warning(f"_get_latest_13f_accession [{cik}]: {e}")
     return None
@@ -92,56 +74,93 @@ def _find_holdings_xml(cik: str, accession: str) -> str | None:
 
 def sync_fund_filings() -> dict:
     """Descarga el último 13F-HR XML para todos los fondos con CIK en tabla funds.
-    Omite fondos que ya tienen XML en disco. Guarda metadata cada 100 descargas."""
+
+    Lógica de skip (Opción B — refresh trimestral por filing_date):
+    - Sin filing previo en BD       → descarga siempre.
+    - filing_date < 80 días         → skip sin llamar a EDGAR (filing fresco).
+    - filing_date ≥ 80 días         → consulta EDGAR; descarga solo si la accession cambió.
+    Guarda en tabla fund_filings (persistente) en vez de JSON temporal.
+    """
     market = MarketScreen()
     funds = market.load_all_funds_with_cik()
     os.makedirs(_13F_SAVE_DIR, exist_ok=True)
-    metadata = _load_13f_metadata()
+    cik_meta = market.load_fund_filings_cik_meta()
     total = len(funds)
     downloaded, skipped, failed = 0, 0, 0
-    ciks_with_xml = {v["cik"] for v in metadata.values()}
+    hoy = date.today()
+    umbral = timedelta(days=_FILING_REFRESH_DAYS)
+    pending_save = []   # acumula registros para bulk save cada 100 descargas
+
     for i, (fund_name, cik) in enumerate(funds, 1):
         if i % 100 == 0 or i == total:
-            _logger.warning(f"sync_fund_filings: [{i}/{total}] descargados={downloaded} skipped={skipped} fallidos={failed}")
-        if cik in ciks_with_xml:
-            skipped += 1
-            continue
+            _logger.warning(
+                f"sync_fund_filings: [{i}/{total}] descargados={downloaded} "
+                f"skipped={skipped} fallidos={failed}"
+            )
+
+        stored = cik_meta.get(cik)
+
+        if stored:
+            try:
+                filing_date_stored = date.fromisoformat(stored["filing_date"])
+            except (ValueError, TypeError):
+                filing_date_stored = None
+
+            if filing_date_stored and (hoy - filing_date_stored) < umbral:
+                skipped += 1
+                continue   # filing fresco — no hace falta consultar EDGAR
+
+        # Sin filing previo o vencido — consultar EDGAR
         time.sleep(0.5)
         result = _get_latest_13f_accession(cik)
         if not result:
             failed += 1
             continue
+
         accession, filing_date = result
+        accession_no_dashes = accession.replace("-", "")
+
+        # Si la accession coincide con la almacenada — ya tenemos el más reciente
+        if stored and stored.get("accession") == accession_no_dashes:
+            skipped += 1
+            continue
+
         xml_file = _find_holdings_xml(cik, accession)
         if not xml_file:
             skipped += 1
             continue
-        local_path = os.path.join(_13F_SAVE_DIR, f"{cik}_{accession.replace('-', '')}_{xml_file}")
-        if os.path.exists(local_path):
-            skipped += 1
-            continue
-        url = _EDGAR_ARCHIVES_URL.format(
-            cik=int(cik), acc_no_dashes=accession.replace("-", ""), filename=xml_file,
-        )
-        r = _sec_get(url, timeout=30)
-        if not r:
-            _logger.warning(f"sync_fund_filings [{fund_name}]: sin respuesta al descargar XML")
-            failed += 1
-            continue
-        try:
-            with open(local_path, "wb") as f:
-                f.write(r.content)
-            metadata[os.path.basename(local_path)] = {
-                "cik": cik, "fund_name": fund_name, "filing_date": filing_date,
-            }
-            downloaded += 1
-            if downloaded % 100 == 0:
-                _save_13f_metadata(metadata)
-            time.sleep(0.5)
-        except Exception as e:
-            _logger.warning(f"sync_fund_filings [{fund_name}]: {e}")
-            failed += 1
-    _save_13f_metadata(metadata)
+
+        filename = f"{cik}_{accession_no_dashes}_{xml_file}"
+        local_path = os.path.join(_13F_SAVE_DIR, filename)
+
+        if not os.path.exists(local_path):
+            url = _EDGAR_ARCHIVES_URL.format(
+                cik=int(cik), acc_no_dashes=accession_no_dashes, filename=xml_file,
+            )
+            r = _sec_get(url, timeout=30)
+            if not r:
+                _logger.warning(f"sync_fund_filings [{fund_name}]: sin respuesta al descargar XML")
+                failed += 1
+                continue
+            try:
+                with open(local_path, "wb") as f:
+                    f.write(r.content)
+                time.sleep(0.5)
+            except Exception as e:
+                _logger.warning(f"sync_fund_filings [{fund_name}]: {e}")
+                failed += 1
+                continue
+
+        # Registrar en BD (XML descargado o ya existía en disco con accession nueva)
+        pending_save.append((filename, cik, fund_name, filing_date, accession_no_dashes))
+        downloaded += 1
+        if len(pending_save) >= 100:
+            market.bulk_save_fund_filings(pending_save)
+            pending_save.clear()
+
+    if pending_save:
+        market.bulk_save_fund_filings(pending_save)
+
     return {"funds": total, "downloaded": downloaded, "skipped": skipped, "failed": failed}
 
 
@@ -203,33 +222,29 @@ def parse_13f_xml(filepath: str) -> list:
 
 
 def sync_13f_holdings(account: str) -> dict:
-    """Parsea XMLs 13F nuevos (no procesados aún) y pobla fund_holdings.
-    Usa holdings_processed.json para no reprocesar XMLs ya cargados."""
+    """Parsea XMLs 13F no procesados y pobla fund_holdings.
+    Usa tabla fund_filings (processed=0) en vez de JSON temporal."""
     market = MarketScreen()
-    metadata = _load_13f_metadata()
-    processed = _load_holdings_processed()
-    all_xml = [f for f in os.listdir(_13F_SAVE_DIR) if f.endswith(".xml")]
-    xml_files = [f for f in all_xml if f not in processed]
+    unprocessed = market.load_unprocessed_filings()
     cusip_map = market.get_cusip_map(account)
 
-    _logger.warning(f"sync_13f_holdings: {len(xml_files)} XMLs nuevos de {len(all_xml)} totales")
+    _logger.warning(f"sync_13f_holdings: {len(unprocessed)} XMLs pendientes")
 
-    # Paso 1: recolectar posiciones de los XMLs nuevos
+    # Paso 1: recolectar posiciones de los XMLs no procesados
     all_positions = {}
-    for xml_file in xml_files:
-        meta = metadata.get(xml_file)
-        if not meta:
-            continue
-        cik = meta["cik"]
+    for entry in unprocessed:
+        xml_file = entry["filename"]
+        cik = entry["cik"]
         fund_id = market.get_fund_id_by_cik(cik)
         if not fund_id:
             continue
         filepath = os.path.join(_13F_SAVE_DIR, xml_file)
+        if not os.path.exists(filepath):
+            continue
         positions = parse_13f_xml(filepath)
-        all_positions[xml_file] = (fund_id, meta["filing_date"], positions)
+        all_positions[xml_file] = (fund_id, entry["filing_date"], positions)
 
     # Paso 2: bulk upsert fund_holdings
-    # Cargar estado previo en memoria: {(fund_id, cusip, opt_grp): shares}
     _logger.warning("sync_13f_holdings: cargando estado previo de fund_holdings...")
     prev_map = market.load_fund_holdings_prev()
 
@@ -241,22 +256,21 @@ def sync_13f_holdings(account: str) -> dict:
             symbol = cusip_map.get(pos["cusip"])
             if not symbol:
                 continue
-            opt       = pos.get("option_type")
-            opt_grp   = opt or ""
-            shares    = pos["shares"]
-            prev_key  = (fund_id, pos["cusip"], opt_grp)
+            opt = pos.get("option_type") or "STK"
+            shares = pos["shares"]
+            prev_key = (fund_id, pos["cusip"], opt)
             shares_prev = prev_map.get(prev_key)
 
             if shares_prev is None:
                 operation, shares_delta, pct_change = "NEW", None, None
             elif shares > shares_prev:
-                operation   = "BUY"
+                operation = "BUY"
                 shares_delta = shares - shares_prev
-                pct_change  = round(shares_delta / shares_prev, 4) if shares_prev > 0 else None
+                pct_change = round(shares_delta / shares_prev, 4) if shares_prev > 0 else None
             elif shares < shares_prev:
-                operation   = "SELL"
+                operation = "SELL"
                 shares_delta = shares - shares_prev
-                pct_change  = round(shares_delta / shares_prev, 4) if shares_prev > 0 else None
+                pct_change = round(shares_delta / shares_prev, 4) if shares_prev > 0 else None
             else:
                 operation, shares_delta, pct_change = "HOLD", 0, 0.0
 
@@ -264,7 +278,7 @@ def sync_13f_holdings(account: str) -> dict:
                 fund_id, symbol, shares, shares_prev, shares_delta, pct_change,
                 operation, filing_date, pos["value"], pos["cusip"], opt,
             ))
-            if opt:
+            if opt != "STK":
                 inserted_options += 1
             else:
                 inserted_holdings += 1
@@ -273,11 +287,11 @@ def sync_13f_holdings(account: str) -> dict:
                     f"({inserted_holdings} directos, {inserted_options} opciones)...")
     market.bulk_upsert_fund_holdings(records)
 
-    processed.update(all_positions.keys())
-    _save_holdings_processed(processed)
+    # Marcar como procesados en BD
+    market.mark_filings_processed(list(all_positions.keys()))
 
     return {
-        "xml_files"        : len(xml_files),
+        "xml_files"        : len(unprocessed),
         "inserted_holdings": inserted_holdings,
         "inserted_options" : inserted_options,
     }

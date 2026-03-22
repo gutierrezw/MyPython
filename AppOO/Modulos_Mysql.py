@@ -1510,6 +1510,109 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+    def load_fund_filings_cik_meta(self) -> dict:
+        """Retorna {cik: {filing_date, accession, filename}} con el filing más reciente
+        por fondo. Reemplaza el JSON 13f_metadata temporal."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT cik, filing_date, accession, filename
+                FROM fund_filings ff1
+                WHERE filing_date = (
+                    SELECT MAX(ff2.filing_date) FROM fund_filings ff2 WHERE ff2.cik = ff1.cik
+                )
+            """)
+            return {
+                cik: {"filing_date": str(filing_date), "accession": accession, "filename": filename}
+                for cik, filing_date, accession, filename in cursor.fetchall()
+            }
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_fund_filings_cik_meta]: {error}")
+            return {}
+        finally:
+            cursor.close()
+            conn.close()
+
+    def load_unprocessed_filings(self) -> list:
+        """Retorna lista de {filename, cik, fund_name, filing_date} de filings
+        no procesados aún en fund_holdings. Reemplaza holdings_processed.json."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT filename, cik, fund_name, filing_date FROM fund_filings WHERE processed = 0"
+            )
+            return [
+                {"filename": fn, "cik": cik, "fund_name": fn_name, "filing_date": str(fd)}
+                for fn, cik, fn_name, fd in cursor.fetchall()
+            ]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_unprocessed_filings]: {error}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
+    def save_fund_filing(self, filename: str, cik: str, fund_name: str,
+                         filing_date: str, accession: str) -> None:
+        """INSERT IGNORE de un filing en fund_filings."""
+        conn = self._conectar(tabla="update.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "INSERT IGNORE INTO fund_filings (filename, cik, fund_name, filing_date, accession) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (filename, cik, fund_name, filing_date, accession),
+            )
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::save_fund_filing({filename})]: {error}")
+        finally:
+            cursor.close()
+            conn.close()
+
+    def bulk_save_fund_filings(self, records: list) -> int:
+        """INSERT IGNORE masivo de filings en fund_filings.
+        records: lista de (filename, cik, fund_name, filing_date, accession)."""
+        if not records:
+            return 0
+        conn = self._conectar(tabla="update.market")
+        cursor = conn.cursor()
+        try:
+            cursor.executemany(
+                "INSERT IGNORE INTO fund_filings (filename, cik, fund_name, filing_date, accession) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                records,
+            )
+            conn.commit()
+            return cursor.rowcount
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::bulk_save_fund_filings]: {error}")
+            return 0
+        finally:
+            cursor.close()
+            conn.close()
+
+    def mark_filings_processed(self, filenames: list) -> None:
+        """Marca como processed=1 los filenames indicados en fund_filings."""
+        if not filenames:
+            return
+        conn = self._conectar(tabla="update.market")
+        cursor = conn.cursor()
+        try:
+            placeholders = ",".join(["%s"] * len(filenames))
+            cursor.execute(
+                f"UPDATE fund_filings SET processed = 1 WHERE filename IN ({placeholders})",
+                filenames,
+            )
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::mark_filings_processed]: {error}")
+        finally:
+            cursor.close()
+            conn.close()
+
     def upsert_fund_holding(self, fund_name: str, symbol: str, shares: int, report_date,
                             value: int = None, cusip: str = None, option_type: str = None) -> None:
         """INSERT o UPDATE en fund_holdings. Calcula operation vs registro anterior.
@@ -1529,9 +1632,9 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
 
                 cursor.execute(
                     "SELECT shares FROM fund_holdings WHERE fund_id = %s AND symbol = %s "
-                    "AND COALESCE(option_type, '') = COALESCE(%s, '') "
+                    "AND option_type = %s "
                     "ORDER BY report_date DESC LIMIT 1",
-                    (fund_id, symbol, option_type),
+                    (fund_id, symbol, option_type or "STK"),
                 )
                 prev = cursor.fetchone()
                 shares_prev = int(prev[0]) if prev else None
@@ -1600,44 +1703,51 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
 
     def load_fund_holdings_stats(self) -> dict:
         """Retorna {symbol: {fh_count, fh_total_value, fh_buy_ratio, fh_sell_ratio,
-        fh_call_count, fh_put_count}} con el último filing por fondo y tipo de posición.
-        fh_count/buy_ratio/sell_ratio: solo posiciones directas (option_type IS NULL).
-        fh_call_count/fh_put_count: fondos únicos con opciones sobre el símbolo."""
+        fh_call_count, fh_put_count, fh_call_shares, fh_put_shares}} con el último
+        filing por fondo y tipo de posición.
+        fh_count/buy_ratio/sell_ratio: solo posiciones directas (option_type='STK').
+        fh_call_count/fh_put_count: fondos únicos con opciones.
+        fh_call_shares/fh_put_shares: acciones totales en posiciones CALL/PUT."""
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
         try:
             cursor.execute("""
                 SELECT fh.symbol,
-                    COUNT(DISTINCT CASE WHEN fh.option_type IS NULL THEN fh.fund_id END) AS fh_count,
-                    SUM(CASE WHEN fh.option_type IS NULL THEN fh.value ELSE 0 END) AS fh_total_value,
-                    SUM(CASE WHEN fh.option_type IS NULL AND fh.operation IN ('NEW','BUY') THEN 1 ELSE 0 END)
-                        / NULLIF(SUM(CASE WHEN fh.option_type IS NULL THEN 1 ELSE 0 END), 0) AS fh_buy_ratio,
-                    SUM(CASE WHEN fh.option_type IS NULL AND fh.operation = 'SELL' THEN 1 ELSE 0 END)
-                        / NULLIF(SUM(CASE WHEN fh.option_type IS NULL THEN 1 ELSE 0 END), 0) AS fh_sell_ratio,
+                    COUNT(DISTINCT CASE WHEN fh.option_type = 'STK' THEN fh.fund_id END) AS fh_count,
+                    SUM(CASE WHEN fh.option_type = 'STK' THEN fh.value ELSE 0 END) AS fh_total_value,
+                    SUM(CASE WHEN fh.option_type = 'STK' AND fh.operation IN ('NEW','BUY') THEN 1 ELSE 0 END)
+                        / NULLIF(SUM(CASE WHEN fh.option_type = 'STK' THEN 1 ELSE 0 END), 0) AS fh_buy_ratio,
+                    SUM(CASE WHEN fh.option_type = 'STK' AND fh.operation = 'SELL' THEN 1 ELSE 0 END)
+                        / NULLIF(SUM(CASE WHEN fh.option_type = 'STK' THEN 1 ELSE 0 END), 0) AS fh_sell_ratio,
                     COUNT(DISTINCT CASE WHEN fh.option_type = 'CALL' THEN fh.fund_id END) AS fh_call_count,
-                    COUNT(DISTINCT CASE WHEN fh.option_type = 'PUT'  THEN fh.fund_id END) AS fh_put_count
+                    COUNT(DISTINCT CASE WHEN fh.option_type = 'PUT'  THEN fh.fund_id END) AS fh_put_count,
+                    SUM(CASE WHEN fh.option_type = 'CALL' THEN fh.shares ELSE 0 END) AS fh_call_shares,
+                    SUM(CASE WHEN fh.option_type = 'PUT'  THEN fh.shares ELSE 0 END) AS fh_put_shares
                 FROM fund_holdings fh
                 INNER JOIN (
-                    SELECT fund_id, symbol, COALESCE(option_type, 'SHARE') AS opt_grp,
+                    SELECT fund_id, symbol, option_type AS opt_grp,
                         MAX(report_date) AS max_date
                     FROM fund_holdings
-                    GROUP BY fund_id, symbol, COALESCE(option_type, 'SHARE')
+                    GROUP BY fund_id, symbol, option_type
                 ) latest ON fh.fund_id = latest.fund_id
                     AND fh.symbol = latest.symbol
-                    AND COALESCE(fh.option_type, 'SHARE') = latest.opt_grp
+                    AND fh.option_type = latest.opt_grp
                     AND fh.report_date = latest.max_date
                 GROUP BY fh.symbol
             """)
             result = {}
             for row in cursor.fetchall():
-                symbol, fh_count, fh_total_value, fh_buy_ratio, fh_sell_ratio, fh_call_count, fh_put_count = row
+                (symbol, fh_count, fh_total_value, fh_buy_ratio, fh_sell_ratio,
+                 fh_call_count, fh_put_count, fh_call_shares, fh_put_shares) = row
                 result[symbol] = {
-                    "fh_count"      : int(fh_count) if fh_count else 0,
-                    "fh_total_value": int(fh_total_value) if fh_total_value else None,
-                    "fh_buy_ratio"  : float(fh_buy_ratio) if fh_buy_ratio else 0.0,
-                    "fh_sell_ratio" : float(fh_sell_ratio) if fh_sell_ratio else 0.0,
-                    "fh_call_count" : int(fh_call_count) if fh_call_count else 0,
-                    "fh_put_count"  : int(fh_put_count) if fh_put_count else 0,
+                    "fh_count"       : int(fh_count) if fh_count else 0,
+                    "fh_total_value" : int(fh_total_value) if fh_total_value else None,
+                    "fh_buy_ratio"   : float(fh_buy_ratio) if fh_buy_ratio else 0.0,
+                    "fh_sell_ratio"  : float(fh_sell_ratio) if fh_sell_ratio else 0.0,
+                    "fh_call_count"  : int(fh_call_count) if fh_call_count else 0,
+                    "fh_put_count"   : int(fh_put_count) if fh_put_count else 0,
+                    "fh_call_shares" : int(fh_call_shares) if fh_call_shares else 0,
+                    "fh_put_shares"  : int(fh_put_shares) if fh_put_shares else 0,
                 }
             return result
         except (Exception, connect.Error) as error:
@@ -1649,21 +1759,21 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
 
     def load_fund_holdings_prev(self) -> dict:
         """Carga el último registro por (fund_id, cusip, option_type) en memoria.
-        Retorna {(fund_id, cusip, opt_grp): shares} donde opt_grp='' para acciones directas."""
+        Retorna {(fund_id, cusip, opt_grp): shares} donde opt_grp='STK' para acciones directas."""
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                SELECT fh.fund_id, fh.cusip, COALESCE(fh.option_type, ''), fh.shares
+                SELECT fh.fund_id, fh.cusip, fh.option_type, fh.shares
                 FROM fund_holdings fh
                 INNER JOIN (
-                    SELECT fund_id, cusip, COALESCE(option_type, '') AS opt_grp,
+                    SELECT fund_id, cusip, option_type AS opt_grp,
                         MAX(report_date) AS max_date
                     FROM fund_holdings
-                    GROUP BY fund_id, cusip, COALESCE(option_type, '')
+                    GROUP BY fund_id, cusip, option_type
                 ) latest ON fh.fund_id = latest.fund_id
                     AND fh.cusip = latest.cusip
-                    AND COALESCE(fh.option_type, '') = latest.opt_grp
+                    AND fh.option_type = latest.opt_grp
                     AND fh.report_date = latest.max_date
             """)
             return {(fund_id, cusip, opt): shares for fund_id, cusip, opt, shares in cursor.fetchall()}
@@ -1680,6 +1790,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                       operation, report_date, value, cusip, option_type)"""
         if not records:
             return 0
+        # Garantizar option_type != NULL — la clave UNIQUE requiere valor explícito
+        records = [r[:10] + (r[10] or "STK",) for r in records]
         _SQL_BASE = (
             "INSERT INTO fund_holdings "
             "(fund_id, symbol, shares, shares_prev, shares_delta, pct_change, "
