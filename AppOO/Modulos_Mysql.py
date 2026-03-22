@@ -1557,6 +1557,23 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+    def load_fund_filings_all(self) -> list:
+        """Retorna lista de {filename, cik, filing_date} para todos los filings en BD."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT filename, cik, filing_date FROM fund_filings")
+            return [
+                {"filename": filename, "cik": cik, "filing_date": str(filing_date)}
+                for filename, cik, filing_date in cursor.fetchall()
+            ]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_fund_filings_all]: {error}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
     def load_fund_filings_cik_meta(self) -> dict:
         """Retorna {cik: {filing_date, accession, filename}} con el filing más reciente
         por fondo. Reemplaza el JSON 13f_metadata temporal."""
