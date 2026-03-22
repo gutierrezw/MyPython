@@ -175,29 +175,40 @@ def sync_edgar_funds() -> dict:
 
 def sync_13f_scores(account: str) -> dict:
     """
-    Recalcula inst_score blendando yfinance (inst_ownership_pct 40%)
-    con señales 13F (fh_count 40%, fh_buy_ratio 20%) y actualiza market.
+    Recalcula inst_score blendando fh_ownership_pct propio (40%)
+    con fh_count 13F (40%) y fh_buy_ratio (20%) y actualiza market.
+
+    fh_ownership_pct = fh_total_shares / floatShares  (o sharesOutstanding si no hay float)
+    Fuente 100% propia — no depende de inst_ownership_pct de Yahoo.
     """
     inst = InstitucionalScore()
     fh_stats = inst.market.load_fund_holdings_stats()
     inst_fields = inst.market.load_market_inst_fields(account)
     updated, skipped = 0, 0
 
-    for symbol, inst_pct in inst_fields.items():
+    for symbol, mkt in inst_fields.items():
         stats = fh_stats.get(symbol, {})
-        fh_count = stats.get("fh_count", 0)
-        fh_total_value = stats.get("fh_total_value")
-        fh_buy_ratio = stats.get("fh_buy_ratio", 0.0)
+        fh_count        = stats.get("fh_count", 0)
+        fh_total_value  = stats.get("fh_total_value")
+        fh_buy_ratio    = stats.get("fh_buy_ratio", 0.0)
+        fh_total_shares = stats.get("fh_total_shares", 0)
 
-        has_yf = inst_pct is not None
+        float_shares = mkt.get("floatShares") or mkt.get("sharesOutstanding")
+        fh_ownership_pct = (
+            round(fh_total_shares / float_shares, 4)
+            if float_shares and fh_total_shares
+            else None
+        )
+
+        has_ownership = fh_ownership_pct is not None
         has_13f = fh_count > 0
 
-        if not has_yf and not has_13f:
+        if not has_ownership and not has_13f:
             skipped += 1
             continue
 
         score = round(
-            (inst_pct or 0.0) * 0.40
+            (fh_ownership_pct or 0.0) * 0.40
             + math.log(max(fh_count, 1)) * 0.40
             + fh_buy_ratio * 0.20,
             4,

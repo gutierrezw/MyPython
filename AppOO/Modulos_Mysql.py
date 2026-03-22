@@ -1356,7 +1356,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                     analyst_rec      IS NULL OR analyst_rec   = ''  OR
                     analyst_mean     IS NULL OR
                     analyst_count    IS NULL OR
-                    sharesOutstanding IS NULL
+                    sharesOutstanding IS NULL OR
+                    floatShares       IS NULL
                   )
                 """,
                 (account,),
@@ -1768,7 +1769,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                     COUNT(DISTINCT CASE WHEN fh.option_type = 'CALL' THEN fh.fund_id END) AS fh_call_count,
                     COUNT(DISTINCT CASE WHEN fh.option_type = 'PUT'  THEN fh.fund_id END) AS fh_put_count,
                     SUM(CASE WHEN fh.option_type = 'CALL' THEN fh.shares ELSE 0 END) AS fh_call_shares,
-                    SUM(CASE WHEN fh.option_type = 'PUT'  THEN fh.shares ELSE 0 END) AS fh_put_shares
+                    SUM(CASE WHEN fh.option_type = 'PUT'  THEN fh.shares ELSE 0 END) AS fh_put_shares,
+                    SUM(CASE WHEN fh.option_type = 'STK'  THEN fh.shares ELSE 0 END) AS fh_total_shares
                 FROM fund_holdings fh
                 INNER JOIN (
                     SELECT fund_id, symbol, option_type AS opt_grp,
@@ -1784,16 +1786,18 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             result = {}
             for row in cursor.fetchall():
                 (symbol, fh_count, fh_total_value, fh_buy_ratio, fh_sell_ratio,
-                 fh_call_count, fh_put_count, fh_call_shares, fh_put_shares) = row
+                 fh_call_count, fh_put_count, fh_call_shares, fh_put_shares,
+                 fh_total_shares) = row
                 result[symbol] = {
-                    "fh_count"       : int(fh_count) if fh_count else 0,
-                    "fh_total_value" : int(fh_total_value) if fh_total_value else None,
-                    "fh_buy_ratio"   : float(fh_buy_ratio) if fh_buy_ratio else 0.0,
-                    "fh_sell_ratio"  : float(fh_sell_ratio) if fh_sell_ratio else 0.0,
-                    "fh_call_count"  : int(fh_call_count) if fh_call_count else 0,
-                    "fh_put_count"   : int(fh_put_count) if fh_put_count else 0,
-                    "fh_call_shares" : int(fh_call_shares) if fh_call_shares else 0,
-                    "fh_put_shares"  : int(fh_put_shares) if fh_put_shares else 0,
+                    "fh_count"        : int(fh_count) if fh_count else 0,
+                    "fh_total_value"  : int(fh_total_value) if fh_total_value else None,
+                    "fh_buy_ratio"    : float(fh_buy_ratio) if fh_buy_ratio else 0.0,
+                    "fh_sell_ratio"   : float(fh_sell_ratio) if fh_sell_ratio else 0.0,
+                    "fh_call_count"   : int(fh_call_count) if fh_call_count else 0,
+                    "fh_put_count"    : int(fh_put_count) if fh_put_count else 0,
+                    "fh_call_shares"  : int(fh_call_shares) if fh_call_shares else 0,
+                    "fh_put_shares"   : int(fh_put_shares) if fh_put_shares else 0,
+                    "fh_total_shares" : int(fh_total_shares) if fh_total_shares else 0,
                 }
             return result
         except (Exception, connect.Error) as error:
@@ -1869,16 +1873,23 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         return total
 
     def load_market_inst_fields(self, account: str) -> dict:
-        """Retorna {symbol: inst_ownership_pct} para todos los símbolos activos."""
+        """Retorna {symbol: {inst_ownership_pct, floatShares, sharesOutstanding}}."""
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "SELECT symbol, inst_ownership_pct FROM market "
-                "WHERE account = %s AND categoriaActivo != 'X'",
+                "SELECT symbol, inst_ownership_pct, floatShares, sharesOutstanding "
+                "FROM market WHERE account = %s AND categoriaActivo != 'X'",
                 (account,),
             )
-            return {row[0]: row[1] for row in cursor.fetchall()}
+            return {
+                row[0]: {
+                    "inst_ownership_pct" : row[1],
+                    "floatShares"        : row[2],
+                    "sharesOutstanding"  : row[3],
+                }
+                for row in cursor.fetchall()
+            }
         except (Exception, connect.Error) as error:
             _logger.error(f"[Mysql::load_market_inst_fields]: {error}")
             return {}
