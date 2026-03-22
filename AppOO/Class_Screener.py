@@ -830,12 +830,8 @@ class Screener(tk.Frame):
                 return set()
 
         def _float_ratio(row):
-            shares = row.get("sharesOutstanding") or 0
+            float_shares = row.get("floatShares") or 0
             vol = row.get("volume") or 0
-            inst = min(row.get("inst_ownership_pct") or 0.0, 1.0)
-            insider = min(row.get("insider_ownership_pct") or 0.0, 1.0)
-            float_pct = max(0.0, 1.0 - inst - insider)
-            float_shares = shares * float_pct
             if float_shares <= 0 or vol <= 0:
                 return None
             return vol / float_shares
@@ -1471,6 +1467,7 @@ def cleanup_market(account):
                 "analyst_mean",
                 "analyst_count",
                 "sharesOutstanding",
+                "floatShares",
             ]
             valores = [
                 str(ap.get("sector") or "")[:50],
@@ -1512,6 +1509,11 @@ def cleanup_market(account):
                 (
                     int(ks["sharesOutstanding"]["raw"])
                     if ks.get("sharesOutstanding", {}).get("raw")
+                    else None
+                ),
+                (
+                    int(ks["floatShares"]["raw"])
+                    if ks.get("floatShares", {}).get("raw")
                     else None
                 ),
             ]
