@@ -274,6 +274,10 @@ def sync_13f_holdings(account: str) -> dict:
             else:
                 operation, shares_delta, pct_change = "HOLD", 0, 0.0
 
+            # Actualizar prev_map en memoria para que el siguiente filing del mismo fondo
+            # compare contra este (permite BUY/SELL/HOLD entre trimestres consecutivos)
+            prev_map[prev_key] = shares
+
             records.append((
                 fund_id, symbol, shares, shares_prev, shares_delta, pct_change,
                 operation, filing_date, pos["value"], pos["cusip"], opt,

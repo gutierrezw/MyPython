@@ -1,0 +1,334 @@
+{
+  "week": "2026-W12",
+  "date": "2026-03-22 10:23",
+  "totals": {
+    "lines": 50279,
+    "classes": 58,
+    "methods": 1294,
+    "files": 48
+  },
+  "files": {
+    "Ajuste_lote_sell.py": {
+      "lines": 13,
+      "classes": 0,
+      "methods": 0
+    },
+    "AppValuations\\consenso_score.py": {
+      "lines": 188,
+      "classes": 0,
+      "methods": 8
+    },
+    "AppValuations\\edgar_13f.py": {
+      "lines": 297,
+      "classes": 0,
+      "methods": 7
+    },
+    "AppValuations\\rebalance_engine.py": {
+      "lines": 1201,
+      "classes": 2,
+      "methods": 36
+    },
+    "AppValuations\\rebuild_13f_metadata.py": {
+      "lines": 76,
+      "classes": 0,
+      "methods": 0
+    },
+    "AppValuations\\run_cleanup_fund_holdings.py": {
+      "lines": 12,
+      "classes": 0,
+      "methods": 0
+    },
+    "AppValuations\\run_sync_13f_holdings.py": {
+      "lines": 23,
+      "classes": 0,
+      "methods": 0
+    },
+    "AppValuations\\run_sync_13f_scores.py": {
+      "lines": 18,
+      "classes": 0,
+      "methods": 0
+    },
+    "AppValuations\\run_sync_fund_filings.py": {
+      "lines": 24,
+      "classes": 0,
+      "methods": 0
+    },
+    "AppValuations\\test_rebalance_engine.py": {
+      "lines": 115,
+      "classes": 1,
+      "methods": 1
+    },
+    "AppValuations\\valuation_alerts.py": {
+      "lines": 388,
+      "classes": 0,
+      "methods": 3
+    },
+    "AppValuations\\valuation_arelle_engine.py": {
+      "lines": 806,
+      "classes": 0,
+      "methods": 12
+    },
+    "AppValuations\\valuation_arelle_parser.py": {
+      "lines": 126,
+      "classes": 0,
+      "methods": 4
+    },
+    "AppValuations\\valuation_canadian_downloader.py": {
+      "lines": 240,
+      "classes": 0,
+      "methods": 3
+    },
+    "AppValuations\\valuation_cleanup.py": {
+      "lines": 558,
+      "classes": 0,
+      "methods": 6
+    },
+    "AppValuations\\valuation_ddm.py": {
+      "lines": 284,
+      "classes": 1,
+      "methods": 7
+    },
+    "AppValuations\\valuation_edgar_downloader.py": {
+      "lines": 279,
+      "classes": 0,
+      "methods": 6
+    },
+    "AppValuations\\valuation_xbrl_api.py": {
+      "lines": 914,
+      "classes": 1,
+      "methods": 17
+    },
+    "Batch_Oportunidades_sell-ejecutadas.py": {
+      "lines": 208,
+      "classes": 0,
+      "methods": 6
+    },
+    "Batch_reproceso_insert_performan.py": {
+      "lines": 206,
+      "classes": 0,
+      "methods": 6
+    },
+    "Class_Analisis.py": {
+      "lines": 1570,
+      "classes": 4,
+      "methods": 41
+    },
+    "Class_ApiBinnace.py": {
+      "lines": 683,
+      "classes": 4,
+      "methods": 44
+    },
+    "Class_ApiIBrks.py": {
+      "lines": 965,
+      "classes": 1,
+      "methods": 30
+    },
+    "Class_BotCryptoUI.py": {
+      "lines": 5869,
+      "classes": 7,
+      "methods": 181
+    },
+    "Class_DashBot.py": {
+      "lines": 2426,
+      "classes": 4,
+      "methods": 72
+    },
+    "Class_DataFrame.py": {
+      "lines": 2907,
+      "classes": 2,
+      "methods": 55
+    },
+    "Class_FondosInversion.py": {
+      "lines": 783,
+      "classes": 1,
+      "methods": 20
+    },
+    "Class_IA_modelos.py": {
+      "lines": 844,
+      "classes": 2,
+      "methods": 26
+    },
+    "Class_Ibrks.py": {
+      "lines": 1719,
+      "classes": 1,
+      "methods": 63
+    },
+    "Class_InstitucionalScore.py": {
+      "lines": 214,
+      "classes": 1,
+      "methods": 8
+    },
+    "Class_Screener.py": {
+      "lines": 1778,
+      "classes": 1,
+      "methods": 52
+    },
+    "Class_SystemStatus.py": {
+      "lines": 3486,
+      "classes": 1,
+      "methods": 66
+    },
+    "Class_customer.py": {
+      "lines": 6640,
+      "classes": 10,
+      "methods": 165
+    },
+    "Class_debugging.py": {
+      "lines": 491,
+      "classes": 3,
+      "methods": 22
+    },
+    "Class_gestion.py": {
+      "lines": 2029,
+      "classes": 1,
+      "methods": 26
+    },
+    "Class_websocket_IB.py": {
+      "lines": 62,
+      "classes": 0,
+      "methods": 4
+    },
+    "DashMainV9_ia.py": {
+      "lines": 5077,
+      "classes": 2,
+      "methods": 101
+    },
+    "EntrenamientoIA.py": {
+      "lines": 16,
+      "classes": 0,
+      "methods": 0
+    },
+    "Modulos_Comunes.py": {
+      "lines": 609,
+      "classes": 0,
+      "methods": 14
+    },
+    "Modulos_Mysql.py": {
+      "lines": 4109,
+      "classes": 7,
+      "methods": 128
+    },
+    "Modulos_Utilitarios.py": {
+      "lines": 1122,
+      "classes": 0,
+      "methods": 41
+    },
+    "Modulos_python.py": {
+      "lines": 144,
+      "classes": 0,
+      "methods": 0
+    },
+    "Test_InsertBotTraderBook.py": {
+      "lines": 119,
+      "classes": 0,
+      "methods": 0
+    },
+    "Test_streamlit.py": {
+      "lines": 70,
+      "classes": 0,
+      "methods": 0
+    },
+    "__init__.py": {
+      "lines": 0,
+      "classes": 0,
+      "methods": 0
+    },
+    "clientportal.py": {
+      "lines": 111,
+      "classes": 1,
+      "methods": 7
+    },
+    "dividends_rendimiento.py": {
+      "lines": 95,
+      "classes": 0,
+      "methods": 1
+    },
+    "download_cnv_selenium.py": {
+      "lines": 365,
+      "classes": 0,
+      "methods": 5
+    }
+  },
+  "vulture": [
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\AppValuations\\valuation_arelle_parser.py:9: unused import 'FileSource' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\AppValuations\\valuation_arelle_parser.py:9: unused import 'ModelManager' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\AppValuations\\valuation_xbrl_api.py:191: unused variable 'input_mode' (100% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Class_ApiIBrks.py:795: unreachable code after 'return' (100% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Class_BotCryptoUI.py:17: unused import 'multiprocessing' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Class_customer.py:1: unused import 'dtime' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Class_DashBot.py:1833: unused variable 'umbral_observacion' (100% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Class_DashBot.py:2100: unused variable 'umbral_observacion' (100% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Class_gestion.py:1504: unused variable 'condicion' (100% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Class_Ibrks.py:1685: unused variable 'risk_period' (100% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Class_Ibrks.py:1685: unused variable 'statistic_period' (100% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Class_Ibrks.py:1685: unused variable 'yield_period' (100% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Class_SystemStatus.py:193: unused variable 'sobre' (100% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\DashMainV9_ia.py:1: unused import 'MangerAfterEvents' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\DashMainV9_ia.py:2: unused import 'InfoYfinance' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\DashMainV9_ia.py:1868: unused variable 'ibrks' (100% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:11: unused import 'hmac' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:22: unused import 'syncio' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:24: unused import 'calendar' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:32: unused import 'multiprocessing' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:53: unused import 'Cache' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:58: unused import 'create_engine' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:59: unused import 'parser' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:64: unused import 'YFRateLimitError' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:67: unused import 'Updater' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:76: unused import 'angle_helper' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:83: unused import 'Process' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:85: unused import 'HTTPAdapter' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:88: unused import 'Cache' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:90: unused import 'Retry' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:94: unused import 'dtime' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:95: unused import 'b64decode' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:95: unused import 'urlsafe_b64decode' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:95: unused import 'urlsafe_b64encode' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:99: unused import 'SMAIndicator' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:101: unused import 'ImageColor' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:101: unused import 'ImageDraw' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:106: unused import 'GridSpec' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'AutoDateFormatter' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'AutoDateLocator' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'ConciseDateFormatter' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'DayLocator' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'FR' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'HourLocator' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'MicrosecondLocator' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'MinuteLocator' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'MO' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'MonthLocator' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'MONTHLY' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'RRuleLocator' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'rrulewrapper' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'SA' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'SecondLocator' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'SU' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'TH' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'TU' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'WE' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'WeekdayLocator' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:112: unused import 'YearLocator' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:136: unused import 'finvizfinance' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_python.py:137: unused import 'Overview' (90% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Modulos_Utilitarios.py:184: unreachable code after 'return' (100% confidence)",
+    "C:\\Users\\InversionesWildaga\\Documents\\MyPython\\AppOO\\Test_streamlit.py:4: unused import 'create_engine' (90% confidence)"
+  ],
+  "git": {
+    "commits": 11,
+    "commit_list": [
+      "2afcaaa Refactor documentar_estructura — extrae a función de módulo reutilizable",
+      "ab9e6e5 AppValuations/edgar_13f.py — Pipeline 13F Eliminado: dependencia de read_json_tmp / write_json_tmp (JSONs temporales) sync_fund_filings — Opción B de refresh trimestral: Lee metadata desde tabla fund_filings (BD persistente) via load_fund_filings_cik_meta() Skip inteligente: filing < 80 días → skip sin llamar EDGAR; ≥ 80 días → consulta accession; misma accession → skip; nueva accession → descarga Guarda en BD con bulk_save_fund_filings() en batches de 100 sync_13f_holdings — reemplaza holdings_processed.json por load_unprocessed_filings() (BD) y mark_filings_processed() al terminar Modulos_Mysql.py — Nuevos métodos load_fund_filings_cik_meta() — {cik: {filing_date, accession, filename}} último filing por fondo load_unprocessed_filings() — lista de filings con processed=0 save_fund_filing() — INSERT IGNORE individual bulk_save_fund_filings() — INSERT IGNORE masivo mark_filings_processed() — UPDATE processed=1 por lista de filenames load_fund_holdings_stats() — agregados 2 campos: fh_call_shares y fh_put_shares (acciones totales en posiciones CALL/PUT, antes solo contaba fondos) Class_Screener.py — UI + Modelo _show_screener_doc(self) — nuevo método de clase con documentación completa del modelo (Screener pipeline, categorización, 13F, 6 votos, tabla de decisión) Botón \"Modelo\" en panel principal del Screener (junto a \"Consenso\") Botón \"Modelo\" en popup de Consenso — ambos llaman self._show_screener_doc() voto_options — ahora usa call_shares / (call_shares + put_shares) en vez de conteo de fondos Columnas CALL/PUT — muestran millones de acciones (39.5M) en vez de número de fondos senal_consenso — retorna (etiqueta, suma, n) para mostrar conteo en columna Consenso Columna Consenso — formato ↗ TENDENCIA +3/5 (etiqueta + votos/activos), ancho 160px Class_InstitucionalScore.py sync_institutional — agrega filtro \"-\" in symbol para saltar preferred shares DashMainV9_ia.py dividends_en_market_stock — branch elif not ind_update para insertar stocks sin dividendo (PLUG, XIFR) con categoriaActivo='N' BD — Cambios estructurales Tabla fund_filings creada (filename PK, cik, fund_name, filing_date, accession, processed) 8,810 filas migradas desde JSON via run_migrate_filings_to_db.py fund_holdings — option_type normalizado a NOT NULL DEFAULT 'STK', UNIQUE KEY reparado, 983k duplicados eliminados Scripts AppTest/ run_migrate_filings_to_db.py — migración one-time JSON → BD run_reprocess_missing_cusips.py — reprocesa XMLs para CUSIPs que no estaban en market (PLUG, XIFR) run_sync_edgar_funds.py, run_sync_fund_filings.py — runners de agentes",
+      "b2f383f Fixes: encartera origen + guard Stock en dividends + symbol en klines log",
+      "282f42c Correcciones varias — encartera, print→logger, Señales de Consenso UI",
+      "11032a7 Screener — Señales de Consenso con CustomTreeview + señal Float",
+      "c90cf5e Class_InstitucionalScore.py",
+      "c6d8a66 Ajustes",
+      "db40765 13F holdings: opciones CALL/PUT + bulk insert masivo",
+      "8d612b1 Screener UI 2 columnas nuevas en el treeview: 13F Funds y 13F Value (datos institucionales 13F visibles en tabla principal) Botón \"Institucionales\" en panel derecho — abre popup con vista de alineación: Inst + Analistas vs Modelo Popup alineación con 3 fuentes: señal institucional (ACOMPAÑAR/MANTENER/REVISAR), señal de analistas (▲▲ FUERTE / ▲ COMPRAR / → MANTENER / ▼ VENDER) y señal del modelo (CSV buy/sell). Color-coded: verde=#00FF88 triple coincidencia, cyan=2 fuentes, rojo=divergencia, naranja=alerta cleanup_market Phase 0: elimina preferreds/warrants (símbolo con -) que ya están en tabla, salvo encartera='Y' sync_market Phase 1: filtra preferreds antes de insertar _yahoo_session backoff: reintentos con espera 0s→30s→90s en caso de 429 Phase 3 Fundamentals: ahora usa load_symbols_needing_fundamentals() — cubre cualquier campo NULL, no solo country/shortName Analistas (nuevo) 3 columnas DB: analyst_rec VARCHAR(20), analyst_mean FLOAT, analyst_count SMALLINT (SQL ya ejecutado) _fetch_fundamentals: agrega recommendationKey, recommendationMean, numberOfAnalystOpinions desde Yahoo financialData load_cartera_inst: incluye los 3 campos de analistas en el SELECT Mysql / DB load_cartera_inst(account): nuevo método — carga activos en cartera con campos institucionales + analistas, ordenado por inst_score DESC load_symbols_needing_fundamentals(account): nuevo método — SQL con 20 campos NULL check para determinar qué símbolos necesitan refresh de fundamentals Bugs corregidos generar_hash_id() en Class_customer.py: faltaba pasar option=vehiculo → crash en Agente_ManagerPreservation get_ultimo_dia_mercado(): retornaba pd.Timestamp causando comparación incorrecta con datetime.date → ahora retorna datetime.date o None si yfinance falla schedule_diario / _schedule_diaria_performace: guard if ultimo_cierre is None: return — evita loop cuando Yahoo está caído Class_SystemStatus.py:495: .date() sobre objeto que ya era datetime.date → eliminado chart_symbol(): print → _logger.warning + nuevo logger \"DataFrame\" registrado en Class_debugging.py trader_iteractive(): print → self.logger.error sync_institutional: eliminado delete de registros cuando yfinance devuelve 404 run_sync_institutional.py: referencia a result['deleted'] eliminada en Class_DashBot.py Script nuevo AppTest/run_cleanup_market.py: ejecuta cleanup_market fuera de la app con reporte de fases",
+      "8ff5713 Class_DashBot.py",
+      "63e2a7a Módulo nuevo"
+    ],
+    "diff_summary": " 47 files changed, 5283 insertions(+), 1021 deletions(-)"
+  }
+}
