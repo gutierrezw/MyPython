@@ -5961,11 +5961,13 @@ class MyWebsocket:
         def on_message(ws, message):
             self.my_message(message)
 
+        _ws_logger = logging.getLogger("IBroks_Client")
+
         def on_error(ws, e):
-            pass
+            _ws_logger.error(f"WebSocket error ({self.vehiculo}): {e}")
 
         def on_open(ws):
-            print("WebSocket connection opened({}):".format(self.vehiculo))
+            _ws_logger.warning("WebSocket connection opened({})".format(self.vehiculo))
 
             # recibe órdenes activas de stock
             subscribe_to_idsymbol()
@@ -5975,8 +5977,8 @@ class MyWebsocket:
             # self.ws.close()
             pass
 
-        def on_close(ws):
-            print("WebSocket connection closed():", self.vehiculo)
+        def on_close(ws, *args):
+            _ws_logger.warning("WebSocket connection closed(): {}".format(self.vehiculo))
 
         def subscribe_get_order():
             time.sleep(3)
@@ -6042,12 +6044,9 @@ class MyWebsocket:
 
     def websocket_loop(self, limit=10):
         try:
-            if self.ws:
-                self.ws.close()
-
             sslopt = {"cert_reqs": ssl.CERT_NONE}
             self.limit = limit
-            self.ws.run_forever(sslopt=sslopt, ping_interval=60, ping_timeout=10)
+            self.ws.run_forever(sslopt=sslopt, ping_interval=30)
 
         except Exception as e:
             print("[MyWebsocket.run_({})]: {}".format(self.vehiculo, e))

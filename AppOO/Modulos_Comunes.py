@@ -562,48 +562,44 @@ def crea_dataframe_performa_Index(account=None, vehiculo=None, display=True, dia
 # orquesta la construcción del performance a partir de la diaria
 def proceso_update_performance(account=None, vehiculo=None):
     try:
-        # obtienen última actualización y retrocede 60 días en la diaria
         Performa = IPerformance()
         (last_update, ix) = Performa.select_performa_inversion(account=account, vehiculo=vehiculo, accion="last")
 
         if last_update:
-
             hasta = last_update[ix.index("fechaclose")]
             desde = hasta - timedelta(days=60)
-
             diaria, iy = Performa.select_diaria_performance(account=account, date=desde, accion="desde")
+        else:
+            # primera vez: performa_inversion vacía — carga desde el inicio de diaria_performance
+            hasta = None
+            diaria, iy = Performa.select_diaria_performance(account=account)
 
-            if diaria:
-                df_performa = crea_dataframe_performa_Index(
-                    account=account,
-                    vehiculo=vehiculo,
-                    display=False,
-                    diaria=diaria,
-                    iy=iy,
-                )
+        if diaria:
+            df_performa = crea_dataframe_performa_Index(
+                account=account,
+                vehiculo=vehiculo,
+                display=False,
+                diaria=diaria,
+                iy=iy,
+            )
 
-                symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=vehiculo)
+            symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=vehiculo)
 
-                # recorre Dataframe para insertar las filas mayores a la fecha desde
-                for date, rows in df_performa.iterrows():
-                    values = {}
-
-                    if date > hasta:
-                        values.update({"idcuenta": account})
-                        values.update({"vehiculo": vehiculo})
-                        values.update({"idcuenta": account})
-                        values.update({"vehiculo": vehiculo})
-                        values.update({"fechaclose": date})
-                        values.update({"referencia": index_ref})
-                        values.update({"p_referencia": float(rows[rtn_index])})
-                        values.update({"p_vehiculo": float(rows["retorno"])})
-                        values.update({"gyp_dia": float(rows["gyp_dia"])})
-                        values.update({"nr_gyp": float(rows["nr_gyp"])})
-                        values.update({"value": float(rows["value"])})
-                        values.update({"costo_base": float(rows["costo_base"])})
-                        values.update({"dividends": float(rows["dividends"])})
-
-                        # Inserta fila en la tabla de performance
-                        Performa.insert_performa_inversion(values)
+            for date, rows in df_performa.iterrows():
+                if hasta is None or date > hasta:
+                    values = {
+                        "idcuenta": account,
+                        "vehiculo": vehiculo,
+                        "fechaclose": date,
+                        "referencia": index_ref,
+                        "p_referencia": float(rows[rtn_index]),
+                        "p_vehiculo": float(rows["retorno"]),
+                        "gyp_dia": float(rows["gyp_dia"]),
+                        "nr_gyp": float(rows["nr_gyp"]),
+                        "value": float(rows["value"]),
+                        "costo_base": float(rows["costo_base"]),
+                        "dividends": float(rows["dividends"]),
+                    }
+                    Performa.insert_performa_inversion(values)
     except Exception as e:
         print(f"proceso_update_performance({vehiculo}): error: {e}")

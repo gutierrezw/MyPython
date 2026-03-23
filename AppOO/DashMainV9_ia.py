@@ -121,6 +121,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
             name=diario,
             interval_sec=10800,
             func=self.schedule_diario,
+            run_now=True,
         )
         DataHub.manager_events.register_job(
             name=RemoteOrder,
@@ -1818,6 +1819,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         self.WsStock.my_message = self.on_message_IBrks_websocket
                         DataHub.update_self_procesos(proces="thread", tarea=task, itera=iteraStream)
                         self.WsStock.websocket_loop(limit=limit)
+                        time.sleep(30)
 
                 except Exception as e:
                     print(f"websocket_stream() error: {e}")
