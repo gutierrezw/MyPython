@@ -1293,7 +1293,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         try:
             cursor.execute(
                 "SELECT symbol, shortName, lastPrice, inst_ownership_pct, inst_score, "
-                "fh_count, fh_total_value, analyst_rec, analyst_mean, analyst_count, categoriaActivo, "
+                "fh_count, fh_total_value, fh_buy_ratio, fh_sell_ratio, "
+                "analyst_rec, analyst_mean, analyst_count, categoriaActivo, "
                 "sharesOutstanding, volume, insider_ownership_pct, website "
                 "FROM market WHERE account = %s AND encartera = 'Y' "
                 "ORDER BY inst_score DESC",

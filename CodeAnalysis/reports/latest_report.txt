@@ -1,0 +1,70 @@
+========================================================================
+  REPORTE SEMANAL — AppOO   2026-W12   generado: 2026-03-22 10:23
+========================================================================
+
+TOTALES
+────────────────────────────────────────────────────────────────────────
+  Archivos  :     48
+  Líneas    : 50,279
+  Clases    :     58
+  Métodos   :  1,294
+
+TOP 10 ARCHIVOS POR LÍNEAS
+────────────────────────────────────────────────────────────────────────
+  Class_customer.py                                    6,640 líneas  10 cls   165 mét
+  Class_BotCryptoUI.py                                 5,869 líneas   7 cls   181 mét
+  DashMainV9_ia.py                                     5,077 líneas   2 cls   101 mét
+  Modulos_Mysql.py                                     4,109 líneas   7 cls   128 mét
+  Class_SystemStatus.py                                3,486 líneas   1 cls    66 mét
+  Class_DataFrame.py                                   2,907 líneas   2 cls    55 mét
+  Class_DashBot.py                                     2,426 líneas   4 cls    72 mét
+  Class_gestion.py                                     2,029 líneas   1 cls    26 mét
+  Class_Screener.py                                    1,778 líneas   1 cls    52 mét
+  Class_Ibrks.py                                       1,719 líneas   1 cls    63 mét
+
+ACTIVIDAD GIT (últimos 7 días)
+────────────────────────────────────────────────────────────────────────
+  Commits   : 11
+  Resumen   :  47 files changed, 5283 insertions(+), 1021 deletions(-)
+    · 2afcaaa Refactor documentar_estructura — extrae a función de módulo reutilizable
+    · ab9e6e5 AppValuations/edgar_13f.py — Pipeline 13F Eliminado: dependencia de read_json_tmp / write_json_tmp (JSONs temporales) sync_fund_filings — Opción B de refresh trimestral: Lee metadata desde tabla fund_filings (BD persistente) via load_fund_filings_cik_meta() Skip inteligente: filing < 80 días → skip sin llamar EDGAR; ≥ 80 días → consulta accession; misma accession → skip; nueva accession → descarga Guarda en BD con bulk_save_fund_filings() en batches de 100 sync_13f_holdings — reemplaza holdings_processed.json por load_unprocessed_filings() (BD) y mark_filings_processed() al terminar Modulos_Mysql.py — Nuevos métodos load_fund_filings_cik_meta() — {cik: {filing_date, accession, filename}} último filing por fondo load_unprocessed_filings() — lista de filings con processed=0 save_fund_filing() — INSERT IGNORE individual bulk_save_fund_filings() — INSERT IGNORE masivo mark_filings_processed() — UPDATE processed=1 por lista de filenames load_fund_holdings_stats() — agregados 2 campos: fh_call_shares y fh_put_shares (acciones totales en posiciones CALL/PUT, antes solo contaba fondos) Class_Screener.py — UI + Modelo _show_screener_doc(self) — nuevo método de clase con documentación completa del modelo (Screener pipeline, categorización, 13F, 6 votos, tabla de decisión) Botón "Modelo" en panel principal del Screener (junto a "Consenso") Botón "Modelo" en popup de Consenso — ambos llaman self._show_screener_doc() voto_options — ahora usa call_shares / (call_shares + put_shares) en vez de conteo de fondos Columnas CALL/PUT — muestran millones de acciones (39.5M) en vez de número de fondos senal_consenso — retorna (etiqueta, suma, n) para mostrar conteo en columna Consenso Columna Consenso — formato ↗ TENDENCIA +3/5 (etiqueta + votos/activos), ancho 160px Class_InstitucionalScore.py sync_institutional — agrega filtro "-" in symbol para saltar preferred shares DashMainV9_ia.py dividends_en_market_stock — branch elif not ind_update para insertar stocks sin dividendo (PLUG, XIFR) con categoriaActivo='N' BD — Cambios estructurales Tabla fund_filings creada (filename PK, cik, fund_name, filing_date, accession, processed) 8,810 filas migradas desde JSON via run_migrate_filings_to_db.py fund_holdings — option_type normalizado a NOT NULL DEFAULT 'STK', UNIQUE KEY reparado, 983k duplicados eliminados Scripts AppTest/ run_migrate_filings_to_db.py — migración one-time JSON → BD run_reprocess_missing_cusips.py — reprocesa XMLs para CUSIPs que no estaban en market (PLUG, XIFR) run_sync_edgar_funds.py, run_sync_fund_filings.py — runners de agentes
+    · b2f383f Fixes: encartera origen + guard Stock en dividends + symbol en klines log
+    · 282f42c Correcciones varias — encartera, print→logger, Señales de Consenso UI
+    · 11032a7 Screener — Señales de Consenso con CustomTreeview + señal Float
+    · c90cf5e Class_InstitucionalScore.py
+    · c6d8a66 Ajustes
+    · db40765 13F holdings: opciones CALL/PUT + bulk insert masivo
+    · 8d612b1 Screener UI 2 columnas nuevas en el treeview: 13F Funds y 13F Value (datos institucionales 13F visibles en tabla principal) Botón "Institucionales" en panel derecho — abre popup con vista de alineación: Inst + Analistas vs Modelo Popup alineación con 3 fuentes: señal institucional (ACOMPAÑAR/MANTENER/REVISAR), señal de analistas (▲▲ FUERTE / ▲ COMPRAR / → MANTENER / ▼ VENDER) y señal del modelo (CSV buy/sell). Color-coded: verde=#00FF88 triple coincidencia, cyan=2 fuentes, rojo=divergencia, naranja=alerta cleanup_market Phase 0: elimina preferreds/warrants (símbolo con -) que ya están en tabla, salvo encartera='Y' sync_market Phase 1: filtra preferreds antes de insertar _yahoo_session backoff: reintentos con espera 0s→30s→90s en caso de 429 Phase 3 Fundamentals: ahora usa load_symbols_needing_fundamentals() — cubre cualquier campo NULL, no solo country/shortName Analistas (nuevo) 3 columnas DB: analyst_rec VARCHAR(20), analyst_mean FLOAT, analyst_count SMALLINT (SQL ya ejecutado) _fetch_fundamentals: agrega recommendationKey, recommendationMean, numberOfAnalystOpinions desde Yahoo financialData load_cartera_inst: incluye los 3 campos de analistas en el SELECT Mysql / DB load_cartera_inst(account): nuevo método — carga activos en cartera con campos institucionales + analistas, ordenado por inst_score DESC load_symbols_needing_fundamentals(account): nuevo método — SQL con 20 campos NULL check para determinar qué símbolos necesitan refresh de fundamentals Bugs corregidos generar_hash_id() en Class_customer.py: faltaba pasar option=vehiculo → crash en Agente_ManagerPreservation get_ultimo_dia_mercado(): retornaba pd.Timestamp causando comparación incorrecta con datetime.date → ahora retorna datetime.date o None si yfinance falla schedule_diario / _schedule_diaria_performace: guard if ultimo_cierre is None: return — evita loop cuando Yahoo está caído Class_SystemStatus.py:495: .date() sobre objeto que ya era datetime.date → eliminado chart_symbol(): print → _logger.warning + nuevo logger "DataFrame" registrado en Class_debugging.py trader_iteractive(): print → self.logger.error sync_institutional: eliminado delete de registros cuando yfinance devuelve 404 run_sync_institutional.py: referencia a result['deleted'] eliminada en Class_DashBot.py Script nuevo AppTest/run_cleanup_market.py: ejecuta cleanup_market fuera de la app con reporte de fases
+    · 8ff5713 Class_DashBot.py
+
+CÓDIGO MUERTO — vulture (≥80% confianza)
+────────────────────────────────────────────────────────────────────────
+  Imports no usados :   52
+  Variables muertas :    9
+  Código inalcanzable:    2
+  Métodos/funciones :    0
+  TOTAL hallazgos   :   63
+
+  Imports sin uso (primeros 20):
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\AppValuations\valuation_arelle_parser.py:9: unused import 'FileSource' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\AppValuations\valuation_arelle_parser.py:9: unused import 'ModelManager' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Class_BotCryptoUI.py:17: unused import 'multiprocessing' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Class_customer.py:1: unused import 'dtime' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\DashMainV9_ia.py:1: unused import 'MangerAfterEvents' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\DashMainV9_ia.py:2: unused import 'InfoYfinance' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:11: unused import 'hmac' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:22: unused import 'syncio' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:24: unused import 'calendar' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:32: unused import 'multiprocessing' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:53: unused import 'Cache' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:58: unused import 'create_engine' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:59: unused import 'parser' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:64: unused import 'YFRateLimitError' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:67: unused import 'Updater' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:76: unused import 'angle_helper' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:83: unused import 'Process' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:85: unused import 'HTTPAdapter' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:88: unused import 'Cache' (90% confidence)
+    · C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Modulos_python.py:90: unused import 'Retry' (90% confidence)
+
+========================================================================
