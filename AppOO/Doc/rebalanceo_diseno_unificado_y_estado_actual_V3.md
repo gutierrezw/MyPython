@@ -19,6 +19,8 @@ El objetivo es dejar una **fuente única de verdad**, clara y auditable, que per
 
 AppRebalanceo es un **motor determinístico de recomendación de compras** cuyo rol no es predecir mercados, sino **reducir riesgo estructural** mediante equiponderación dinámica.
 
+> *"No decide qué activo es mejor. Decide qué activo ayuda más a que la cartera sea coherente con su propio diseño."*
+
 Principios centrales:
 
 - No timing
@@ -28,6 +30,14 @@ Principios centrales:
 - Sí explicabilidad
 
 El motor trabaja **exclusivamente** sobre el estado consolidado del portafolio generado por `DataHub.manager_buysell`.
+
+**Restricción estructural de ingresos:** al menos el **80% del valor del portafolio** debe generar ingresos (dividendos). Aplica al balance de tipos de activo.
+
+**Explícitamente fuera de alcance:**
+- Predicción de precios o análisis técnico
+- Valoración fundamental profunda
+- Ejecución automática de operaciones
+- Decisiones de venta como objetivo principal
 
 ---
 
@@ -208,4 +218,65 @@ El estado actual del motor:
 En otras palabras:
 
 > *El motor hoy no solo refleja la idea original: la ejecuta.*
+
+---
+
+## 11. Agente de Preservación de Ganancias
+
+Agente **defensivo estructural** — independiente del motor ofensivo (IA). No optimiza ventas, no predice, no compite con `Agente_ManagerSell`. Solo protege ganancias acumuladas mediante órdenes STOP dinámicas.
+
+> *"Nunca permitir que una ganancia significativa se transforme en una ganancia irrelevante."*
+
+### Activación y cálculo
+
+```
+Se activa si: ROI >= roi_minimo
+
+max_price = max(max_price_guardado, last)
+
+stop_distance = max(correccion_pct × max_price, atr_mult × ATR)
+stop_calculado = max_price - stop_distance
+
+# Regla de Oro — nunca bajar el stop:
+stop_final = max(stop_anterior, stop_calculado)
+
+qty = round(position × proteccion_base)   ← cantidad protegida
+```
+
+### Parámetros (tabla `sesion`, campo `parameters`, bloque `"preservation"`)
+
+| Parámetro | Stock | Crypto | Descripción |
+|-----------|-------|--------|-------------|
+| `roi_minimo` | 0.10 | 0.18 | ROI mínimo para activar |
+| `proteccion_base` | 0.50 | 0.40 | Fracción de posición protegida |
+| `correccion_pct` | 0.08 | 0.12 | % caída para calcular stop |
+| `atr_mult` | 2.0 | 2.5 | Multiplicador ATR |
+| `revisiones_dia` | 2 | 2 | Máximo revisiones por día |
+
+### Reglas institucionales
+
+1. Nunca bajar un stop ya colocado
+2. No activar si ROI es insignificante
+3. No mezclar lógica ofensiva y defensiva
+4. Las órdenes STOP llevan `order_tag = "PRESERVATION_STOP"` (evita duplicación, mantiene idempotencia)
+5. IB vende automáticamente los lotes con mayor ganancia (criterio fiscal)
+
+### Estado persistido por símbolo
+- `max_price` · `stop_actual` · `last_preservation_check`
+
+### Integración
+```python
+self.exec_modulo_async(self.Agente_ManagerPreservation())
+# autolimita por revisiones_dia — valida por timestamp guardado por símbolo
+```
+
+### Separación de agentes
+
+| Agente | Rol |
+|--------|-----|
+| `Agente_ManagerSell` | Ofensivo |
+| `Agente_ManagerBuy` | Ofensivo |
+| `Agente_ManagerTop10` | Ranking |
+| `Agente_downloads_filings_EDGAR` | Data |
+| `Agente_ManagerPreservation` | **Defensivo estructural** |
 

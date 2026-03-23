@@ -72,3 +72,30 @@ Nunca se almacenan ambas claves simultáneamente para un mismo símbolo.
 - La asignación de efectivo se realiza en una etapa posterior y separada.
 
 Esta separación garantiza claridad, trazabilidad y escalabilidad del sistema.
+
+---
+
+## Campos Yahoo Finance — Dividendos
+
+Referencia de campos yfinance para operaciones con dividendos. Errores comunes documentados.
+
+| Campo | Descripción | Uso correcto |
+|-------|-------------|--------------|
+| `dividendRate` | Pago **individual** (NO anual) | ❌ NO usar para cálculo anual. Ej: trimestral $0.50 = $2.00/año |
+| `trailingAnnualDividendRate` | TTM — suma últimos 12 meses | ✅ Usar para dividendo anual real |
+| `dividendYield` | Rendimiento % | ✅ Para filtros de yield |
+| `trailingAnnualDividendYield` | Yield basado en TTM | ✅ Más confiable que `dividendYield` |
+| `exDividendDate` | Fecha ex-dividendo | ✅ Para validar pagos próximos |
+| `dividendDate` | Fecha de pago | ℹ️ Informativo |
+| `payoutRatio` | Ratio pago (dividendos/ganancias) | ✅ Para análisis de sostenibilidad |
+| `fiveYearAvgDividendYield` | Promedio 5 años | ✅ Para comparar vs. actual |
+
+### Validaciones implementadas en `dividends_en_market_stock()`
+
+- **Frescura de datos**: si último pago fue hace más de 18 meses → advertencia (datos posiblemente obsoletos — yfinance puede retener históricos de activos que dejaron de pagar)
+- **Meses de pago**: se usan últimos 12 meses móviles (TTM), no año calendario anterior
+- **Frecuencia detectada**: mensual / trimestral / semestral / anual según conteo de pagos TTM
+
+### Pendiente
+Migrar a IB API para dividendos — campos disponibles vía WebSocket IB:
+`"7286"` dividendo actual · `"7287"` yield% · `"7288"` ex-date · `"7672"` TTM · `"7671"` próximo pago

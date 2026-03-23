@@ -255,11 +255,11 @@ class Screener(tk.Frame):
                 ("categoriaActivo", "Status", 45, "center"),
                 ("encartera", "Cart", 35, "center"),
                 ("lastPrice", "Last", 70, "e"),
-                ("operatingMargins", "Op M", 60, "e"),
+                ("rotacion", "Rotación", 80, "center"),
                 ("inst_score", "Inst Score", 75, "e"),
                 ("inst_funds", "# Inst", 65, "e"),
                 ("inst_ownership_pct", "Inst %", 65, "e"),
-                ("fh_count", "# Inst 13F", 65, "e"),
+                ("fh_count", "13F Inst", 65, "e"),
                 ("fh_total_value", "13F Value", 90, "e"),
                 ("volume", "Volume", 80, "e"),
                 ("averageVolume", "Avg Vol", 80, "e"),
@@ -306,6 +306,7 @@ class Screener(tk.Frame):
                 ("freeCashflow", "Free CF", 80, "e"),
                 ("grossMargins", "Gross M", 65, "e"),
                 ("ebitdaMargins", "EBITDA M", 70, "e"),
+                ("operatingMargins", "Op M", 60, "e"),
                 ("inst_top_holder", "Top Holder", 160, "w"),
                 ("totalDebt", "Total Debt", 85, "e"),
                 ("lastFiscalYearEnd", "FY End", 75, "w"),
@@ -366,19 +367,31 @@ class Screener(tk.Frame):
             self.ctree_widget.tree_fixed.bind("<<TreeviewSelect>>", item_selected)
 
             def _open_website(event):
-                sel = self.ctree_widget.tree_fixed.selection()
+                tree = event.widget
+                col = tree.identify_column(event.x)
+                col_id = tree.column(col, "id") if col else ""
+                if col_id != "website":
+                    return
+                sel = tree.selection()
                 if not sel:
                     return
                 iid = sel[0]
-                row_data = self.ctree_widget.tree_scroll.item(iid, "values")
-                col_keys = [c[0] for c in _COL_DEFS if c[0] not in _FIXED]
-                idx = col_keys.index("website") if "website" in col_keys else -1
-                if idx >= 0 and idx < len(row_data):
-                    url = row_data[idx]
-                    if url and url.startswith("http"):
-                        webbrowser.open(url)
+                fixed_vals = self.ctree_widget.tree_fixed.item(iid, "values")
+                if not fixed_vals:
+                    return
+                symbol = fixed_vals[0]
+                url = next(
+                    (
+                        row[self.ix.index("website")]
+                        for row in self.market
+                        if row[self.ix.index("symbol")] == symbol
+                        and self.ix.count("website")
+                    ),
+                    None,
+                )
+                if url and str(url).startswith("http"):
+                    webbrowser.open(str(url))
 
-            self.ctree_widget.tree_fixed.bind("<Double-1>", _open_website)
             self.ctree_widget.tree_scroll.bind("<Double-1>", _open_website)
 
             # set position of all above objects by pack panel
@@ -682,18 +695,49 @@ class Screener(tk.Frame):
             except:
                 return str(v) if v else ""
 
+        def _rotacion(row_keys):
+            float_sh = row_keys[ix.index("floatShares")] if "floatShares" in ix else None
+            if not float_sh and "sharesOutstanding" in ix:
+                float_sh = row_keys[ix.index("sharesOutstanding")]
+            vol = row_keys[ix.index("volume")] if "volume" in ix else None
+            try:
+                float_sh = float(float_sh)
+                vol = float(vol)
+            except (TypeError, ValueError):
+                return ""
+            if not float_sh or not vol:
+                return ""
+            ratio = vol / float_sh
+            if ratio >= 3.0:
+                return "⚡ EXTREMA"
+            if ratio >= 1.0:
+                return "↑↑ ALTA"
+            if ratio >= 0.3:
+                return "↑ MEDIA"
+            return "— BAJA"
+
         for keys in self.market:
             self.ctree_widget.insert_row(
                 values=(
+                    # fijas
                     _g("symbol") or "",
                     _g("shortName") or "",
                     _g("categoriaActivo") or "",
                     _g("encartera") or "",
+                    # scrollables — orden igual a _COL_DEFS
+                    _price(_g("lastPrice")),
+                    _rotacion(keys),
+                    _price(_g("inst_score")),
+                    str(_g("inst_funds")) if _g("inst_funds") else "",
+                    _pct(_g("inst_ownership_pct")),
+                    str(_g("fh_count")) if _g("fh_count") else "",
+                    _big(_g("fh_total_value")),
+                    _big(_g("volume")),
+                    _big(_g("averageVolume")),
                     _g("country") or "",
                     _g("sector") or "",
                     _g("industry") or "",
                     _g("currency") or "",
-                    _price(_g("lastPrice")),
                     _price(_g("previousClose")),
                     _price(_g("open")),
                     _price(_g("fiftyTwoWeekHigh")),
@@ -705,8 +749,6 @@ class Screener(tk.Frame):
                     _price(_g("ema100")),
                     _price(_g("ema200")),
                     _big(_g("marketCap")),
-                    _big(_g("volume")),
-                    _big(_g("averageVolume")),
                     _price(_g("beta")),
                     _price(_g("trailingPE")),
                     _price(_g("forwardPE")),
@@ -736,10 +778,6 @@ class Screener(tk.Frame):
                     _pct(_g("grossMargins")),
                     _pct(_g("ebitdaMargins")),
                     _pct(_g("operatingMargins")),
-                    _price(_g("inst_score")),
-                    _pct(_g("inst_ownership_pct")),
-                    str(_g("fh_count")) if _g("fh_count") else "",
-                    _big(_g("fh_total_value")),
                     _g("inst_top_holder") or "",
                     _big(_g("totalDebt")),
                     _date(_g("lastFiscalYearEnd")),
@@ -1041,6 +1079,7 @@ class Screener(tk.Frame):
                         senal_ana,
                         modelo,
                         consenso,
+                        row.get("website") or "",
                     ),
                     "tag": tag,
                     "categ": categ,
@@ -1073,12 +1112,12 @@ class Screener(tk.Frame):
         )
         hdr.pack(pady=(8, 4))
 
-        _FIXED_COLS = ("Symbol", "Div", "Nombre", "# Inst", "Inst %")
+        _FIXED_COLS = ("Symbol", "Div", "Nombre", "13F Inst", "Inst %")
         _COL_DEFS = (
             ("Symbol", 65, "w"),
             ("Div", 38, "center"),
             ("Nombre", 200, "w"),
-            ("# Inst", 55, "e"),
+            ("13F Inst", 55, "e"),
             ("Inst %", 65, "e"),
             ("13F Buy%", 70, "e"),
             ("13F Sell%", 70, "e"),
@@ -1089,6 +1128,7 @@ class Screener(tk.Frame):
             ("Analistas", 140, "w"),
             ("IA Signal", 90, "center"),
             ("Consenso", 160, "w"),
+            ("Website", 200, "w"),
         )
         all_cols = tuple(d[0] for d in _COL_DEFS)
         col_align = {d[0]: {"anchor": d[2], "width": d[1]} for d in _COL_DEFS}
@@ -1127,6 +1167,26 @@ class Screener(tk.Frame):
             ct.tree_scroll.insert(
                 "", tk.END, values=f["values"][n_fixed:], tags=(f["tag"],)
             )
+
+        def _open_website_consenso(event):
+            tree = event.widget
+            col = tree.identify_column(event.x)
+            col_id = tree.column(col, "id") if col else ""
+            if col_id != "Website":
+                return
+            sel = tree.selection()
+            if not sel:
+                return
+            iid = sel[0]
+            scroll_vals = ct.tree_scroll.item(iid, "values")
+            scroll_cols = [d[0] for d in _COL_DEFS if d[0] not in _FIXED_COLS]
+            idx = scroll_cols.index("Website") if "Website" in scroll_cols else -1
+            if idx >= 0 and idx < len(scroll_vals):
+                url = scroll_vals[idx]
+                if url and str(url).startswith("http"):
+                    webbrowser.open(str(url))
+
+        ct.tree_scroll.bind("<Double-1>", _open_website_consenso)
 
         # Barra resumen
         resumen_frame = tk.Frame(win, bg="#111111")
