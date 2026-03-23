@@ -71,8 +71,6 @@ class IB(IBClient):
 
         # Asigna Nombre Logging
         self.logger = logging.getLogger("IBroks_Client")
-        # Flag para suprimir logs repetidos de red cuando no hay conexión IBKR
-        self._network_error_logged = False
 
     # valida conexión al localHost
     def is_localhost(self):
@@ -165,11 +163,20 @@ class IB(IBClient):
         while True:
             try:
                 resp = self.tickle()
-                auth = resp.get("iserver", {}).get("authStatus", {}).get("authenticated", False)
+                auth_status = resp.get("iserver", {}).get("authStatus", {})
+                auth = auth_status.get("authenticated", False)
+                connected = auth_status.get("connected", False)
 
+                self.logger.warning(f"Tickle: auth={auth} connected={connected} iter={counter}")
                 if datahub:
                     datahub.update_self_procesos(proces="thread", tarea=self.task, itera=counter)
                 counter += 1
+
+                # sesión SSO viva pero brokerage desconectado → validate + reauthenticate proactivo
+                if auth and not connected:
+                    self.validate()
+                    reauth_resp = self.reauthenticate()
+                    self.logger.warning(f"⚠️ IB connected=False — validate+reauthenticate(): {reauth_resp}")
 
                 if auth:
                     if was_disconnected:
@@ -580,9 +587,6 @@ class IB(IBClient):
                     else:
                         data = {"raw_text": response.text}
 
-                    if self._network_error_logged:
-                        self.logger.warning("✅ IBKR conexión restaurada — requests funcionando nuevamente")
-                        self._network_error_logged = False
                     self.logger.debug(
                         textwrap.dedent(
                             f"""
@@ -620,22 +624,18 @@ class IB(IBClient):
                 return {}
 
         except requests.exceptions.RequestException as e:
-            # Errores de red: timeouts, conexión caída, etc.
-            # Solo loguea la primera vez para no saturar el log cuando IBKR no está conectado
-            if not self._network_error_logged:
-                self.logger.error(
-                    textwrap.dedent(
-                        f"""
-                    ================
-                    _make_request(): NETWORK EXCEPTION
-                    ================
-                    URL: {url}
-                    Type: {req_type}
-                    Error: {e}
-                    """
-                    )
+            self.logger.error(
+                textwrap.dedent(
+                    f"""
+                ================
+                _make_request(): NETWORK EXCEPTION
+                ================
+                URL: {url}
+                Type: {req_type}
+                Error: {e}
+                """
                 )
-                self._network_error_logged = True
+            )
             return {}
         except Exception as e:
             # Otros errores no controlados

@@ -68,8 +68,10 @@ class ManagerEvents:
             self.logger.warning(f"⚠️ Thread {name} no registrado.")
 
     # ---------------- Jobs ----------------
-    def register_job(self, name, interval_sec, func, *args, **kwargs):
-        schedule.every(interval_sec).seconds.do(func, *args, **kwargs).tag(name)
+    def register_job(self, name, interval_sec, func, *args, run_now=False, **kwargs):
+        job = schedule.every(interval_sec).seconds.do(func, *args, **kwargs).tag(name)
+        if run_now:
+            job.next_run = schedule.datetime.datetime.now()
         self.job_params[name] = (interval_sec, func, args, kwargs)  # Guarda parámetros
 
         print(f"{name}")
