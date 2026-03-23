@@ -34,6 +34,7 @@ from Modulos_python import (
     math,
     pd,
     EmptyDataError,
+    webbrowser,
 )
 
 _logger = logging.getLogger("Screener")
@@ -253,11 +254,19 @@ class Screener(tk.Frame):
                 ("shortName", "Name", 200, "w"),
                 ("categoriaActivo", "Status", 45, "center"),
                 ("encartera", "Cart", 35, "center"),
+                ("lastPrice", "Last", 70, "e"),
+                ("operatingMargins", "Op M", 60, "e"),
+                ("inst_score", "Inst Score", 75, "e"),
+                ("inst_funds", "# Inst", 65, "e"),
+                ("inst_ownership_pct", "Inst %", 65, "e"),
+                ("fh_count", "# Inst 13F", 65, "e"),
+                ("fh_total_value", "13F Value", 90, "e"),
+                ("volume", "Volume", 80, "e"),
+                ("averageVolume", "Avg Vol", 80, "e"),
                 ("country", "Country", 100, "w"),
                 ("sector", "Sector", 120, "w"),
                 ("industry", "Industry", 160, "w"),
                 ("currency", "Cur", 35, "center"),
-                ("lastPrice", "Last", 70, "e"),
                 ("previousClose", "Prev", 70, "e"),
                 ("open", "Open", 70, "e"),
                 ("fiftyTwoWeekHigh", "52W H", 70, "e"),
@@ -269,8 +278,6 @@ class Screener(tk.Frame):
                 ("ema100", "EMA100", 70, "e"),
                 ("ema200", "EMA200", 70, "e"),
                 ("marketCap", "Mkt Cap", 85, "e"),
-                ("volume", "Volume", 80, "e"),
-                ("averageVolume", "Avg Vol", 80, "e"),
                 ("beta", "Beta", 55, "e"),
                 ("trailingPE", "P/E", 60, "e"),
                 ("forwardPE", "Fwd P/E", 65, "e"),
@@ -299,11 +306,6 @@ class Screener(tk.Frame):
                 ("freeCashflow", "Free CF", 80, "e"),
                 ("grossMargins", "Gross M", 65, "e"),
                 ("ebitdaMargins", "EBITDA M", 70, "e"),
-                ("operatingMargins", "Op M", 60, "e"),
-                ("inst_score", "Inst Score", 75, "e"),
-                ("inst_ownership_pct", "Inst %", 65, "e"),
-                ("fh_count", "13F Funds", 65, "e"),
-                ("fh_total_value", "13F Value", 90, "e"),
                 ("inst_top_holder", "Top Holder", 160, "w"),
                 ("totalDebt", "Total Debt", 85, "e"),
                 ("lastFiscalYearEnd", "FY End", 75, "w"),
@@ -362,6 +364,22 @@ class Screener(tk.Frame):
                 )
 
             self.ctree_widget.tree_fixed.bind("<<TreeviewSelect>>", item_selected)
+
+            def _open_website(event):
+                sel = self.ctree_widget.tree_fixed.selection()
+                if not sel:
+                    return
+                iid = sel[0]
+                row_data = self.ctree_widget.tree_scroll.item(iid, "values")
+                col_keys = [c[0] for c in _COL_DEFS if c[0] not in _FIXED]
+                idx = col_keys.index("website") if "website" in col_keys else -1
+                if idx >= 0 and idx < len(row_data):
+                    url = row_data[idx]
+                    if url and url.startswith("http"):
+                        webbrowser.open(url)
+
+            self.ctree_widget.tree_fixed.bind("<Double-1>", _open_website)
+            self.ctree_widget.tree_scroll.bind("<Double-1>", _open_website)
 
             # set position of all above objects by pack panel
             imagen_tk = BDsystem.select_image(idd=200, size=(32, 32))
@@ -567,7 +585,7 @@ class Screener(tk.Frame):
             reset.grid(column=1, row=20, sticky=E, columnspa=2, pady=20)
 
             btn_line = ttk.Frame(self.panel, style="B.TFrame")
-            btn_line.grid(column=0, row=10, columnspan=3, sticky=W, padx=8, pady=(6, 4))
+            btn_line.grid(column=0, row=10, columnspan=3, sticky=tk.EW, padx=8, pady=(6, 4))
 
             btn_frame = tk.Frame(btn_line, bg="black")
             health_frame = tk.Frame(btn_line, bg="black")
