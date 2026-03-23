@@ -1294,7 +1294,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.execute(
                 "SELECT symbol, shortName, lastPrice, inst_ownership_pct, inst_score, "
                 "fh_count, fh_total_value, analyst_rec, analyst_mean, analyst_count, categoriaActivo, "
-                "sharesOutstanding, volume, insider_ownership_pct "
+                "sharesOutstanding, volume, insider_ownership_pct, website "
                 "FROM market WHERE account = %s AND encartera = 'Y' "
                 "ORDER BY inst_score DESC",
                 (account,),
@@ -1605,7 +1605,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "SELECT filename, cik, fund_name, filing_date FROM fund_filings WHERE processed = 0"
+                "SELECT filename, cik, fund_name, filing_date FROM fund_filings WHERE processed = 0 ORDER BY filing_date ASC"
             )
             return [
                 {"filename": fn, "cik": cik, "fund_name": fn_name, "filing_date": str(fd)}

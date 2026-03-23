@@ -477,27 +477,81 @@ envs_config = json.loads(session_data["userapi"].decode("utf-8"))
 ### Estructura JSON en BD (userapi)
 ```json
 {
-    "bgcolor": "#1e1e2e",
-    "cgcolor": "#2d2d3d",
+    "bgcolor": "DarkCyan",
+    "cgcolor": "black",
     "cchart": {
-        "line_color": "cyan",
-        "bar_color": "green",
-        ...
+        "texto":    "white",
+        "titulo":   "cyan",
+        "fondo":    "DarkCyan",
+        "fondo_fig":"black",
+        "asx":      "black",
+        "asy":      "black",
+        "axsy":     "grey",
+        "axsx":     "grey",
+        "2eje":     "orange",
+        "plot0":    "white",
+        "plot1":    "green",
+        "plot11":   "GreenYellow",
+        "plot2":    "orange",
+        "plot21":   "DarkOrange",
+        "plot3":    "red",
+        "plot31":   "OrangeRed",
+        "plot4":    "yellow",
+        "plot41":   "Gold",
+        "plot5":    "DodgerBlue",
+        "plot6":    "skyblue",
+        "plot7":    "grey",
+        "plot8":    "black",
+        "plot9":    "blue"
     },
     "display": null,
     "max_points": 40,
     "interval": 1,
     "CpuLock": null,
-    "MinProfit": 50,
+    "MinProfit": 80.0,
     "Toleranciasell": 0.10,
     "MaxRoi": 0.09,
-    "MinGananciaPrecio": 0.05,
-    "MinScoreBuy": 0.5,
-    "InicioInversior": "2020-01-01",
-    "ib_gateway_host": "127.0.0.1",
-    "ib_gateway_port": 4002
+    "InicioInversior": "2020-07-31",
+    "ib_gateway_host": "https://localhost",
+    "ib_gateway_port": "5501"
 }
 ```
+
+---
+
+## Métodos de Sesión BD (BDsystem)
+
+Métodos en `Modulos_Mysql.py` usados para leer/escribir la configuración de DataHub y sesiones de vehículos.
+
+### Lectura
+```python
+# Obtener sesión completa por vehículo
+sesion = BDsystem.get_sesion_by_vehiculo("Stock")
+sesion = BDsystem.get_sesion_by_vehiculo("Crypto")
+sesion = BDsystem.get_sesion_by_vehiculo("DataHub")   # ← config de DataHub
+
+# Campos retornados
+sesion["idcuenta"]    # cuenta
+sesion["userapi"]     # BLOB con JSON de config (para DataHub)
+sesion["userpass"]    # credencial
+sesion["environment"] # PROD / TESTNET
+sesion["xstrategy"]   # estrategia activa
+```
+
+### Escritura
+```python
+# Actualizar fecha de sesión y orden de cartera
+BDsystem.update_sesion_fecha_orden(vehiculo, fesesion, orcartera)
+
+# Actualizar fecha fundamental
+BDsystem.update_sesion_fecha_fund(vehiculo, fecha_fund)
+
+# Actualizar estrategia de trading
+BDsystem.update_sesion_strategy(vehiculo, xstrategy)
+```
+
+> Estos métodos reemplazaron a `select_sesion()` (eliminado dic-2025).
+> Usan SQL parametrizado — sin riesgo de inyección.
 
 ---
 
