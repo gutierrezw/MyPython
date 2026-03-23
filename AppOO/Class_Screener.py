@@ -257,9 +257,10 @@ class Screener(tk.Frame):
                 ("lastPrice", "Last", 70, "e"),
                 ("rotacion", "Rotación", 80, "center"),
                 ("inst_score", "Inst Score", 75, "e"),
-                ("inst_funds", "# Inst", 65, "e"),
                 ("inst_ownership_pct", "Inst %", 65, "e"),
                 ("fh_count", "13F Inst", 65, "e"),
+                ("fh_buy_ratio", "13F Buy%", 65, "e"),
+                ("fh_sell_ratio", "13F Sell%", 65, "e"),
                 ("fh_total_value", "13F Value", 90, "e"),
                 ("volume", "Volume", 80, "e"),
                 ("averageVolume", "Avg Vol", 80, "e"),
@@ -728,9 +729,10 @@ class Screener(tk.Frame):
                     _price(_g("lastPrice")),
                     _rotacion(keys),
                     _price(_g("inst_score")),
-                    str(_g("inst_funds")) if _g("inst_funds") else "",
                     _pct(_g("inst_ownership_pct")),
                     str(_g("fh_count")) if _g("fh_count") else "",
+                    _pct(_g("fh_buy_ratio")),
+                    _pct(_g("fh_sell_ratio")),
                     _big(_g("fh_total_value")),
                     _big(_g("volume")),
                     _big(_g("averageVolume")),
@@ -913,11 +915,11 @@ class Screener(tk.Frame):
             }
             return mapa.get((rec or "").lower().replace(" ", "_"), "")
 
-        def _build_net_percentiles(stats_subset):
+        def _build_net_percentiles(cartera_rows):
             nets = sorted(
                 [
-                    (v.get("fh_buy_ratio") or 0.0) - (v.get("fh_sell_ratio") or 0.0)
-                    for v in stats_subset.values()
+                    float(r.get("fh_buy_ratio") or 0.0) - float(r.get("fh_sell_ratio") or 0.0)
+                    for r in cartera_rows
                 ]
             )
             if len(nets) < 3:
@@ -995,17 +997,15 @@ class Screener(tk.Frame):
         syms_buy = _read_csv_signals("csv_datosIA_buy")
         syms_sell = _read_csv_signals("csv_datosIA_sell")
 
-        cartera_syms = {r["symbol"] for r in cartera}
-        fh_cartera = {s: v for s, v in fh_stats.items() if s in cartera_syms}
-        p33_net, p67_net = _build_net_percentiles(fh_cartera)
+        p33_net, p67_net = _build_net_percentiles(cartera)
 
         # Construir filas y ordenar por prioridad de consenso
         filas = []
         for row in cartera:
             sym = row["symbol"]
             stats = fh_stats.get(sym, {})
-            fh_buy_ratio = stats.get("fh_buy_ratio", 0.0)
-            fh_sell_ratio = stats.get("fh_sell_ratio", 0.0)
+            fh_buy_ratio = float(row.get("fh_buy_ratio") or 0.0)
+            fh_sell_ratio = float(row.get("fh_sell_ratio") or 0.0)
             rec = (row.get("analyst_rec") or "").lower().replace(" ", "_")
             categ = row.get("categoriaActivo") or ""
             senal_inst = _senal_inst(
@@ -1027,7 +1027,7 @@ class Screener(tk.Frame):
             inst_pct = f"{inst_val:.1%}" if inst_val else ""
             buy_r_str = f"{fh_buy_ratio:.0%}" if fh_buy_ratio else ""
             sell_r_str = f"{fh_sell_ratio:.0%}" if fh_sell_ratio else ""
-            n_inst = str(stats["fh_count"]) if stats.get("fh_count") else ""
+            n_inst = str(row["fh_count"]) if row.get("fh_count") else ""
             nombre = (row.get("shortName") or "")[:35]
 
             votos = {

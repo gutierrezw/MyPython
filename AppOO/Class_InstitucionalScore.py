@@ -214,8 +214,12 @@ def sync_13f_scores(account: str) -> dict:
             4,
         )
         ok = inst.market.update(
-            upd=["inst_score", "fh_count", "fh_total_value"],
-            val=[score, fh_count if fh_count else None, fh_total_value],
+            upd=["inst_score", "fh_count", "fh_total_value", "fh_buy_ratio", "fh_sell_ratio",
+                 "inst_ownership_pct"],
+            val=[score, fh_count if fh_count else None, fh_total_value,
+                 fh_buy_ratio if fh_buy_ratio else None,
+                 stats.get("fh_sell_ratio") if stats.get("fh_sell_ratio") else None,
+                 fh_ownership_pct],
             symbol=symbol,
             account=account,
         )

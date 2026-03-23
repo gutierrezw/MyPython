@@ -11,12 +11,13 @@ Orden acordado (después de las 4 fijas: Symbol, Name, Status, Cart):
 | 1 | lastPrice | Last |
 | 2 | rotacion | Rotación |
 | 3 | inst_score | Inst Score |
-| 4 | inst_funds | # Inst |
-| 5 | inst_ownership_pct | Inst % |
-| 6 | fh_count | **13F Inst** |
-| 7 | fh_total_value | 13F Value |
-| 8 | volume | Volume |
-| 9 | averageVolume | Avg Vol |
+| 4 | inst_ownership_pct | Inst % |
+| 5 | fh_count | **13F Inst** |
+| 6 | fh_buy_ratio | 13F Buy% |
+| 7 | fh_sell_ratio | 13F Sell% |
+| 8 | fh_total_value | 13F Value |
+| 9 | volume | Volume |
+| 10 | averageVolume | Avg Vol |
 | … | … country, sector, industry … | |
 | … | grossMargins | Gross M |
 | … | ebitdaMargins | EBITDA M |
@@ -24,17 +25,19 @@ Orden acordado (después de las 4 fijas: Symbol, Name, Status, Cart):
 | … | inst_top_holder | Top Holder |
 | … | website | Website |
 
+**NOTA:** `inst_funds` (Yahoo) eliminado del Screener — datos inconsistentes. Solo usar `fh_count` (EDGAR).
+
 ## Nomenclatura homologada (Screener ↔ Consenso)
 
-- `fh_count` → siempre se muestra como **"13F Inst"** (no "# Inst 13F", no "# Inst")
-- `inst_funds` → siempre **"# Inst"** (fuente Yahoo, worldwide)
+- `fh_count` → siempre **"13F Inst"** — única fuente de conteo institucional
+- `inst_funds` → NO mostrar en UI (datos Yahoo inconsistentes)
 - Ambas pantallas deben usar los mismos nombres de columna para los mismos conceptos
 
 ## Consenso popup — columnas fijas
 
 `_FIXED_COLS = ("Symbol", "Div", "Nombre", "13F Inst", "Inst %")`
 
-El `# Inst` del popup Consenso usa `fh_count` (pipeline EDGAR propio), **no** `inst_funds` de Yahoo.
+`13F Inst` usa `fh_count` (pipeline EDGAR propio).
 
 ## Autonomía del usuario
 

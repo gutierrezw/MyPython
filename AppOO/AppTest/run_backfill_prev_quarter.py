@@ -34,11 +34,18 @@ _logger = logging.getLogger("backfill_prev_quarter")
 ACCOUNT = "U4214563"   # cuenta stock
 
 
+def _fmt_accession(acc_no_dashes: str) -> str:
+    """000110465926014835 → 0001104659-26-014835 (formato EDGAR)."""
+    a = acc_no_dashes.zfill(18)
+    return f"{a[:10]}-{a[10:12]}-{a[12:]}"
+
+
 def _get_prev_13f_filing(cik: str, skip_accession: str) -> tuple | None:
     """Retorna (accession, filing_date, filename_xml) del 13F-HR ANTERIOR al skip_accession."""
     r = _sec_get(_EDGAR_SUBMISSIONS_URL.format(cik=int(cik)))
     if not r:
         return None
+    skip_edgar = _fmt_accession(skip_accession)
     try:
         recent = r.json().get("filings", {}).get("recent", {})
         forms = recent.get("form", [])
@@ -48,7 +55,7 @@ def _get_prev_13f_filing(cik: str, skip_accession: str) -> tuple | None:
         for form, acc, fd in zip(forms, accs, dates):
             if form != "13F-HR":
                 continue
-            if acc == skip_accession:
+            if acc == skip_edgar:
                 found_skip = True
                 continue
             if found_skip:
