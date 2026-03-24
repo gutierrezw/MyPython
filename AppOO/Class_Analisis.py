@@ -13,6 +13,8 @@ Uso:
     analisis.mostrar_ventana()
 """
 
+import json
+
 from Modulos_python import (
     tk,
     ttk,
@@ -22,14 +24,17 @@ from Modulos_python import (
     mpatches,
     mdates,
     traceback,
+    logging,
 )
 from Modulos_Mysql import BDsystem, PlanInversion, RepositorioOportunidadesBuySell
 from Modulos_Comunes import performa_asset, detalle_book, read_csv_insert_diaria, proceso_update_performance
 from Modulos_Utilitarios import vehiculo_parm
-from Modulos_python import threading
+from Modulos_python import threading, time
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+
+_logger = logging.getLogger("Analisis")
 
 
 class AnalisisBase:
@@ -1319,6 +1324,11 @@ class AnalisisCrypto(AnalisisBase):
 
     def _poblar_contenido(self, frame):
         """Implementación específica para Crypto"""
+        def _actualizar():
+            for w in frame.winfo_children():
+                w.destroy()
+            self._poblar_contenido(frame)
+
         self.obtener_lotes_desde_info()
         resumen = self.obtener_resumen()
 
@@ -1340,7 +1350,12 @@ class AnalisisCrypto(AnalisisBase):
             fg_valor=color_gan,
         )
 
-        # ========== TOP 5 GANADORES / PERDEDORES (gráfico barras) ==========
+        # ========== ANÁLISIS DE PRÉSTAMOS FLEXIBLES ==========
+        row = self._seccion_deuda(frame, row)
+
+        # ========== RENDIMIENTO DE POSICIONES ==========
+        row = self.crear_seccion(frame, "Rendimiento de Posiciones", row)
+
         if not self.df_lotes.empty:
             row = self.crear_grafico_ganadores_perdedores(
                 parent=frame,
@@ -1348,14 +1363,6 @@ class AnalisisCrypto(AnalisisBase):
                 col_symbol="symbol",
                 col_pct="ganancia_pct",
                 titulo="Top 5 Ganadores / Perdedores",
-                row=row,
-            )
-
-        # ========== DETALLE DE POSICIONES (gráfico barras todas) ==========
-        if not self.df_lotes.empty:
-            row = self.crear_grafico_todas_posiciones(
-                parent=frame,
-                df=self.df_lotes,
                 row=row,
             )
 
@@ -1372,6 +1379,271 @@ class AnalisisCrypto(AnalisisBase):
         row += 1
 
         row = self.crear_grafico_vs_indice(parent=frame, row=row)
+
+        after_id = frame.after(60000, _actualizar)
+        frame.winfo_toplevel().bind("<Destroy>", lambda e: frame.after_cancel(after_id), add="+")
+
+    def _seccion_deuda(self, frame, row):
+        """Sección de análisis de préstamos flexibles Binance con simulador loan_distribute."""
+
+        def _get_loan_data():
+            from Class_ApiBinnace import BinanceClient  # import diferido — evita ciclo con Modulos_python chain
+            try:
+                spot = BinanceClient(vehiculo="Crypto").spot
+                resultado = spot.get_flexible_loan_ongoing_orders()
+                rows = resultado.get("rows", []) if resultado else []
+                prestamos = []
+                for r in rows:
+                    ltv = float(r.get("currentLTV", 0))
+                    if ltv == 0:
+                        continue
+                    loan_usd = float(r.get("loanValueInUSD") or r.get("totalDebt", 0))
+                    col_usd = float(r.get("collateralValueInUSD", 0))
+                    if col_usd == 0 and ltv > 0:
+                        col_usd = loan_usd / ltv
+                    prestamos.append({
+                        "activo": r.get("collateralCoin", ""),
+                        "loan_coin": r.get("loanCoin", "USDT"),
+                        "col_usd": col_usd,
+                        "ltv": ltv,
+                        "deuda": loan_usd,
+                        "col_amount": float(r.get("collateralAmount", 0)),
+                    })
+                earn = spot.get_simple_earn_account()
+                capital_earn = float(earn.get("totalFlexibleAmountInUSDT", 0)) if earn else 0.0
+                return prestamos, capital_earn
+            except Exception as e:
+                print(f"[_get_loan_data]: {e}")
+                return [], 0.0
+
+        def _crear_grafico_prestamos(parent, prestamos, row):
+            if not prestamos:
+                return row
+            activos  = [p["activo"] for p in prestamos]
+            deudas   = [p["deuda"] for p in prestamos]
+            cols_usd = [p["col_usd"] for p in prestamos]
+            promedio = sum(cols_usd) / len(cols_usd) if cols_usd else 0
+
+            x = np.arange(len(activos))
+            w = 0.35
+
+            fg = Figure(figsize=(5.6, 2.8), dpi=100)
+            fg.patch.set_facecolor(self.CG_COLOR)
+            fg.subplots_adjust(left=0.10, right=0.88, top=0.85, bottom=0.22)
+
+            ax1 = fg.add_subplot(111)
+            ax1.set_facecolor(self.CG_COLOR)
+            ax1.bar(x - w / 2, deudas,   width=w, color="#3498db", label="Deuda",    alpha=0.85)
+            ax1.bar(x + w / 2, cols_usd, width=w, color="#2ecc71", label="Colateral", alpha=0.85)
+            ax1.axhline(y=promedio, color="white", linewidth=1.0, linestyle="--", label=f"Prom col ${promedio:,.0f}")
+            ax1.text(len(activos) - 0.5, promedio, f"  μ = ${promedio:,.0f}", color="white",
+                     fontsize=7, va="bottom", ha="right")
+            ax1.set_xticks(x)
+            ax1.set_xticklabels(activos, color="white", fontsize=7, rotation=60, ha="right")
+            ax1.tick_params(axis="y", colors="white", labelsize=7)
+            ax1.tick_params(axis="x", colors="white", labelsize=7)
+            ax1.spines["top"].set_visible(False)
+            ax1.spines["bottom"].set_visible(False)
+            ax1.spines["left"].set_color("gray")
+            ax1.spines["right"].set_visible(False)
+            ax1.set_ylabel("USD", color="white", fontsize=7)
+            ax1.grid(True, alpha=0.3, color="gray", axis="y")
+
+            lines1, labels1 = ax1.get_legend_handles_labels()
+            fg.legend(lines1, labels1,
+                      loc="outside upper left", fontsize=5,
+                      facecolor="white", labelcolor="black", framealpha=1.0)
+            fg.suptitle("Deuda / Colateral", fontsize=10, color="white")
+
+            frm = tk.Frame(parent, bg=self.CG_COLOR)
+            frm.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+            canvas_fig = FigureCanvasTkAgg(fg, master=frm)
+            canvas_fig.draw()
+            canvas_fig.get_tk_widget().pack(fill="x", expand=True)
+            return row + 1
+
+        def _calcular_distribucion():
+            try:
+                monto_str = entry_monto.get().strip()
+                requested = float(monto_str) if monto_str else 0.0
+                if requested <= 0:
+                    return
+                delta_min = float(lconfig.get("delta_minimo", 1.0))
+                n = len(prestamos)
+                target_deuda = (total_deuda + requested) / n if n > 0 else 0
+                raw = [max(0.0, target_deuda - p["deuda"]) for p in prestamos]
+                total_raw = sum(raw)
+                scale = requested / total_raw if total_raw > 0 else 0
+
+                for item in tree_result.get_children():
+                    tree_result.delete(item)
+
+                total_borrow = 0.0
+                for p, r in zip(prestamos, raw):
+                    borrow = r * scale if r * scale >= delta_min else 0.0
+                    ltv_final = (p["deuda"] + borrow) / p["col_usd"] if p["col_usd"] > 0 else 0
+                    total_borrow += borrow
+                    tree_result.insert("", "end", values=(
+                        p["activo"],
+                        f"{p['col_usd']:,.2f}",
+                        f"{p['ltv']:.2%}",
+                        f"{p['deuda']:,.2f}",
+                        f"{borrow:,.2f}" if borrow > 0 else "-",
+                        f"{ltv_final:.2%}",
+                    ))
+                ltv_portfolio = (total_deuda + total_borrow) / total_col if total_col > 0 else 0
+                tree_result.insert("", "end", values=(
+                    "TOTAL", f"{total_col:,.2f}", "", f"{total_deuda:,.2f}", f"{total_borrow:,.2f}", f"{ltv_portfolio:.2%}"
+                ), tags=("total",))
+                tree_result.tag_configure("total", foreground="yellow")
+            except Exception as e:
+                _logger.error(f"_calcular_distribucion(): {e}")
+
+        # — leer params desde BD —
+        try:
+            sesion = self.repositorio.get_sesion_by_vehiculo("Crypto")
+            params_raw = sesion.get("parameters", "{}") if sesion else "{}"
+            params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
+            lconfig = params.get("loan", {})
+        except Exception:
+            lconfig = {}
+        max_deuda_pct = float(lconfig.get("max_deuda_pct", 0.09))
+
+        prestamos, capital_earn = _get_loan_data()
+        total_col = sum(p["col_usd"] for p in prestamos)
+        total_deuda = sum(p["deuda"] for p in prestamos)
+        capital_neto = total_col - total_deuda
+        total_capital = capital_earn + total_col
+        apalancamiento = total_deuda / total_capital if total_capital > 0 else 0
+        max_deuda = capital_earn * max_deuda_pct
+        disponible = capital_neto
+
+        row = self.crear_seccion(frame, "Análisis de Préstamos Flexibles", row)
+        row = self.crear_campo(frame, "Capital Earn (Flexible):", f"${capital_earn:,.2f} USDT", row)
+        row = self.crear_campo(frame, "Capital Colateral:", f"${total_col:,.2f} USD", row)
+        row = self.crear_campo(frame, "Deuda Total:", f"${total_deuda:,.2f} USDT", row)
+        color_neto = "green" if capital_neto >= 0 else "red"
+        row = self.crear_campo(frame, "Capital Neto (col - deuda):", f"${capital_neto:,.2f} USD", row, fg_valor=color_neto)
+        row = self.crear_campo(frame, "Apalancamiento:", f"{apalancamiento:.2%}  (deuda / earn+col)", row)
+
+        row = _crear_grafico_prestamos(frame, prestamos, row)
+
+        # simulador loan_distribute
+        row = self.crear_seccion(frame, "Simulador loan_distribute", row)
+
+        frame_input = tk.Frame(frame, bg=self.BG_COLOR)
+        frame_input.grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=4)
+        tk.Label(frame_input, text=f"Monto a solicitar (máx. ${disponible:,.2f}):",
+                 bg=self.BG_COLOR, fg="black", font=("Segoe UI", 9)).pack(side="left")
+        entry_monto = tk.Entry(frame_input, width=12, bg=self.ENTRY_BG, fg="white",
+                               font=("Segoe UI", 9), relief="flat")
+        entry_monto.insert(0, "0")
+        entry_monto.pack(side="left", padx=6)
+        tk.Button(frame_input, text="Calcular", bg="DarkCyan", fg="white", width=10,
+                  font=("Segoe UI", 9), command=_calcular_distribucion).pack(side="left", padx=4)
+        row += 1
+
+        cols_res = ("Activo", "Col USD", "LTV actual", "USDT Actual", "Pedir USDT", "LTV final")
+        tree_result = ttk.Treeview(frame, columns=cols_res, show="headings", height=len(prestamos) + 1 or 2)
+        for c, w in zip(cols_res, (70, 90, 80, 90, 90, 80)):
+            tree_result.heading(c, text=c)
+            tree_result.column(c, width=w, anchor="e")
+        tree_result.column("Activo", anchor="center")
+
+        # distribución actual al cargar
+        ltv_portfolio_actual = total_deuda / total_col if total_col > 0 else 0
+        for p in prestamos:
+            tree_result.insert("", "end", values=(
+                p["activo"], f"{p['col_usd']:,.2f}", f"{p['ltv']:.2%}", f"{p['deuda']:,.2f}", "-", f"{p['ltv']:.2%}"
+            ))
+        tree_result.insert("", "end", values=(
+            "TOTAL", f"{total_col:,.2f}", f"{ltv_portfolio_actual:.2%}", f"{total_deuda:,.2f}", "-", f"{ltv_portfolio_actual:.2%}"
+        ), tags=("total",))
+        tree_result.tag_configure("total", foreground="yellow")
+
+        tree_result.grid(row=row, column=0, columnspan=2, padx=10, pady=4, sticky="w")
+        row += 1
+
+        def _ejecutar_prestamo():
+            from Class_ApiBinnace import BinanceClient  # import diferido — evita ciclo con Modulos_python chain
+            from Class_customer import MyMessageBox  # import diferido — evita ciclo
+            try:
+                spot = BinanceClient(vehiculo="Crypto").spot
+                errores, ok, total_ejecutado = [], 0, 0.0
+                for item in tree_result.get_children():
+                    vals = tree_result.item(item, "values")
+                    if vals[0] == "TOTAL" or vals[4] == "-":
+                        continue
+                    activo = vals[0]
+                    borrow = float(vals[4].replace(",", ""))
+                    if borrow <= 0:
+                        continue
+                    time.sleep(2)
+                    resp = spot.get_flexible_loan_borrow(loanCoin="USDT", collateralCoin=activo, amount=borrow)
+                    _logger.warning(f"loan_borrow [{activo}] ${borrow:.2f} → {resp}")
+                    if not resp:
+                        errores.append(f"{activo}:sin respuesta")
+                    elif "code" in resp and int(resp["code"]) < 0:
+                        errores.append(f"{activo}:{resp.get('msg', resp['code'])}")
+                    else:
+                        ok += 1
+                        total_ejecutado += borrow
+                msg = f"Préstamo ejecutado: {ok} activos\n${total_ejecutado:.2f} USDT"
+                if errores:
+                    msg += f"\n\nErrores:\n" + "\n".join(errores)
+                MyMessageBox(frame).showinfo("Préstamo", msg)
+            except Exception as e:
+                MyMessageBox(frame).showinfo("Error", str(e))
+                _logger.error(f"_ejecutar_prestamo(): {e}")
+
+        def _ejecutar_pago():
+            from Class_ApiBinnace import BinanceClient  # import diferido — evita ciclo con Modulos_python chain
+            from Class_customer import MyMessageBox  # import diferido — evita ciclo
+            try:
+                monto_str = entry_monto.get().strip()
+                requested = float(monto_str) if monto_str else 0.0
+                if requested <= 0:
+                    MyMessageBox(frame).showinfo("Pagar", "Ingresa el monto a pagar")
+                    return
+                spot = BinanceClient(vehiculo="Crypto").spot
+                n_repay = len(prestamos)
+                target_deuda_repay = (total_deuda - requested) / n_repay if n_repay > 0 else 0
+                raw_repay = [max(0.0, p["deuda"] - target_deuda_repay) for p in prestamos]
+                total_raw_repay = sum(raw_repay) or 1.0
+                errores, ok, total_pagado = [], 0, 0.0
+                for p, r in zip(prestamos, raw_repay):
+                    repay = round(requested * (r / total_raw_repay), 2)
+                    if repay <= 0:
+                        continue
+                    time.sleep(2)
+                    resp = spot.get_flexible_loan_repay(loanCoin="USDT", collateralCoin=p["activo"], amount=repay)
+                    _logger.warning(f"loan_repay [{p['activo']}] ${repay:.2f} → {resp}")
+                    if not resp:
+                        errores.append(f"{p['activo']}:sin respuesta")
+                    elif "code" in resp and int(resp["code"]) < 0:
+                        errores.append(f"{p['activo']}:{resp.get('msg', resp['code'])}")
+                    else:
+                        repay_status = resp.get("repayStatus", resp.get("status", "OK"))
+                        ok += 1
+                        total_pagado += repay
+                        _logger.warning(f"loan_repay [{p['activo']}] → {repay_status}")
+                msg = f"Pago ejecutado: {ok} activos\n${total_pagado:.2f} USDT"
+                if errores:
+                    msg += f"\n\nErrores:\n" + "\n".join(errores)
+                MyMessageBox(frame).showinfo("Pagar", msg)
+            except Exception as e:
+                MyMessageBox(frame).showinfo("Error", str(e))
+                _logger.error(f"_ejecutar_pago(): {e}")
+
+        frame_btns = tk.Frame(frame, bg=self.BG_COLOR)
+        frame_btns.grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=8)
+        tk.Button(frame_btns, text="Préstamo", bg="#2471a3", fg="white",
+                  width=12, command=_ejecutar_prestamo).pack(side="left", padx=4)
+        tk.Button(frame_btns, text="Pagar", bg="#922b21", fg="white",
+                  width=12, command=_ejecutar_pago).pack(side="left", padx=4)
+        row += 1
+
+        return row
 
     def obtener_lotes_desde_info(self):
         """Obtiene lotes desde self._positions (lista de DataHub.positions)"""

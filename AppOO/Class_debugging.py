@@ -370,6 +370,10 @@ class Debugging:
         self.logger.update({"BotCryptoUI": logging.getLogger("BotCryptoUI")})
         self.logger["BotCryptoUI"].setLevel(logging.WARNING)
 
+        # manager logging
+        self.logger.update({"Analisis": logging.getLogger("Analisis")})
+        self.logger["Analisis"].setLevel(logging.WARNING)
+
     def handled_CacheLogger_name(self):
         """
         Captura manejo de cache y filename para logger

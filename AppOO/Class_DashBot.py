@@ -66,6 +66,7 @@ from edgar_13f import sync_fund_filings, sync_13f_holdings
 from valuation_edgar_downloader import BASE_DIR, download_filing
 from valuation_xbrl_api import get_zip_files
 from Class_customer import DataHub, TickerInfo
+from Class_ApiBinnace import BinanceClient
 from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
 from Modulos_Utilitarios import define_FileCache, read_json_tmp, write_json_tmp
 
@@ -99,10 +100,15 @@ class ClassAgenteIA:
 
         # Estado del agente de preservación
         self.preservation_state = {}  # {symbol: {max_price, stop_actual, last_check}}
-        self.preservation_config = {}  # {vehiculo: pconfig} — cargado una vez al inicio
+        self.preservation_config = (
+            {}
+        )  # {vehiculo: sub-dict "preservation"} — extraído de _params_cache
         self.preservation_last_run = (
             {}
         )  # {vehiculo: datetime} — última evaluación por vehículo
+        self._params_cache = (
+            {}
+        )  # {vehiculo: full parsed parameters dict} — compartido entre agentes
 
     # decorador para limitar ejecuciones
     def wait_rate(intervalo_segundos: int, persist: bool = False):
@@ -453,6 +459,48 @@ class ClassAgenteIA:
         except Exception as e:
             self.logger.error(f"Agente_AuditPortfolio(): {e}")
 
+    # agente LTV — monitorea y calcula ajuste de colateral Binance (DRY RUN)
+    @wait_rate(300)
+    def Agente_LtvControl(self):
+        try:
+            params = self._load_params("Crypto")
+            if not params:
+                self.logger.warning(
+                    "Agente_LtvControl: sin parameters en sesion Crypto → SKIP"
+                )
+                return
+            lconfig = params.get("ltv")
+            if not lconfig:
+                self.logger.warning(
+                    "Agente_LtvControl: sin bloque 'ltv' en parameters → SKIP"
+                )
+                return
+            spot = BinanceClient(vehiculo="Crypto").spot
+            analisis = spot.ltv_check_and_adjust(lconfig)
+            if not analisis:
+                self.logger.warning("Agente_LtvControl: sin préstamos activos")
+                return
+            for item in analisis:
+                gap = item["ltv_actual"] - lconfig.get("target", 0.50)
+                gap_str = f"+{gap:.2%}" if gap >= 0 else f"{gap:.2%}"
+                if item["ajuste_direction"] and item["ajuste_coin"] > 0:
+                    resp = spot.get_flexible_adjust_ltv(
+                        loanCoin=item["loanCoin"],
+                        collateralCoin=item["collateralCoin"],
+                        adjustType=item["ajuste_direction"],
+                        amount=item["ajuste_coin"],
+                    )
+                    ajuste_str = f"{item['ajuste_direction']} {item['ajuste_coin']:.4f} {item['collateralCoin']} → {resp}"
+                else:
+                    ajuste_str = "sin ajuste"
+                self.logger.warning(
+                    f"LTV [{item['collateralCoin']}] {item['ltv_actual']:.2%} gap={gap_str} "
+                    f"{item['estado']} | col={item['collateral_amount']:.4f} (~{item['collateral_usd']:.2f}) "
+                    f"deuda={item['loan_usd']:.2f} | {ajuste_str}"
+                )
+        except Exception as e:
+            self.logger.error(f"Agente_LtvControl(): {e}")
+
     # agente defensivo: protege ganancias con órdenes STOP dinámicas
     async def Agente_ManagerPreservation(self):
         """
@@ -472,6 +520,25 @@ class ClassAgenteIA:
             except Exception as e:
                 self.logger.error(f"Agente_ManagerPreservation({vehiculo}): {e}")
 
+    def _load_params(self, vehiculo):
+        """
+        Carga y cachea el JSON completo de parameters para el vehiculo.
+        Fuente única — evita duplicar parseo entre agentes (preservation, ltv, etc.).
+        Retorna dict o None si no hay parameters en sesion.
+        """
+        if vehiculo not in self._params_cache:
+            sesion = self.PlanInversion.get_sesion_by_vehiculo(vehiculo)
+            params_raw = sesion.get("parameters")
+            if not params_raw:
+                self._params_cache[vehiculo] = None
+            else:
+                self._params_cache[vehiculo] = json.loads(
+                    params_raw.decode("utf-8")
+                    if isinstance(params_raw, bytes)
+                    else params_raw
+                )
+        return self._params_cache.get(vehiculo)
+
     def _preservation_get_config(self, vehiculo):
         """
         Carga config desde BD una sola vez por vehículo (cache en self.preservation_config).
@@ -480,19 +547,13 @@ class ClassAgenteIA:
         """
         # 1. Carga config una sola vez al arranque del vehículo
         if vehiculo not in self.preservation_config:
-            sesion = self.PlanInversion.get_sesion_by_vehiculo(vehiculo)
-            params_raw = sesion.get("parameters")
-            if not params_raw:
+            params = self._load_params(vehiculo)
+            if not params:
                 self.logger.warning(
                     f"Preservation({vehiculo}): sin parameters en sesion → SKIP"
                 )
                 self.preservation_config[vehiculo] = None
                 return None, 0, False
-            params = json.loads(
-                params_raw.decode("utf-8")
-                if isinstance(params_raw, bytes)
-                else params_raw
-            )
             pconfig = params.get("preservation")
             if not pconfig:
                 self.logger.warning(
@@ -1647,6 +1708,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
                     # Agente Institutional Score — ownership institucional (una vez al día)
                     self.Agente_InstitucionalScore()
+
+                    # Agente LTV Control — monitorea ratio deuda/colateral Binance (DRY RUN)
+                    self.Agente_LtvControl()
 
                     # Agente for Preservation (defensivo estructural)  -- No activar esta en prueba
                     # self.exec_modulo_async(self.Agente_ManagerPreservation())
