@@ -1706,7 +1706,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     campos.update({"categoriaActivo": x_categoria[0]})
                     campos.update({"trazaDividends": ddatos.to_json(orient="split")})
                 else:
-                    campos.update({"categoriaActivo": "X"})
+                    qt = (activo.get("quoteType") or "").upper()
+                    campos.update({"categoriaActivo": "X" if qt in _ETF_TYPES else "N"})
                 campos.update({"trailingAnnualDividendRate": activo.get("trailingAnnualDividendRate", 0)})
                 campos.update({"dividendYield": activo.get("dividendYield", 0)})
                 timestamp = activo.get("exDividendDate")
@@ -1719,12 +1720,17 @@ class DatosVehivulo(TickerInfo, MyOrders):
             except Exception as error:
                 self.logger.error("construct_info_dividends({}): {}".format(x_symbol, error), exc_info=True)
 
+        _ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
+
         try:
             if self.vehiculo != "Stock":
                 return
             for symbol in activos:
                 ticket = convierte_ticket_crypto(symbol)
                 yf_activo, datos, ind_update = self.ts_yfinance_symbol(symbol=ticket, vehiculo=self.vehiculo)
+                qt = (yf_activo.get("quoteType") or "").upper()
+                if qt in _ETF_TYPES:
+                    continue  # ETF/fondo — no insertar en market
                 if not ind_update and ("dividendYield" in yf_activo) and ("Dividends" in datos):
                     self._validate_dividend_data_freshness(symbol, yf_activo, datos["Dividends"])
                     fields, categoria, meses = construct_info_dividends(ticket, yf_activo, datos)

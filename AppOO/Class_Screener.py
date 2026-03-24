@@ -685,7 +685,7 @@ class Screener(tk.Frame):
             return f"{v:.2f}" if v is not None else ""
 
         def _pct(v):
-            return f"{v:.2%}" if v is not None else ""
+            return f"{v:.1%}" if v is not None else ""
 
         def _big(v):
             return mask_numero(v or 0) if v is not None else ""
@@ -729,7 +729,7 @@ class Screener(tk.Frame):
                     _price(_g("lastPrice")),
                     _rotacion(keys),
                     _price(_g("inst_score")),
-                    _pct(_g("inst_ownership_pct")),
+                    _pct(min(_g("inst_ownership_pct"), 1.0) if _g("inst_ownership_pct") else None),
                     str(_g("fh_count")) if _g("fh_count") else "",
                     _pct(_g("fh_buy_ratio")),
                     _pct(_g("fh_sell_ratio")),
