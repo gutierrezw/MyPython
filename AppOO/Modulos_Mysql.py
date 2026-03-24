@@ -1296,7 +1296,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 "fh_count, fh_total_value, fh_buy_ratio, fh_sell_ratio, "
                 "analyst_rec, analyst_mean, analyst_count, categoriaActivo, "
                 "floatShares, sharesOutstanding, volume, insider_ownership_pct, website "
-                "FROM market WHERE account = %s AND encartera = 'Y' "
+                "FROM market WHERE account = %s AND encartera = 'Y' AND categoriaActivo != 'X' "
                 "ORDER BY inst_score DESC",
                 (account,),
             )
