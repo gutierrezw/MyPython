@@ -1976,17 +1976,13 @@ def grupo_sector(fig: object, positions=None, parm=None):
         }
     except HTTPError as e:
         if "403" in str(e):
-            print(f"grupo_sector():🔴 ERROR FINVIZ: Bloqueo 403 Forbidden. Reintento en 5 minutos. Mensaje: {e}")
-
+            _logger.error(f"grupo_sector(): FINVIZ 403 Forbidden: {e}")
         elif "404" in str(e):
-            print(f"grupo_sector():🔴 ERROR FINVIZ: La página no se encuentra (404). Revisar la librería.")
-
+            _logger.error("grupo_sector(): FINVIZ 404 — revisar librería")
         else:
-            # Cualquier otro error HTTP
-            print(f"grupo_sector():🔴 ERROR FINVIZ: Fallo HTTP inesperado: {e}")
+            _logger.error(f"grupo_sector(): FINVIZ HTTP error: {e}")
     except Exception as e_general:
-        # Captura cualquier otro error no relacionado con la red
-        print(f"grupo_sector():🔴 ERROR GENERAL en grupo_sector: {e_general}")
+        _logger.error(f"grupo_sector(): {e_general}")
 
 
 def sectores(busca=None, symbol=None):
