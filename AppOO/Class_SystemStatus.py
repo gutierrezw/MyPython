@@ -19,7 +19,7 @@ from Modulos_python import (
     filedialog,
 )
 from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem
-from Modulos_Utilitarios import documentar_estructura
+from Modulos_Utilitarios import documentar_estructura, write_json_tmp
 from Class_customer import (
     MyMessageBox,
     DataHub,
@@ -1398,26 +1398,95 @@ class system_status(tk.Frame):
             traceback.print_exc()
             print(f"connect_api(): {e}")
 
-    # detalla estados de conexiones
+    # detalla estados de conexiones — interactivo: doble-click toggle WARNING↔ERROR, clic derecho menú completo
     def debugging_system(self):
         try:
+            LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+            LEVEL_COLORS = {
+                "DEBUG": "#4A90D9",
+                "INFO": "#7ED321",
+                "WARNING": "#F5A623",
+                "ERROR": "#D0021B",
+                "CRITICAL": "#9B0000",
+            }
 
-            cols = ["Option"]
-            tree = ttk.Treeview(self.debugging, columns=cols, height=15, style="TFrame")
+            def _save_levels():
+                data = {tree.item(iid, "text"): tree.set(iid, "Level") for iid in tree.get_children()}
+                write_json_tmp("logger_levels", data)
+
+            def _set_level(level_name):
+                sel = tree.selection()
+                if not sel:
+                    return
+                iid = sel[0]
+                key = tree.item(iid, "text")
+                handler = DataHub.logger.get(key)
+                if handler:
+                    handler.setLevel(getattr(logging, level_name))
+                    tree.set(iid, "Level", level_name)
+                    tree.item(iid, tags=(level_name,))
+                    _save_levels()
+
+            def _on_double_click(event):
+                iid = tree.identify_row(event.y)
+                if not iid:
+                    return
+                tree.selection_set(iid)
+                key = tree.item(iid, "text")
+                handler = DataHub.logger.get(key)
+                if handler:
+                    current = logging.getLevelName(handler.level)
+                    new_level = "ERROR" if current == "WARNING" else "WARNING"
+                    _set_level(new_level)
+
+            def _show_menu(event):
+                iid = tree.identify_row(event.y)
+                if iid:
+                    tree.selection_set(iid)
+                    menu.post(event.x_root, event.y_root)
+
+            def _reset_all():
+                for iid in tree.get_children():
+                    key = tree.item(iid, "text")
+                    handler = DataHub.logger.get(key)
+                    if handler:
+                        handler.setLevel(logging.WARNING)
+                        tree.set(iid, "Level", "WARNING")
+                        tree.item(iid, tags=("WARNING",))
+                _save_levels()
+
+            frame = ttk.Frame(self.debugging, style="C.TFrame")
+            frame.pack(expand=True, fill="both", padx=5, pady=(5, 0))
+
+            cols = ["Level"]
+            tree = ttk.Treeview(frame, columns=cols, height=15, show="tree headings")
             tree.heading("#0", text="Logger")
-            tree.heading("Option", text="Level")
+            tree.heading("Level", text="Level")
+            tree.column("#0", width=220, minwidth=150)
+            tree.column("Level", width=100, minwidth=80)
 
-            tree.column("#0", width=200, minwidth=100)
-            tree.column("Option", width=80, minwidth=80)
-            tree.pack(expand=True, fill="both", pady=5, padx=(5, 5))
+            scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+            scroll.pack(side="right", fill="y")
+            tree.pack(side="left", expand=True, fill="both")
+
+            for lvl, color in LEVEL_COLORS.items():
+                tree.tag_configure(lvl, foreground=color)
+
+            btn_frame = ttk.Frame(self.debugging, style="C.TFrame")
+            btn_frame.pack(fill="x", padx=5, pady=(2, 5))
+            ttk.Button(btn_frame, text="Reset All → WARNING", command=_reset_all).pack(side="left")
+
+            menu = tk.Menu(tree, tearoff=0)
+            for lvl in LEVELS:
+                menu.add_command(label=lvl, command=lambda l=lvl: _set_level(l))
+
+            tree.bind("<Button-3>", _show_menu)
+            tree.bind("<Double-1>", _on_double_click)
 
             for key, handler in DataHub.logger.items():
-                tree.insert(
-                    "",
-                    "end",
-                    text=f"{key}",
-                    values=f"{logging.getLevelName(handler.level)}",
-                )
+                lvl_name = logging.getLevelName(handler.level)
+                tree.insert("", "end", text=key, values=(lvl_name,), tags=(lvl_name,))
+
         except Exception as e:
             print("debugging_system(): {}".format(e))
 

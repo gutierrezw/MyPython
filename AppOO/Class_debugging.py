@@ -14,7 +14,7 @@ from Modulos_python import (
     traceback,
     textwrap,
 )
-from Modulos_Utilitarios import delete_file
+from Modulos_Utilitarios import delete_file, read_json_tmp, write_json_tmp
 from logging.handlers import RotatingFileHandler
 
 
@@ -373,6 +373,18 @@ class Debugging:
         # manager logging
         self.logger.update({"Analisis": logging.getLogger("Analisis")})
         self.logger["Analisis"].setLevel(logging.WARNING)
+
+        # restaurar niveles guardados por el usuario desde el panel Debugging
+        self._apply_saved_levels()
+
+    def _apply_saved_levels(self):
+        """Carga logger_levels.json y aplica los niveles guardados sobre los defaults."""
+        saved = read_json_tmp("logger_levels")
+        for key, lvl_name in saved.items():
+            if key in self.logger:
+                level = getattr(logging, lvl_name, None)
+                if level is not None:
+                    self.logger[key].setLevel(level)
 
     def handled_CacheLogger_name(self):
         """

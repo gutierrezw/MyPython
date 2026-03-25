@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(python -c \":*)",
-      "Bash(find C:UsersInversionesWildagaDocumentsMyPythonEDGAR13F -name *.xml -path *0000102909*)"
+      "Bash(find C:UsersInversionesWildagaDocumentsMyPythonEDGAR13F -name *.xml -path *0000102909*)",
+      "Bash(python Ajuste_lote_sell.py)"
     ]
   }
 }

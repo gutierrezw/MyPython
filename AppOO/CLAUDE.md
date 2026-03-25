@@ -45,6 +45,29 @@ Orden acordado (después de las 4 fijas: Symbol, Name, Status, Cart):
 - Siempre entregar el comando listo y dejar que el usuario decida cuándo correrlo.
 - El usuario quiere mantener control y aprender del proceso.
 
+## Panel Debugging — Class_SystemStatus.py
+
+El tab "Debugging" en `self.debugging` debe ser **siempre interactivo**: el usuario puede cambiar niveles de logger en tiempo real desde la UI sin reiniciar la app.
+
+Patrón implementado en `debugging_system()`:
+
+| Acción | Comportamiento |
+|--------|----------------|
+| Doble-click en fila | Toggle rápido WARNING ↔ ERROR |
+| Clic derecho | Menú completo: DEBUG / INFO / WARNING / ERROR / CRITICAL |
+| Botón "Reset All → WARNING" | Regresa todos los loggers a WARNING |
+
+- Colores por nivel: DEBUG=azul, INFO=verde, WARNING=naranja, ERROR=rojo, CRITICAL=rojo oscuro
+- Los cambios se aplican a `DataHub.logger[key].setLevel(...)` en tiempo real
+- La fuente de verdad es siempre `DataHub.logger` (dict registrado en `Class_debugging.py`)
+
+**Persistencia entre sesiones:**
+- Cada cambio de nivel llama `_save_levels()` → escribe `tmp/logger_levels.json` con `write_json_tmp`
+- `Debugging.__init__()` llama `_apply_saved_levels()` al final → lee el JSON y sobreescribe defaults
+- Si el JSON no existe (primera vez) → `read_json_tmp` devuelve `{}` y se usan los defaults sin error
+
+**Objetivo de uso:** elevar loggers ruidosos a ERROR para que no ensucien el log rotativo; bajar a DEBUG para diagnóstico puntual.
+
 ## Checklist antes de cerrar sesión
 
 Antes de hacer commit, preguntar explícitamente:
