@@ -135,7 +135,9 @@ class ClassAgenteIA:
 
                 if tiempo_transcurrido < intervalo_segundos:
                     tiempo_restante = intervalo_segundos - tiempo_transcurrido
-                    td = timedelta(seconds=int(tiempo_restante))
+                    logging.getLogger("ClassAgenteIA").debug(
+                        f"wait_rate: '{func.__name__}' bloqueado — faltan {int(tiempo_restante)}s"
+                    )
                     return None
                 else:
                     resultado = func(*args, **kwargs)
@@ -144,19 +146,6 @@ class ClassAgenteIA:
                         data = read_json_tmp(_FILE)
                         data[func.__name__] = tiempo_actual
                         write_json_tmp(_FILE, data)
-                    logger = logging.getLogger("ClassAgenteIA")
-                    logger.warning(
-                        textwrap.dedent(
-                            f"""
-                            ==============================================================================================
-                            Agente_downloads_filings_EDGAR():
-                            =
-                            🛑 BLOQUEADO: La función '{func.__name__}' está limitada a 1 llamada cada {intervalo_segundos}s.
-                            ==============================================================================================
-
-                            """
-                        )
-                    )
                     return resultado
 
             return wrapper

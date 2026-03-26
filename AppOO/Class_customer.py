@@ -1166,6 +1166,7 @@ class MyOrders:
         submit={},
         hash_id_Op=None,
         remote=False,
+        origen="UI",
     ):
         # place order Stock
         def place_OrderStock(account, pedido):
@@ -1182,7 +1183,7 @@ class MyOrders:
                         keys["quantity"] = float(keys["quantity"])
                 orden = {"orders": [keys]}
 
-                self.logger.warning(f"place_OrderStock: account={account} | symbol={symbol} | order={orden}")
+                self.logger.warning(f"place_OrderStock: origen={origen} | account={account} | symbol={symbol} | order={orden}")
 
                 response = self.IClient.place_order(account_id=account, order=orden)
 
@@ -1261,6 +1262,8 @@ class MyOrders:
             try:
                 response, enviada, values = {}, {}, {}
 
+                self.logger.warning(f"place_OrderCrypto: origen={origen} | symbol={symbol} | side={pedido['side']} | qty={pedido['quantity']} | price={pedido['price']}")
+
                 response = self.BClient.get_new_order(
                     symbol=pedido["symbol"],
                     side=pedido["side"],
@@ -1290,6 +1293,9 @@ class MyOrders:
                             "hash_id_oportunidad": hash_id_Op,
                         }
                         self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
+                        self.logger.warning(f"place_OrderCrypto: OK | orderId={response['orderId']} | status={response['status']} | symbol={symbol}")
+                else:
+                    self.logger.error(f"place_OrderCrypto: sin respuesta | symbol={symbol}")
 
                 return response, enviada, values
             except Exception as e:
@@ -1306,14 +1312,14 @@ class MyOrders:
             else:
                 response, enviada, values = {}, {}, {}
 
-            # Traza de orden: WARNING si es remota o falló, DEBUG si local ok
-            log_level = "warning" if remote or not values else "debug"
-            getattr(self.logger, log_level)(
+            # Traza de orden: siempre WARNING — toda orden ejecutada debe quedar en log
+            self.logger.warning(
                 textwrap.dedent(
                     f"""
                         ====================================
                         put_completa_orden({self.vehiculo}):
                         ====================================
+                        Origen........: {origen}
                         Remote_order  : {remote}
                         Simutale_order: {self.simulation}
                         Order.........: {pedido}
@@ -2564,6 +2570,7 @@ class TickerInfo(MyOrders):
                         pedido=pedido,
                         hash_id_Op=hash_id,
                         remote=True,
+                        origen="Telegram",
                     )
 
                     # arma respuesta compuesta para el bot
@@ -2583,6 +2590,7 @@ class TickerInfo(MyOrders):
                         pedido=pedido,
                         hash_id_Op=hash_id,
                         remote=True,
+                        origen="Telegram",
                     )
                     resp = {
                         "values": response,
