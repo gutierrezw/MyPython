@@ -224,13 +224,13 @@ class BinanceSpot(Spot):
         if timeInForce is not None:
             params["timeInForce"] = timeInForce
 
-        self.logger.warning(f"API >> POST /api/v3/order | {params}")
+        self.logger.debug(f"API >> POST /api/v3/order | {params}")
 
         signed_query = self.signature_spot_message(REQUEST=params)
         headers = {"X-MBX-APIKEY": self.api_key}
         r = requests.post(self._base_url + "/api/v3/order", headers=headers, params=signed_query, timeout=5)
 
-        self.logger.warning(f"API << {r.status_code} | {r.text[:500]}")
+        self.logger.debug(f"API << {r.status_code} | {r.text[:500]}")
 
         r.raise_for_status()
         return r.json()

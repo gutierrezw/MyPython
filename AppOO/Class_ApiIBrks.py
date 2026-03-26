@@ -71,6 +71,7 @@ class IB(IBClient):
 
         # Asigna Nombre Logging
         self.logger = logging.getLogger("IBroks_Client")
+        self._network_error_logged = False  # guard: loguea NETWORK EXCEPTION solo una vez por período de caída
 
     # valida conexión al localHost
     def is_localhost(self):
@@ -167,7 +168,7 @@ class IB(IBClient):
                 auth = auth_status.get("authenticated", False)
                 connected = auth_status.get("connected", False)
 
-                self.logger.warning(f"Tickle: auth={auth} connected={connected} iter={counter}")
+                self.logger.debug(f"Tickle: auth={auth} connected={connected} iter={counter}")
                 if datahub:
                     datahub.update_self_procesos(proces="thread", tarea=self.task, itera=counter)
                 counter += 1
@@ -587,6 +588,7 @@ class IB(IBClient):
                     else:
                         data = {"raw_text": response.text}
 
+                    self._network_error_logged = False  # reset: Gateway volvió a responder
                     self.logger.debug(
                         textwrap.dedent(
                             f"""
@@ -624,18 +626,22 @@ class IB(IBClient):
                 return {}
 
         except requests.exceptions.RequestException as e:
-            self.logger.error(
-                textwrap.dedent(
-                    f"""
-                ================
-                _make_request(): NETWORK EXCEPTION
-                ================
-                URL: {url}
-                Type: {req_type}
-                Error: {e}
-                """
+            if not self._network_error_logged:
+                self.logger.error(
+                    textwrap.dedent(
+                        f"""
+                    ================
+                    _make_request(): NETWORK EXCEPTION
+                    ================
+                    URL: {url}
+                    Type: {req_type}
+                    Error: {e}
+                    """
+                    )
                 )
-            )
+                self._network_error_logged = True
+            else:
+                self.logger.debug(f"_make_request(): NETWORK EXCEPTION (suprimido) | {url}")
             return {}
         except Exception as e:
             # Otros errores no controlados
