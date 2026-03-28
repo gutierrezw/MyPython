@@ -1395,7 +1395,7 @@ def sync_market(account):
             omitidos += 1
 
     # Phase 2: yfinance — todos los símbolos activos, paralelo
-    active_symbols = [s for s, cat in existing.items() if cat not in ("I", "S", "X")]
+    active_symbols = [s for s, cat in existing.items() if cat not in ("X",)]
     data_ok = 0
     with ThreadPoolExecutor(max_workers=3) as ex:
         futures = {ex.submit(_fetch_symbol_data, sym): sym for sym in active_symbols}
