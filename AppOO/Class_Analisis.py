@@ -1531,10 +1531,22 @@ class AnalisisCrypto(AnalisisBase):
         prestamos = _get_loan_data()
         total_col = sum(p["col_usd"] for p in prestamos)
         total_deuda = sum(p["deuda"] for p in prestamos)
-        capital_neto = total_col - total_deuda
-        apalancamiento = total_deuda / total_col if total_col > 0 else 0
+
+        # capital earn de los activos con LTV activo = capital real disponible
+        # Binance puede bloquear todo ese earn como colateral en cualquier momento
+        try:
+            from Class_ServiciosCrypto import ServiciosCrypto  # import diferido — evita ciclo con Modulos_python chain
+            earn_balances = ServiciosCrypto().earn_spot_balances()
+            earn_map = {b["asset"]: b.get("earn_usdt", 0.0) for b in earn_balances}
+        except Exception:
+            earn_map = {}
+        col_assets = {p["activo"] for p in prestamos}
+        capital_earn_col = sum(earn_map.get(a, 0.0) for a in col_assets)
+        capital_base = capital_earn_col if capital_earn_col > 0 else total_col
+
+        capital_neto = capital_base - total_deuda
+        apalancamiento = total_deuda / capital_base if capital_base > 0 else 0
         leverage_crypto = total_col / max(capital_neto, 1.0)
-        disponible = capital_neto
 
         from Class_customer import DataHub  # import diferido — evita ciclo: Class_Analisis→Class_customer
         _beta_c = DataHub.manager_GyP["Crypto"].get("BetaPortfolio", 1.5)
@@ -1548,13 +1560,16 @@ class AnalisisCrypto(AnalisisBase):
         DataHub.manager_GyP["Crypto"]["Debit"]       = total_deuda
         DataHub.manager_GyP["Crypto"]["Leverage"]    = leverage_crypto
 
+        ltv_binance = total_deuda / total_col if total_col > 0 else 0
+
         row = self.crear_seccion(frame, "Análisis de Préstamos Flexibles", row)
-        row = self.crear_campo(frame, "Capital Colateral:", f"${total_col:,.2f} USD", row)
+        row = self.crear_campo(frame, "Capital disponible (earn):", f"${capital_earn_col:,.2f} USD", row)
         row = self.crear_campo(frame, "Deuda Total:", f"${total_deuda:,.2f} USDT", row)
         color_neto = "green" if capital_neto >= 0 else "red"
-        row = self.crear_campo(frame, "Capital Neto (col - deuda):", f"${capital_neto:,.2f} USD", row, fg_valor=color_neto)
-        row = self.crear_campo(frame, "Apalancamiento (LTV):", f"{apalancamiento:.2%}  (deuda / colateral)", row)
-        row = self.crear_campo(frame, "Leverage:", f"{leverage_crypto:.2f}x  (col / capital_neto)", row)
+        row = self.crear_campo(frame, "Capital Neto:", f"${capital_neto:,.2f} USD", row, fg_valor=color_neto)
+        row = self.crear_campo(frame, "Exposición sobre capital:", f"{apalancamiento:.2%}  (deuda / capital disponible)", row)
+        row = self.crear_campo(frame, "LTV Binance actual:", f"{ltv_binance:.2%}  (ref. simulador — deuda / col. bloqueado)", row)
+        row = self.crear_campo(frame, "Leverage:", f"{leverage_crypto:.2f}x  (col bloqueado / capital_neto)", row)
         row = self.crear_campo(frame, "Beta Portfolio:", f"{_beta_c:.2f}  (calculado al abrir análisis)", row)
         row = self.crear_campo(
             frame, "% Mrg/Risk:",
@@ -1569,7 +1584,7 @@ class AnalisisCrypto(AnalisisBase):
 
         frame_input = tk.Frame(frame, bg=self.BG_COLOR)
         frame_input.grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=4)
-        tk.Label(frame_input, text=f"Monto a solicitar (máx. ${disponible:,.2f}):",
+        tk.Label(frame_input, text=f"Monto a solicitar (máx. ${capital_neto:,.2f}):",
                  bg=self.BG_COLOR, fg="black", font=("Segoe UI", 9)).pack(side="left")
         entry_monto = tk.Entry(frame_input, width=12, bg=self.ENTRY_BG, fg="white",
                                font=("Segoe UI", 9), relief="flat")
