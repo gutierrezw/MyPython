@@ -467,6 +467,10 @@ class BinanceSpot(Spot):
         return self.get_flexible_product_position(current=current, size=size, recvWindow=recvWindow)
 
     @handle_binance_exceptions
+    def Mysubscribe_flexible_product(self, productId: str, amount: float, recvWindow=10000):
+        return self.subscribe_flexible_product(productId=productId, amount=amount, recvWindow=recvWindow)
+
+    @handle_binance_exceptions
     def get_redeem_flexible_product(self, productId: str, amount: float, recvWindow=10000):
         return self.redeem_flexible_product(productId=productId, amount=amount, recvWindow=recvWindow)
 

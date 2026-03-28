@@ -338,7 +338,7 @@ def margin_risk_status(margen):
     if margen < 0.20:
         return {"emoji": "🟢", "estado": "Seguro",   "accion": "OK",          "color": "#2ecc71"}
     if margen < 0.50:
-        return {"emoji": "🟡", "estado": "Moderado", "accion": "Cuidado",     "color": "yellow"}
+        return {"emoji": "🟡", "estado": "Moderado", "accion": "Cuidado",     "color": "#B8860B"}
     if margen < 0.80:
         return {"emoji": "🟠", "estado": "Alto",     "accion": "Reducir",     "color": "orange"}
     return     {"emoji": "🔴", "estado": "Peligro",  "accion": "Riesgo real", "color": "red"}
