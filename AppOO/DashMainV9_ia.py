@@ -3052,8 +3052,8 @@ class DashMain:
                     last = market[0][ix.index("lastDividendValue")]
 
                     div = 0
-                    if market[0][ix.index("trailingAnnualDividendRate")] > 0:
-                        div = market[0][ix.index("dividendRate")]
+                    if (market[0][ix.index("trailingAnnualDividendRate")] or 0) > 0:
+                        div = market[0][ix.index("dividendRate")] or 0
 
                     string = market[0][ix.index("monthDividendsPay")]
                     fecha = market[0][ix.index("exDividendDate")]

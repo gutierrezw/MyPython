@@ -139,14 +139,18 @@ class ClassAgenteIA:
                     logging.getLogger("ClassAgenteIA").debug(
                         f"wait_rate: '{func.__name__}' bloqueado — faltan {int(tiempo_restante)}s"
                     )
+                    wrapper._overdue = False
                     return None
                 else:
+                    # True si lleva más de 1.5x el intervalo sin ejecutar (reinicios frecuentes)
+                    wrapper._overdue = tiempo_transcurrido > intervalo_segundos * 1.5
                     resultado = func(*args, **kwargs)
                     func.last_run = tiempo_actual
                     if persist:
                         data = read_json_tmp(_FILE)
                         data[func.__name__] = tiempo_actual
                         write_json_tmp(_FILE, data)
+                    wrapper._overdue = False
                     return resultado
 
             return wrapper
@@ -381,7 +385,7 @@ class ClassAgenteIA:
     # agente Edgar Funds — carga todos los filers 13F-HR de EDGAR en tabla funds, una vez por mes
     @wait_rate(2592000, persist=True)
     def Agente_EdgarFunds(self):
-        if not (0 <= datetime.now().hour < 6):
+        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_EdgarFunds._overdue:
             return
         try:
             result = sync_edgar_funds()
@@ -394,7 +398,7 @@ class ClassAgenteIA:
     # agente Fund Filings — descarga XMLs 13F-HR para top 50 fondos, una vez por semana
     @wait_rate(604800, persist=True)
     def Agente_FundFilings(self):
-        if not (0 <= datetime.now().hour < 6):
+        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_FundFilings._overdue:
             return
         try:
             result = sync_fund_filings(top_n=50)
@@ -408,7 +412,7 @@ class ClassAgenteIA:
     # agente 13F Scores — recalcula inst_score con señales 13F, una vez por semana
     @wait_rate(604800, persist=True)
     def Agente_13FScores(self):
-        if not (0 <= datetime.now().hour < 6):
+        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_13FScores._overdue:
             return
         try:
             result = sync_13f_scores(account=self.account)
@@ -421,7 +425,7 @@ class ClassAgenteIA:
     # agente 13F Holdings — parsea XMLs descargados y pobla fund_holdings, una vez por semana
     @wait_rate(604800, persist=True)
     def Agente_13FHoldings(self):
-        if not (0 <= datetime.now().hour < 6):
+        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_13FHoldings._overdue:
             return
         try:
             result = sync_13f_holdings(account=self.account)
@@ -437,7 +441,7 @@ class ClassAgenteIA:
     # agente auditoría cartera — detecta delistados/renombrados, mensual
     @wait_rate(2592000, persist=True)
     def Agente_AuditPortfolio(self):
-        if not (0 <= datetime.now().hour < 6):
+        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_AuditPortfolio._overdue:
             return
         try:
             result = audit_portfolio(account=self.account)
