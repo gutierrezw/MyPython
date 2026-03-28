@@ -33,6 +33,7 @@ from Modulos_python import threading, time, yf
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+from matplotlib.patches import Rectangle
 
 _logger = logging.getLogger("Analisis")
 
@@ -1436,44 +1437,100 @@ class AnalisisCrypto(AnalisisBase):
                 print(f"[_get_loan_data]: {e}")
                 return []
 
-        def _crear_grafico_prestamos(parent, prestamos, row):
+        def _crear_grafico_prestamos(parent, prestamos, earn_map_local, row):
             if not prestamos:
                 return row
+
+            ltv_inicial     = float(lconfig.get("ltv_inicial",     0.78))
+            ltv_alerta      = float(lconfig.get("ltv_alerta",      0.85))
+            ltv_liquidacion = float(lconfig.get("ltv_liquidacion",  0.91))
+
             activos  = [p["activo"] for p in prestamos]
+            ltvs     = [p["ltv"] * 100 for p in prestamos]
             deudas   = [p["deuda"] for p in prestamos]
             cols_usd = [p["col_usd"] for p in prestamos]
-            promedio = sum(cols_usd) / len(cols_usd) if cols_usd else 0
+            n = len(activos)
+            x = np.arange(n)
+            w = 0.28
 
-            x = np.arange(len(activos))
-            w = 0.35
-
-            fg = Figure(figsize=(5.6, 2.8), dpi=100)
+            fg = Figure(figsize=(5.6, 3.2), dpi=100)
             fg.patch.set_facecolor(self.CG_COLOR)
-            fg.subplots_adjust(left=0.10, right=0.88, top=0.85, bottom=0.22)
+            fg.subplots_adjust(left=0.10, right=0.88, top=0.82, bottom=0.18)
 
-            ax1 = fg.add_subplot(111)
+            ax1 = fg.add_subplot(111)    # eje Y izquierdo: LTV %
             ax1.set_facecolor(self.CG_COLOR)
-            ax1.bar(x - w / 2, deudas,   width=w, color="#3498db", label="Deuda",    alpha=0.85)
-            ax1.bar(x + w / 2, cols_usd, width=w, color="#2ecc71", label="Colateral", alpha=0.85)
-            ax1.axhline(y=promedio, color="white", linewidth=1.0, linestyle="--", label=f"Prom col ${promedio:,.0f}")
-            ax1.text(len(activos) - 0.5, promedio, f"  μ = ${promedio:,.0f}", color="white",
-                     fontsize=7, va="bottom", ha="right")
-            ax1.set_xticks(x)
-            ax1.set_xticklabels(activos, color="white", fontsize=7, rotation=60, ha="right")
-            ax1.tick_params(axis="y", colors="white", labelsize=7)
-            ax1.tick_params(axis="x", colors="white", labelsize=7)
-            ax1.spines["top"].set_visible(False)
-            ax1.spines["bottom"].set_visible(False)
+            ax2 = ax1.twinx()            # eje Y derecho: USD
+
+            # ── AX1: zonas de riesgo en coordenadas de ejes (0-1) para no afectar ax2 ──
+            ltv_max = ltv_liquidacion * 100 + 10   # mismo ylim que ax1
+
+            def _span(y0, y1, color, alpha):
+                y0n = y0 / ltv_max
+                y1n = y1 / ltv_max
+                ax1.add_patch(Rectangle(
+                    (0, y0n), 1, y1n - y0n,
+                    transform=ax1.transAxes, color=color, alpha=alpha, zorder=0
+                ))
+
+            _span(0,                     ltv_inicial * 100,     "#27ae60", 0.08)
+            _span(ltv_inicial * 100,     ltv_alerta * 100,      "#e67e22", 0.10)
+            _span(ltv_alerta * 100,      ltv_liquidacion * 100, "#e74c3c", 0.13)
+
+            ax1.axhline(ltv_inicial * 100,     color="#27ae60", linewidth=0.9, linestyle="--",
+                        zorder=2, label=f"Inicial {ltv_inicial:.0%}")
+            ax1.axhline(ltv_alerta * 100,      color="#e67e22", linewidth=0.9, linestyle="--",
+                        zorder=2, label=f"Alerta {ltv_alerta:.0%}")
+            ax1.axhline(ltv_liquidacion * 100, color="#e74c3c", linewidth=1.1, linestyle="-",
+                        zorder=2, label=f"Liquidación {ltv_liquidacion:.0%}")
+
+            # área LTV: relleno tenue bajo la línea de cada activo
+            ltv_line = ltvs + [ltvs[-1]]
+            x_area   = list(x) + [x[-1] + 0.001]
+            ltv_color_area = "#2ecc71" if max(ltvs) < ltv_inicial * 100 else "#e67e22"
+            ax1.fill_between(x_area, ltv_line, step="post",
+                             color=ltv_color_area, alpha=0.08, zorder=1)
+            ax1.step(x, ltvs, where="mid", color=ltv_color_area,
+                     linewidth=0.7, zorder=3, label="LTV actual")
+
+            # ⚠ solo si supera zona inicial — sin etiqueta %
+            for i in range(n):
+                if ltvs[i] >= ltv_inicial * 100:
+                    ax1.text(x[i], ltvs[i] + 2.0, "⚠", color="#e74c3c",
+                             fontsize=7, ha="center", va="bottom", zorder=5)
+
+            ax1.set_ylim(0, ltv_liquidacion * 100 + 10)
+            ax1.set_ylabel("LTV %", color="white", fontsize=6)
+            ax1.tick_params(axis="y", colors="white", labelsize=6)
             ax1.spines["left"].set_color("gray")
-            ax1.spines["right"].set_visible(False)
-            ax1.set_ylabel("USD", color="white", fontsize=7)
-            ax1.grid(True, alpha=0.3, color="gray", axis="y")
+
+            # grid tenue gris
+            ax1.grid(True, alpha=0.15, color="gray", axis="y", linestyle=":", zorder=0)
+
+            # ── AX2: barras colateral y deuda separadas ───────────────────────
+            max_usd = max(cols_usd) * 1.1 if cols_usd else 1
+            ax2.bar(x - w / 2, cols_usd, width=w, color="#2980b9", alpha=0.75, zorder=3, label="Col. USD")
+            ax2.bar(x + w / 2, deudas,   width=w, color="#e74c3c", alpha=0.75, zorder=3, label="Deuda USD")
+
+            ax2.set_ylim(0, max_usd * 1.55)
+            ax2.set_ylabel("USD", color="white", fontsize=6)
+            ax2.tick_params(axis="y", colors="white", labelsize=6)
+            ax2.spines["right"].set_color("gray")
+
+            # ── eje X compartido — sin línea ─────────────────────────────────
+            for ax in (ax1, ax2):
+                ax.set_xticks(x)
+                ax.set_xticklabels(activos, color="white", fontsize=7)
+                ax.set_xlim(-0.6, n - 0.4)
+                ax.spines["top"].set_visible(False)
+                ax.spines["bottom"].set_visible(False)
+                ax.tick_params(axis="x", length=0)
 
             lines1, labels1 = ax1.get_legend_handles_labels()
-            fg.legend(lines1, labels1,
+            lines2, labels2 = ax2.get_legend_handles_labels()
+            fg.legend(lines1 + lines2, labels1 + labels2,
                       loc="outside upper left", fontsize=5,
                       facecolor="white", labelcolor="black", framealpha=1.0)
-            fg.suptitle("Deuda / Colateral", fontsize=10, color="white")
+            fg.suptitle("LTV por Activo — Zonas de Riesgo Binance", fontsize=9, color="white")
 
             frm = tk.Frame(parent, bg=self.CG_COLOR)
             frm.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
@@ -1577,7 +1634,7 @@ class AnalisisCrypto(AnalisisBase):
             row, fg_valor=_mrs_c["color"],
         )
 
-        row = _crear_grafico_prestamos(frame, prestamos, row)
+        row = _crear_grafico_prestamos(frame, prestamos, earn_map, row)
 
         # simulador loan_distribute
         row = self.crear_seccion(frame, "Simulador loan_distribute", row)
@@ -1824,8 +1881,34 @@ class AnalisisCrypto(AnalisisBase):
         )
         sb_earn.config(command=tree_earn.yview)
 
+        _sort_state = {}
+
+        def _sort_col(col):
+            reverse = _sort_state.get(col, False)
+            col_idx = cols_earn.index(col)
+            rows = [(tree_earn.set(k, col), k) for k in tree_earn.get_children("")]
+
+            def _key(item):
+                v = item[0]
+                if v in ("-", "Sí", "No"):
+                    return (0, v)
+                try:
+                    return (1, float(v.replace("$", "").replace(",", "").replace("%", "")))
+                except ValueError:
+                    return (0, v)
+
+            rows.sort(key=_key, reverse=reverse)
+            for idx, (_, k) in enumerate(rows):
+                tree_earn.move(k, "", idx)
+            _sort_state[col] = not reverse
+            for c in cols_earn:
+                tree_earn.heading(c, text=c)
+            arrow = " ▲" if not reverse else " ▼"
+            tree_earn.heading(col, text=col + arrow)
+
         for col, w in zip(cols_earn, (70, 100, 100, 60, 80, 90, 0)):
-            tree_earn.heading(col, text=col)
+            tree_earn.heading(col, text=col,
+                              command=lambda c=col: _sort_col(c))
             tree_earn.column(col, width=w, anchor="e" if col != "Activo" else "center", minwidth=w)
         tree_earn.column("productId", width=0, minwidth=0, stretch=False)
 
