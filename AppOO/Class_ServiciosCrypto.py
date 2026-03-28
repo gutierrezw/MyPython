@@ -57,15 +57,17 @@ class ServiciosCrypto:
             spot_free  = spot_balances.get(asset, 0.0)
             total      = spot_free + earn_info.get("amount", 0.0)
             price      = _price_usdt(asset)
+            earn_amt = earn_info.get("amount", 0.0)
             result.append({
                 "asset":           asset,
                 "spot_free":       spot_free,
-                "earn_amount":     earn_info.get("amount", 0.0),
+                "earn_amount":     earn_amt,
                 "earn_apr":        earn_info.get("apr", 0.0),
                 "earn_product_id": earn_info.get("productId", ""),
                 "can_redeem":      earn_info.get("canRedeem", False),
                 "total":           total,
-                "usdt_value":      total * price,
+                "usdt_value":      total * price,       # spot + earn en USDT (para tabla UI)
+                "earn_usdt":       earn_amt * price,    # solo earn en USDT (para LTV)
             })
         return result
 
