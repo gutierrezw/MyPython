@@ -1368,6 +1368,9 @@ class AnalisisCrypto(AnalisisBase):
         # ========== ANÁLISIS DE PRÉSTAMOS FLEXIBLES ==========
         row = self._seccion_deuda(frame, row)
 
+        # ========== GESTIÓN EARN ↔ SPOT ==========
+        row = self._seccion_earn_spot(frame, row)
+
         # ========== RENDIMIENTO DE POSICIONES ==========
         row = self.crear_seccion(frame, f"Rendimiento Top {self.top} (6m):", row)
         frame_chart = tk.Frame(frame, bg=self.CG_COLOR)
@@ -1428,12 +1431,10 @@ class AnalisisCrypto(AnalisisBase):
                         "deuda": loan_usd,
                         "col_amount": float(r.get("collateralAmount", 0)),
                     })
-                earn = spot.get_simple_earn_account()
-                capital_earn = float(earn.get("totalFlexibleAmountInUSDT", 0)) if earn else 0.0
-                return prestamos, capital_earn
+                return prestamos
             except Exception as e:
                 print(f"[_get_loan_data]: {e}")
-                return [], 0.0
+                return []
 
         def _crear_grafico_prestamos(parent, prestamos, row):
             if not prestamos:
@@ -1526,16 +1527,13 @@ class AnalisisCrypto(AnalisisBase):
             lconfig = params.get("loan", {})
         except Exception:
             lconfig = {}
-        max_deuda_pct = float(lconfig.get("max_deuda_pct", 0.09))
 
-        prestamos, capital_earn = _get_loan_data()
+        prestamos = _get_loan_data()
         total_col = sum(p["col_usd"] for p in prestamos)
         total_deuda = sum(p["deuda"] for p in prestamos)
         capital_neto = total_col - total_deuda
-        total_capital = capital_earn + total_col
-        apalancamiento = total_deuda / total_capital if total_capital > 0 else 0
+        apalancamiento = total_deuda / total_col if total_col > 0 else 0
         leverage_crypto = total_col / max(capital_neto, 1.0)
-        max_deuda = capital_earn * max_deuda_pct
         disponible = capital_neto
 
         from Class_customer import DataHub  # import diferido — evita ciclo: Class_Analisis→Class_customer
@@ -1551,12 +1549,11 @@ class AnalisisCrypto(AnalisisBase):
         DataHub.manager_GyP["Crypto"]["Leverage"]    = leverage_crypto
 
         row = self.crear_seccion(frame, "Análisis de Préstamos Flexibles", row)
-        row = self.crear_campo(frame, "Capital Earn (Flexible):", f"${capital_earn:,.2f} USDT", row)
         row = self.crear_campo(frame, "Capital Colateral:", f"${total_col:,.2f} USD", row)
         row = self.crear_campo(frame, "Deuda Total:", f"${total_deuda:,.2f} USDT", row)
         color_neto = "green" if capital_neto >= 0 else "red"
         row = self.crear_campo(frame, "Capital Neto (col - deuda):", f"${capital_neto:,.2f} USD", row, fg_valor=color_neto)
-        row = self.crear_campo(frame, "Apalancamiento (LTV):", f"{apalancamiento:.2%}  (deuda / earn+col)", row)
+        row = self.crear_campo(frame, "Apalancamiento (LTV):", f"{apalancamiento:.2%}  (deuda / colateral)", row)
         row = self.crear_campo(frame, "Leverage:", f"{leverage_crypto:.2f}x  (col / capital_neto)", row)
         row = self.crear_campo(frame, "Beta Portfolio:", f"{_beta_c:.2f}  (calculado al abrir análisis)", row)
         row = self.crear_campo(
@@ -1583,7 +1580,17 @@ class AnalisisCrypto(AnalisisBase):
         row += 1
 
         cols_res = ("Activo", "Col USD", "LTV actual", "USDT Actual", "Pedir USDT", "LTV final")
-        tree_result = ttk.Treeview(frame, columns=cols_res, show="headings", height=len(prestamos) + 1 or 2)
+
+        frame_tree_sim = tk.Frame(frame, bg=self.BG_COLOR)
+        frame_tree_sim.grid(row=row, column=0, columnspan=2, padx=10, pady=4, sticky="w")
+
+        sb_sim = ttk.Scrollbar(frame_tree_sim, orient="vertical")
+        tree_result = ttk.Treeview(
+            frame_tree_sim, columns=cols_res, show="headings",
+            height=len(prestamos) + 1 or 2, yscrollcommand=sb_sim.set,
+        )
+        sb_sim.config(command=tree_result.yview)
+
         for c, w in zip(cols_res, (70, 90, 80, 90, 90, 80)):
             tree_result.heading(c, text=c)
             tree_result.column(c, width=w, anchor="e")
@@ -1600,7 +1607,8 @@ class AnalisisCrypto(AnalisisBase):
         ), tags=("total",))
         tree_result.tag_configure("total", foreground="yellow")
 
-        tree_result.grid(row=row, column=0, columnspan=2, padx=10, pady=4, sticky="w")
+        tree_result.pack(side="left", fill="both")
+        sb_sim.pack(side="right", fill="y")
         row += 1
 
         def _ejecutar_prestamo():
@@ -1680,6 +1688,165 @@ class AnalisisCrypto(AnalisisBase):
                   width=12, command=_ejecutar_prestamo).pack(side="left", padx=4)
         tk.Button(frame_btns, text="Pagar", bg="#922b21", fg="white",
                   width=12, command=_ejecutar_pago).pack(side="left", padx=4)
+        row += 1
+
+        return row
+
+    def _seccion_earn_spot(self, frame, row):
+        """Sección Gestión Earn ↔ Spot: suscribir / rescatar fondos Simple Earn."""
+
+        def _cargar_balances():
+            from Class_ServiciosCrypto import ServiciosCrypto  # import diferido — evita ciclo con Modulos_python chain
+            try:
+                return ServiciosCrypto().earn_spot_balances()
+            except Exception as e:
+                _logger.error(f"_seccion_earn_spot._cargar_balances(): {e}")
+                return []
+
+        def _ejecutar_subscribe():
+            from Class_ServiciosCrypto import ServiciosCrypto  # import diferido — evita ciclo con Modulos_python chain
+            from Class_customer import MyMessageBox  # import diferido — evita ciclo
+            sel = tree_earn.selection()
+            if not sel:
+                MyMessageBox(frame).showinfo("Earn", "Selecciona una fila primero")
+                return
+            vals = tree_earn.item(sel[0], "values")
+            product_id = vals[6]
+            if not product_id:
+                MyMessageBox(frame).showinfo("Earn", f"No hay productId para {vals[0]} — activo sin posición Earn")
+                return
+            try:
+                amount = float(entry_monto_earn.get().strip())
+            except ValueError:
+                MyMessageBox(frame).showinfo("Earn", "Ingresa un monto válido")
+                return
+            if amount <= 0:
+                MyMessageBox(frame).showinfo("Earn", "El monto debe ser mayor a 0")
+                return
+            spot_str = vals[1].replace(",", "") if vals[1] != "-" else "0"
+            spot_disponible = float(spot_str) if spot_str else 0.0
+            if amount > spot_disponible:
+                MyMessageBox(frame).showinfo(
+                    "Earn", f"Insuficiente en Spot\nDisponible: {spot_disponible:.6f} {vals[0]}\nSolicitado: {amount:.6f}"
+                )
+                return
+            try:
+                resp = ServiciosCrypto().earn_subscribe(productId=product_id, amount=amount)
+                _logger.warning(f"earn_subscribe [{vals[0]}] {amount} → {resp}")
+                if resp and "code" in resp and int(resp["code"]) < 0:
+                    MyMessageBox(frame).showinfo("Earn", f"Error: {resp.get('msg', resp['code'])}")
+                else:
+                    MyMessageBox(frame).showinfo("Earn", f"Suscrito: {amount} {vals[0]}\n{resp}")
+            except Exception as e:
+                MyMessageBox(frame).showinfo("Error", str(e))
+                _logger.error(f"_ejecutar_subscribe(): {e}")
+
+        def _ejecutar_redeem():
+            from Class_ServiciosCrypto import ServiciosCrypto  # import diferido — evita ciclo con Modulos_python chain
+            from Class_customer import MyMessageBox  # import diferido — evita ciclo
+            sel = tree_earn.selection()
+            if not sel:
+                MyMessageBox(frame).showinfo("Earn", "Selecciona una fila primero")
+                return
+            vals = tree_earn.item(sel[0], "values")
+            product_id = vals[6]
+            if not product_id:
+                MyMessageBox(frame).showinfo("Earn", f"No hay productId para {vals[0]} — sin posición Earn activa")
+                return
+            try:
+                amount = float(entry_monto_earn.get().strip())
+            except ValueError:
+                MyMessageBox(frame).showinfo("Earn", "Ingresa un monto válido")
+                return
+            if amount <= 0:
+                MyMessageBox(frame).showinfo("Earn", "El monto debe ser mayor a 0")
+                return
+            earn_str = vals[2].replace(",", "") if vals[2] != "-" else "0"
+            earn_disponible = float(earn_str) if earn_str else 0.0
+            if amount > earn_disponible:
+                MyMessageBox(frame).showinfo(
+                    "Earn", f"Insuficiente en Earn\nDisponible: {earn_disponible:.6f} {vals[0]}\nSolicitado: {amount:.6f}"
+                )
+                return
+            try:
+                resp = ServiciosCrypto().earn_redeem(productId=product_id, amount=amount)
+                _logger.warning(f"earn_redeem [{vals[0]}] {amount} → {resp}")
+                if resp and "code" in resp and int(resp["code"]) < 0:
+                    MyMessageBox(frame).showinfo("Earn", f"Error: {resp.get('msg', resp['code'])}")
+                else:
+                    MyMessageBox(frame).showinfo("Earn", f"Rescatado: {amount} {vals[0]}\n{resp}")
+            except Exception as e:
+                MyMessageBox(frame).showinfo("Error", str(e))
+                _logger.error(f"_ejecutar_redeem(): {e}")
+
+        def _on_select(event):
+            sel = tree_earn.selection()
+            if not sel:
+                return
+            vals = tree_earn.item(sel[0], "values")
+            entry_monto_earn.delete(0, "end")
+            # Pre-fill con el Spot libre (máximo disponible para Spot → Earn)
+            spot_str = vals[1].replace(",", "") if vals[1] != "-" else "0"
+            try:
+                entry_monto_earn.insert(0, f"{float(spot_str):.6f}".rstrip("0").rstrip("."))
+            except ValueError:
+                pass
+
+        row = self.crear_seccion(frame, "Gestión Earn ↔ Spot", row)
+
+        balances = _cargar_balances()
+
+        cols_earn = ("Activo", "Spot Libre", "Earn Amount", "APR %", "Rescate", "USDT", "productId")
+        n_rows = max(len(balances), 2)
+
+        frame_tree_earn = tk.Frame(frame, bg=self.BG_COLOR)
+        frame_tree_earn.grid(row=row, column=0, columnspan=2, padx=10, pady=4, sticky="w")
+
+        sb_earn = ttk.Scrollbar(frame_tree_earn, orient="vertical")
+        tree_earn = ttk.Treeview(
+            frame_tree_earn, columns=cols_earn, show="headings",
+            height=min(n_rows, 8), yscrollcommand=sb_earn.set,
+        )
+        sb_earn.config(command=tree_earn.yview)
+
+        for col, w in zip(cols_earn, (70, 100, 100, 60, 80, 90, 0)):
+            tree_earn.heading(col, text=col)
+            tree_earn.column(col, width=w, anchor="e" if col != "Activo" else "center", minwidth=w)
+        tree_earn.column("productId", width=0, minwidth=0, stretch=False)
+
+        for b in balances:
+            usdt_val = b.get("usdt_value", 0.0)
+            tree_earn.insert("", "end", values=(
+                b["asset"],
+                f"{b['spot_free']:,.6f}" if b["spot_free"] > 0 else "-",
+                f"{b['earn_amount']:,.6f}" if b["earn_amount"] > 0 else "-",
+                f"{b['earn_apr']:.2%}" if b["earn_apr"] > 0 else "-",
+                "Sí" if b["can_redeem"] else ("No" if b["earn_amount"] > 0 else "-"),
+                f"${usdt_val:,.2f}" if usdt_val > 0 else "-",
+                b["earn_product_id"],
+            ))
+
+        tree_earn.pack(side="left", fill="both")
+        sb_earn.pack(side="right", fill="y")
+        tree_earn.bind("<<TreeviewSelect>>", _on_select)
+        row += 1
+
+        frame_earn_ctrl = tk.Frame(frame, bg=self.BG_COLOR)
+        frame_earn_ctrl.grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=4)
+
+        tk.Label(frame_earn_ctrl, text="Monto:", bg=self.BG_COLOR, fg="black",
+                 font=("Segoe UI", 9)).pack(side="left")
+        entry_monto_earn = tk.Entry(frame_earn_ctrl, width=16, bg=self.ENTRY_BG, fg="white",
+                                    font=("Segoe UI", 9), relief="flat")
+        entry_monto_earn.insert(0, "0")
+        entry_monto_earn.pack(side="left", padx=6)
+
+        tk.Button(frame_earn_ctrl, text="Spot → Earn", bg="#1a5276", fg="white",
+                  width=14, font=("Segoe UI", 9),
+                  command=_ejecutar_subscribe).pack(side="left", padx=4)
+        tk.Button(frame_earn_ctrl, text="Earn → Spot", bg="#7d6608", fg="white",
+                  width=14, font=("Segoe UI", 9),
+                  command=_ejecutar_redeem).pack(side="left", padx=4)
         row += 1
 
         return row
