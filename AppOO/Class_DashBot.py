@@ -33,6 +33,7 @@ from Modulos_python import (
     EmptyDataError,
     time,
     os,
+    yf,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     CallbackQueryHandler,
@@ -55,7 +56,7 @@ from Modulos_python import (
 
 sys.path.insert(0, "..")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "AppValuations"))
-from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion
+from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion, MarketScreen
 from Class_Screener import sync_market, audit_portfolio
 from Class_InstitucionalScore import (
     sync_institutional,
@@ -487,8 +488,91 @@ class ClassAgenteIA:
                     f"{item['estado']} | col={item['collateral_amount']:.4f} (~{item['collateral_usd']:.2f}) "
                     f"deuda={item['loan_usd']:.2f} | {ajuste_str}"
                 )
+
+            # sincronizar DataHub con datos exactos de API → panel siempre consistente
+            total_col   = sum(i["collateral_usd"] for i in analisis)
+            total_deuda = sum(i["loan_usd"]        for i in analisis)
+            capital_neto = total_col - total_deuda
+            leverage_c   = total_col / max(capital_neto, 1.0)
+            DataHub.manager_GyP["Crypto"]["Colateral"]   = total_col
+            DataHub.manager_GyP["Crypto"]["CapitalNeto"] = capital_neto
+            DataHub.manager_GyP["Crypto"]["Debit"]       = total_deuda
+            DataHub.manager_GyP["Crypto"]["Leverage"]    = leverage_c
+
         except Exception as e:
             self.logger.error(f"Agente_LtvControl(): {e}")
+
+    # agente beta portfolio Stock — actualiza BetaPortfolio cada hora desde DB + posiciones vivas
+    @wait_rate(3600)
+    def Agente_StockBeta(self):
+        try:
+            positions = [p for p in DataHub.manager_positions.get("Stock", []) if float(p.get("mktvalue", 0)) > 0]
+            if not positions:
+                return
+            result = MarketScreen().select(account=self.account, tipo="Dividends")
+            if not result:
+                return
+            rows, ix = result
+            if not rows or not ix:
+                return
+            beta_map = {
+                dict(zip(ix, row))["symbol"]: dict(zip(ix, row)).get("beta")
+                for row in rows
+            }
+            total_val, beta_sum = 0.0, 0.0
+            for p in positions:
+                val = float(p.get("mktvalue", 0))
+                beta_raw = beta_map.get(p.get("ticket", ""))
+                try:
+                    beta = float(beta_raw) if beta_raw is not None else 1.0
+                except (TypeError, ValueError):
+                    beta = 1.0
+                beta_sum += val * beta
+                total_val += val
+            beta_port = round(max(beta_sum / total_val, 0.1), 3) if total_val > 0 else 1.0
+            DataHub.manager_GyP["Stock"]["BetaPortfolio"] = beta_port
+            self.logger.warning(f"StockBeta: β={beta_port:.3f}  ({len(positions)} posiciones)")
+        except Exception as e:
+            self.logger.error(f"Agente_StockBeta(): {e}")
+
+    # agente beta portfolio Crypto — descarga histórico yfinance y calcula beta vs BTC cada 6h
+    @wait_rate(21600)
+    def Agente_CryptoBeta(self):
+        try:
+            positions = [p for p in DataHub.manager_positions.get("Crypto", []) if float(p.get("position", 0)) > 0]
+            if not positions:
+                return
+            orig_names = [p["ticket"] for p in positions]
+            yf_names   = [s[:-4] + "-USD" if s.endswith("USDT") else s for s in orig_names]
+            name_map   = dict(zip(yf_names, orig_names))
+            raw = yf.download(yf_names, period="6mo", auto_adjust=True, progress=False)
+            if raw.empty:
+                return
+            close = (
+                raw[["Close"]].rename(columns={"Close": orig_names[0]})
+                if len(yf_names) == 1
+                else raw["Close"].rename(columns=name_map)
+            )
+            returns = close.pct_change().dropna()
+            if returns.empty or len(returns) < 10:
+                return
+            btc_col    = next((c for c in returns.columns if "BTC" in c.upper()), None)
+            market_ret = returns[btc_col] if btc_col else returns.mean(axis=1)
+            market_var = market_ret.var()
+            if market_var == 0:
+                return
+            beta_map  = {col: returns[col].cov(market_ret) / market_var for col in returns.columns}
+            total_val = sum(float(p.get("mktvalue", 0)) for p in positions)
+            if total_val <= 0:
+                return
+            beta_port = sum(
+                (float(p.get("mktvalue", 0)) / total_val) * beta_map.get(p["ticket"], 1.5)
+                for p in positions
+            )
+            DataHub.manager_GyP["Crypto"]["BetaPortfolio"] = round(max(beta_port, 0.1), 3)
+            self.logger.warning(f"CryptoBeta: β={DataHub.manager_GyP['Crypto']['BetaPortfolio']:.3f}  ({len(positions)} posiciones)")
+        except Exception as e:
+            self.logger.error(f"Agente_CryptoBeta(): {e}")
 
     # agente defensivo: protege ganancias con órdenes STOP dinámicas
     async def Agente_ManagerPreservation(self):
@@ -1700,6 +1784,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
                     # Agente LTV Control — monitorea ratio deuda/colateral Binance (DRY RUN)
                     self.Agente_LtvControl()
+
+                    # Agente Beta Portfolio Stock — actualiza BetaPortfolio cada hora
+                    self.Agente_StockBeta()
+
+                    # Agente Beta Portfolio Crypto — descarga yfinance y calcula beta vs BTC cada 6h
+                    self.Agente_CryptoBeta()
 
                     # Agente for Preservation (defensivo estructural)  -- No activar esta en prueba
                     # self.exec_modulo_async(self.Agente_ManagerPreservation())
