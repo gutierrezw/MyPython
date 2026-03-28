@@ -38,6 +38,7 @@ from Modulos_python import (
 )
 from Modulos_Utilitarios import (
     display_red_green,
+    margin_risk_status,
     sort_positions,
     convierte_ticket_crypto,
     is_magnitud,
@@ -221,7 +222,12 @@ class DataHub:
     manager_after = {}
     manager_buysell = {}
     manager_sesion = {}
-    manager_GyP = {"BotCrypto": {"Value": 0, "Inversion": 0, "dGyP": 0, "Debit": 0, "Margen": 0}}
+    manager_GyP = {
+        "BotCrypto": {"Value": 0, "Inversion": 0, "dGyP": 0, "Debit": 0, "Margen": 0},
+        "Stock":     {"Debit": 0, "DebitMax": 0, "BetaPortfolio": 1.0},
+        "Crypto":    {"Debit": 0, "DebitMax": 0, "BetaPortfolio": 1.5, "Colateral": 0, "CapitalNeto": 0, "Leverage": 0},
+    }
+    manager_positions = {"Stock": [], "Crypto": []}  # posiciones vivas por vehículo para agentes
     rebalanceo = {}
     telegram_botcrypto = {}
     procesos = []
@@ -3624,7 +3630,8 @@ class WidgetVehiculo(TickerInfo):
 
             # 2da fila
             self.resumen[" Dividendos :"] = "{:>11.2f}".format(float(Dividends))
-            self.resumen[" % Margen   :"] = "{:>11.2f}".format(float(Margen))
+            _mrs = margin_risk_status(float(Margen))
+            self.resumen[" %Mrg/Risk  :"] = f"{_mrs['emoji']} {float(Margen):>6.1%}"
             self.resumen[" Cash       :"] = "{:>11.2f}".format(float(Cash))
             if Sesion is None:
                 self.resumen[" Prc/profit :"] = "{:>11.2f}".format(float(Per))
@@ -3658,13 +3665,20 @@ class WidgetVehiculo(TickerInfo):
 
                         # display linea inferior header
                         if i > 4:
-                            if " Conexión   :" != key:
+                            if " %Mrg/Risk  :" == key:
+                                try:
+                                    mrg_val = float(value.strip().split("%")[0].split()[-1]) / 100
+                                    mrg_color = margin_risk_status(mrg_val)["color"]
+                                except Exception:
+                                    mrg_color = "white"
                                 self.panel_label[k].config(text=key, font=("Courier", 9))
-                                self.panel_label[k + 1].config(text=value, font=("Courier", 9))
+                                self.panel_label[k + 1].config(text=value, fg=mrg_color, font=("Courier", 9))
                             elif " Conexión   :" == key:
-                                cox = display_red_green(0)
                                 self.panel_label[k].config(text=key, font=("Courier", 9))
                                 self.panel_label[k + 1].config(text=value, fg="yellow", font=("Courier", 9))
+                            else:
+                                self.panel_label[k].config(text=key, font=("Courier", 9))
+                                self.panel_label[k + 1].config(text=value, font=("Courier", 9))
 
             # rescribe valores de oportunidades sell
             message = []
@@ -3695,15 +3709,8 @@ class WidgetVehiculo(TickerInfo):
     def header_total_positions(self, positions) -> list:
         try:
             # totaliza sobre positions y deja en datos
-            dgyp, costobase, mktvalue, gyp, debit, dividendos, roi, unprofit = (
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
+            dgyp, costobase, mktvalue, gyp, debit, dividendos, roi, unprofit, colateral_value = (
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             )
             if positions:
                 for position in positions:
@@ -3714,7 +3721,10 @@ class WidgetVehiculo(TickerInfo):
                     mktvalue += position["mktvalue"]
                     if mktvalue == 0.0:
                         mktvalue += position["position"] * position["mrkprice"]
-                    debit += position["deuda"]
+                    pos_deuda = float(position.get("deuda", 0))
+                    debit += pos_deuda
+                    if pos_deuda > 0:
+                        colateral_value += position["mktvalue"]
                     dgyp += position["dgyp"]
                     gyp += position["unrealizedpnl"]
                     roi = (gyp / costobase) if costobase > 0 else 0
@@ -3738,7 +3748,13 @@ class WidgetVehiculo(TickerInfo):
             if self.vehiculo == "Crypto":
                 # comparte totalización de gyp diarias
                 per = costobase / unprofit if unprofit > 0 else 0
-                margen = costobase / (costobase - debit)
+                debit_max_crypto = colateral_value * 0.65
+                DataHub.manager_GyP["Crypto"]["Debit"]    = debit
+                DataHub.manager_GyP["Crypto"]["DebitMax"] = debit_max_crypto
+                beta_crypto  = DataHub.manager_GyP["Crypto"].get("BetaPortfolio", 1.5)
+                neto_api     = DataHub.manager_GyP["Crypto"].get("CapitalNeto", 0)
+                equity_crypto = max(neto_api if neto_api > 0 else colateral_value - debit, 1.0)
+                margen = debit / equity_crypto * beta_crypto
                 cash = float(self.resumen.get(" Cash       :", 0))
 
                 # escribir en resumen para impactar los graficos vehículo
@@ -3758,14 +3774,23 @@ class WidgetVehiculo(TickerInfo):
                 if self.summary:
                     base = "BASE"
                     # comparte totalización de gyp diarias
-                    dividendos = self.summary[base]["dividends"]
-                    mktvalue = self.summary[base]["netliquidationvalue"]
-                    debit = self.summary[base]["cashbalance"] if self.summary[base]["cashbalance"] < 0 else 0
-                    cash = self.summary[base]["cashbalance"]
-                    gyp = self.summary[base]["unrealizedpnl"]
+                    dividendos   = self.summary[base]["dividends"]
+                    mktvalue     = float(self.summary[base]["netliquidationvalue"] or 0)
+                    gross_pos    = float(self.summary[base].get("stockmarketvalue") or 0) or mktvalue
+                    cash_balance = float(self.summary[base]["cashbalance"] or 0)
+                    cash         = cash_balance
+                    gyp          = self.summary[base]["unrealizedpnl"]
 
                     per = costobase / unprofit if unprofit > 0 else 0
-                    margen = costobase / (costobase + debit)
+                    # cashbalance < 0 → deuda directa de cash (fuente IB, coincide con portal web)
+                    # cashbalance ≥ 0 → puede haber deuda de margen sobre posiciones
+                    deuda_actual = abs(cash_balance) if cash_balance < 0 else max(0.0, gross_pos - mktvalue)
+                    debit_max_stock = mktvalue * 0.8
+                    DataHub.manager_GyP["Stock"]["Debit"]    = deuda_actual
+                    DataHub.manager_GyP["Stock"]["DebitMax"] = debit_max_stock
+                    beta_stock   = DataHub.manager_GyP["Stock"].get("BetaPortfolio", 1.0)
+                    equity_stock = max(mktvalue, 1.0)
+                    margen       = (deuda_actual / equity_stock) * beta_stock
 
                     # escribir en resumen para impactar los graficos vehículo
                     self.set_header_panel(
@@ -3774,11 +3799,15 @@ class WidgetVehiculo(TickerInfo):
                         Unpyl=gyp,
                         Unprofit=unprofit,
                         Per=per,
-                        Debit=debit,
+                        Debit=deuda_actual,
                         Dividends=dividendos,
                         Margen=margen,
                         Cash=cash,
                     )
+
+            # compartir posiciones vivas con agentes de beta
+            if self.vehiculo in DataHub.manager_positions and positions:
+                DataHub.manager_positions[self.vehiculo] = positions
 
             return datos
         except Exception as e:
@@ -4760,6 +4789,9 @@ class WidgetVehiculo(TickerInfo):
                     repositorio=self.PlanInversion,
                     colors=self.colors,
                     vehiculo=self.vehiculo,
+                    summary=self.summary,
+                    account=self.account,
+                    positions=self.positions,
                 )
 
             analisis.mostrar_ventana()
@@ -5211,6 +5243,7 @@ class WidgetVehiculo(TickerInfo):
 
             # --- 1. Preparar los Datos (igual que antes) ---
             df_rendimiento = pd.DataFrame(data, columns=["Symbol", "Rendimiento"])
+            df_rendimiento["Rendimiento"] = pd.to_numeric(df_rendimiento["Rendimiento"], errors="coerce").fillna(0.0)
             df_rendimiento["Rendimiento_Pct"] = df_rendimiento["Rendimiento"] * 100
 
             ganadores = df_rendimiento[df_rendimiento["Rendimiento"] >= 0].nlargest(5, "Rendimiento_Pct")

@@ -26,10 +26,10 @@ from Modulos_python import (
     traceback,
     logging,
 )
-from Modulos_Mysql import BDsystem, PlanInversion, RepositorioOportunidadesBuySell
+from Modulos_Mysql import BDsystem, PlanInversion, RepositorioOportunidadesBuySell, MarketScreen
 from Modulos_Comunes import performa_asset, detalle_book, read_csv_insert_diaria, proceso_update_performance
-from Modulos_Utilitarios import vehiculo_parm
-from Modulos_python import threading, time
+from Modulos_Utilitarios import vehiculo_parm, margin_risk_status
+from Modulos_python import threading, time, yf
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
@@ -53,22 +53,16 @@ class AnalisisBase:
     LABEL_FG = "yellow"
     VALUE_FG = "black"  # Negro para mejor lectura sobre fondo verde
 
-    def __init__(self, master, info, repositorio, colors, vehiculo):
-        """
-        Inicializa el análisis base
-
-        Args:
-            master: Ventana padre de Tkinter
-            info: dict con datos de activos (DataHub.info)
-            repositorio: Objeto para queries a BD
-            colors: dict con colores de la aplicación
-            vehiculo: Tipo de vehículo
-        """
+    def __init__(self, master, info, repositorio, colors, vehiculo, summary=None, account=None, positions=None):
         self.master = master
         self.info = info
         self.repositorio = repositorio
         self.colors = colors
         self.vehiculo = vehiculo
+        self.summary = summary or {}
+        self.account = account
+        self.positions = positions or []
+        self.top = 3
 
         # DataFrames para análisis
         self.df_lotes = pd.DataFrame()
@@ -551,57 +545,91 @@ class AnalisisBase:
         ax.spines["right"].set_visible(True)
         for sp in ax.spines.values():
             sp.set_color("gray")
-        ax.set_title(titulo_ax, fontsize=9, color=color_titulo, pad=3)
-        ax.legend(handles=p_legend, loc="upper left", fontsize=5,
-                  facecolor=self.CG_COLOR, labelcolor="white", framealpha=0.6)
-
-    def crear_grafico_evolucion_top(self, parent, df_historico, fondos_list, titulo, row, color_titulo="#27ae60"):
-        """Crea gráfico de líneas con evolución histórica del rendimiento acumulado (subplot único)."""
-        if df_historico.empty or not fondos_list:
-            return row
-        try:
-            fg = Figure(figsize=(5.4, 3.0), dpi=100)
-            fg.patch.set_facecolor(self.CG_COLOR)
-            ax = fg.add_subplot(111)
-            self._dibujar_evolucion_ax(ax, df_historico, fondos_list, titulo, color_titulo)
-            fg.subplots_adjust(left=0.05, right=0.90, top=0.85, bottom=0.20)
-
-            frame_grafico = tk.Frame(parent, bg=self.CG_COLOR)
-            frame_grafico.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
-            canvas = FigureCanvasTkAgg(fg, master=frame_grafico)
-            canvas.draw()
-            canvas.get_tk_widget().pack(fill="x", expand=True)
-            return row + 1
-        except Exception as e:
-            print(f"[crear_grafico_evolucion_top]: {e}")
-            return row
+        return p_legend
 
     def crear_grafico_evolucion_combinado(self, parent, df_historico, fondos_mejores, fondos_peores, row):
-        """Un solo Figure con 2 subplots apilados: MEJORES (verde) arriba, PEORES (naranja) abajo."""
+        """Dos Figure separados apilados: MEJORES (verde) y PEORES (naranja), leyenda blanca fuera."""
         if df_historico.empty:
             return row
         try:
             n = self.top
-            fg = Figure(figsize=(5.4, 5.2), dpi=100)
-            fg.patch.set_facecolor(self.CG_COLOR)
-            ax1 = fg.add_subplot(211)
-            ax2 = fg.add_subplot(212)
-
-            self._dibujar_evolucion_ax(ax1, df_historico, fondos_mejores, f"TOP {n} MEJORES FCIs", "#2ecc71")
-            self._dibujar_evolucion_ax(ax2, df_historico, fondos_peores,  f"TOP {n} PEORES FCIs",  "#e67e22")
-
-            fg.subplots_adjust(left=0.05, right=0.88, top=0.97, bottom=0.08, hspace=0.35)
-
             frame_g = tk.Frame(parent, bg=self.CG_COLOR)
             frame_g.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
-            canvas = FigureCanvasTkAgg(fg, master=frame_g)
-            canvas.get_tk_widget().pack(fill="x", expand=True)
-            canvas.draw()
+            for simbolos, titulo, color_titulo in (
+                (fondos_mejores, f"TOP {n} MEJORES FCIs", "#2ecc71"),
+                (fondos_peores,  f"TOP {n} PEORES FCIs",  "#e67e22"),
+            ):
+                fg = Figure(figsize=(5.4, 2.8), dpi=100)
+                fg.patch.set_facecolor(self.CG_COLOR)
+                ax = fg.add_subplot(111)
+                p_legend = self._dibujar_evolucion_ax(ax, df_historico, simbolos, titulo, color_titulo)
+                fg.legend(handles=p_legend, loc="outside upper left", fontsize=6,
+                          facecolor="white", labelcolor="black", framealpha=1.0)
+                fg.suptitle(titulo, fontsize=9, color=color_titulo)
+                fg.subplots_adjust(left=0.05, right=0.88, top=0.80, bottom=0.18)
+                canvas = FigureCanvasTkAgg(fg, master=frame_g)
+                canvas.get_tk_widget().pack(fill="x", expand=True, pady=2)
+                canvas.draw()
             return row + 1
         except Exception as e:
             print(f"[crear_grafico_evolucion_combinado]: {e}")
             traceback.print_exc()
             return row
+
+    @staticmethod
+    def margin_risk(total_position, equity, beta):
+        """Riesgo de margen ajustado por beta: usage = deuda/equity, risk = usage × beta."""
+        debt  = max(0.0, total_position - equity)
+        usage = debt / equity if equity > 0 else 0.0
+        return {"usage": usage, "risk": usage * beta}
+
+    def _fetch_historico_yfinance(self):
+        """Descarga 6 meses de precios para todos los símbolos activos (batch único). Subclases pueden override."""
+        try:
+            symbols = [p["ticket"] for p in self.positions if float(p.get("position", 0)) > 0]
+            if not symbols:
+                return pd.DataFrame()
+            raw = yf.download(symbols, period="6mo", auto_adjust=True, progress=False)
+            if raw.empty:
+                return pd.DataFrame()
+            close = raw[["Close"]].rename(columns={"Close": symbols[0]}) if len(symbols) == 1 else raw["Close"]
+            df = close.reset_index().melt(id_vars="Date", var_name="fondo", value_name="valorActual")
+            df = df.rename(columns={"Date": "fecha"})
+            return df.dropna(subset=["valorActual"])
+        except Exception as e:
+            _logger.error(f"_fetch_historico_yfinance(): {e}")
+            return pd.DataFrame()
+
+    def _render_grafico_evolucion(self, frame_chart, df_hist):
+        """Dos gráficos separados: TOP N GANADORES y TOP N PERDEDORES con leyenda blanca fuera."""
+        try:
+            for w in frame_chart.winfo_children():
+                w.destroy()
+            if df_hist.empty or self.df_lotes.empty:
+                tk.Label(
+                    frame_chart, text="Sin datos históricos disponibles",
+                    bg=self.CG_COLOR, fg="gray", font=("Segoe UI", 8),
+                ).pack()
+                return
+            top_gan = self.df_lotes.nlargest(self.top, "ganancia_pct")["symbol"].tolist()
+            top_per = self.df_lotes.nsmallest(self.top, "ganancia_pct")["symbol"].tolist()
+            for simbolos, titulo, color_titulo in (
+                (top_gan, f"TOP {self.top} GANADORES", "#2ecc71"),
+                (top_per, f"TOP {self.top} PERDEDORES", "#e67e22"),
+            ):
+                fg = Figure(figsize=(5.4, 2.8), dpi=100)
+                fg.patch.set_facecolor(self.CG_COLOR)
+                ax = fg.add_subplot(111)
+                p_legend = self._dibujar_evolucion_ax(ax, df_hist, simbolos, titulo, color_titulo)
+                fg.legend(handles=p_legend, loc="outside upper left", fontsize=6,
+                          facecolor="white", labelcolor="black", framealpha=1.0)
+                fg.suptitle(titulo, fontsize=9, color=color_titulo)
+                fg.subplots_adjust(left=0.05, right=0.88, top=0.80, bottom=0.18)
+                canvas = FigureCanvasTkAgg(fg, master=frame_chart)
+                canvas.get_tk_widget().pack(fill="x", expand=True, pady=2)
+                canvas.draw()
+        except Exception as e:
+            _logger.error(f"_render_grafico_evolucion(): {e}")
 
     def crear_treeview_ranking(self, parent, df, columnas, titulo, row, height=8):
         """
@@ -726,65 +754,6 @@ class AnalisisBase:
             traceback.print_exc()
             return row
 
-    def crear_grafico_ganadores_perdedores(self, parent, df, col_symbol, col_pct, titulo, row):
-        """
-        Gráfico de barras horizontales: top 5 ganadores + top 5 perdedores por col_pct.
-        df: DataFrame con columnas col_symbol y col_pct (porcentaje float).
-        """
-        if df is None or df.empty:
-            return row
-        try:
-            top_gan = df[df[col_pct] >= 0].nlargest(5, col_pct)
-            top_per = df[df[col_pct] < 0].nsmallest(5, col_pct)
-            # Bear market: si no hay positivos, toma los menos negativos
-            if top_gan.empty:
-                top_gan = df.nlargest(5, col_pct)
-            df_chart = pd.concat([
-                top_gan.sort_values(col_pct, ascending=True),
-                top_per.sort_values(col_pct, ascending=True),
-            ]).drop_duplicates(subset=[col_symbol])
-
-            colores = ["#2ecc71" if v >= 0 else "#e74c3c" for v in df_chart[col_pct]]
-            nombres = [s[:12] for s in df_chart[col_symbol]]
-            valores = df_chart[col_pct].values
-
-            fg = Figure(figsize=(5.4, 2.4), dpi=100)
-            fg.patch.set_facecolor(self.CG_COLOR)
-            ax = fg.add_subplot(111)
-            ax.set_facecolor(self.CG_COLOR)
-
-            bars = ax.barh(nombres, valores, color=colores, height=0.6)
-            ax.axvline(0, color="gray", linewidth=0.6)
-            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:+.0f}%"))
-            ax.tick_params(colors="white", labelsize=7)
-            ax.spines[["top", "right"]].set_visible(False)
-            for sp in ["bottom", "left"]:
-                ax.spines[sp].set_color("gray")
-            ax.grid(axis="x", alpha=0.2, color="gray")
-
-            # etiquetas dentro/fuera de cada barra
-            xmax = max(abs(valores)) if len(valores) else 1
-            for bar, val in zip(bars, valores):
-                offset = xmax * 0.02
-                ha = "left" if val >= 0 else "right"
-                x  = val + offset if val >= 0 else val - offset
-                ax.text(x, bar.get_y() + bar.get_height() / 2,
-                        f"{val:+.1f}%", va="center", ha=ha, fontsize=5, color="white")
-
-            fg.suptitle(titulo, fontsize=9, color="white", y=0.98)
-            fg.subplots_adjust(left=0.28, right=0.95, top=0.88, bottom=0.15)
-
-            frame_g = tk.Frame(parent, bg=self.CG_COLOR)
-            frame_g.grid(row=row, column=0, columnspan=2, padx=5, pady=3, sticky="ew")
-            canvas = FigureCanvasTkAgg(fg, master=frame_g)
-            canvas.get_tk_widget().pack(fill="x", expand=True)
-            canvas.draw()
-            return row + 1
-
-        except Exception as e:
-            print(f"[crear_grafico_ganadores_perdedores]: {e}")
-            traceback.print_exc()
-            return row
 
     def reconstruir_diaria_performance(self, btn=None, lbl=None):
         """
@@ -845,7 +814,6 @@ class AnalisisFCI(AnalisisBase):
     def __init__(self, master, info, repositorio, colors, vehiculo="BBVA.ARS"):
         super().__init__(master, info, repositorio, colors, vehiculo)
         self.vehiculo = vehiculo
-        self.top = 3
         self.df_historico = pd.DataFrame()
         self.df_ultimo = pd.DataFrame()
         self.metricas = pd.DataFrame()
@@ -1322,6 +1290,53 @@ class AnalisisCrypto(AnalisisBase):
         super().__init__(master, info, repositorio, colors, vehiculo)
         self._positions = positions or []
 
+    def _calcular_beta_portfolio(self, df_hist):
+        """Beta portfolio Crypto vs BTC usando la misma data histórica ya descargada."""
+        try:
+            from Class_customer import DataHub  # import diferido — evita ciclo
+            if df_hist.empty or self.df_lotes.empty:
+                return
+            pivot = df_hist.pivot(index="fecha", columns="fondo", values="valorActual").dropna(how="all")
+            returns = pivot.pct_change().dropna()
+            if returns.empty or len(returns) < 10:
+                return
+            btc_col = next((c for c in returns.columns if "BTC" in c.upper()), None)
+            market_ret = returns[btc_col] if btc_col else returns.mean(axis=1)
+            market_var = market_ret.var()
+            if market_var == 0:
+                return
+            beta_map = {col: returns[col].cov(market_ret) / market_var for col in returns.columns}
+            total_val = self.df_lotes["valor_actual"].sum()
+            if total_val <= 0:
+                return
+            beta_port = sum(
+                (row["valor_actual"] / total_val) * beta_map.get(row["symbol"], 1.5)
+                for _, row in self.df_lotes.iterrows()
+            )
+            DataHub.manager_GyP["Crypto"]["BetaPortfolio"] = round(max(beta_port, 0.1), 3)
+        except Exception as e:
+            _logger.error(f"_calcular_beta_portfolio(): {e}")
+
+    def _fetch_historico_yfinance(self):
+        """Override: convierte BTCUSDT→BTC-USD para yfinance y descarga 6 meses."""
+        try:
+            positions = [p for p in self._positions if float(p.get("position", 0)) > 0]
+            if not positions:
+                return pd.DataFrame()
+            orig_names = [p["ticket"] for p in positions]
+            yf_names   = [s[:-4] + "-USD" if s.endswith("USDT") else s for s in orig_names]
+            name_map   = dict(zip(yf_names, orig_names))
+            raw = yf.download(yf_names, period="6mo", auto_adjust=True, progress=False)
+            if raw.empty:
+                return pd.DataFrame()
+            close = raw[["Close"]].rename(columns={"Close": orig_names[0]}) if len(yf_names) == 1 else raw["Close"].rename(columns=name_map)
+            df = close.reset_index().melt(id_vars="Date", var_name="fondo", value_name="valorActual")
+            df = df.rename(columns={"Date": "fecha"})
+            return df.dropna(subset=["valorActual"])
+        except Exception as e:
+            _logger.error(f"AnalisisCrypto._fetch_historico_yfinance(): {e}")
+            return pd.DataFrame()
+
     def _poblar_contenido(self, frame):
         """Implementación específica para Crypto"""
         def _actualizar():
@@ -1354,17 +1369,21 @@ class AnalisisCrypto(AnalisisBase):
         row = self._seccion_deuda(frame, row)
 
         # ========== RENDIMIENTO DE POSICIONES ==========
-        row = self.crear_seccion(frame, "Rendimiento de Posiciones", row)
+        row = self.crear_seccion(frame, f"Rendimiento Top {self.top} (6m):", row)
+        frame_chart = tk.Frame(frame, bg=self.CG_COLOR)
+        frame_chart.grid(row=row, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        tk.Label(
+            frame_chart, text="Cargando datos históricos...",
+            bg=self.CG_COLOR, fg="gray", font=("Segoe UI", 8),
+        ).pack()
+        row += 1
 
-        if not self.df_lotes.empty:
-            row = self.crear_grafico_ganadores_perdedores(
-                parent=frame,
-                df=self.df_lotes,
-                col_symbol="symbol",
-                col_pct="ganancia_pct",
-                titulo="Top 5 Ganadores / Perdedores",
-                row=row,
-            )
+        def _cargar_y_render_crypto():
+            df_hist = self._fetch_historico_yfinance()
+            self._calcular_beta_portfolio(df_hist)
+            frame_chart.after(0, lambda: self._render_grafico_evolucion(frame_chart, df_hist))
+
+        threading.Thread(target=_cargar_y_render_crypto, daemon=True).start()
 
         # ========== CARTERA VS ÍNDICE ==========
         row = self.crear_seccion(frame, "Cartera vs Índice:", row)
@@ -1515,8 +1534,21 @@ class AnalisisCrypto(AnalisisBase):
         capital_neto = total_col - total_deuda
         total_capital = capital_earn + total_col
         apalancamiento = total_deuda / total_capital if total_capital > 0 else 0
+        leverage_crypto = total_col / max(capital_neto, 1.0)
         max_deuda = capital_earn * max_deuda_pct
         disponible = capital_neto
+
+        from Class_customer import DataHub  # import diferido — evita ciclo: Class_Analisis→Class_customer
+        _beta_c = DataHub.manager_GyP["Crypto"].get("BetaPortfolio", 1.5)
+        _equity_c = max(capital_neto, 1.0)
+        _mrg_risk_c = (total_deuda / _equity_c) * _beta_c
+        _mrs_c = margin_risk_status(_mrg_risk_c)
+
+        # sincronizar con panel — usa datos exactos de API
+        DataHub.manager_GyP["Crypto"]["Colateral"]   = total_col
+        DataHub.manager_GyP["Crypto"]["CapitalNeto"] = capital_neto
+        DataHub.manager_GyP["Crypto"]["Debit"]       = total_deuda
+        DataHub.manager_GyP["Crypto"]["Leverage"]    = leverage_crypto
 
         row = self.crear_seccion(frame, "Análisis de Préstamos Flexibles", row)
         row = self.crear_campo(frame, "Capital Earn (Flexible):", f"${capital_earn:,.2f} USDT", row)
@@ -1524,7 +1556,14 @@ class AnalisisCrypto(AnalisisBase):
         row = self.crear_campo(frame, "Deuda Total:", f"${total_deuda:,.2f} USDT", row)
         color_neto = "green" if capital_neto >= 0 else "red"
         row = self.crear_campo(frame, "Capital Neto (col - deuda):", f"${capital_neto:,.2f} USD", row, fg_valor=color_neto)
-        row = self.crear_campo(frame, "Apalancamiento:", f"{apalancamiento:.2%}  (deuda / earn+col)", row)
+        row = self.crear_campo(frame, "Apalancamiento (LTV):", f"{apalancamiento:.2%}  (deuda / earn+col)", row)
+        row = self.crear_campo(frame, "Leverage:", f"{leverage_crypto:.2f}x  (col / capital_neto)", row)
+        row = self.crear_campo(frame, "Beta Portfolio:", f"{_beta_c:.2f}  (calculado al abrir análisis)", row)
+        row = self.crear_campo(
+            frame, "% Mrg/Risk:",
+            f"{_mrg_risk_c:.1%}  {_mrs_c['emoji']} {_mrs_c['estado']} — {_mrs_c['accion']}  (deuda/equity × β={_beta_c:.2f})",
+            row, fg_valor=_mrs_c["color"],
+        )
 
         row = _crear_grafico_prestamos(frame, prestamos, row)
 
@@ -1710,8 +1749,16 @@ class AnalisisCrypto(AnalisisBase):
 class AnalisisStock(AnalisisBase):
     """Análisis específico para Acciones (IB)"""
 
-    def __init__(self, master, info, repositorio, colors, vehiculo="Stock"):
-        super().__init__(master, info, repositorio, colors, vehiculo)
+    _LEVERAGE_PARAMS = {
+        "max_leverage": 1.8,
+        "max_monthly_interest_pct": 0.02,
+        "target_beta_portfolio": 1.2,
+        "max_beta_portfolio": 1.5,
+        "tasa_ib": 0.065,
+    }
+
+    def __init__(self, master, info, repositorio, colors, vehiculo="Stock", summary=None, account=None, positions=None):
+        super().__init__(master, info, repositorio, colors, vehiculo, summary=summary, account=account, positions=positions)
 
     def _poblar_contenido(self, frame):
         """Implementación específica para Stock"""
@@ -1736,85 +1783,195 @@ class AnalisisStock(AnalisisBase):
             fg_valor=color_gan,
         )
 
-        # ========== TOP GANADORES ==========
-        row = self.crear_seccion(frame, "Top 5 Ganadores", row)
-        if not self.df_lotes.empty:
-            top_ganadores = self.df_lotes.nlargest(5, "ganancia_pct")
-            for _, lote in top_ganadores.iterrows():
-                color = self.obtener_color_ganancia(lote["ganancia_pct"])
-                row = self.crear_campo(
-                    frame,
-                    f"{lote['symbol'][:15]}:",
-                    f"${lote['valor_actual']:,.2f}  |  {lote['ganancia_pct']:+.2f}%",
-                    row,
-                    fg_valor=color,
-                )
+        # ========== GRÁFICO EVOLUCIÓN TOP 5 (carga asíncrona) ==========
+        row = self.crear_seccion(frame, f"Rendimiento Top {self.top} (6m):", row)
+        frame_chart = tk.Frame(frame, bg=self.CG_COLOR)
+        frame_chart.grid(row=row, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        tk.Label(
+            frame_chart, text="Cargando datos históricos...",
+            bg=self.CG_COLOR, fg="gray", font=("Segoe UI", 8),
+        ).pack()
+        row += 1
 
-        # ========== TOP PERDEDORES ==========
-        row = self.crear_seccion(frame, "Top 5 Perdedores", row)
-        if not self.df_lotes.empty:
-            top_perdedores = self.df_lotes.nsmallest(5, "ganancia_pct")
-            for _, lote in top_perdedores.iterrows():
-                color = self.obtener_color_ganancia(lote["ganancia_pct"])
-                row = self.crear_campo(
-                    frame,
-                    f"{lote['symbol'][:15]}:",
-                    f"${lote['valor_actual']:,.2f}  |  {lote['ganancia_pct']:+.2f}%",
-                    row,
-                    fg_valor=color,
-                )
+        def _cargar_y_render():
+            df_hist = self._fetch_historico_yfinance()
+            frame_chart.after(0, lambda: self._render_grafico_evolucion(frame_chart, df_hist))
 
-        # ========== DETALLE DE POSICIONES ==========
-        row = self.crear_seccion(frame, "Detalle de Posiciones", row)
-        if not self.df_lotes.empty:
-            for _, lote in self.df_lotes.sort_values("valor_actual", ascending=False).iterrows():
-                color = self.obtener_color_ganancia(lote["ganancia_pct"])
-                row = self.crear_campo(
-                    frame,
-                    f"{lote['symbol'][:15]}:",
-                    f"Qty: {lote['cantidad']:.0f} | ${lote['valor_actual']:,.2f} | {lote['ganancia_pct']:+.1f}%",
-                    row,
-                    width=50,
-                    fg_valor=color,
-                )
+        threading.Thread(target=_cargar_y_render, daemon=True).start()
+
+        # ========== CONTROL DE APALANCAMIENTO + SIMULADOR ==========
+        apal = self._evaluar_apalancamiento(resumen["total_valor"])
+        if apal:
+            p = self._LEVERAGE_PARAMS
+            margen_max = max(0.0, apal["netliq"] * p["max_leverage"] - apal["gross_pos"])
+
+            row = self.crear_seccion(frame, "Control de Apalancamiento (IB)", row)
+
+            # fila input integrada en la misma sección
+            fr_sim = tk.Frame(frame, bg=self.BG_COLOR)
+            fr_sim.grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=4)
+            tk.Label(fr_sim, text=f"Invertir adicional (máx. ${margen_max:,.0f}):",
+                     bg=self.BG_COLOR, fg="black", font=("Segoe UI", 9)).pack(side="left")
+            entry_sim = tk.Entry(fr_sim, width=12, bg=self.ENTRY_BG, fg="white",
+                                 font=("Segoe UI", 9), relief="flat")
+            entry_sim.insert(0, "0")
+            entry_sim.pack(side="left", padx=6)
+            tk.Button(fr_sim, text="Calcular", bg="DarkCyan", fg="white", width=10,
+                      font=("Segoe UI", 9), command=lambda: _simular()).pack(side="left", padx=4)
+            row += 1
+
+            # tabla principal: todas las métricas con Actual | Proyectado | Δ
+            cols_cmp = ("Métrica", "Actual", "Proyectado", "Δ")
+            tv_cmp = ttk.Treeview(frame, columns=cols_cmp, show="headings", height=12)
+            for c, w, anc in zip(cols_cmp, (200, 130, 120, 90), ("w", "e", "e", "e")):
+                tv_cmp.heading(c, text=c)
+                tv_cmp.column(c, width=w, anchor=anc)
+            tv_cmp.grid(row=row, column=0, columnspan=2, padx=10, pady=4, sticky="ew")
+            row += 1
+
+            # tabla proyección temporal
+            row = self.crear_seccion(frame, "Proyección de costos de interés", row)
+            cols_proy = ("Período", "Int. Acumulada ($)", "% de NetLiq", "Margen libre ($)")
+            tv_proy = ttk.Treeview(frame, columns=cols_proy, show="headings", height=4)
+            for c, w, anc in zip(cols_proy, (90, 150, 130, 170), ("w", "e", "e", "e")):
+                tv_proy.heading(c, text=c)
+                tv_proy.column(c, width=w, anchor=anc)
+            tv_proy.grid(row=row, column=0, columnspan=2, padx=10, pady=4, sticky="ew")
+            row += 1
+
+            def _simular():
+                def _delta_str(v_new, v_cur, fmt=".2f"):
+                    d = v_new - v_cur
+                    return f"{d:+{fmt}}" if d != 0 else "–"
+
+                def _col_lev(v):
+                    return "red" if v >= p["max_leverage"] else ("orange" if v >= p["max_leverage"] * 0.9 else "#2ecc71")
+
+                def _col_risk(v):
+                    return "red" if v >= 2.0 else ("orange" if v >= 1.5 else "#2ecc71")
+
+                def _col_int(v):
+                    mx = p["max_monthly_interest_pct"]
+                    return "red" if v >= mx else ("orange" if v >= mx * 0.8 else "white")
+
+                try:
+                    extra = float(entry_sim.get().replace(",", "") or 0)
+                except ValueError:
+                    return
+
+                new_gross    = apal["gross_pos"] + extra
+                new_lev      = new_gross / apal["netliq"]
+                new_deuda    = max(0.0, new_gross - apal["netliq"])
+                new_int_m    = new_deuda * p["tasa_ib"] / 12
+                new_int_a    = new_deuda * p["tasa_ib"]
+                new_risk     = new_lev * apal["beta_portfolio"]
+                new_cost_pct = new_int_m / apal["netliq"] if apal["netliq"] > 0 else 0
+                new_margen   = max(0.0, apal["netliq"] * p["max_leverage"] - new_gross)
+                cur_int_m    = apal["monthly_interest"]
+                cur_int_a    = cur_int_m * 12
+                cur_margen   = max(0.0, apal["netliq"] * p["max_leverage"] - apal["gross_pos"])
+                # usar apal["deuda"] (abs(cashbalance) si <0) — misma fuente que el panel
+                risk_cur  = (apal["deuda"] / max(apal["netliq"], 1.0)) * apal["beta_portfolio"]
+                risk_new  = (new_deuda    / max(apal["netliq"], 1.0)) * apal["beta_portfolio"]
+                mrs_cur   = margin_risk_status(risk_cur)
+                mrs_new   = margin_risk_status(risk_new)
+
+                # filas: (métrica, actual, proyectado, Δ, tag_color)
+                filas = [
+                    ("Net Liquidation ($)",   f"${apal['netliq']:,.2f}",                 "–",                              "–",                                     "white"),
+                    ("Gross Position ($)",     f"${apal['gross_pos']:,.2f}",              f"${new_gross:,.2f}",              f"${extra:+,.0f}",                       "white"),
+                    ("Deuda ($)",              f"${apal['deuda']:,.2f}",                  f"${new_deuda:,.2f}",              _delta_str(new_deuda, apal["deuda"], ",.0f"), "white"),
+                    ("Leverage",               f"{apal['leverage']:.2f}x  (máx {p['max_leverage']}x)",
+                                               f"{new_lev:.2f}x",                         _delta_str(new_lev, apal["leverage"]),   _col_lev(new_lev)),
+                    ("Leverage máx dinámico",  f"{apal['leverage_max_din']:.2f}x  (= 2 / β)", "–",                         "–",                                     "white"),
+                    ("Beta Portfolio",         f"{apal['beta_portfolio']:.2f}  (target {p['target_beta_portfolio']})", "–", "–",                                     apal["color_beta"]),
+                    ("Risk Real (Lev×Beta)",   f"{apal['risk_real']:.2f}  (límite 2.0)", f"{new_risk:.2f}",                 _delta_str(new_risk, apal["risk_real"]),  _col_risk(new_risk)),
+                    ("% Mrg/Risk",            f"{risk_cur:.1%} {mrs_cur['emoji']} {mrs_cur['estado']} — {mrs_cur['accion']}",
+                                               f"{risk_new:.1%} {mrs_new['emoji']} {mrs_new['estado']} — {mrs_new['accion']}",
+                                               _delta_str(risk_new, risk_cur, ".1%"),                         mrs_cur["color"]),
+                    ("Interés mensual ($)",    f"${cur_int_m:,.2f}  ({apal['interest_source']})", f"${new_int_m:,.2f}",     f"${new_int_m - cur_int_m:+,.2f}",      "white"),
+                    ("Interés anual ($)",      f"${cur_int_a:,.2f}",                      f"${new_int_a:,.2f}",              f"${new_int_a - cur_int_a:+,.2f}",       "white"),
+                    ("Costo % NetLiq/mes",     f"{apal['interest_pct']:.3%}  (máx {p['max_monthly_interest_pct']:.0%})",
+                                               f"{new_cost_pct:.3%}",                     _delta_str(new_cost_pct, apal["interest_pct"], ".3%"), _col_int(new_cost_pct)),
+                    ("Margen libre ($)",       f"${cur_margen:,.0f}",                     f"${new_margen:,.0f}",             f"${new_margen - cur_margen:+,.0f}",     "white"),
+                ]
+
+                tv_cmp.delete(*tv_cmp.get_children())
+                for idx, (metrica, actual, proy, delta, color) in enumerate(filas):
+                    tag = f"row{idx}"
+                    tv_cmp.insert("", "end", values=(metrica, actual, proy, delta), tags=(tag,))
+                    tv_cmp.tag_configure(tag, foreground=color)
+
+                # proyección temporal
+                tv_proy.delete(*tv_proy.get_children())
+                for meses, label in ((1, "1 mes"), (3, "3 meses"), (6, "6 meses"), (12, "12 meses")):
+                    int_acum = new_int_m * meses
+                    pct_netliq = int_acum / apal["netliq"] if apal["netliq"] > 0 else 0
+                    tv_proy.insert("", "end", values=(
+                        label,
+                        f"${int_acum:,.2f}",
+                        f"{pct_netliq:.3%}",
+                        f"${max(0.0, new_margen - int_acum):,.0f}",
+                    ))
+
+            _simular()   # mostrar estado actual al abrir
+
 
     def obtener_lotes_desde_info(self):
-        """Obtiene lotes desde self.info para Stock"""
+        """Obtiene lotes desde self.positions para Stock"""
         try:
             lotes = []
 
-            for symbol, data in self.info.items():
-                if symbol == "TimeDataHub" or not isinstance(data, dict):
+            for position in self.positions:
+                cantidad = float(position.get("position", 0))
+                if cantidad <= 0:
                     continue
 
-                position = data.get("position", {})
-                if not position:
-                    continue
-
+                costo_base = float(position.get("costobase", 0))
+                precio_actual = float(position.get("mrkprice", 0))
                 lote = {
-                    "symbol": symbol,
-                    "cantidad": float(position.get("position", 0)),
-                    "costo_base": float(data.get("costobase", 0) or position.get("costobase", 0)),
-                    "precio_actual": float(position.get("mrkprice", 0)),
+                    "symbol": position.get("ticket", ""),
+                    "cantidad": cantidad,
+                    "costo_base": costo_base,
+                    "precio_actual": precio_actual,
                     "valor_actual": 0,
                     "ganancia_abs": 0,
                     "ganancia_pct": 0,
+                    "beta": 1.0,
                 }
 
-                if lote["cantidad"] > 0 and lote["precio_actual"] > 0:
-                    lote["valor_actual"] = lote["cantidad"] * lote["precio_actual"]
-                    if lote["costo_base"] > 0:
-                        lote["ganancia_abs"] = lote["valor_actual"] - lote["costo_base"]
-                        lote["ganancia_pct"] = ((lote["valor_actual"] / lote["costo_base"]) - 1) * 100
+                if precio_actual > 0:
+                    lote["valor_actual"] = cantidad * precio_actual
+                    if costo_base > 0:
+                        lote["ganancia_abs"] = lote["valor_actual"] - costo_base
+                        lote["ganancia_pct"] = ((lote["valor_actual"] / costo_base) - 1) * 100
 
-                if lote["cantidad"] > 0:
-                    lotes.append(lote)
+                lotes.append(lote)
+
+            # Enriquecer con beta desde tabla market — una sola consulta bulk
+            if lotes and self.account:
+                market = MarketScreen()
+                result = market.select(account=self.account, tipo="Dividends")
+                if result:
+                    rows, ix = result
+                    if rows and ix:
+                        beta_map = {
+                            dict(zip(ix, row))["symbol"]: dict(zip(ix, row)).get("beta")
+                            for row in rows
+                        }
+                        for lote in lotes:
+                            beta_val = beta_map.get(lote["symbol"])
+                            if beta_val is not None:
+                                try:
+                                    lote["beta"] = float(beta_val)
+                                except (TypeError, ValueError):
+                                    pass
 
             self.df_lotes = pd.DataFrame(lotes)
             return len(self.df_lotes)
 
         except Exception as e:
-            print(f"[AnalisisStock.obtener_lotes_desde_info]: {e}")
+            _logger.error(f"obtener_lotes_desde_info(): {e}")
             return 0
 
     def obtener_resumen(self):
@@ -1840,3 +1997,72 @@ class AnalisisStock(AnalisisBase):
             "total_ganancia": total_ganancia,
             "ganancia_pct": ganancia_pct,
         }
+
+    def _evaluar_apalancamiento(self, total_valor):
+        """Calcula métricas de apalancamiento y semáforos de riesgo.
+        Usa stockmarketvalue e interest del ledger IB cuando están disponibles.
+        """
+        def _semaforo(valor, umbral_warn, umbral_alert):
+            if valor >= umbral_alert:
+                return "red"
+            if valor >= umbral_warn:
+                return "orange"
+            return "green"
+
+        if not self.summary or self.df_lotes.empty or total_valor <= 0:
+            return None
+
+        base = self.summary.get("BASE", {})
+        netliq = float(base.get("netliquidationvalue") or 0)
+        if netliq <= 0:
+            return None
+
+        p = self._LEVERAGE_PARAMS
+
+        # Preferir stockmarketvalue del ledger (fuente IB) sobre total calculado desde posiciones
+        gross_pos = float(base.get("stockmarketvalue") or 0) or total_valor
+        leverage = gross_pos / netliq
+
+        total_w = self.df_lotes["valor_actual"].sum()
+        if total_w > 0 and "beta" in self.df_lotes.columns:
+            beta_port = float(
+                (self.df_lotes["valor_actual"] * self.df_lotes["beta"]).sum() / total_w
+            )
+        else:
+            beta_port = 1.0
+        beta_port = max(beta_port, 0.1)
+        from Class_customer import DataHub  # import diferido — evita ciclo Class_Analisis→Class_customer
+        DataHub.manager_GyP["Stock"]["BetaPortfolio"] = round(beta_port, 3)
+
+        risk_real = leverage * beta_port
+        cash_balance = float(base.get("cashbalance") or 0)
+        deuda = abs(cash_balance) if cash_balance < 0 else max(0.0, gross_pos - netliq)
+        leverage_max_din = 2.0 / beta_port
+
+        # Interés real del ledger IB (MTD accrued); si no hay, estimar con tasa_ib
+        interest_real = float(base.get("interest") or 0)
+        if interest_real != 0:
+            monthly_interest = abs(interest_real)
+            interest_source = "IB real"
+        else:
+            monthly_interest = deuda * p["tasa_ib"] / 12
+            interest_source = "estimado"
+        interest_pct = monthly_interest / netliq
+
+        return {
+            "netliq": netliq,
+            "gross_pos": gross_pos,
+            "leverage": leverage,
+            "beta_portfolio": beta_port,
+            "risk_real": risk_real,
+            "deuda": deuda,
+            "monthly_interest": monthly_interest,
+            "interest_source": interest_source,
+            "interest_pct": interest_pct,
+            "leverage_max_din": leverage_max_din,
+            "color_leverage": _semaforo(leverage, p["max_leverage"] * 0.9, p["max_leverage"]),
+            "color_beta": _semaforo(beta_port, p["target_beta_portfolio"], p["max_beta_portfolio"]),
+            "color_risk": _semaforo(risk_real, 1.5, 2.0),
+            "color_interest": _semaforo(interest_pct, p["max_monthly_interest_pct"] * 0.8, p["max_monthly_interest_pct"]),
+        }
+

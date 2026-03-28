@@ -327,6 +327,23 @@ def display_azul(campo, i) -> str:
     return iibg
 
 
+def margin_risk_status(margen):
+    """Semáforo de riesgo de margen. margen = (deuda/equity) × beta.
+    %Uso        Estado      Acción
+    0%–20%      🟢 Seguro   OK
+    20%–50%     🟡 Moderado Cuidado
+    50%–80%     🟠 Alto     Reducir
+    80%+        🔴 Peligro  Riesgo real
+    """
+    if margen < 0.20:
+        return {"emoji": "🟢", "estado": "Seguro",   "accion": "OK",          "color": "#2ecc71"}
+    if margen < 0.50:
+        return {"emoji": "🟡", "estado": "Moderado", "accion": "Cuidado",     "color": "yellow"}
+    if margen < 0.80:
+        return {"emoji": "🟠", "estado": "Alto",     "accion": "Reducir",     "color": "orange"}
+    return     {"emoji": "🔴", "estado": "Peligro",  "accion": "Riesgo real", "color": "red"}
+
+
 def vehiculo_parm(vehiculo=None):
     """
     @param vehiculo:

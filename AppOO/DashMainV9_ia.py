@@ -1855,9 +1855,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     self.procesos.append({"widget": {socket: 0}})
 
                 else:
-                    raise ValueError("run_stock()]: {}".format("No hay conección con IBKR's"))
+                    logging.getLogger("IBroks_Client").warning("run_stock(): No hay conexión con IBKR")
             except Exception as error:
-                print("[run_stock]: {}".format(error))
+                logging.getLogger("IBroks_Client").error(f"run_stock(): {error}")
 
         try:
             # instancia para vehiculo Crypto
@@ -1986,15 +1986,21 @@ class DashMain:
         botPn0 = ttk.Frame(pn0, style="C.TFrame")
         lineLeft = ttk.Frame(topPn0, style="C.TFrame")
         lineRight = ttk.Frame(topPn0, style="C.TFrame")
-        gypBottom = ttk.Frame(botPn0, style="C.TFrame")
-        InvBottom = ttk.Frame(botPn0, style="C.TFrame")
+        leftBotPn0 = ttk.Frame(botPn0, style="C.TFrame")
+        rightBotPn0 = ttk.Frame(botPn0, style="C.TFrame")
+        gypBottom = ttk.Frame(leftBotPn0, style="C.TFrame")
+        InvBottom = ttk.Frame(leftBotPn0, style="C.TFrame")
+        DebtBottom = ttk.Frame(rightBotPn0, style="C.TFrame")
 
         topPn0.pack(side=tk.TOP)
         botPn0.pack(side=tk.BOTTOM)
         lineLeft.pack(side=tk.LEFT, fill=tk.X)
         lineRight.pack(side=tk.RIGHT, fill=tk.X)
+        leftBotPn0.pack(side=tk.LEFT)
+        rightBotPn0.pack(side=tk.LEFT)
         gypBottom.pack(side=tk.TOP)
         InvBottom.pack(side=tk.BOTTOM)
+        DebtBottom.pack(side=tk.TOP)
 
         # información usuario -----------------------------------------------------------------------------------------
         self.line = tk.Label(
@@ -2065,8 +2071,18 @@ class DashMain:
             height=10,
             bg_color=self.colors["bgcolor"],
         )
+        self.DebtProgress = ProgressBar(
+            DebtBottom,
+            label="Deuda Total (USD)",
+            avance=0,
+            proyeccion=1_000,
+            width=130,
+            height=10,
+            bg_color=self.colors["bgcolor"],
+        )
         self.GypProgress.pack(side=tk.LEFT, pady=5)
         self.InvProgress.pack(side=tk.LEFT, pady=5)
+        self.DebtProgress.pack(side=tk.LEFT, pady=5)
 
         # áreas y figuras de gráficos principales --------------------------------------------------------------------
         self.rg0 = Figure(figsize=(2.77, 2.4), dpi=110, layout="tight")  # firgura de rendimiento ultimos 6 meses
@@ -2296,7 +2312,7 @@ class DashMain:
 
         def _ib_on_reconnect():
             """Callback: IB Gateway reconectó tras pérdida de sesión."""
-            _log = logging.getLogger("IBGateway")
+            _log = logging.getLogger("IBroks_Client")
             try:
                 if hasattr(self, "stock_ts") and self.stock_ts:
                     # Ya existía conexión previa — refrescar datos
@@ -2341,7 +2357,7 @@ class DashMain:
                 DataHub.manager_sesion.update({"Stock": False})
 
             except Exception:
-                logging.getLogger("IBGateway").warning("⚠️ IB Gateway no disponible — modo Offline")
+                logging.getLogger("IBroks_Client").warning("⚠️ IB Gateway no disponible — modo Offline")
 
             if connected:
                 DataHub.manager_sesion.update({"Stock": True})
@@ -2370,7 +2386,7 @@ class DashMain:
             ib.start_tickle(interval=30, datahub=DataHub, on_reconnect=_ib_on_reconnect)
 
         except Exception as e:
-            logging.getLogger("IBGateway").error(f"start_stock(): {e}")
+            logging.getLogger("IBroks_Client").error(f"start_stock(): {e}")
 
     def start_chatbot(self):
         """
@@ -5000,9 +5016,16 @@ class DashMain:
             low_limit_gyp = (_inf * _mul) * limit_gyp
             high_limit_gyp = _mul * limit_gyp
 
+            # deuda total Stock + Crypto vs límite máximo
+            total_debit    = (DataHub.manager_GyP.get("Stock",  {}).get("Debit",    0)
+                            + DataHub.manager_GyP.get("Crypto", {}).get("Debit",    0))
+            total_debitmax = (DataHub.manager_GyP.get("Stock",  {}).get("DebitMax", 0)
+                            + DataHub.manager_GyP.get("Crypto", {}).get("DebitMax", 0))
+
             # update progressos
             self.GypProgress.update_values(low_limit_gyp, ganancias_dia, high_limit_gyp)
             self.InvProgress.update_values(0, costo_base, limit_costoB)
+            self.DebtProgress.update_values(0, total_debit, total_debitmax if total_debitmax > 0 else 1)
 
             # Programar siguiente actualización (cada 30 segundos)
             if self.is_running:
