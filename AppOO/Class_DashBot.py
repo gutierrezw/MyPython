@@ -1817,7 +1817,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             lineas.append(sep)
             lineas.append(f"Resumen: 🟢 OK={ok}  🟡 Pendiente={pendiente}  🔴 Vencido={vencido}")
-            self.logger.warning("\n".join(lineas))
+            self.logger.critical("\n".join(lineas))
 
         def agentesIA():
             try:

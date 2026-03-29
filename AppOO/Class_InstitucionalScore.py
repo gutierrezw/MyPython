@@ -213,12 +213,24 @@ def sync_13f_scores(account: str) -> dict:
             + fh_buy_ratio * 0.20,
             4,
         )
+        fh_sell_ratio      = stats.get("fh_sell_ratio")
+        fh_call_shares     = stats.get("fh_call_shares")
+        fh_put_shares      = stats.get("fh_put_shares")
+        new_entrants       = stats.get("new_entrants")
+        full_exits         = stats.get("full_exits")
+        delta_call_shares  = stats.get("delta_call_shares")
+        delta_put_shares   = stats.get("delta_put_shares")
         ok = inst.market.update(
             upd=["inst_score", "fh_count", "fh_total_value", "fh_buy_ratio", "fh_sell_ratio",
-                 "inst_ownership_pct"],
+                 "fh_call_shares", "fh_put_shares", "new_entrants", "full_exits",
+                 "delta_call_shares", "delta_put_shares", "inst_ownership_pct"],
             val=[score, fh_count if fh_count else None, fh_total_value,
                  fh_buy_ratio if fh_buy_ratio else None,
-                 stats.get("fh_sell_ratio") if stats.get("fh_sell_ratio") else None,
+                 fh_sell_ratio if fh_sell_ratio else None,
+                 fh_call_shares, fh_put_shares,
+                 new_entrants if new_entrants else None,
+                 full_exits if full_exits else None,
+                 delta_call_shares, delta_put_shares,
                  fh_ownership_pct],
             symbol=symbol,
             account=account,

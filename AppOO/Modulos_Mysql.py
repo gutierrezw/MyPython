@@ -1294,6 +1294,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.execute(
                 "SELECT symbol, shortName, lastPrice, inst_ownership_pct, inst_score, "
                 "fh_count, fh_total_value, fh_buy_ratio, fh_sell_ratio, "
+                "fh_call_shares, fh_put_shares, new_entrants, full_exits, "
+                "delta_call_shares, delta_put_shares, "
                 "analyst_rec, analyst_mean, analyst_count, categoriaActivo, "
                 "floatShares, sharesOutstanding, volume, insider_ownership_pct, website "
                 "FROM market WHERE account = %s AND encartera = 'Y' AND categoriaActivo != 'X' "
@@ -1776,6 +1778,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
         try:
+            # Query principal — snapshot del último filing por fondo (igual que antes, probado y rápido)
             cursor.execute("""
                 SELECT fh.symbol,
                     COUNT(DISTINCT CASE WHEN fh.option_type = 'STK' THEN fh.fund_id END) AS fh_count,
@@ -1788,7 +1791,11 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                     COUNT(DISTINCT CASE WHEN fh.option_type = 'PUT'  THEN fh.fund_id END) AS fh_put_count,
                     SUM(CASE WHEN fh.option_type = 'CALL' THEN fh.shares ELSE 0 END) AS fh_call_shares,
                     SUM(CASE WHEN fh.option_type = 'PUT'  THEN fh.shares ELSE 0 END) AS fh_put_shares,
-                    SUM(CASE WHEN fh.option_type = 'STK'  THEN fh.shares ELSE 0 END) AS fh_total_shares
+                    SUM(CASE WHEN fh.option_type = 'STK'  THEN fh.shares ELSE 0 END) AS fh_total_shares,
+                    COUNT(DISTINCT CASE WHEN fh.option_type = 'STK' AND fh.operation = 'NEW'
+                        THEN fh.fund_id END) AS new_entrants,
+                    COUNT(DISTINCT CASE WHEN fh.option_type = 'STK' AND fh.operation = 'SELL'
+                        AND fh.shares = 0 THEN fh.fund_id END) AS full_exits
                 FROM fund_holdings fh
                 INNER JOIN (
                     SELECT fund_id, symbol, option_type AS opt_grp,
@@ -1805,18 +1812,57 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             for row in cursor.fetchall():
                 (symbol, fh_count, fh_total_value, fh_buy_ratio, fh_sell_ratio,
                  fh_call_count, fh_put_count, fh_call_shares, fh_put_shares,
-                 fh_total_shares) = row
+                 fh_total_shares, new_entrants, full_exits) = row
                 result[symbol] = {
-                    "fh_count"        : int(fh_count) if fh_count else 0,
-                    "fh_total_value"  : int(fh_total_value) if fh_total_value else None,
-                    "fh_buy_ratio"    : float(fh_buy_ratio) if fh_buy_ratio else 0.0,
-                    "fh_sell_ratio"   : float(fh_sell_ratio) if fh_sell_ratio else 0.0,
-                    "fh_call_count"   : int(fh_call_count) if fh_call_count else 0,
-                    "fh_put_count"    : int(fh_put_count) if fh_put_count else 0,
-                    "fh_call_shares"  : int(fh_call_shares) if fh_call_shares else 0,
-                    "fh_put_shares"   : int(fh_put_shares) if fh_put_shares else 0,
-                    "fh_total_shares" : int(fh_total_shares) if fh_total_shares else 0,
+                    "fh_count"          : int(fh_count) if fh_count else 0,
+                    "fh_total_value"    : int(fh_total_value) if fh_total_value else None,
+                    "fh_buy_ratio"      : float(fh_buy_ratio) if fh_buy_ratio else 0.0,
+                    "fh_sell_ratio"     : float(fh_sell_ratio) if fh_sell_ratio else 0.0,
+                    "fh_call_count"     : int(fh_call_count) if fh_call_count else 0,
+                    "fh_put_count"      : int(fh_put_count) if fh_put_count else 0,
+                    "fh_call_shares"    : int(fh_call_shares) if fh_call_shares else 0,
+                    "fh_put_shares"     : int(fh_put_shares) if fh_put_shares else 0,
+                    "fh_total_shares"   : int(fh_total_shares) if fh_total_shares else 0,
+                    "new_entrants"      : int(new_entrants) if new_entrants else 0,
+                    "full_exits"        : int(full_exits) if full_exits else 0,
+                    "delta_call_shares" : None,
+                    "delta_put_shares"  : None,
                 }
+
+            # Query delta CALL/PUT — Q actual vs Q anterior por símbolo (solo símbolos con 2 trimestres)
+            cursor.execute("""
+                SELECT symbol,
+                    SUM(CASE WHEN es_actual = 1 THEN call_sh ELSE 0 END) -
+                    SUM(CASE WHEN es_actual = 0 THEN call_sh ELSE 0 END) AS delta_call,
+                    SUM(CASE WHEN es_actual = 1 THEN put_sh ELSE 0 END) -
+                    SUM(CASE WHEN es_actual = 0 THEN put_sh ELSE 0 END) AS delta_put
+                FROM (
+                    SELECT fh.symbol,
+                        SUM(CASE WHEN fh.option_type='CALL' THEN fh.shares ELSE 0 END) AS call_sh,
+                        SUM(CASE WHEN fh.option_type='PUT'  THEN fh.shares ELSE 0 END) AS put_sh,
+                        (fh.report_date = max_dates.max_date) AS es_actual
+                    FROM fund_holdings fh
+                    INNER JOIN (
+                        SELECT symbol,
+                            MAX(report_date) AS max_date,
+                            MIN(report_date) AS min_date
+                        FROM fund_holdings
+                        WHERE option_type IN ('CALL','PUT')
+                        GROUP BY symbol
+                        HAVING COUNT(DISTINCT report_date) >= 2
+                    ) max_dates ON fh.symbol = max_dates.symbol
+                        AND (fh.report_date = max_dates.max_date
+                             OR fh.report_date = max_dates.min_date)
+                    WHERE fh.option_type IN ('CALL','PUT')
+                    GROUP BY fh.symbol, es_actual
+                ) t
+                GROUP BY symbol
+            """)
+            for row in cursor.fetchall():
+                sym, delta_call, delta_put = row
+                if sym in result:
+                    result[sym]["delta_call_shares"] = int(delta_call) if delta_call is not None else None
+                    result[sym]["delta_put_shares"] = int(delta_put) if delta_put is not None else None
             return result
         except (Exception, connect.Error) as error:
             _logger.error(f"[Mysql::load_fund_holdings_stats]: {error}")
