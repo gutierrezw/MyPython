@@ -216,7 +216,7 @@ Resume en una palabra la postura de los fondos institucionales:
 
 ---
 
-## MODELO DE CONSENSO — 6 VOTOS
+## MODELO DE CONSENSO — 7 VOTOS
 
 Cada señal emite: `+1` favorable | `0` neutral | `-1` desfavorable | `None` abstiene
 
@@ -234,21 +234,29 @@ Cada señal emite: `+1` favorable | `0` neutral | `-1` desfavorable | `None` abs
                       < 0.40   → -1
                       Usa acciones totales (millones), no cantidad de fondos.
 
-  3. ANALISTAS (YF)   recommendationKey
+  3. FLUJO (13F)      (new_entrants − full_exits) / fh_count   ranking cartera
+                      flujo_neto clipeado [-1, +1]             +1 / 0 / -1
+                      top 33%  → +1                            None si sin fh_count
+                      mid 33%  →  0
+                      bot 33%  → -1
+                      new_entrants = fondos nuevos en Q4
+                      full_exits   = fondos en Q3 que no presentaron Q4
+
+  4. ANALISTAS (YF)   recommendationKey
                       buy/strong_buy  → +1            +1 / 0 / -1
                       hold            →  0            None si sin datos
                       sell/strong_sell→ -1
 
-  4. IA SIGNAL        CSV buy/sell (activa en mercado abierto)
+  5. IA SIGNAL        CSV buy/sell (activa en mercado abierto)
                       buy   → +1                      +1 / 0 / -1
                       sell  → -1
                       none  →  0
 
-  5. VALUACIÓN        categoriaActivo
+  6. VALUACIÓN        categoriaActivo
                       I → +1 / N → 0 / S → -1         +1 / 0 / -1
                       X / T → abstiene                 None
 
-  6. COBERTURA        fh_count
+  7. COBERTURA        fh_count
                       ≥ 20 → +1 / ≥ 5 → 0 / < 5 → -1  +1 / 0 / -1
   ──────────────────────────────────────────────────────────────────
 
@@ -267,8 +275,8 @@ Cada señal emite: `+1` favorable | `0` neutral | `-1` desfavorable | `None` abs
   │ ▼ SALIDA    │ pct ≤ -0.60 │ Salir o no entrar                 │
   └─────────────┴─────────────┴───────────────────────────────────┘
 
-  Columna Consenso:  ↗ TENDENCIA  +3/5
-                     (suma=+3 sobre 5 señales activas, 1 abstención)
+  Columna Consenso:  ↗ TENDENCIA  +4/7
+                     (suma=+4 sobre 7 señales activas, 0 abstenciones)
 ```
 
 ---
