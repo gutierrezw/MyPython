@@ -1,5 +1,5 @@
 # SCREENER & MODELO DE CONSENSO — CARTERA DE DIVIDENDOS
-**AppOO · Versión 2026-W12**
+**AppOO · Versión 2026-W13**
 
 ---
 
@@ -101,8 +101,8 @@ Preserva siempre los que tienen `encartera='Y'`.
 |-------|-----------|-------------|
 | `sync_edgar_funds` | Mensual | Descarga company.idx EDGAR → ~9K fondos en tabla `funds` |
 | `sync_fund_filings` | Semanal | Descarga XMLs 13F-HR. Refresh si filing ≥ 80 días y accession cambió. Metadata en `fund_filings` |
-| `sync_13f_holdings` | Semanal | Parsea XMLs (`processed=0`), mapea CUSIP→symbol, calcula NEW/BUY/SELL/HOLD, bulk upsert `fund_holdings` |
-| `sync_13f_scores` | Semanal | Recalcula `inst_score` = fh_ownership_pct×0.40 + log(fh_count)×0.40 + fh_buy_ratio×0.20 |
+| `sync_13f_holdings` | **Diario** | Parsea XMLs (`processed=0`), mapea CUSIP→symbol, calcula NEW/BUY/SELL/HOLD, bulk upsert `fund_holdings` |
+| `sync_13f_scores` | **Diario** | Recalcula `inst_score` v2 + guarda fh_buy/sell_ratio, CALL/PUT, ΔCall/ΔPut, +Nuevos, -Salidas |
 
 ### Resolución CUSIP → symbol (sync_13f_holdings)
 
@@ -133,46 +133,76 @@ Los XMLs 13F usan CUSIP como identificador. La resolución a ticker se hace en d
 
 ---
 
-## COLUMNAS INSTITUCIONALES — RELACIÓN ENTRE MÉTRICAS
+## COLUMNAS INSTITUCIONALES — MAPA COMPLETO
+
+### Visibles en Screener
+
+| Header | Campo BD | Fuente | Descripción |
+|--------|----------|--------|-------------|
+| Last | `lastPrice` | Yahoo | Último precio |
+| Rotación | calculado | market | floatShares / volume — proxy de liquidez institucional |
+| Inst Score | `inst_score` | EDGAR calc | Score blendado (ver fórmula v2 abajo) |
+| Inst % | `inst_ownership_pct` | EDGAR calc | fh_total_shares / floatShares |
+| 13F Inst | `fh_count` | EDGAR | Fondos con posición STK activa (último filing) |
+| 13F Buy% | `fh_buy_ratio` | EDGAR | NEW+BUY / total STK filings |
+| 13F Sell% | `fh_sell_ratio` | EDGAR | SELL / total STK filings |
+| CALL | `fh_call_shares` | EDGAR | Total acciones opciones CALL Q4 (en millones) |
+| PUT | `fh_put_shares` | EDGAR | Total acciones opciones PUT Q4 (en millones) |
+| ΔCall | `delta_call_shares` | EDGAR calc | CALL Q4 − CALL Q3 → acumulación/distribución silenciosa |
+| ΔPut | `delta_put_shares` | EDGAR calc | PUT Q4 − PUT Q3 → cobertura bajista creciente/decreciente |
+| +Nuevos | `new_entrants` | EDGAR | Fondos que abrieron posición por 1ra vez en Q4 (operation='NEW') |
+| -Salidas | `full_exits` | EDGAR calc | Fondos en Q3 que no presentaron Q4 (salida silenciosa) |
+| 13F Value | `fh_total_value` | EDGAR | Valor total posiciones STK (miles USD) |
+| Top Holder | `inst_top_holder` | Yahoo | Nombre del mayor fondo institucional |
+
+### Usadas "tras bambalinas" — scoring y votos, no visibles como columna
+
+| Campo BD | Dónde se usa | Descripción |
+|----------|-------------|-------------|
+| `floatShares` | sync_13f_scores | Base para calcular fh_ownership_pct |
+| `sharesOutstanding` | sync_13f_scores | Fallback si no hay floatShares |
+| `fh_total_shares` | sync_13f_scores | SUM acciones STK ÷ float = fh_ownership_pct |
+| `analyst_rec` | Voto #3 Consenso | buy/strong_buy/hold/sell |
+| `analyst_mean` | Inst Señal | media recomendación numérica |
+| `analyst_count` | Consenso display | número de analistas |
+| `categoriaActivo` | Voto #5 Valuación | I/S/N/X/T |
+| `encartera` | Filtro Screener + Consenso | Y = en cartera |
+| `insider_ownership_pct` | pendiente | % insiders (Yahoo) |
+
+---
+
+## FÓRMULA inst_score v2
 
 ```
-fund_holdings (13F)
-  └── STK positions
-       ├── COUNT(DISTINCT fund_id)  ──────────────►  # Inst  (fh_count)
+fund_holdings (13F) — STK positions
+  ├── SUM(shares) / floatShares  ──────────────►  fh_ownership_pct  (lo más tangible)
+  ├── COUNT(DISTINCT fund_id)    ──────────────►  fh_count
+  ├── NEW+BUY / total            ──────────────►  fh_buy_ratio
+  └── (new_entrants − full_exits) / fh_count  ►  flujo_neto  [-1, +1]
        │
-       ├── SUM(shares) / floatShares ────────────►  Inst %  (fh_ownership_pct)
-       │        │                                    ⚠ usamos floatShares propio
-       │        │                                      (no heldPercentInstitutions
-       │        │                                       de Yahoo — puede > 100%)
-       │
-       └── NEW+BUY / total ──────────────────────►  fh_buy_ratio
+       ├── new_entrants  = fondos con operation='NEW' en Q4
+       └── full_exits    = fondos en Q3 que NO aparecen en Q4
 
-  inst_score = fh_ownership_pct × 0.40
-             + log(max(fh_count, 1)) × 0.40
-             + fh_buy_ratio          × 0.20
-                                             ──►  Inst Score  [0..∞]
-
-  Inst Score  →  SEÑAL:
-    ≥ 0.40 AND buy_ratio ≥ 0.50 AND fh_count ≥ 20  →  ACOMPAÑAR
-    ≥ 0.25 OR  fh_count ≥ 10                        →  MANTENER
-    resto                                            →  REVISAR
+  inst_score = fh_ownership_pct       × 0.40   ← más tangible: cuánto del float tienen
+             + log(max(fh_count, 1))  × 0.20   ← cobertura institucional
+             + fh_buy_ratio           × 0.20   ← dirección del flujo
+             + flujo_neto             × 0.20   ← entradas netas Q3→Q4
+                                               ──►  Inst Score  [0..∞]
 ```
 
-| Columna | Campo BD | Fuente | Descripción |
-|---------|----------|--------|-------------|
-| `# Inst` | `fh_count` | fund_holdings (EDGAR) | Fondos con posición STK activa (último filing) |
-| `Inst %` | `fh_ownership_pct` | Calculado (EDGAR) | fh_total_shares / floatShares — trazable, sin Yahoo |
-| `Inst Score` | `inst_score` | Calculado (EDGAR) | Score blendado combinando ownership, cobertura y flujo |
-| `CALL` | `fh_call_shares` | fund_holdings (EDGAR) | Acciones totales en opciones CALL (en millones) |
-| `PUT` | `fh_put_shares` | fund_holdings (EDGAR) | Acciones totales en opciones PUT (en millones) |
-| `Top Holder` | `inst_top_holder` | Yahoo quoteSummary | Nombre del mayor fondo institucional |
+> **Nota floatShares:** Yahoo `heldPercentInstitutions` puede superar 100% por short selling.
+> Usamos `floatShares` propio desde Yahoo `keyStatistics` en tabla `market` para reproducibilidad.
+> Cubre ~9K fondos EDGAR — conservador pero consistente entre activos.
 
-> **inst_top_holder** se obtiene vía Yahoo Finance (no EDGAR): `quoteSummary/{symbol}?modules=institutionOwnership,majorHoldersBreakdown` → `ownershipList[0].organization`. Usa `_yahoo_session()` compartida con el resto del pipeline. Campo complementario — no afecta el `inst_score`.
+> **full_exits:** cuando un fondo vende completamente, no reporta el símbolo (no hay registro shares=0).
+> La salida se detecta por ausencia en Q4. Ventanas calculadas dinámicamente en `load_fund_holdings_stats`
+> según calendario 13F (Q_ant: Aug–Dec, Q_act: Jan+).
 
-> **Nota floatShares:** Yahoo `heldPercentInstitutions` puede superar 100% por short selling
-> y diferencias de timing. Usamos `floatShares` propio desde Yahoo `keyStatistics` almacenado
-> en tabla `market` para calcular `fh_ownership_pct` de forma reproducible.
-> Limitación: cubre ~9K fondos EDGAR — el número puede ser conservador pero es consistente entre activos.
+### Señal institucional compuesta (columna "Inst Señal")
+
+- **ACOMPAÑAR** — inst_score ≥ 0.40 AND buy_ratio ≥ 0.50 AND fh_count ≥ 20
+- **MANTENER** — inst_score ≥ 0.25 OR fh_count ≥ 10
+- **REVISAR** — resto
 
 ---
 
