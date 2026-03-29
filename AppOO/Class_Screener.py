@@ -948,6 +948,17 @@ class Screener(tk.Frame):
             n = len(nets)
             return nets[n // 3], nets[(2 * n) // 3]
 
+        def _build_flujo_percentiles(cartera_rows):
+            vals = sorted([
+                max(-1.0, min(1.0, ((r.get("new_entrants") or 0) - (r.get("full_exits") or 0))
+                    / max(r.get("fh_count") or 1, 1)))
+                for r in cartera_rows if r.get("fh_count")
+            ])
+            if len(vals) < 3:
+                return -0.1, 0.1
+            n = len(vals)
+            return vals[n // 3], vals[(2 * n) // 3]
+
         def voto_net_relativo(buy_r, sell_r, p33, p67):
             net = (buy_r or 0.0) - (sell_r or 0.0)
             if net >= p67:
@@ -994,6 +1005,16 @@ class Screener(tk.Frame):
                 return 0
             return -1
 
+        def voto_flujo(new_ent, exits, fh_count, p33, p67):
+            if not fh_count:
+                return None
+            fn = max(-1.0, min(1.0, ((new_ent or 0) - (exits or 0)) / fh_count))
+            if fn >= p67:
+                return 1
+            if fn >= p33:
+                return 0
+            return -1
+
         def senal_consenso(votos_activos, suma):
             n = len(votos_activos)
             if n == 0:
@@ -1018,6 +1039,7 @@ class Screener(tk.Frame):
         syms_sell = _read_csv_signals("csv_datosIA_sell")
 
         p33_net, p67_net = _build_net_percentiles(cartera)
+        p33_flujo, p67_flujo = _build_flujo_percentiles(cartera)
 
         # Construir filas y ordenar por prioridad de consenso
         filas = []
@@ -1053,6 +1075,10 @@ class Screener(tk.Frame):
                 "Net": voto_net_relativo(fh_buy_ratio, fh_sell_ratio, p33_net, p67_net),
                 "Opt": voto_options(
                     row.get("fh_call_shares"), row.get("fh_put_shares")
+                ),
+                "Flujo": voto_flujo(
+                    row.get("new_entrants"), row.get("full_exits"),
+                    row.get("fh_count"), p33_flujo, p67_flujo
                 ),
                 "Ana": voto_analistas(rec),
                 "Mod": (1 if en_buy else (-1 if en_sell else 0)),
