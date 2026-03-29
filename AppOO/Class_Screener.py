@@ -261,6 +261,12 @@ class Screener(tk.Frame):
                 ("fh_count", "13F Inst", 65, "e"),
                 ("fh_buy_ratio", "13F Buy%", 65, "e"),
                 ("fh_sell_ratio", "13F Sell%", 65, "e"),
+                ("fh_call_shares", "CALL", 70, "e"),
+                ("fh_put_shares", "PUT", 70, "e"),
+                ("delta_call_shares", "ΔCall", 75, "e"),
+                ("delta_put_shares", "ΔPut", 75, "e"),
+                ("new_entrants", "+Nuevos", 60, "e"),
+                ("full_exits", "-Salidas", 65, "e"),
                 ("fh_total_value", "13F Value", 90, "e"),
                 ("volume", "Volume", 80, "e"),
                 ("averageVolume", "Avg Vol", 80, "e"),
@@ -687,6 +693,15 @@ class Screener(tk.Frame):
         def _pct(v):
             return f"{v:.1%}" if v is not None else ""
 
+        def _shares_m(v):
+            return f"{float(v) / 1_000_000:.1f}M" if v and float(v) > 0 else ""
+
+        def _delta_m(v):
+            if v is None:
+                return ""
+            f = float(v) / 1_000_000
+            return f"{f:+.1f}M" if f != 0 else ""
+
         def _big(v):
             return mask_numero(v or 0) if v is not None else ""
 
@@ -733,6 +748,12 @@ class Screener(tk.Frame):
                     str(_g("fh_count")) if _g("fh_count") else "",
                     _pct(_g("fh_buy_ratio")),
                     _pct(_g("fh_sell_ratio")),
+                    _shares_m(_g("fh_call_shares")),
+                    _shares_m(_g("fh_put_shares")),
+                    _delta_m(_g("delta_call_shares")),
+                    _delta_m(_g("delta_put_shares")),
+                    str(_g("new_entrants")) if _g("new_entrants") else "",
+                    str(_g("full_exits")) if _g("full_exits") else "",
                     _big(_g("fh_total_value")),
                     _big(_g("volume")),
                     _big(_g("averageVolume")),
@@ -993,7 +1014,6 @@ class Screener(tk.Frame):
             return etiqueta, suma, n
 
         cartera = self.ScMarket.load_cartera_inst(self.account)
-        fh_stats = self.ScMarket.load_fund_holdings_stats()
         syms_buy = _read_csv_signals("csv_datosIA_buy")
         syms_sell = _read_csv_signals("csv_datosIA_sell")
 
@@ -1003,7 +1023,6 @@ class Screener(tk.Frame):
         filas = []
         for row in cartera:
             sym = row["symbol"]
-            stats = fh_stats.get(sym, {})
             fh_buy_ratio = float(row.get("fh_buy_ratio") or 0.0)
             fh_sell_ratio = float(row.get("fh_sell_ratio") or 0.0)
             rec = (row.get("analyst_rec") or "").lower().replace(" ", "_")
@@ -1025,20 +1044,20 @@ class Screener(tk.Frame):
                 else None
             )
             inst_pct = f"{inst_val:.1%}" if inst_val else ""
-            buy_r_str = f"{fh_buy_ratio:.0%}" if fh_buy_ratio else ""
-            sell_r_str = f"{fh_sell_ratio:.0%}" if fh_sell_ratio else ""
+            buy_r_str = f"{fh_buy_ratio:.1%}" if fh_buy_ratio else ""
+            sell_r_str = f"{fh_sell_ratio:.1%}" if fh_sell_ratio else ""
             n_inst = str(row["fh_count"]) if row.get("fh_count") else ""
             nombre = (row.get("shortName") or "")[:35]
 
             votos = {
                 "Net": voto_net_relativo(fh_buy_ratio, fh_sell_ratio, p33_net, p67_net),
                 "Opt": voto_options(
-                    stats.get("fh_call_shares"), stats.get("fh_put_shares")
+                    row.get("fh_call_shares"), row.get("fh_put_shares")
                 ),
                 "Ana": voto_analistas(rec),
                 "Mod": (1 if en_buy else (-1 if en_sell else 0)),
                 "Val": voto_valuacion(categ),
-                "Cob": voto_cobertura(stats.get("fh_count")),
+                "Cob": voto_cobertura(row.get("fh_count")),
             }
             activos = {k: v for k, v in votos.items() if v is not None}
             suma = sum(activos.values())
@@ -1058,22 +1077,33 @@ class Screener(tk.Frame):
             else:
                 tag = "NEUTRO"
 
-            _call_sh = stats.get("fh_call_shares") or 0
-            _put_sh = stats.get("fh_put_shares") or 0
-            calls_str = f"{_call_sh / 1_000_000:.1f}M" if _call_sh else ""
-            puts_str = f"{_put_sh  / 1_000_000:.1f}M" if _put_sh else ""
+            _call_sh = row.get("fh_call_shares") or 0
+            _put_sh = row.get("fh_put_shares") or 0
+            calls_str = f"{float(_call_sh) / 1_000_000:.1f}M" if _call_sh else ""
+            puts_str = f"{float(_put_sh) / 1_000_000:.1f}M" if _put_sh else ""
+            _d_call = row.get("delta_call_shares")
+            _d_put = row.get("delta_put_shares")
+            d_call_str = f"{float(_d_call) / 1_000_000:+.1f}M" if _d_call is not None and _d_call != 0 else ""
+            d_put_str = f"{float(_d_put) / 1_000_000:+.1f}M" if _d_put is not None and _d_put != 0 else ""
+            new_ent_str = str(row["new_entrants"]) if row.get("new_entrants") else ""
+            full_ex_str = str(row["full_exits"]) if row.get("full_exits") else ""
             filas.append(
                 {
                     "values": (
                         sym,
                         categ,
                         nombre,
-                        n_inst,
+                        f"{float(row['lastPrice']):.2f}" if row.get("lastPrice") else "",
                         inst_pct,
+                        n_inst,
                         buy_r_str,
                         sell_r_str,
                         calls_str,
                         puts_str,
+                        d_call_str,
+                        d_put_str,
+                        new_ent_str,
+                        full_ex_str,
                         float_str,
                         senal_inst,
                         senal_ana,
@@ -1112,17 +1142,22 @@ class Screener(tk.Frame):
         )
         hdr.pack(pady=(8, 4))
 
-        _FIXED_COLS = ("Symbol", "Div", "Nombre", "13F Inst", "Inst %")
+        _FIXED_COLS = ("Symbol", "Div", "Nombre", "Last", "Inst %", "13F Inst")
         _COL_DEFS = (
             ("Symbol", 65, "w"),
             ("Div", 38, "center"),
             ("Nombre", 200, "w"),
-            ("13F Inst", 55, "e"),
+            ("Last", 65, "e"),
             ("Inst %", 65, "e"),
+            ("13F Inst", 55, "e"),
             ("13F Buy%", 70, "e"),
             ("13F Sell%", 70, "e"),
             ("CALL", 60, "e"),
             ("PUT", 60, "e"),
+            ("ΔCall", 70, "e"),
+            ("ΔPut", 70, "e"),
+            ("+Nuevos", 60, "e"),
+            ("-Salidas", 65, "e"),
             ("Rotación", 80, "center"),
             ("Inst Señal", 100, "w"),
             ("Analistas", 140, "w"),
