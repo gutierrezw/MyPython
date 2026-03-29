@@ -1750,7 +1750,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         self.info[symbol]["update"] = True
                 elif not ind_update:
                     # Sin datos de dividendo — garantizar registro en market con encartera='Y'
-                    update_tabla_market(symbol, ["encartera", "categoriaActivo", "account"], ["Y", "N", self.account])
+                    cat = "X" if qt in _ETF_TYPES else "N"
+                    update_tabla_market(symbol, ["encartera", "categoriaActivo", "account"], ["Y", cat, self.account])
         except Exception as e:
             self.logger.error("dividends_en_market_stock(): {}".format(e))
 
