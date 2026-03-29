@@ -1719,6 +1719,10 @@ def cleanup_market(account):
                     not_found.append(sym)
                     continue
                 campos, valores = _map_quote(s)
+                qt = (s.get("quoteType") or "").upper()
+                if qt in _ETF_TYPES and existing.get(sym, {}).get("categoriaActivo") == "N":
+                    campos = list(campos) + ["categoriaActivo"]
+                    valores = list(valores) + ["X"]
                 market.update(upd=campos, val=valores, symbol=sym)
                 quote_ok += 1
             # Detectar no encontrados en este batch
