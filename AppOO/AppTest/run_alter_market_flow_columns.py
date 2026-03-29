@@ -14,21 +14,26 @@ mkt = MarketScreen()
 conn = mkt._conectar(tabla="select.market")
 c = conn.cursor()
 
-alteraciones = [
-    "ALTER TABLE market ADD COLUMN IF NOT EXISTS new_entrants INT DEFAULT NULL",
-    "ALTER TABLE market ADD COLUMN IF NOT EXISTS full_exits INT DEFAULT NULL",
-    "ALTER TABLE market ADD COLUMN IF NOT EXISTS delta_call_shares BIGINT DEFAULT NULL",
-    "ALTER TABLE market ADD COLUMN IF NOT EXISTS delta_put_shares BIGINT DEFAULT NULL",
+nuevas = [
+    ("new_entrants",       "INT DEFAULT NULL"),
+    ("full_exits",         "INT DEFAULT NULL"),
+    ("delta_call_shares",  "BIGINT DEFAULT NULL"),
+    ("delta_put_shares",   "BIGINT DEFAULT NULL"),
 ]
 
-for sql in alteraciones:
+c.execute("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='market'")
+existentes = {r[0] for r in c.fetchall()}
+
+for col, typedef in nuevas:
+    if col in existentes:
+        print(f"YA EXISTE: {col}")
+        continue
     try:
-        c.execute(sql)
+        c.execute(f"ALTER TABLE market ADD COLUMN {col} {typedef}")
         conn.commit()
-        col = sql.split("COLUMN IF NOT EXISTS ")[1].split(" ")[0]
         print(f"OK: {col}")
     except Exception as e:
-        print(f"ERROR: {e}")
+        print(f"ERROR {col}: {e}")
 
 conn.close()
 print("Listo.")
