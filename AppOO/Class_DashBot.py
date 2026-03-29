@@ -401,7 +401,7 @@ class ClassAgenteIA:
         if not (0 <= datetime.now().hour < 6) and not type(self).Agente_FundFilings._overdue:
             return
         try:
-            result = sync_fund_filings(top_n=50)
+            result = sync_fund_filings()
             self.logger.warning(
                 f"FundFilings: fondos={result['funds']} descargados={result['downloaded']} "
                 f"skipped={result['skipped']} fallidos={result['failed']}"
@@ -409,8 +409,8 @@ class ClassAgenteIA:
         except Exception as e:
             self.logger.error(f"Agente_FundFilings(): {e}")
 
-    # agente 13F Scores — recalcula inst_score con señales 13F, una vez por semana
-    @wait_rate(604800, persist=True)
+    # agente 13F Scores — recalcula inst_score con señales 13F, una vez al día
+    @wait_rate(86400, persist=True)
     def Agente_13FScores(self):
         if not (0 <= datetime.now().hour < 6) and not type(self).Agente_13FScores._overdue:
             return
@@ -422,8 +422,8 @@ class ClassAgenteIA:
         except Exception as e:
             self.logger.error(f"Agente_13FScores(): {e}")
 
-    # agente 13F Holdings — parsea XMLs descargados y pobla fund_holdings, una vez por semana
-    @wait_rate(604800, persist=True)
+    # agente 13F Holdings — parsea XMLs descargados y pobla fund_holdings, una vez al día
+    @wait_rate(86400, persist=True)
     def Agente_13FHoldings(self):
         if not (0 <= datetime.now().hour < 6) and not type(self).Agente_13FHoldings._overdue:
             return
@@ -1764,9 +1764,64 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
     # Inicio del chatbot
     def run(self):
+        def _log_schedule_status():
+            """Loguea tabla de estado de agentes al arrancar agentesIA."""
+            _AGENTES = {
+                "Agente_MarketScreener":     86400,
+                "Agente_InstitucionalScore": 604800,
+                "Agente_EdgarFunds":         2592000,
+                "Agente_FundFilings":        604800,
+                "Agente_13FHoldings":        86400,
+                "Agente_13FScores":          86400,
+                "Agente_AuditPortfolio":     2592000,
+                "Agente_LtvControl":         300,
+                "Agente_StockBeta":          3600,
+            }
+
+            def _fmt_intervalo(seg):
+                if seg >= 86400:
+                    return f"{seg // 86400}d"
+                if seg >= 3600:
+                    return f"{seg // 3600}h"
+                return f"{seg // 60}m"
+
+            sched = read_json_tmp("agents_schedule.json")
+            ahora = time.time()
+            sep = "─" * 100
+            header = f"{'Agente':<28} {'Intervalo':<10} {'Último run':<22} {'Próximo run':<22} {'Estado'}"
+            lineas = ["\nAgentesIA — schedule al arrancar:", sep, header, sep]
+            ok, pendiente, vencido = 0, 0, 0
+
+            for nombre, intervalo in _AGENTES.items():
+                ts = sched.get(nombre, 0)
+                if not ts:
+                    estado = "⚠  NUNCA"
+                    ultimo_str, proximo_str = "nunca", "al arrancar"
+                    pendiente += 1
+                else:
+                    ultimo_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+                    proximo_str = datetime.fromtimestamp(ts + intervalo).strftime("%Y-%m-%d %H:%M")
+                    transcurrido = ahora - ts
+                    if transcurrido >= intervalo * 1.5:
+                        estado = "🔴 VENCIDO"
+                        vencido += 1
+                    elif transcurrido >= intervalo:
+                        estado = "🟡 PENDIENTE"
+                        pendiente += 1
+                    else:
+                        estado = "🟢 OK"
+                        ok += 1
+                lineas.append(
+                    f"{nombre:<28} {_fmt_intervalo(intervalo):<10} {ultimo_str:<22} {proximo_str:<22} {estado}"
+                )
+
+            lineas.append(sep)
+            lineas.append(f"Resumen: 🟢 OK={ok}  🟡 Pendiente={pendiente}  🔴 Vencido={vencido}")
+            self.logger.warning("\n".join(lineas))
+
         def agentesIA():
             try:
-
+                _log_schedule_status()
                 while True:
                     # Agente for Sell
                     self.exec_modulo_async(self.Agente_ManagerSell())
@@ -1779,12 +1834,6 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
                     # Agente for Donloads filings
                     self.Agente_downloads_filings_EDGAR()
-
-                    # Agente Market Screener — descubrimiento + enriquecimiento (una vez al día)
-                    self.Agente_MarketScreener()
-
-                    # Agente Institutional Score — ownership institucional (una vez al día)
-                    self.Agente_InstitucionalScore()
 
                     # Agente LTV Control — monitorea ratio deuda/colateral Binance (DRY RUN)
                     self.Agente_LtvControl()
@@ -1815,14 +1864,17 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 target=agentesIA,
             )
 
-            # Agentes lentos — BLOQUEADOS: reset pipeline institucional en curso
+            DataHub.manager_events.register_thread(
+                name="Agente_MarketScreener", target=self.Agente_MarketScreener, loop_sleep=300
+            )
+            DataHub.manager_events.register_thread(
+                name="Agente_InstitucionalScore", target=self.Agente_InstitucionalScore, loop_sleep=300
+            )
             DataHub.manager_events.register_thread(
                 name="Agente_EdgarFunds", target=self.Agente_EdgarFunds, loop_sleep=300
             )
             DataHub.manager_events.register_thread(
-                name="Agente_FundFilings",
-                target=self.Agente_FundFilings,
-                loop_sleep=300,
+                name="Agente_FundFilings", target=self.Agente_FundFilings, loop_sleep=300
             )
             DataHub.manager_events.register_thread(
                 name="Agente_13FHoldings",
