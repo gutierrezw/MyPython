@@ -207,19 +207,22 @@ def sync_13f_scores(account: str) -> dict:
             skipped += 1
             continue
 
+        new_entrants = stats.get("new_entrants") or 0
+        full_exits   = stats.get("full_exits") or 0
+        flujo_neto   = max(-1.0, min(1.0, (new_entrants - full_exits) / max(fh_count, 1)))
+
         score = round(
             (fh_ownership_pct or 0.0) * 0.40
-            + math.log(max(fh_count, 1)) * 0.40
-            + fh_buy_ratio * 0.20,
+            + math.log(max(fh_count, 1)) * 0.20
+            + fh_buy_ratio * 0.20
+            + flujo_neto   * 0.20,
             4,
         )
         fh_sell_ratio      = stats.get("fh_sell_ratio")
-        fh_call_shares     = stats.get("fh_call_shares")
-        fh_put_shares      = stats.get("fh_put_shares")
-        new_entrants       = stats.get("new_entrants")
-        full_exits         = stats.get("full_exits")
-        delta_call_shares  = stats.get("delta_call_shares")
-        delta_put_shares   = stats.get("delta_put_shares")
+        fh_call_shares    = stats.get("fh_call_shares")
+        fh_put_shares     = stats.get("fh_put_shares")
+        delta_call_shares = stats.get("delta_call_shares")
+        delta_put_shares  = stats.get("delta_put_shares")
         ok = inst.market.update(
             upd=["inst_score", "fh_count", "fh_total_value", "fh_buy_ratio", "fh_sell_ratio",
                  "fh_call_shares", "fh_put_shares", "new_entrants", "full_exits",
