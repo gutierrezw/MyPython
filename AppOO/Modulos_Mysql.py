@@ -1829,6 +1829,46 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                     "delta_put_shares"  : None,
                 }
 
+            # Query full_exits — fondos en Q_anterior que NO aparecen en Q_actual
+            # Ventanas calculadas dinámicamente según el calendario 13F (45 días post-quarter end)
+            today = datetime.today()
+            m, y = today.month, today.year
+            if m <= 5:      # Ene-May: Q4 en curso (Dec quarter)
+                q_act_start = datetime(y, 1, 1).date()
+                q_ant_start = datetime(y - 1, 8, 1).date()
+                q_ant_end   = datetime(y - 1, 12, 31).date()
+            elif m <= 8:    # Jun-Ago: Q1 en curso (Mar quarter)
+                q_act_start = datetime(y, 4, 1).date()
+                q_ant_start = datetime(y - 1, 11, 1).date()
+                q_ant_end   = datetime(y, 3, 31).date()
+            elif m <= 11:   # Sep-Nov: Q2 en curso (Jun quarter)
+                q_act_start = datetime(y, 7, 1).date()
+                q_ant_start = datetime(y, 2, 1).date()
+                q_ant_end   = datetime(y, 6, 30).date()
+            else:           # Dic: Q3 en curso (Sep quarter)
+                q_act_start = datetime(y, 10, 1).date()
+                q_ant_start = datetime(y, 5, 1).date()
+                q_ant_end   = datetime(y, 9, 30).date()
+
+            cursor.execute("""
+                SELECT fh_q3.symbol, COUNT(DISTINCT fh_q3.fund_id) AS full_exits
+                FROM (
+                    SELECT DISTINCT fund_id, symbol FROM fund_holdings
+                    WHERE option_type = 'STK'
+                      AND report_date BETWEEN %s AND %s
+                ) fh_q3
+                LEFT JOIN (
+                    SELECT DISTINCT fund_id, symbol FROM fund_holdings
+                    WHERE option_type = 'STK' AND report_date >= %s
+                ) fh_q4 ON fh_q3.fund_id = fh_q4.fund_id AND fh_q3.symbol = fh_q4.symbol
+                WHERE fh_q4.fund_id IS NULL
+                GROUP BY fh_q3.symbol
+            """, (q_ant_start, q_ant_end, q_act_start))
+            for row in cursor.fetchall():
+                sym, full_exits_val = row
+                if sym in result:
+                    result[sym]["full_exits"] = int(full_exits_val) if full_exits_val else 0
+
             # Query delta CALL/PUT — Q actual vs Q anterior por símbolo (solo símbolos con 2 trimestres)
             cursor.execute("""
                 SELECT symbol,
