@@ -1113,6 +1113,9 @@ class Screener(tk.Frame):
             d_put_str = f"{float(_d_put) / 1_000_000:+.1f}M" if _d_put is not None and _d_put != 0 else ""
             new_ent_str = str(row["new_entrants"]) if row.get("new_entrants") else ""
             full_ex_str = str(row["full_exits"]) if row.get("full_exits") else ""
+            _fh_c = row.get("fh_count") or 0
+            _fn = max(-1.0, min(1.0, ((row.get("new_entrants") or 0) - (row.get("full_exits") or 0)) / max(_fh_c, 1))) if _fh_c else None
+            flujo_str = f"{_fn:+.2f}" if _fn is not None else ""
             filas.append(
                 {
                     "values": (
@@ -1130,6 +1133,7 @@ class Screener(tk.Frame):
                         d_put_str,
                         new_ent_str,
                         full_ex_str,
+                        flujo_str,
                         float_str,
                         senal_inst,
                         senal_ana,
@@ -1184,6 +1188,7 @@ class Screener(tk.Frame):
             ("ΔPut", 70, "e"),
             ("+Nuevos", 60, "e"),
             ("-Salidas", 65, "e"),
+            ("Flujo", 55, "center"),
             ("Rotación", 80, "center"),
             ("Inst Señal", 100, "w"),
             ("Analistas", 140, "w"),
