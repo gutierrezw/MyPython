@@ -52,7 +52,7 @@ evitando depender de una sola fuente.
                  ▼
      ┌───────────────────────┐
      │   CONSENSO SCORE      │
-     │   (6 votos)           │
+     │   (7 votos)           │
      └───────────────────────┘
 ```
 
