@@ -1451,7 +1451,6 @@ class AnalisisCrypto(AnalisisBase):
             cols_usd = [p["col_usd"] for p in prestamos]
             n = len(activos)
             x = np.arange(n)
-            w = 0.28
 
             fg = Figure(figsize=(5.6, 3.2), dpi=100)
             fg.patch.set_facecolor(self.CG_COLOR)
@@ -1483,54 +1482,63 @@ class AnalisisCrypto(AnalisisBase):
             ax1.axhline(ltv_liquidacion * 100, color="#e74c3c", linewidth=1.1, linestyle="-",
                         zorder=2, label=f"Liquidación {ltv_liquidacion:.0%}")
 
-            # área LTV: relleno tenue bajo la línea de cada activo
-            ltv_line = ltvs + [ltvs[-1]]
-            x_area   = list(x) + [x[-1] + 0.001]
-            ltv_color_area = "#2ecc71" if max(ltvs) < ltv_inicial * 100 else "#e67e22"
-            ax1.fill_between(x_area, ltv_line, step="post",
-                             color=ltv_color_area, alpha=0.08, zorder=1)
-            ax1.step(x, ltvs, where="mid", color=ltv_color_area,
-                     linewidth=0.7, zorder=3, label="LTV actual")
+            # ── AX1: LTV como línea blanca — encima de las áreas ────────────
+            ax1.plot(x, ltvs, color="white", linewidth=1.0,
+                     marker="o", markersize=3, zorder=7, label="LTV actual")
 
-            # ⚠ solo si supera zona inicial — sin etiqueta %
+            # ⚠ solo si supera zona inicial
             for i in range(n):
                 if ltvs[i] >= ltv_inicial * 100:
                     ax1.text(x[i], ltvs[i] + 2.0, "⚠", color="#e74c3c",
-                             fontsize=7, ha="center", va="bottom", zorder=5)
+                             fontsize=7, ha="center", va="bottom", zorder=8)
 
             ax1.set_ylim(0, ltv_liquidacion * 100 + 10)
             ax1.set_ylabel("LTV %", color="white", fontsize=6)
             ax1.tick_params(axis="y", colors="white", labelsize=6)
-            ax1.spines["left"].set_color("gray")
+            ax1.spines["left"].set_color("white")
+            ax1.spines["left"].set_linewidth(1.0)
+            ax1.grid(True, alpha=0.12, color="gray", axis="y", linestyle=":", zorder=0)
 
-            # grid tenue gris
-            ax1.grid(True, alpha=0.15, color="gray", axis="y", linestyle=":", zorder=0)
+            # ── AX2: áreas apiladas — rojo deuda (base) + azul colateral ─────
+            deudas_arr = np.array(deudas)
+            cols_arr   = np.array(cols_usd)
+            total_arr  = deudas_arr + cols_arr
 
-            # ── AX2: barras colateral y deuda separadas ───────────────────────
-            max_usd = max(cols_usd) * 1.1 if cols_usd else 1
-            ax2.bar(x - w / 2, cols_usd, width=w, color="#2980b9", alpha=0.75, zorder=3, label="Col. USD")
-            ax2.bar(x + w / 2, deudas,   width=w, color="#e74c3c", alpha=0.75, zorder=3, label="Deuda USD")
+            ax2.fill_between(x, 0,          deudas_arr, color="#e74c3c", alpha=0.40, zorder=3, label="Deuda USD")
+            ax2.plot(x, deudas_arr,                      color="#e74c3c", linewidth=0.9, zorder=4)
+            ax2.fill_between(x, deudas_arr, total_arr,  color="#2980b9", alpha=0.35, zorder=3, label="Col. USD")
+            ax2.plot(x, total_arr,                       color="#2980b9", linewidth=0.9, zorder=4)
 
+            max_usd = float(total_arr.max()) * 1.1 if len(total_arr) > 0 else 1
             ax2.set_ylim(0, max_usd * 1.55)
-            ax2.set_ylabel("USD", color="white", fontsize=6)
+            ax2.set_ylabel("Deuda / Colateral USD", color="white", fontsize=6)
             ax2.tick_params(axis="y", colors="white", labelsize=6)
             ax2.spines["right"].set_color("gray")
+            ax2.grid(True, alpha=0.22, color="gray", axis="y", linestyle=":", zorder=1)
 
-            # ── eje X compartido — sin línea ─────────────────────────────────
+            # ── eje X: etiquetas solo en ax1, rotadas 60° ────────────────────
+            ax1.set_xticks(x)
+            ax1.set_xticklabels(activos, color="white", fontsize=7, rotation=60, ha="right")
+            ax1.set_xlim(-0.6, n - 0.4)
+            ax2.set_xlim(-0.6, n - 0.4)
             for ax in (ax1, ax2):
-                ax.set_xticks(x)
-                ax.set_xticklabels(activos, color="white", fontsize=7)
-                ax.set_xlim(-0.6, n - 0.4)
                 ax.spines["top"].set_visible(False)
                 ax.spines["bottom"].set_visible(False)
                 ax.tick_params(axis="x", length=0)
 
+            # ── leyendas separadas: zonas Binance | importes USD ─────────────
             lines1, labels1 = ax1.get_legend_handles_labels()
             lines2, labels2 = ax2.get_legend_handles_labels()
-            fg.legend(lines1 + lines2, labels1 + labels2,
-                      loc="outside upper left", fontsize=5,
-                      facecolor="white", labelcolor="black", framealpha=1.0)
-            fg.suptitle("LTV por Activo — Zonas de Riesgo Binance", fontsize=9, color="white")
+            leg1 = fg.legend(lines1, labels1,
+                             loc="outside upper left", fontsize=5,
+                             facecolor="white", labelcolor="black", framealpha=1.0,
+                             title="Zonas / LTV", title_fontsize=5)
+            leg2 = ax2.legend(lines2, labels2,
+                              loc="upper right", fontsize=5,
+                              facecolor="white", labelcolor="black", framealpha=0.9,
+                              title="Importes", title_fontsize=5)
+            fg.add_artist(leg1)
+            fg.suptitle("Deuda / Colateral USD", fontsize=9, color="white")
 
             frm = tk.Frame(parent, bg=self.CG_COLOR)
             frm.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")

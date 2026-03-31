@@ -1162,10 +1162,16 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 cursor.execute(qry % (account, sector))
                 sql = cursor.fetchall()
 
+            if is_none(symbol) and is_none(name) and not is_none(country) and not is_none(sector):
+                qry = """SELECT  * FROM market WHERE account= '%s' AND country = '%s' AND sector = '%s';"""
+                cursor.execute(qry % (account, country, sector))
+                sql = cursor.fetchall()
+
             ix = [columna[0] for columna in cursor.description]
             return sql, ix
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: select_market]: {}".format(error))
+            return [], []
 
     def insert(self, upd=None, val=None, symbol=None):
         """

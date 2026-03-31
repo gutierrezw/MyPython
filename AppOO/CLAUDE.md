@@ -68,9 +68,51 @@ Patrón implementado en `debugging_system()`:
 
 **Objetivo de uso:** elevar loggers ruidosos a ERROR para que no ensucien el log rotativo; bajar a DEBUG para diagnóstico puntual.
 
+## Base de datos — MySQL 8.x (schema: bdinv)
+
+### Configuración optimizada (my.ini — aplicada 2026-03-30)
+```ini
+innodb_buffer_pool_size         = 2G
+innodb_buffer_pool_instances    = 2
+innodb_log_file_size            = 512M
+innodb_flush_log_at_trx_commit  = 2
+join_buffer_size                = 4M
+sort_buffer_size                = 4M
+tmp_table_size                  = 256M
+max_heap_table_size             = 256M
+slow_query_log                  = ON
+long_query_time                 = 1
+log_queries_not_using_indexes   = ON
+```
+
+### Índices críticos (creados o verificados 2026-03-30)
+| Tabla | Índice | Columnas | Motivo |
+|-------|--------|----------|--------|
+| booktrading | idx_hash_id | hash_id | Búsqueda por hash — sin índice era full scan de 3K filas |
+| oportunidadesbuysell | idx_hash_id | hash_id | Igual que booktrading |
+| trazaplan | idx_idcuenta | idcuenta | Filtro frecuente sin índice |
+| fund_holdings | idx_cusip | cusip | Crítico — sin índice: 782K filas, 18 min por query |
+| fund_holdings | idx_fund_date | fund_id, report_date | Filtro combinado frecuente |
+| fund_holdings | idx_report_date | report_date | Filtro por fecha solo |
+| market | idx_symbol | symbol | Tabla sin índices secundarios |
+| market | idx_cusip | cusip | JOIN frecuente con fund_holdings |
+| funds | idx_cik | cik | Tabla sin índices secundarios |
+| diaria_cnv | idx_fecha_cod | fecha, codCAFCI | Filtro compuesto |
+| performa_inversion | idx_idcuenta_vehiculo | idcuenta, vehiculo | Filtro compuesto |
+| order_trader | idx_account_symbol | account, symbol | Filtro compuesto |
+
+### Script de monitoreo
+`SchemasSQL/mysql_index_analyzer.py` — analiza schema, índices sin uso, full scans y configuración InnoDB.
+
+### Tarea recurrente
+Cada lunes 8am → reporte HTML por Gmail (configurado en Claude Scheduled).
+
+---
+
 ## Checklist antes de cerrar sesión
 
 Antes de hacer commit, preguntar explícitamente:
 1. ¿Quedó algún acuerdo de UI/columnas sin registrar?
 2. ¿Hay ideas pendientes por guardar en memoria?
 3. ¿Todos los cambios de código tienen su contraparte en datos (header + valor en mismo orden)?
+4. ¿Se documentaron nuevos índices o cambios en la BD?
