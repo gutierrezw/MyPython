@@ -371,8 +371,8 @@ class ClassAgenteIA:
         except Exception as e:
             self.logger.error(f"Agente_MarketScreener(): {e}")
 
-    # agente Institutional Score — enriquece Market con ownership institucional, una vez a la semana
-    @wait_rate(604800, persist=True)
+    # agente Institutional Score — enriquece Market con ownership institucional, una vez al día
+    @wait_rate(86400, persist=True)
     def Agente_InstitucionalScore(self):
         try:
             result = sync_institutional(account=self.account)
@@ -1768,7 +1768,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             """Loguea tabla de estado de agentes al arrancar agentesIA."""
             _AGENTES = {
                 "Agente_MarketScreener":     86400,
-                "Agente_InstitucionalScore": 604800,
+                "Agente_InstitucionalScore": 86400,
                 "Agente_EdgarFunds":         2592000,
                 "Agente_FundFilings":        604800,
                 "Agente_13FHoldings":        86400,
