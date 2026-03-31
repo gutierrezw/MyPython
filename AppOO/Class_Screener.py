@@ -1679,7 +1679,7 @@ def cleanup_market(account):
     # ── Phase 0: Eliminar preferreds/warrants/rights ya existentes ────────────
     preferreds_eliminados = 0
     for sym in list(all_symbols):
-        if "-" in sym and existing[sym].get("encartera") != "Y":
+        if ("-" in sym or "^" in sym) and existing[sym].get("encartera") != "Y":
             market.delete(symbol=sym, account=account)
             existing.pop(sym)
             all_symbols.remove(sym)
