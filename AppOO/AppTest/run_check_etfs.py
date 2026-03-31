@@ -1,44 +1,32 @@
-from pymysql import connect
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from Modulos_Mysql import MarketScreen
 
 ACCOUNT = "U4214563"
-DB = {"user": "root", "password": "", "host": "localhost", "database": "bdinv"}
 
-conn = connect(**DB)
+mkt = MarketScreen()
+conn = mkt._conectar(tabla="select.market")
 c = conn.cursor()
 
+print("=== Símbolos EN CARTERA — categoriaActivo actual ===")
 c.execute("""
-    SELECT symbol, shortName, categoriaActivo, encartera
-    FROM market WHERE account=%s
-    AND categoriaActivo='X'
-    ORDER BY encartera DESC, symbol
+    SELECT symbol, shortName, categoriaActivo, sector, industry
+    FROM market
+    WHERE account=%s AND encartera='Y'
+    ORDER BY categoriaActivo, symbol
 """, (ACCOUNT,))
 rows = c.fetchall()
 
-print(f"{'Symbol':<10} {'Nombre':<45} {'Cat':>4} {'Cartera':>8}")
-print("-" * 72)
-for r in rows:
-    print(f"{r[0]:<10} {(r[1] or '')[:44]:<45} {r[2]:>4} {r[3]:>8}")
-print(f"\nTotal ETF/Fondos en market: {len(rows)}")
+print(f"{'Symbol':<10} {'Cat':>4}  {'Nombre':<35} {'Sector':<25} {'Industry'}")
+print("-" * 110)
+for sym, nombre, cat, sector, industry in rows:
+    print(f"  {sym:<10} {cat:>4}  {(nombre or '')[:34]:<35} {(sector or '')[:24]:<25} {(industry or '')[:40]}")
 
-a_eliminar = [r[0] for r in rows if (r[3] or "").strip() != "Y"]
-en_cartera  = [r[0] for r in rows if (r[3] or "").strip() == "Y"]
+print(f"\nTotal en cartera: {len(rows)}")
 
-print(f"\nEn cartera (audit_portfolio los gestiona): {en_cartera}")
-print(f"A eliminar (no en cartera, categoriaActivo=X): {a_eliminar}")
-
-if not a_eliminar:
-    print("\nNada que eliminar.")
-else:
-    resp = input(f"\n¿Eliminar {len(a_eliminar)} registros de market? [s/N]: ").strip().lower()
-    if resp == "s":
-        eliminados = 0
-        for sym in a_eliminar:
-            c.execute("DELETE FROM market WHERE symbol=%s AND account=%s", (sym, ACCOUNT))
-            print(f"  eliminado: {sym}")
-            eliminados += 1
-        conn.commit()
-        print(f"\nTotal eliminados: {eliminados}")
-    else:
-        print("Cancelado.")
+cats = {}
+for _, _, cat, _, _ in rows:
+    cats[cat] = cats.get(cat, 0) + 1
+print("Por categoría:", cats)
 
 conn.close()
