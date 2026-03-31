@@ -76,14 +76,20 @@ def _totals(files: dict) -> dict:
 
 def _run_vulture() -> list:
     """Ejecuta vulture y retorna lista de hallazgos."""
-    all_files = _collect_py_files()
+    exclude_patterns = ",".join(EXCLUDE_DIRS)
     try:
         r = subprocess.run(
-            [sys.executable, "-m", "vulture"] + all_files + ["--min-confidence", "80"],
-            capture_output=True, text=True, timeout=60,
+            [
+                sys.executable, "-m", "vulture", APP_DIR,
+                "--min-confidence", "80",
+                "--exclude", exclude_patterns,
+            ],
+            capture_output=True, text=True, timeout=180,
         )
         lines = [l.strip() for l in r.stdout.splitlines() if l.strip()]
         return lines
+    except subprocess.TimeoutExpired:
+        return ["ERROR ejecutando vulture: timeout (>180s)"]
     except Exception as e:
         return [f"ERROR ejecutando vulture: {e}"]
 

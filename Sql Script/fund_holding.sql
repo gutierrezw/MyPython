@@ -1,6 +1,6 @@
 SELECT * 
 FROM bdinv.fund_holdings
--- where symbol = "UUUU"
+-- where symbol in ("PLUG", "XIFR")
 -- WHERE cusip is NULL
 -- where  cusip = '0001051470'
 ;
@@ -16,8 +16,7 @@ GROUP BY symbol;
 SELECT COUNT(*) FROM funds;
 SELECT COUNT(*) FROM fund_holdings;
 
-SELECT COUNT(*) FROM funds WHERE cik IS NOT NULL;
-SELECT COUNT(DISTINCT fund_id) FROM fund_holdings WHERE cusip IS NOT NULL;
+SELECT COUNT(*) FROM funds WHERE cik IS NULL;
 SELECT COUNT(DISTINCT fund_id) FROM fund_holdings WHERE cusip IS NULL;
 SELECT COUNT(DISTINCT cusip) FROM fund_holdings WHERE cusip IS NULL;
 SELECT COUNT(*) FROM market;
@@ -43,5 +42,11 @@ FROM fund_holdings fh
 WHERE fh.symbol IN (SELECT symbol FROM market WHERE account = 'U4214563');
 
 
+SELECT option_type, COUNT(*) total
+FROM fund_holdings
+GROUP BY option_type
+ORDER BY 2 DESC;
 
+SHOW INDEX FROM fund_holdings;
+DESCRIBE fund_holdings;
 
