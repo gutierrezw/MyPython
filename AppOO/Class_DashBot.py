@@ -433,7 +433,7 @@ class ClassAgenteIA:
                 f"13FHoldings: archivos={result['xml_files']} "
                 f"holdings={result['inserted_holdings']} opciones={result['inserted_options']}"
             )
-            deleted = self.market.cleanup_fund_holdings_nulls()
+            deleted = MarketScreen().cleanup_fund_holdings_nulls()
             self.logger.warning(f"13FHoldings cleanup: eliminadas={deleted} filas NULL")
         except Exception as e:
             self.logger.error(f"Agente_13FHoldings(): {e}")
