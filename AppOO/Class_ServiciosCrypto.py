@@ -86,3 +86,74 @@ class ServiciosCrypto:
         except Exception as e:
             self._logger.error(f"earn_redeem({productId}, {amount}): {e}")
             return None
+
+    def ltv_check_and_adjust(self, lconfig):
+        """Analiza el LTV de cada préstamo flexible activo y calcula el ajuste necesario.
+        DRY RUN — solo calcula y retorna, no ejecuta ninguna llamada de ajuste.
+
+        Retorna lista de dicts con: loanCoin, collateralCoin, ltv_actual,
+        loan_usd, collateral_usd, estado, ajuste_direction, ajuste_coin.
+        """
+        target = float(lconfig.get("target", 0.50))
+        tolerance = float(lconfig.get("tolerance", 0.05))
+        critical = float(lconfig.get("critical", 0.65))
+        rebalance_step = float(lconfig.get("rebalance_step", 0.25))
+        ltv_lower = target * (1 - tolerance)
+        ltv_upper = target * (1 + tolerance)
+
+        resultado = self._spot.get_flexible_loan_ongoing_orders()
+        if not resultado:
+            return []
+        rows = resultado.get("rows", [])
+        if not rows:
+            return []
+
+        analisis = []
+        for row in rows:
+            if float(row.get("currentLTV", 0)) == 0:
+                continue
+            loan_coin = row.get("loanCoin", "")
+            collateral_coin = row.get("collateralCoin", "")
+            ltv_actual = float(row.get("currentLTV", 0))
+            collateral_amount = float(row.get("collateralAmount", 0))
+            loan_usd = float(row.get("loanValueInUSD") or row.get("totalDebt", 0))
+            collateral_usd = float(row.get("collateralValueInUSD", 0))
+            if collateral_usd == 0 and ltv_actual > 0:
+                collateral_usd = loan_usd / ltv_actual
+
+            if ltv_actual >= critical:
+                estado = "CRITICO"
+            elif ltv_actual > ltv_upper:
+                estado = "ALTO"
+            elif ltv_actual < ltv_lower:
+                estado = "BAJO"
+            else:
+                estado = "NORMAL"
+
+            ajuste_direction = None
+            ajuste_coin = 0.0
+            if estado in ("ALTO", "CRITICO"):
+                colateral_obj_usd = loan_usd / target if target > 0 else 0
+                delta_usd = (colateral_obj_usd - collateral_usd) * rebalance_step
+                precio_col = collateral_usd / collateral_amount if collateral_amount > 0 else 0
+                ajuste_coin = delta_usd / precio_col if precio_col > 0 else 0
+                ajuste_direction = "ADDITIONAL"
+            elif estado == "BAJO":
+                colateral_obj_usd = loan_usd / target if target > 0 else 0
+                delta_usd = (collateral_usd - colateral_obj_usd) * rebalance_step
+                precio_col = collateral_usd / collateral_amount if collateral_amount > 0 else 0
+                ajuste_coin = delta_usd / precio_col if precio_col > 0 else 0
+                ajuste_direction = "REDUCED"
+
+            analisis.append({
+                "loanCoin": loan_coin,
+                "collateralCoin": collateral_coin,
+                "ltv_actual": ltv_actual,
+                "loan_usd": loan_usd,
+                "collateral_amount": collateral_amount,
+                "collateral_usd": collateral_usd,
+                "estado": estado,
+                "ajuste_direction": ajuste_direction,
+                "ajuste_coin": round(ajuste_coin, 6),
+            })
+        return analisis
