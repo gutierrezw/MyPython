@@ -5394,7 +5394,7 @@ class BotCryptoUI:
             if saved and saved.get("position") == "LONG" and saved.get("entry_price"):
                 bot.state.update(saved)
                 # Verificar régimen actual — si BEAR, salir inmediatamente
-                regime = self.bot_manager._check_market_regime(bot.df) if self.bot_manager else "RANGE"
+                regime = bot._check_market_regime() if bot.df is not None else "RANGE"
                 if regime == "BEAR":
                     self.logger.warning(
                         f"📥 {symbol}: Estado restaurado pero régimen BEAR → EXIT inmediato"
