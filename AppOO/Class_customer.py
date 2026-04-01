@@ -871,9 +871,15 @@ class DataHub:
                     return lotesGain(book, ix, last)
                 elif opcion == "ambos":
                     return lotesGainLost(book, ix, last)
+            if opcion == "ambos":
+                return {"book": ([], []), "profit": 0, "gain lotes": 0, "total lotes": 0, "cantidad": 0}, [], []
+            return []
         except Exception as e:
             print(f"get_lotesGainLost: {e}")
             traceback.print_exc()
+            if opcion == "ambos":
+                return {"book": ([], []), "profit": 0, "gain lotes": 0, "total lotes": 0, "cantidad": 0}, [], []
+            return []
 
     # optimiza venta de lotes para la gain de capital
     def maximiza_sell_lotes(account=None, symbol=None, last=None, c_sell=None, position=None, costobase=None):

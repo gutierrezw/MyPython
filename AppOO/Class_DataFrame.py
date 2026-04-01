@@ -2229,9 +2229,10 @@ def chart_rendimiento_dividendos(fg=None, datos=None, dlabl=None, cchart=None, a
             interpolate=True,
         )
 
+        lbl_idx = d_index[min(2, len(d_index) - 1)]
         av.axhline(y, linewidth=0.6, ls="--", color=cchart["plot1"])
         av.text(
-            d_index[2],
+            lbl_idx,
             y + off,
             "{:>+4.1%} Infravalorado el activo".format(y),
             fontsize=6,
@@ -2240,7 +2241,7 @@ def chart_rendimiento_dividendos(fg=None, datos=None, dlabl=None, cchart=None, a
         av.axhline(m, linewidth=0.6, ls="--", color=cchart["texto"])
         av.axhline(x, linewidth=0.6, ls="--", color=cchart["plot3"])
         av.text(
-            d_index[2],
+            lbl_idx,
             x - off,
             "{:>+4.1%} Sobrevalorado el activo".format(x),
             fontsize=6,
