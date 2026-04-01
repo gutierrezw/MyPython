@@ -1699,9 +1699,14 @@ class BotCryptoUI:
             self._iniciar_auto_refresh()
             self._schedule_diaria_performace()
 
-            # Auto-start: iniciar bots al cargar la app, siempre self.env != None
-            if self.all_activos and self.env:
+            # Auto-start: solo si el estado persistido no es "stopped"
+            estado_guardado = read_json_tmp("botcrypto_running_state")
+            fue_detenido = estado_guardado.get("running", True) is False
+            if self.all_activos and self.env and not fue_detenido:
                 self._on_start_all()
+            elif fue_detenido:
+                self.lbl_status.config(text="● STOPPED", fg="gray")
+                self.logger.warning("BotCryptoUI: auto-start omitido — fue detenido manualmente antes del reinicio")
         except Exception as e:
             self.logger.error(f"Error inicializando BotCryptoUI: {e}")
             traceback.print_exc()
@@ -3598,6 +3603,7 @@ class BotCryptoUI:
             return
 
         self.running = True
+        write_json_tmp("botcrypto_running_state", {"running": True})
         self.lbl_status.config(text="● CALCULANDO...", fg="yellow")
         self.interval = self.combo_interval.get()
 
@@ -3814,6 +3820,7 @@ class BotCryptoUI:
             return
 
         self.running = False
+        write_json_tmp("botcrypto_running_state", {"running": False})
         self.lbl_status.config(text="● STOPPED", fg="gray")
 
         # Detener WebSocket y scoring cycle

@@ -945,7 +945,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         values = {}
                         values.update({"simbolo": keys["symbol"]})
                         values.update({"categoria": "Stock"})
-                        values.update({"divisa": "USD"})
+                        values.update({"divisa": keys.get("currency", "USD")})
                         values.update({"cuenta": keys["accountCode"]})
                         timestamp = int(keys["trade_time_r"] / 1000)
                         values.update({"fechahora": datetime.fromtimestamp(timestamp)})
@@ -1387,6 +1387,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     p["deuda"] = 0
                     p["conid"] = str(key["conid"])
                     p["open"] = x_open
+                    p["factor_cambio"] = factor
+                    p["divisa"] = key.get("currency", "USD")
                     p["dgyp"] = (p["mrkprice"] - p["open"] if p["open"] > 0 else 0) * p["position"]
                     p["peso"] = 0
 
