@@ -68,6 +68,7 @@ from valuation_edgar_downloader import BASE_DIR, download_filing
 from valuation_xbrl_api import get_zip_files
 from Class_customer import DataHub, TickerInfo
 from Class_ApiBinnace import BinanceClient
+from Class_ServiciosCrypto import ServiciosCrypto
 from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
 from Modulos_Utilitarios import define_FileCache, read_json_tmp, write_json_tmp
 
@@ -469,8 +470,8 @@ class ClassAgenteIA:
                     "Agente_LtvControl: sin bloque 'ltv' en parameters → SKIP"
                 )
                 return
-            spot = BinanceClient(vehiculo="Crypto").spot
-            analisis = spot.ltv_check_and_adjust(lconfig)
+            svc = ServiciosCrypto()
+            analisis = svc.ltv_check_and_adjust(lconfig)
             if not analisis:
                 self.logger.warning("Agente_LtvControl: sin préstamos activos")
                 return
@@ -478,7 +479,7 @@ class ClassAgenteIA:
                 gap = item["ltv_actual"] - lconfig.get("target", 0.50)
                 gap_str = f"+{gap:.2%}" if gap >= 0 else f"{gap:.2%}"
                 if item["ajuste_direction"] and item["ajuste_coin"] > 0:
-                    resp = spot.get_flexible_adjust_ltv(
+                    resp = svc._spot.get_flexible_adjust_ltv(
                         loanCoin=item["loanCoin"],
                         collateralCoin=item["collateralCoin"],
                         adjustType=item["ajuste_direction"],
