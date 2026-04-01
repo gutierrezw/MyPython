@@ -454,8 +454,13 @@ class ClassAgenteIA:
         except Exception as e:
             self.logger.error(f"Agente_AuditPortfolio(): {e}")
 
-    # agente LTV — monitorea y calcula ajuste de colateral Binance (DRY RUN)
-    @wait_rate(300)
+    # Agente LTV — mantiene el LTV en ~28% para evitar liquidaciones de colateral en Binance.
+    # Corre cada 5 min. Si el precio del colateral baja (LTV sube) → agrega colateral automáticamente.
+    # Si el precio sube (LTV baja) → retira colateral sobrante hacia Earn.
+    # Complementa loan_distribute (distribución inicial manual desde AnalisisCrypto).
+    # Parámetros: bloque "ltv" en el JSON de sesión Crypto (target, umbral_alto, umbral_bajo, umbral_critico).
+    # Doc completa: Doc/ltv_agent.md
+    @wait_rate(300, persist=True)
     def Agente_LtvControl(self):
         try:
             params = self._load_params("Crypto")
@@ -508,7 +513,7 @@ class ClassAgenteIA:
             self.logger.error(f"Agente_LtvControl(): {e}")
 
     # agente beta portfolio Stock — actualiza BetaPortfolio cada hora desde DB + posiciones vivas
-    @wait_rate(3600)
+    @wait_rate(3600, persist=True)
     def Agente_StockBeta(self):
         try:
             positions = [p for p in DataHub.manager_positions.get("Stock", []) if float(p.get("mktvalue", 0)) > 0]
