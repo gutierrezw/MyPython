@@ -6,6 +6,7 @@ Diagnóstico específico para estructura UPREIT de HASI
 En estructuras UPREIT:
 Total Equity = Stockholders' Equity + Noncontrolling Interest
 """
+
 import sys
 from pathlib import Path
 
@@ -13,9 +14,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from valuation_xbrl_api import load_filing, get_fact_value
 
-print("="*80)
+print("=" * 80)
 print("🔍 DIAGNÓSTICO UPREIT - HASI")
-print("="*80)
+print("=" * 80)
 
 # Cargar filing
 hasi_file = "EDGAR/HASI_EDGAR_Files/10K_Filings/hasi-20231231.htm"
@@ -25,30 +26,32 @@ filing = load_filing(hasi_file)
 print(f"✅ Cargado: {len(filing.facts)} conceptos")
 
 # Buscar componentes de equity en UPREIT
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("📊 COMPONENTES DE EQUITY EN UPREIT")
-print("="*80)
+print("=" * 80)
 
 # Equity calculado
-assets_val = get_fact_value(filing.facts['us-gaap:Assets'][0])
-liab_val = get_fact_value(filing.facts['us-gaap:Liabilities'][0])
+assets_val = get_fact_value(filing.facts["us-gaap:Assets"][0])
+liab_val = get_fact_value(filing.facts["us-gaap:Liabilities"][0])
 calculated_equity = float(assets_val) - float(liab_val)
 
 print(f"\n💡 Equity calculado (Assets - Liabilities): ${calculated_equity:,.0f}")
 
 # Buscar Stockholders' Equity (componente REIT)
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🔎 BUSCAR: Stockholders' Equity (parte REIT)")
-print("="*80)
+print("=" * 80)
 
 stockholders_concepts = []
 for name in filing.facts.keys():
     name_lower = name.lower()
-    if (('stockholder' in name_lower or 'shareholder' in name_lower) and
-        'equity' in name_lower and
-        'attributable' not in name_lower and
-        'note' not in name_lower and
-        'text' not in name_lower):
+    if (
+        ("stockholder" in name_lower or "shareholder" in name_lower)
+        and "equity" in name_lower
+        and "attributable" not in name_lower
+        and "note" not in name_lower
+        and "text" not in name_lower
+    ):
         stockholders_concepts.append(name)
 
 if stockholders_concepts:
@@ -57,7 +60,7 @@ if stockholders_concepts:
         facts = filing.facts[concept]
         if facts:
             # Verificar si es INSTANT
-            ctx_id = getattr(facts[0], 'contextID', None)
+            ctx_id = getattr(facts[0], "contextID", None)
             if ctx_id:
                 ctx = filing.contexts.get(ctx_id)
                 if ctx and "instant" in ctx:
@@ -71,16 +74,18 @@ if stockholders_concepts:
                         pass
 
 # Buscar Noncontrolling Interest (Operating Partnership units)
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🔎 BUSCAR: Noncontrolling Interest (OP units)")
-print("="*80)
+print("=" * 80)
 
 noncontrolling_concepts = []
 for name in filing.facts.keys():
     name_lower = name.lower()
-    if (('noncontrol' in name_lower or 'non-control' in name_lower or 'minority' in name_lower) and
-        'note' not in name_lower and
-        'text' not in name_lower):
+    if (
+        ("noncontrol" in name_lower or "non-control" in name_lower or "minority" in name_lower)
+        and "note" not in name_lower
+        and "text" not in name_lower
+    ):
         noncontrolling_concepts.append(name)
 
 if noncontrolling_concepts:
@@ -89,7 +94,7 @@ if noncontrolling_concepts:
         facts = filing.facts[concept]
         if facts:
             # Verificar si es INSTANT
-            ctx_id = getattr(facts[0], 'contextID', None)
+            ctx_id = getattr(facts[0], "contextID", None)
             if ctx_id:
                 ctx = filing.contexts.get(ctx_id)
                 if ctx and "instant" in ctx:
@@ -103,16 +108,19 @@ if noncontrolling_concepts:
                         pass
 
 # Buscar conceptos con "Attributable" (typical UPREIT structure)
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🔎 BUSCAR: Equity Attributable to Parent/Company")
-print("="*80)
+print("=" * 80)
 
 attributable_concepts = []
 for name in filing.facts.keys():
     name_lower = name.lower()
-    if ('attributable' in name_lower and 'equity' in name_lower and
-        'note' not in name_lower and
-        'text' not in name_lower):
+    if (
+        "attributable" in name_lower
+        and "equity" in name_lower
+        and "note" not in name_lower
+        and "text" not in name_lower
+    ):
         attributable_concepts.append(name)
 
 if attributable_concepts:
@@ -121,7 +129,7 @@ if attributable_concepts:
         facts = filing.facts[concept]
         if facts:
             # Verificar si es INSTANT
-            ctx_id = getattr(facts[0], 'contextID', None)
+            ctx_id = getattr(facts[0], "contextID", None)
             if ctx_id:
                 ctx = filing.contexts.get(ctx_id)
                 if ctx and "instant" in ctx:
@@ -135,18 +143,20 @@ if attributable_concepts:
                         pass
 
 # Buscar "equity" con "including" (Total Equity Including Noncontrolling)
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🔎 BUSCAR: Total Equity (Including Noncontrolling)")
-print("="*80)
+print("=" * 80)
 
 total_equity_concepts = []
 for name in filing.facts.keys():
     name_lower = name.lower()
-    if ('equity' in name_lower and
-        ('including' in name_lower or 'total' in name_lower) and
-        'note' not in name_lower and
-        'text' not in name_lower and
-        'policy' not in name_lower):
+    if (
+        "equity" in name_lower
+        and ("including" in name_lower or "total" in name_lower)
+        and "note" not in name_lower
+        and "text" not in name_lower
+        and "policy" not in name_lower
+    ):
         total_equity_concepts.append(name)
 
 if total_equity_concepts:
@@ -155,7 +165,7 @@ if total_equity_concepts:
         facts = filing.facts[concept]
         if facts:
             # Verificar si es INSTANT
-            ctx_id = getattr(facts[0], 'contextID', None)
+            ctx_id = getattr(facts[0], "contextID", None)
             if ctx_id:
                 ctx = filing.contexts.get(ctx_id)
                 if ctx and "instant" in ctx:
@@ -172,20 +182,22 @@ if total_equity_concepts:
                         pass
 
 # Verificar sumatoria: Stockholders' + Noncontrolling = Total
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("💡 VERIFICACIÓN: Stockholders + Noncontrolling = Total")
-print("="*80)
+print("=" * 80)
 
 # Buscar conceptos más comunes
 stockholders = None
 noncontrolling = None
 
 # Try standard concepts
-for concept in ['us-gaap:StockholdersEquity',
-                'us-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest']:
+for concept in [
+    "us-gaap:StockholdersEquity",
+    "us-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+]:
     if concept in filing.facts:
         facts = filing.facts[concept]
-        if facts and 'IncludingPortion' not in concept:
+        if facts and "IncludingPortion" not in concept:
             val = get_fact_value(facts[0])
             if val:
                 try:
@@ -196,8 +208,7 @@ for concept in ['us-gaap:StockholdersEquity',
                 except (ValueError, TypeError):
                     pass
 
-for concept in ['us-gaap:MinorityInterest',
-                'us-gaap:PartnersCapitalAttributableToNoncontrollingInterest']:
+for concept in ["us-gaap:MinorityInterest", "us-gaap:PartnersCapitalAttributableToNoncontrollingInterest"]:
     if concept in filing.facts:
         facts = filing.facts[concept]
         if facts:
@@ -225,9 +236,9 @@ if stockholders and noncontrolling:
         print(f"\n⚠️  DISCREPANCIA: ${diff:,.0f}")
 
 # Listar TODOS los conceptos con valor ~$2.1B
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🔎 BUSCAR: Todos los conceptos con valor ~$2.1B")
-print("="*80)
+print("=" * 80)
 
 print(f"\nBuscando conceptos con valor entre $2.0B y $2.3B...")
 
@@ -241,7 +252,7 @@ for name in filing.facts.keys():
     facts = filing.facts[name]
     if facts:
         # Solo INSTANT contexts
-        ctx_id = getattr(facts[0], 'contextID', None)
+        ctx_id = getattr(facts[0], "contextID", None)
         if ctx_id:
             ctx = filing.contexts.get(ctx_id)
             if ctx and "instant" in ctx:
@@ -262,6 +273,6 @@ if matches:
 else:
     print("\n❌ No se encontraron conceptos en el rango esperado")
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("✅ Diagnóstico UPREIT completo")
-print("="*80)
+print("=" * 80)

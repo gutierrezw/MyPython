@@ -2,6 +2,7 @@
 """
 Regression test for HASI to verify US-GAAP dividend extraction still works
 """
+
 import sys
 from pathlib import Path
 
@@ -10,9 +11,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from valuation_xbrl_api import get_zip_files
 from valuation_arelle_engine import run_valuation
 
-print("="*80)
+print("=" * 80)
 print("🧪 REGRESSION TEST - HASI (US-GAAP)")
-print("="*80)
+print("=" * 80)
 
 # Get HASI filings
 ticker_dir = "EDGAR/HASI_EDGAR_Files"
@@ -26,13 +27,13 @@ result = run_valuation(
     ticker="HASI",
     price=32.50,  # Example price
     company_name="Hannon Armstrong",
-    company_type="domestic"
+    company_type="domestic",
 )
 
 if result:
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("💰 CASH FLOW METRICS")
-    print("="*80)
+    print("=" * 80)
 
     fundamentals = result.get("fundamentals", {})
     cash_flow = fundamentals.get("cash_flow", {})
@@ -46,7 +47,7 @@ if result:
     print(f"  Dividends Paid: {fmt(cash_flow.get('dividends_paid'))}")
 
     # Check dividends
-    dividends_paid = cash_flow.get('dividends_paid')
+    dividends_paid = cash_flow.get("dividends_paid")
     if dividends_paid and dividends_paid > 0:
         print(f"\n✅ SUCCESS: US-GAAP dividends still working: ${dividends_paid:,.0f}")
     elif dividends_paid is None:
@@ -55,9 +56,9 @@ if result:
         print(f"\n⚠️ WARNING: dividends_paid is {dividends_paid}")
 
     # Check REIT metrics
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🏢 REIT METRICS")
-    print("="*80)
+    print("=" * 80)
 
     reit = result.get("reit_metrics", {})
     is_reit = reit.get("is_reit", False)
@@ -78,6 +79,6 @@ if result:
 else:
     print("\n❌ Analysis returned None")
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("✅ Regression test complete")
-print("="*80)
+print("=" * 80)

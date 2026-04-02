@@ -3,6 +3,7 @@ run_check_full_exits.py
 Analiza si el concepto 'full exit' (fondo que liquida completamente) está en BD
 y cómo se representa en fund_holdings.
 """
+
 import sys
 import os
 

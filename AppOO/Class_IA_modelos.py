@@ -16,7 +16,6 @@ from Modulos_python import (
 from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem
 from Modulos_Utilitarios import define_FileCache
 
-
 # Parámetros por defecto del modelo
 DEFAULT_PARAMS_SELL = {
     # Parámetros del RandomForest

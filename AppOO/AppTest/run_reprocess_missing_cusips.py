@@ -2,6 +2,7 @@
 Reprocesa XMLs 13F para CUSIPs que no estaban en market cuando se corrió sync_13f_holdings.
 Solo inserta/actualiza posiciones de los CUSIPs indicados, sin reprocesar todo el pipeline.
 """
+
 import sys
 import os
 import subprocess
@@ -98,10 +99,21 @@ for xml_file in all_xml_files:
         else:
             operation, shares_delta, pct_change = "HOLD", 0, 0.0
 
-        records.append((
-            fund_id, symbol, shares, shares_prev, shares_delta, pct_change,
-            operation, filing_date, pos["value"], pos["cusip"], opt,
-        ))
+        records.append(
+            (
+                fund_id,
+                symbol,
+                shares,
+                shares_prev,
+                shares_delta,
+                pct_change,
+                operation,
+                filing_date,
+                pos["value"],
+                pos["cusip"],
+                opt,
+            )
+        )
 
 print(f"XMLs con target CUSIPs: {xmls_con_target}")
 print(f"Registros a insertar  : {len(records)}")
@@ -111,6 +123,7 @@ if not records:
 
 # Desglose por símbolo
 from collections import Counter
+
 by_sym = Counter(r[1] for r in records)
 for sym, cnt in sorted(by_sym.items()):
     print(f"  {sym}: {cnt} registros")

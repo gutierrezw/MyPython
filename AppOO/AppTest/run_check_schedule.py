@@ -5,6 +5,7 @@ Muestra último run, próximo run y alerta si alguno está vencido (>1.5x interv
 
 Uso: python AppTest/run_check_schedule.py
 """
+
 import sys
 import os
 
@@ -15,18 +16,18 @@ from datetime import datetime
 import time
 
 AGENTES = {
-    "Agente_MarketScreener":     {"intervalo": 86400,   "desc": "Discovery + Yahoo (diario)"},
-    "Agente_InstitucionalScore": {"intervalo": 604800,  "desc": "Ownership institucional (semanal)"},
-    "Agente_EdgarFunds":         {"intervalo": 2592000, "desc": "Fondos EDGAR company.idx (mensual)"},
-    "Agente_FundFilings":        {"intervalo": 604800,  "desc": "Descarga XMLs 13F-HR (semanal)"},
-    "Agente_13FHoldings":        {"intervalo": 86400,   "desc": "Parsea XMLs → fund_holdings (diario)"},
-    "Agente_13FScores":          {"intervalo": 86400,   "desc": "Recalcula inst_score (diario)"},
-    "Agente_AuditPortfolio":     {"intervalo": 2592000, "desc": "Auditoría cartera delistados (mensual)"},
-    "Agente_LtvControl":         {"intervalo": 300,     "desc": "LTV colateral Binance (5 min)"},
-    "Agente_StockBeta":          {"intervalo": 3600,    "desc": "Beta portfolio Stock (1 hora)"},
+    "Agente_MarketScreener": {"intervalo": 86400, "desc": "Discovery + Yahoo (diario)"},
+    "Agente_InstitucionalScore": {"intervalo": 604800, "desc": "Ownership institucional (semanal)"},
+    "Agente_EdgarFunds": {"intervalo": 2592000, "desc": "Fondos EDGAR company.idx (mensual)"},
+    "Agente_FundFilings": {"intervalo": 604800, "desc": "Descarga XMLs 13F-HR (semanal)"},
+    "Agente_13FHoldings": {"intervalo": 86400, "desc": "Parsea XMLs → fund_holdings (diario)"},
+    "Agente_13FScores": {"intervalo": 86400, "desc": "Recalcula inst_score (diario)"},
+    "Agente_AuditPortfolio": {"intervalo": 2592000, "desc": "Auditoría cartera delistados (mensual)"},
+    "Agente_LtvControl": {"intervalo": 300, "desc": "LTV colateral Binance (5 min)"},
+    "Agente_StockBeta": {"intervalo": 3600, "desc": "Beta portfolio Stock (1 hora)"},
 }
 
-ALERTA_FACTOR = 1.5   # vencido si lleva > 1.5x el intervalo sin correr
+ALERTA_FACTOR = 1.5  # vencido si lleva > 1.5x el intervalo sin correr
 
 
 def _fmt_intervalo(seg):

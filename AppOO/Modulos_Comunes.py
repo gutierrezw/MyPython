@@ -93,7 +93,11 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
                         pdatos.index = pd.to_datetime(pdatos.index)
                         indice.index = pd.to_datetime(indice.index)
                         cols_pdatos = ["CumPort"] + [c for c in ("value", "costo_base") if c in pdatos.columns]
-                        datos = pdatos[cols_pdatos].join(indice[[cum_index]], how="inner").dropna(subset=["CumPort", cum_index])
+                        datos = (
+                            pdatos[cols_pdatos]
+                            .join(indice[[cum_index]], how="inner")
+                            .dropna(subset=["CumPort", cum_index])
+                        )
                         # Alias para compatibilidad con graph_performace_portafolio
                         datos[index_ref] = datos[cum_index]
                         datos["++ Portafolio"] = datos["CumPort"]
@@ -362,7 +366,7 @@ def actualiza_performa_inversion(account=None, vehiculo=None):
 
     try:
         Performa = IPerformance()
-        (last_update, ix) = Performa.select_performa_inversion(account=account, vehiculo=vehiculo, accion="last")
+        last_update, ix = Performa.select_performa_inversion(account=account, vehiculo=vehiculo, accion="last")
         if last_update:
 
             # obtiene a partir last fecha de performa, registros diarias pendientes
@@ -408,7 +412,7 @@ def actualiza_performa_inversion(account=None, vehiculo=None):
                 pdatos["CumPort"] = (1 + pdatos["retorno"]).cumprod() - 1
 
                 # busca desempeño del índice asociado al vehículo
-                (df_indice, index_ref, rtn_index) = crea_dataframe_index(vehiculo=vehiculo, desde=f_inicio)
+                df_indice, index_ref, rtn_index = crea_dataframe_index(vehiculo=vehiculo, desde=f_inicio)
                 df_previo = pd.merge(df_indice, pdatos, on="Date", how="inner")
 
                 # deja en df_update las filas Date > f_desde
@@ -563,7 +567,7 @@ def crea_dataframe_performa_Index(account=None, vehiculo=None, display=True, dia
 def proceso_update_performance(account=None, vehiculo=None):
     try:
         Performa = IPerformance()
-        (last_update, ix) = Performa.select_performa_inversion(account=account, vehiculo=vehiculo, accion="last")
+        last_update, ix = Performa.select_performa_inversion(account=account, vehiculo=vehiculo, accion="last")
 
         if last_update:
             hasta = last_update[ix.index("fechaclose")]

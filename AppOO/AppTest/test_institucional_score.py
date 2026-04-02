@@ -54,7 +54,9 @@ data = inst.score_company(symbol)
 
 if data:
     ok = inst.market.update_inst_fields(symbol, ACCOUNT, data)
-    print(f"\n  [{symbol}] update_inst_fields → {'OK actualizado' if ok else 'no afecto filas (simbolo no existe o I/S/X)'}")
+    print(
+        f"\n  [{symbol}] update_inst_fields → {'OK actualizado' if ok else 'no afecto filas (simbolo no existe o I/S/X)'}"
+    )
     print(f"    inst_score           : {data.get('inst_score')}")
     print(f"    inst_ownership_pct   : {data.get('inst_ownership_pct')}")
     print(f"    inst_top_holder      : {data.get('inst_top_holder')}")

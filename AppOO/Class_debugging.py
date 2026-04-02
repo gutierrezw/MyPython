@@ -347,6 +347,8 @@ class Debugging:
         # manager logging
         self.logger.update({"Screener": logging.getLogger("Screener")})
         self.logger["Screener"].setLevel(logging.WARNING)
+        self.logger.update({"TradingView": logging.getLogger("TradingView")})
+        self.logger["TradingView"].setLevel(logging.WARNING)
 
         # manager logging
         self.logger.update({"InstitucionalScore": logging.getLogger("InstitucionalScore")})

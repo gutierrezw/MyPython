@@ -24,6 +24,7 @@ from Modulos_Utilitarios import (
 
 _logger = logging.getLogger("Mysql")
 
+
 class BDsystem:  # ----------------------------------------------------------------------------------------------------
     """
     clase para manejar accesos genericos a mysql."""
@@ -1069,9 +1070,7 @@ class EstrategiaInversion(BDsystem):  # ----------------------------------------
                 qry = """SELECT a.*, b.descripcion FROM (SELECT DISTINCT estrategia 
                                                          FROM bdinv.inversion where iactiva = 'Y')
                                 a JOIN  (SELECT * FROM estrategia WHERE vehiculo = '{}') b 
-                                ON a.estrategia = b.estrategia;""".format(
-                    ivehiculo
-                )
+                                ON a.estrategia = b.estrategia;""".format(ivehiculo)
 
             if accion == "tabla":
                 qry = """SELECT * FROM estrategia ORDER BY estrategia"""
@@ -1322,8 +1321,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             conn = self._conectar(tabla="update.booktrading")
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE booktrading SET delisted = 1, updateStamp = %s "
-                "WHERE simbolo = %s AND cuenta = %s",
+                "UPDATE booktrading SET delisted = 1, updateStamp = %s " "WHERE simbolo = %s AND cuenta = %s",
                 (datetime.now(), symbol, account),
             )
             conn.commit()
@@ -1397,7 +1395,6 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
-
     def get_cusip_map(self, account: str) -> dict:
         """Retorna {cusip: symbol} combinando market + fund_holdings.
         fund_holdings ya tiene el mapeo completo de runs anteriores — evita
@@ -1408,8 +1405,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.execute("SELECT cusip, symbol FROM market WHERE cusip IS NOT NULL AND account = %s", (account,))
             result = {row[0]: row[1] for row in cursor.fetchall()}
             cursor.execute(
-                "SELECT DISTINCT cusip, symbol FROM fund_holdings "
-                "WHERE cusip IS NOT NULL AND symbol IS NOT NULL"
+                "SELECT DISTINCT cusip, symbol FROM fund_holdings " "WHERE cusip IS NOT NULL AND symbol IS NOT NULL"
             )
             for cusip, symbol in cursor.fetchall():
                 if cusip not in result:
@@ -1450,7 +1446,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         cursor = conn.cursor()
         try:
             for i in range(0, len(funds_list), _CHUNK):
-                chunk = funds_list[i:i + _CHUNK]
+                chunk = funds_list[i : i + _CHUNK]
                 placeholders = ",".join(["(%s,%s)"] * len(chunk))
                 sql = f"INSERT IGNORE INTO funds (fund_name, cik) VALUES {placeholders}"
                 flat = [v for row in chunk for v in row]
@@ -1533,8 +1529,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             pendientes = cursor.fetchone()[0] or 0
 
             cursor.execute(
-                "SELECT COUNT(*) FROM fund_filings "
-                "WHERE filing_date <= DATE_SUB(CURDATE(), INTERVAL 70 DAY)"
+                "SELECT COUNT(*) FROM fund_filings " "WHERE filing_date <= DATE_SUB(CURDATE(), INTERVAL 70 DAY)"
             )
             por_renovar = cursor.fetchone()[0] or 0
 
@@ -1547,16 +1542,15 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             fh_sin_symbol = cursor.fetchone()[0] or 0
 
             cursor.execute(
-                "SELECT COUNT(*) FROM market "
-                "WHERE account = %s AND cusip IS NULL AND encartera = 'Y'",
+                "SELECT COUNT(*) FROM market " "WHERE account = %s AND cusip IS NULL AND encartera = 'Y'",
                 (account,),
             )
             market_sin_cusip = cursor.fetchone()[0] or 0
 
             return {
-                "pendientes"      : pendientes,
-                "por_renovar"     : por_renovar,
-                "fh_sin_symbol"   : fh_sin_symbol,
+                "pendientes": pendientes,
+                "por_renovar": por_renovar,
+                "fh_sin_symbol": fh_sin_symbol,
                 "market_sin_cusip": market_sin_cusip,
             }
         except (Exception, connect.Error) as error:
@@ -1627,8 +1621,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
-    def save_fund_filing(self, filename: str, cik: str, fund_name: str,
-                         filing_date: str, accession: str) -> None:
+    def save_fund_filing(self, filename: str, cik: str, fund_name: str, filing_date: str, accession: str) -> None:
         """INSERT IGNORE de un filing en fund_filings."""
         conn = self._conectar(tabla="update.market")
         cursor = conn.cursor()
@@ -1686,8 +1679,16 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
-    def upsert_fund_holding(self, fund_name: str, symbol: str, shares: int, report_date,
-                            value: int = None, cusip: str = None, option_type: str = None) -> None:
+    def upsert_fund_holding(
+        self,
+        fund_name: str,
+        symbol: str,
+        shares: int,
+        report_date,
+        value: int = None,
+        cusip: str = None,
+        option_type: str = None,
+    ) -> None:
         """INSERT o UPDATE en fund_holdings. Calcula operation vs registro anterior.
         Filtra bonos/preferreds: solo acepta símbolos puros de letras con ≤ 5 chars.
         option_type: None=acciones directas, 'CALL'/'PUT'=opciones."""
@@ -1732,9 +1733,25 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                     "ON DUPLICATE KEY UPDATE "
                     "shares=%s, shares_prev=%s, shares_delta=%s, "
                     "pct_change=%s, operation=%s, value=%s",
-                    (fund_id, symbol, shares, shares_prev, shares_delta, pct_change, operation,
-                     report_date, value, cusip, option_type,
-                     shares, shares_prev, shares_delta, pct_change, operation, value),
+                    (
+                        fund_id,
+                        symbol,
+                        shares,
+                        shares_prev,
+                        shares_delta,
+                        pct_change,
+                        operation,
+                        report_date,
+                        value,
+                        cusip,
+                        option_type,
+                        shares,
+                        shares_prev,
+                        shares_delta,
+                        pct_change,
+                        operation,
+                        value,
+                    ),
                 )
                 conn.commit()
                 return
@@ -1752,7 +1769,6 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             finally:
                 cursor.close()
                 conn.close()
-
 
     def cleanup_fund_holdings_nulls(self) -> int:
         """Elimina filas con cusip IS NULL cuando ya existe otra fila del mismo (fund_id, symbol) con cusip."""
@@ -1816,47 +1832,59 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             """)
             result = {}
             for row in cursor.fetchall():
-                (symbol, fh_count, fh_total_value, fh_buy_ratio, fh_sell_ratio,
-                 fh_call_count, fh_put_count, fh_call_shares, fh_put_shares,
-                 fh_total_shares, new_entrants, full_exits) = row
+                (
+                    symbol,
+                    fh_count,
+                    fh_total_value,
+                    fh_buy_ratio,
+                    fh_sell_ratio,
+                    fh_call_count,
+                    fh_put_count,
+                    fh_call_shares,
+                    fh_put_shares,
+                    fh_total_shares,
+                    new_entrants,
+                    full_exits,
+                ) = row
                 result[symbol] = {
-                    "fh_count"          : int(fh_count) if fh_count else 0,
-                    "fh_total_value"    : int(fh_total_value) if fh_total_value else None,
-                    "fh_buy_ratio"      : float(fh_buy_ratio) if fh_buy_ratio else 0.0,
-                    "fh_sell_ratio"     : float(fh_sell_ratio) if fh_sell_ratio else 0.0,
-                    "fh_call_count"     : int(fh_call_count) if fh_call_count else 0,
-                    "fh_put_count"      : int(fh_put_count) if fh_put_count else 0,
-                    "fh_call_shares"    : int(fh_call_shares) if fh_call_shares else 0,
-                    "fh_put_shares"     : int(fh_put_shares) if fh_put_shares else 0,
-                    "fh_total_shares"   : int(fh_total_shares) if fh_total_shares else 0,
-                    "new_entrants"      : int(new_entrants) if new_entrants else 0,
-                    "full_exits"        : int(full_exits) if full_exits else 0,
-                    "delta_call_shares" : None,
-                    "delta_put_shares"  : None,
+                    "fh_count": int(fh_count) if fh_count else 0,
+                    "fh_total_value": int(fh_total_value) if fh_total_value else None,
+                    "fh_buy_ratio": float(fh_buy_ratio) if fh_buy_ratio else 0.0,
+                    "fh_sell_ratio": float(fh_sell_ratio) if fh_sell_ratio else 0.0,
+                    "fh_call_count": int(fh_call_count) if fh_call_count else 0,
+                    "fh_put_count": int(fh_put_count) if fh_put_count else 0,
+                    "fh_call_shares": int(fh_call_shares) if fh_call_shares else 0,
+                    "fh_put_shares": int(fh_put_shares) if fh_put_shares else 0,
+                    "fh_total_shares": int(fh_total_shares) if fh_total_shares else 0,
+                    "new_entrants": int(new_entrants) if new_entrants else 0,
+                    "full_exits": int(full_exits) if full_exits else 0,
+                    "delta_call_shares": None,
+                    "delta_put_shares": None,
                 }
 
             # Query full_exits — fondos en Q_anterior que NO aparecen en Q_actual
             # Ventanas calculadas dinámicamente según el calendario 13F (45 días post-quarter end)
             today = datetime.today()
             m, y = today.month, today.year
-            if m <= 5:      # Ene-May: Q4 en curso (Dec quarter)
+            if m <= 5:  # Ene-May: Q4 en curso (Dec quarter)
                 q_act_start = datetime(y, 1, 1).date()
                 q_ant_start = datetime(y - 1, 8, 1).date()
-                q_ant_end   = datetime(y - 1, 12, 31).date()
-            elif m <= 8:    # Jun-Ago: Q1 en curso (Mar quarter)
+                q_ant_end = datetime(y - 1, 12, 31).date()
+            elif m <= 8:  # Jun-Ago: Q1 en curso (Mar quarter)
                 q_act_start = datetime(y, 4, 1).date()
                 q_ant_start = datetime(y - 1, 11, 1).date()
-                q_ant_end   = datetime(y, 3, 31).date()
-            elif m <= 11:   # Sep-Nov: Q2 en curso (Jun quarter)
+                q_ant_end = datetime(y, 3, 31).date()
+            elif m <= 11:  # Sep-Nov: Q2 en curso (Jun quarter)
                 q_act_start = datetime(y, 7, 1).date()
                 q_ant_start = datetime(y, 2, 1).date()
-                q_ant_end   = datetime(y, 6, 30).date()
-            else:           # Dic: Q3 en curso (Sep quarter)
+                q_ant_end = datetime(y, 6, 30).date()
+            else:  # Dic: Q3 en curso (Sep quarter)
                 q_act_start = datetime(y, 10, 1).date()
                 q_ant_start = datetime(y, 5, 1).date()
-                q_ant_end   = datetime(y, 9, 30).date()
+                q_ant_end = datetime(y, 9, 30).date()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT fh_q3.symbol, COUNT(DISTINCT fh_q3.fund_id) AS full_exits
                 FROM (
                     SELECT DISTINCT fund_id, symbol FROM fund_holdings
@@ -1869,7 +1897,9 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 ) fh_q4 ON fh_q3.fund_id = fh_q4.fund_id AND fh_q3.symbol = fh_q4.symbol
                 WHERE fh_q4.fund_id IS NULL
                 GROUP BY fh_q3.symbol
-            """, (q_ant_start, q_ant_end, q_act_start))
+            """,
+                (q_ant_start, q_ant_end, q_act_start),
+            )
             for row in cursor.fetchall():
                 sym, full_exits_val = row
                 if sym in result:
@@ -1966,7 +1996,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         _ROW_PH = "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
         total = 0
         for i in range(0, len(records), chunk_size):
-            chunk = records[i:i + chunk_size]
+            chunk = records[i : i + chunk_size]
             sql = _SQL_BASE + ",".join([_ROW_PH] * len(chunk)) + _SQL_UPDATE
             flat = [v for r in chunk for v in r]
             conn = self._conectar(tabla="update.market")
@@ -1994,9 +2024,9 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             )
             return {
                 row[0]: {
-                    "inst_ownership_pct" : row[1],
-                    "floatShares"        : row[2],
-                    "sharesOutstanding"  : row[3],
+                    "inst_ownership_pct": row[1],
+                    "floatShares": row[2],
+                    "sharesOutstanding": row[3],
                 }
                 for row in cursor.fetchall()
             }
@@ -3902,9 +3932,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         # aplica a las sell para obtener maxima's ganancias y marcas los códigos = 'O' como inactivo
         def maximiza_ganancias_corto_plazo(c_sell, update):
             try:
-                (book, iy) = self.select_booktrading(
-                    accion="ganancias", account=account, idivisa=idivisa, symbol=symbol
-                )
+                book, iy = self.select_booktrading(accion="ganancias", account=account, idivisa=idivisa, symbol=symbol)
                 ebook = enumerate(book)
                 eof_book, read = next(ebook, (None, None))
 
@@ -3954,7 +3982,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         # Objetivo es dejar solo como activa la venta más reciente
         def update_codigo_sell(id_trader=None, update=None):
             try:
-                (book, iy) = self.select_booktrading(accion="select*", account=account, idivisa=idivisa, symbol=symbol)
+                book, iy = self.select_booktrading(accion="select*", account=account, idivisa=idivisa, symbol=symbol)
                 ebook = enumerate(book)
 
                 eof_book, read = next(ebook, (None, None))
@@ -4127,7 +4155,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         try:
             inicio, ifecha = {}, datetime.now()
             for ticket in list_asset:
-                (utrading, ix) = self.select_booktrading(accion="low", account=account, idivisa=idivisa, symbol=ticket)
+                utrading, ix = self.select_booktrading(accion="low", account=account, idivisa=idivisa, symbol=ticket)
                 if utrading:
                     if ifecha > utrading[0]["fechahora"]:
                         ifecha = utrading[0]["fechahora"]
@@ -4227,4 +4255,3 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             return sql, ix
         except conn.ProgrammingError as error:
             print("[Mysql:: select_order_trader({})]: {}".format(vehiculo, error))
-

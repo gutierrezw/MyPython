@@ -2,6 +2,7 @@
 run_check_holdings_stats.py
 Valida load_fund_holdings_stats — tiempo de ejecución y métricas de flujo.
 """
+
 import sys
 import os
 import time
@@ -17,6 +18,7 @@ elapsed = time.time() - t
 
 # Mostrar ventanas Q usadas (misma lógica que el método)
 from datetime import datetime as _dt
+
 _m, _y = _dt.today().month, _dt.today().year
 if _m <= 5:
     _q4s, _q3s, _q3e = f"{_y}-01-01", f"{_y-1}-08-01", f"{_y-1}-12-31"
@@ -30,7 +32,9 @@ print(f"Ventanas — Q_ant: {_q3s} → {_q3e}  |  Q_act: {_q4s} →")
 print(f"Tiempo: {elapsed:.1f}s  Simbolos: {len(stats)}")
 print()
 
-print(f"{'Symbol':<8} {'fh_count':>8} {'buy_r':>7} {'sell_r':>7} {'CALL':>10} {'PUT':>10} {'new':>6} {'exits':>6} {'dCALL':>12} {'dPUT':>12}")
+print(
+    f"{'Symbol':<8} {'fh_count':>8} {'buy_r':>7} {'sell_r':>7} {'CALL':>10} {'PUT':>10} {'new':>6} {'exits':>6} {'dCALL':>12} {'dPUT':>12}"
+)
 print("-" * 95)
 for sym in ["CCI", "VALE", "CVS", "PFE", "SWK", "AMT", "HASI", "FMC"]:
     s = stats.get(sym, {})

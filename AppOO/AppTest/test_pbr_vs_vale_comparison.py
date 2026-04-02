@@ -6,6 +6,7 @@ Análisis diferencial: PBR (funciona) vs VALE (falla)
 Compara la estructura XBRL de ambos filings para identificar
 por qué PBR extrae deuda correctamente y VALE no.
 """
+
 import sys
 from pathlib import Path
 
@@ -13,9 +14,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from valuation_xbrl_api import load_filing, get_fact_value
 
-print("="*80)
+print("=" * 80)
 print("🔄 COMPARACIÓN DIFERENCIAL: PBR vs VALE")
-print("="*80)
+print("=" * 80)
 
 # Cargar ambos filings
 pbr_file = "EDGAR/PBR_EDGAR_Files/20F_Filings/pbrform20f_2024.htm"
@@ -42,11 +43,12 @@ if not pbr_filing or not vale_filing:
     sys.exit(1)
 
 # Keywords para buscar deuda
-debt_keywords = ['borrow', 'debt', 'loan']
+debt_keywords = ["borrow", "debt", "loan"]
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🔎 IDENTIFICANDO CONCEPTOS DE DEUDA")
-print("="*80)
+print("=" * 80)
+
 
 def get_debt_concepts(filing):
     """Extrae conceptos relacionados con deuda"""
@@ -56,6 +58,7 @@ def get_debt_concepts(filing):
         if any(kw in name_lower for kw in debt_keywords):
             debt_concepts.append(name)
     return set(debt_concepts)
+
 
 pbr_debt = get_debt_concepts(pbr_filing)
 vale_debt = get_debt_concepts(vale_filing)
@@ -73,14 +76,14 @@ print(f"🔵 Solo en PBR: {len(only_pbr)} conceptos")
 print(f"🟡 Solo en VALE: {len(only_vale)} conceptos")
 
 # Mostrar conceptos comunes
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("✅ CONCEPTOS COMUNES (ambos tienen)")
-print("="*80)
+print("=" * 80)
 
 if common:
     # Agrupar por relevancia
-    current_common = [c for c in common if 'current' in c.lower()]
-    noncurrent_common = [c for c in common if 'noncurrent' in c.lower()]
+    current_common = [c for c in common if "current" in c.lower()]
+    noncurrent_common = [c for c in common if "noncurrent" in c.lower()]
     other_common = [c for c in common if c not in current_common and c not in noncurrent_common]
 
     if current_common:
@@ -103,14 +106,14 @@ else:
     print("\n⚠️  No hay conceptos en común - PBR y VALE usan nomenclatura completamente diferente")
 
 # Mostrar conceptos solo en PBR
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🔵 CONCEPTOS SOLO EN PBR (por qué PBR funciona)")
-print("="*80)
+print("=" * 80)
 
 if only_pbr:
     # Filtrar los más relevantes
-    pbr_current = [c for c in only_pbr if 'current' in c.lower() or 'shortterm' in c.lower()]
-    pbr_noncurrent = [c for c in only_pbr if 'noncurrent' in c.lower() or 'longterm' in c.lower()]
+    pbr_current = [c for c in only_pbr if "current" in c.lower() or "shortterm" in c.lower()]
+    pbr_noncurrent = [c for c in only_pbr if "noncurrent" in c.lower() or "longterm" in c.lower()]
 
     if pbr_current:
         print("\n📌 PBR - Deuda de Corto Plazo:")
@@ -159,18 +162,18 @@ else:
     print("\n✅ PBR no tiene conceptos únicos (usa solo conceptos comunes)")
 
 # Mostrar conceptos solo en VALE
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🟡 CONCEPTOS SOLO EN VALE (clave para la solución)")
-print("="*80)
+print("=" * 80)
 
 if only_vale:
     # Filtrar los más relevantes
-    vale_current = [c for c in only_vale if 'current' in c.lower() or 'shortterm' in c.lower()]
-    vale_noncurrent = [c for c in only_vale if 'noncurrent' in c.lower() or 'longterm' in c.lower()]
+    vale_current = [c for c in only_vale if "current" in c.lower() or "shortterm" in c.lower()]
+    vale_noncurrent = [c for c in only_vale if "noncurrent" in c.lower() or "longterm" in c.lower()]
 
     # Identificar namespace
-    vale_namespace = [c for c in only_vale if c.startswith('vale:')]
-    ifrs_namespace = [c for c in only_vale if c.startswith('ifrs-full:')]
+    vale_namespace = [c for c in only_vale if c.startswith("vale:")]
+    ifrs_namespace = [c for c in only_vale if c.startswith("ifrs-full:")]
 
     print(f"\n📊 Distribución de namespace:")
     print(f"  • vale: {len(vale_namespace)} conceptos")
@@ -219,9 +222,9 @@ else:
     print("\n✅ VALE no tiene conceptos únicos (usa solo conceptos comunes)")
 
 # Análisis de los conceptos que build_ttm() está buscando
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🎯 CONCEPTOS QUE build_ttm() BUSCA ACTUALMENTE")
-print("="*80)
+print("=" * 80)
 
 current_seeking = [
     "us-gaap:ShortTermBorrowings",
@@ -255,9 +258,9 @@ for concept in noncurrent_seeking:
     print(f"    {in_pbr}  |  {in_vale}")
 
 # Conclusiones
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("💡 ANÁLISIS Y CONCLUSIONES")
-print("="*80)
+print("=" * 80)
 
 # Identificar conceptos que PBR tiene pero VALE no
 pbr_has_sought = any(c in pbr_debt for c in current_seeking + noncurrent_seeking)
@@ -291,9 +294,9 @@ elif vale_has_sought:
     print("   • Dimensiones/members no manejados")
     print("   • Problema en select_best_fact()")
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("✅ Comparación completa")
-print("="*80)
+print("=" * 80)
 print("\n💡 PRÓXIMOS PASOS:")
 print("  1. Revisar conceptos únicos de VALE identificados arriba")
 print("  2. Ejecutar: python test_debt_metrics.py (ver estado actual)")

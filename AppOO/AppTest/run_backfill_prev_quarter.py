@@ -16,6 +16,7 @@ Flujo:
 
 Correr desde AppTest/:  python run_backfill_prev_quarter.py
 """
+
 import sys
 import os
 
@@ -24,14 +25,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from Modulos_python import requests, time, logging
 from Modulos_Mysql import MarketScreen
 from AppValuations.edgar_13f import (
-    _sec_get, _find_holdings_xml, sync_13f_holdings,
-    _EDGAR_SUBMISSIONS_URL, _EDGAR_ARCHIVES_URL, _13F_SAVE_DIR,
+    _sec_get,
+    _find_holdings_xml,
+    sync_13f_holdings,
+    _EDGAR_SUBMISSIONS_URL,
+    _EDGAR_ARCHIVES_URL,
+    _13F_SAVE_DIR,
 )
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s")
 _logger = logging.getLogger("backfill_prev_quarter")
 
-ACCOUNT = "U4214563"   # cuenta stock
+ACCOUNT = "U4214563"  # cuenta stock
 
 
 def _fmt_accession(acc_no_dashes: str) -> str:
@@ -143,7 +148,7 @@ def main():
             market.bulk_save_fund_filings(pending_save)
             pending_save.clear()
 
-        time.sleep(0.12)   # respetar rate limit EDGAR (~8 req/s)
+        time.sleep(0.12)  # respetar rate limit EDGAR (~8 req/s)
 
     if pending_save:
         market.bulk_save_fund_filings(pending_save)
@@ -165,7 +170,7 @@ def main():
     c3 = conn3.cursor()
 
     for batch_start in range(0, len(cik_list), 500):
-        batch = cik_list[batch_start:batch_start + 500]
+        batch = cik_list[batch_start : batch_start + 500]
         placeholders = ",".join(["%s"] * len(batch))
         c3.execute(
             f"UPDATE fund_filings SET processed = 0 WHERE cik IN ({placeholders})",
@@ -182,7 +187,7 @@ def main():
 
     # Obtener fund_ids de los CIKs afectados
     for batch_start in range(0, len(cik_list), 500):
-        batch = cik_list[batch_start:batch_start + 500]
+        batch = cik_list[batch_start : batch_start + 500]
         placeholders = ",".join(["%s"] * len(batch))
         c4.execute(
             f"DELETE fh FROM fund_holdings fh "
