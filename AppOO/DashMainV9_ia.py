@@ -71,6 +71,7 @@ from Class_DashBot import AsistenteChatbot
 from Class_IA_modelos import ModeloOportunidadesSell
 from Class_SystemStatus import system_status
 from Class_BotCryptoUI import BotCryptoUI
+from Class_TradingView import start_tv_server, stop_tv_server, start_price_sync
 
 
 # class para manipular vehiculo
@@ -4965,6 +4966,11 @@ class DashMain:
         except:
             pass
 
+        try:
+            stop_tv_server()
+        except:
+            pass
+
         print("✅ DashMain: Recursos liberados correctamente")
 
         # cierra todos los threads & Job's pendientes
@@ -5119,6 +5125,10 @@ class DashMain:
 
         self.screener = Screener(master=self.win2, account=self.sesion_stock["idcuenta"], colors=self.colors)
         self.screener.pack()
+
+        # Inicia servidor HTTP para datos TradingView (Tampermonkey) ------------------------------------
+        start_tv_server()
+        start_price_sync(lambda: DataHub.info)
 
         # Start ayudante y agentes del sistema------------------------------------------------------------
         self.start_chatbot()

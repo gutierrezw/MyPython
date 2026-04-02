@@ -1,10 +1,17 @@
 from Modulos_python import (
-    os,
     webbrowser,
     logging,
+    threading,
+    json,
+    time,
+    HTTPServer,
+    BaseHTTPRequestHandler,
+    urlparse,
+    parse_qs,
 )
 
 _logger = logging.getLogger("TradingView")
+_TV_PORT = 5050
 
 # Símbolo TradingView por vehículo: prefijo del exchange
 _EXCHANGE_PREFIX = {
@@ -13,6 +20,13 @@ _EXCHANGE_PREFIX = {
     "FCI": "",
 }
 
+# Cache de datos por símbolo — leídos por Tampermonkey vía HTTP
+_tv_data = {}  # {symbol: {"posicion": {...}, "lotes": [...], "vehiculo": "..."}}
+_tv_prices = {}  # {symbol: {"last": float, "ts": float}} — precios live actualizados por la app
+_tv_current = {"symbol": ""}  # último símbolo enviado desde la app
+_tv_last_ping = {"t": 0.0, "ever": False}  # ever=True → Tampermonkey activo en esta sesión
+_tv_server = None  # referencia para shutdown limpio
+
 
 def _tv_symbol(symbol, vehiculo):
     """Convierte símbolo interno al formato TradingView según vehículo."""
@@ -20,165 +34,108 @@ def _tv_symbol(symbol, vehiculo):
     return f"{prefix}{symbol}"
 
 
-def _html_panel_lotes(lotes, posicion):
-    """
-    Genera el bloque HTML del panel de lotes.
+class _TVRequestHandler(BaseHTTPRequestHandler):
+    """Handler HTTP para el servidor local de datos TradingView."""
 
-    lotes: lista de dicts con keys: precio, cantidad, costo lote, gyp, roi, fechahora
-    posicion: dict con keys: avgcost, costo_base, position, objetivo, last
-    """
-    avgcost = posicion.get("avgcost") or posicion.get("avgCost") or 0
-    costo_base = posicion.get("costo_base") or posicion.get("costobase") or 0
-    position = posicion.get("position") or 0
-    last = posicion.get("last") or posicion.get("mrkprice") or 0
+    def log_message(self, format, *args):
+        _logger.debug(f"TVServer: {self.address_string()} {format % args}")
 
-    filas_lotes = ""
-    for i, lote in enumerate(lotes or [], start=1):
-        precio = lote.get("precio") or lote.get("costo lote", 0)
-        cantidad = lote.get("cantidad", 0)
-        gyp = lote.get("gyp", 0)
-        roi = lote.get("roi", 0)
-        fecha = lote.get("fechahora", "")
-        color = "#00FF88" if gyp >= 0 else "#FF6060"
-        filas_lotes += f"""
-        <tr>
-          <td style="color:#aaa">{i}</td>
-          <td>{fecha}</td>
-          <td style="text-align:right">{precio:,.2f}</td>
-          <td style="text-align:right">{cantidad:,.4f}</td>
-          <td style="text-align:right; color:{color}">{gyp:+,.2f}</td>
-          <td style="text-align:right; color:{color}">{roi:+.1%}</td>
-        </tr>"""
+    def _send_json(self, data, status=200):
+        body = json.dumps(data, default=str).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "https://www.tradingview.com")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-    gyp_total = (last * position - costo_base) if last and position and costo_base else 0
-    roi_total = (gyp_total / costo_base) if costo_base else 0
-    color_total = "#00FF88" if gyp_total >= 0 else "#FF6060"
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "https://www.tradingview.com")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.end_headers()
 
-    return f"""
-    <div class="section-title">POSICIÓN</div>
-    <table class="data-table">
-      <tr><td class="lbl">Precio medio</td><td class="val">{avgcost:,.2f}</td></tr>
-      <tr><td class="lbl">Cantidad</td><td class="val">{position:,.4f}</td></tr>
-      <tr><td class="lbl">Costo base</td><td class="val">{costo_base:,.2f}</td></tr>
-      <tr><td class="lbl">Precio actual</td><td class="val">{last:,.2f}</td></tr>
-      <tr><td class="lbl">G/P</td>
-          <td class="val" style="color:{color_total}">{gyp_total:+,.2f} ({roi_total:+.1%})</td></tr>
-    </table>
-
-    <div class="section-title" style="margin-top:16px">LOTES</div>
-    <table class="lotes-table">
-      <thead>
-        <tr>
-          <th>#</th><th>Fecha</th><th>Precio</th><th>Cant.</th><th>G/P</th><th>ROI</th>
-        </tr>
-      </thead>
-      <tbody>{filas_lotes}</tbody>
-    </table>"""
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        if parsed.path == "/position":
+            symbol = (params.get("symbol") or [""])[0].upper()
+            self._send_json(_tv_data.get(symbol, {}))
+        elif parsed.path == "/current":
+            self._send_json(_tv_current)
+        elif parsed.path == "/price":
+            symbol = (params.get("symbol") or [""])[0].upper()
+            self._send_json(_tv_prices.get(symbol, {}))
+        elif parsed.path == "/ping":
+            _tv_last_ping["t"] = time.time()
+            _tv_last_ping["ever"] = True
+            self._send_json({"ok": True})
+        else:
+            self._send_json({"error": "not found"}, 404)
 
 
-def _html_panel_estrategia(posicion):
-    """
-    Genera el bloque HTML del panel de estrategia (objetivo, SL, R/R).
-
-    posicion: dict con keys: last, objetivo, stop_loss (o sl), avgcost
-    """
-    last = posicion.get("last") or posicion.get("mrkprice") or 0
-    objetivo = posicion.get("objetivo") or 0
-    sl = posicion.get("stop_loss") or posicion.get("sl") or 0
-    avgcost = posicion.get("avgcost") or posicion.get("avgCost") or 0
-
-    obj_pct = ((objetivo - avgcost) / avgcost) if avgcost and objetivo else 0
-    sl_pct = ((sl - avgcost) / avgcost) if avgcost and sl else 0
-    rr = abs(obj_pct / sl_pct) if sl_pct else 0
-
-    return f"""
-    <div class="section-title" style="margin-top:16px">ESTRATEGIA</div>
-    <table class="data-table">
-      <tr><td class="lbl">Actual</td>
-          <td class="val" style="color:cyan">{last:,.2f}</td></tr>
-      <tr><td class="lbl">Objetivo</td>
-          <td class="val" style="color:#00FF88">{objetivo:,.2f}
-            <span style="font-size:10px;color:#00FF88"> ({obj_pct:+.1%})</span></td></tr>
-      <tr><td class="lbl">Ref. SL</td>
-          <td class="val" style="color:#FF6060">{sl:,.2f}
-            <span style="font-size:10px;color:#FF6060"> ({sl_pct:+.1%})</span></td></tr>
-      <tr><td class="lbl">R/R</td>
-          <td class="val">1:{rr:.1f}</td></tr>
-    </table>"""
+def start_tv_server():
+    """Inicia el servidor HTTP local en background. Llamar una vez al arrancar la app."""
+    global _tv_server
+    try:
+        _tv_server = HTTPServer(("localhost", _TV_PORT), _TVRequestHandler)
+        t = threading.Thread(target=_tv_server.serve_forever, name="TVServer", daemon=True)
+        t.start()
+        _logger.warning(f"TradingView server iniciado en puerto {_TV_PORT}")
+    except OSError as e:
+        _logger.warning(f"TradingView server no pudo iniciar (puerto {_TV_PORT} en uso?): {e}")
+    except Exception as e:
+        _logger.error(f"start_tv_server(): {e}")
 
 
-def _html_full(symbol, vehiculo, posicion, lotes):
-    """Genera el HTML completo: widget TV (izquierda) + panel datos (derecha)."""
-    tv_symbol = _tv_symbol(symbol, vehiculo)
-    panel_lotes = _html_panel_lotes(lotes, posicion)
-    panel_estrategia = _html_panel_estrategia(posicion)
+def stop_tv_server():
+    """Cierra el servidor HTTP sin bloquear el shutdown de la app."""
+    global _tv_server
+    if _tv_server:
+        try:
+            _tv_server.server_close()
+        except Exception:
+            pass
+        _tv_server = None
+        _logger.warning("TradingView server detenido")
 
-    return f"""<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>{symbol} — TradingView</title>
-  <style>
-    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    body {{ background: #131722; color: #d1d4dc; font-family: Arial, sans-serif; font-size: 12px;
-           display: flex; height: 100vh; overflow: hidden; }}
-    #tv-container {{ flex: 1; min-width: 0; }}
-    #panel {{ width: 280px; min-width: 280px; background: #1e2130; padding: 12px;
-              overflow-y: auto; border-left: 1px solid #2a2e39; }}
-    .section-title {{ color: #787b86; font-size: 10px; text-transform: uppercase;
-                      letter-spacing: 1px; margin-bottom: 6px; border-bottom: 1px solid #2a2e39;
-                      padding-bottom: 4px; }}
-    .data-table {{ width: 100%; border-collapse: collapse; }}
-    .data-table td {{ padding: 3px 0; }}
-    .lbl {{ color: #787b86; width: 50%; }}
-    .val {{ color: #d1d4dc; text-align: right; }}
-    .lotes-table {{ width: 100%; border-collapse: collapse; font-size: 11px; }}
-    .lotes-table th {{ color: #787b86; text-align: right; padding: 2px 2px;
-                       border-bottom: 1px solid #2a2e39; }}
-    .lotes-table th:first-child {{ text-align: left; }}
-    .lotes-table td {{ padding: 2px 2px; border-bottom: 1px solid #1e2130; }}
-    .lotes-table td:first-child {{ color: #787b86; }}
-  </style>
-</head>
-<body>
-  <div id="tv-container">
-    <div class="tradingview-widget-container" style="height:100%; width:100%;">
-      <div id="tradingview_chart" style="height:100%; width:100%;"></div>
-      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-      <script type="text/javascript">
-      new TradingView.widget({{
-        "autosize": true,
-        "symbol": "{tv_symbol}",
-        "interval": "D",
-        "timezone": "Etc/UTC",
-        "theme": "dark",
-        "style": "1",
-        "locale": "es",
-        "toolbar_bg": "#131722",
-        "enable_publishing": false,
-        "hide_side_toolbar": false,
-        "allow_symbol_change": true,
-        "withdateranges": true,
-        "save_image": true,
-        "details": true,
-        "load_chart_as_image": false,
-        "load_last_chart": true,
-        "container_id": "tradingview_chart"
-      }});
-      </script>
-    </div>
-  </div>
-  <div id="panel">
-    {panel_lotes}
-    {panel_estrategia}
-  </div>
-</body>
-</html>"""
+
+def update_tv_price(symbol, last):
+    """Actualiza el precio live de un símbolo en el cache."""
+    if symbol and last:
+        _tv_prices[symbol] = {"last": float(last), "ts": time.time()}
+
+
+def _price_sync_loop(get_info_fn):
+    """Loop que sincroniza precios desde DataHub.info al cache _tv_prices cada 2s."""
+    while True:
+        try:
+            sym = _tv_current.get("symbol", "")
+            if sym:
+                info = get_info_fn().get(sym, {})
+                last = info.get("websocket", {}).get("last") or info.get("mrkprice")
+                if last:
+                    update_tv_price(sym, last)
+        except Exception:
+            pass
+        time.sleep(2)
+
+
+def start_price_sync(datahub_info_fn):
+    """Inicia el loop de sincronización de precios. Llamar después de start_tv_server()."""
+    t = threading.Thread(
+        target=_price_sync_loop,
+        args=(datahub_info_fn,),
+        name="TVPriceSync",
+        daemon=True,
+    )
+    t.start()
 
 
 def abrir_tradingview(symbol, vehiculo="Stock", posicion=None, lotes=None):
     """
-    Genera el HTML con widget TradingView + panel de lotes/estrategia y lo abre en el browser.
+    Cachea los datos del símbolo y abre TradingView web en el browser.
+    Tampermonkey lee los datos desde http://localhost:5050/position?symbol=X
 
     Args:
         symbol: símbolo del activo
@@ -189,14 +146,12 @@ def abrir_tradingview(symbol, vehiculo="Stock", posicion=None, lotes=None):
     try:
         posicion = posicion or {}
         lotes = lotes or []
-        html = _html_full(symbol, vehiculo, posicion, lotes)
-
-        tmp_dir = os.path.join(os.path.dirname(__file__), "tmp")
-        os.makedirs(tmp_dir, exist_ok=True)
-        html_path = os.path.join(tmp_dir, f"tv_{symbol}.html")
-        with open(html_path, "w", encoding="utf-8") as f:
-            f.write(html)
-        webbrowser.open(f"file:///{html_path.replace(os.sep, '/')}")
-        _logger.warning(f"TradingView abierto: {symbol} ({vehiculo})")
+        _tv_data[symbol] = {"posicion": posicion, "lotes": lotes, "vehiculo": vehiculo}
+        _tv_current["symbol"] = symbol
+        tv_symbol = _tv_symbol(symbol, vehiculo)
+        tv_activo = _tv_last_ping["ever"]
+        if not tv_activo:
+            webbrowser.open(f"https://www.tradingview.com/chart/?symbol={tv_symbol}")
+        _logger.warning(f"TradingView {'navegado por Tampermonkey' if tv_activo else 'abierto'}: {symbol} ({vehiculo})")
     except Exception as e:
         _logger.error(f"abrir_tradingview({symbol}): {e}")
