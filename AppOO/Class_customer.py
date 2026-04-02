@@ -3580,6 +3580,19 @@ class WidgetVehiculo(TickerInfo):
                 activos = {k: v for k, v in votos.items() if v is not None}
                 suma = sum(activos.values())
                 n = len(activos)
+                pct = suma / n if n else 0
+                if suma == n:
+                    _label = "★ UNÁNIME"
+                elif pct >= 0.6:
+                    _label = "▲ CONSENSO"
+                elif pct >= 0.2:
+                    _label = "↗ TENDENCIA"
+                elif pct > -0.2:
+                    _label = "→ NEUTRO"
+                elif pct > -0.6:
+                    _label = "↘ ALERTA"
+                else:
+                    _label = "↙ SALIDA"
 
                 posicion["rotacion"] = _rotacion(
                     row.get("volume"), row.get("floatShares") or row.get("sharesOutstanding")
@@ -3587,7 +3600,7 @@ class WidgetVehiculo(TickerInfo):
                 posicion["senal_inst"] = _senal_inst(row.get("inst_score"), row.get("fh_buy_ratio"), fh_count)
                 posicion["senal_ana"] = _senal_analyst(rec)
                 posicion["ia_signal"] = _modelo_ia(symbol)
-                posicion["votos"] = {k: v for k, v in activos.items()}
+                posicion["consenso_label"] = _label if n else ""
                 posicion["consenso_suma"] = f"{suma:+d}/{n}" if n else ""
         except Exception:
             pass
