@@ -124,9 +124,7 @@ def use_dataframe_cache(df_cache):
                 if use_cache:
                     df_cache.set(key, result)
             except Exception as e:
-                df_cache.logger.warning(
-                    textwrap.dedent(
-                        f"""
+                df_cache.logger.warning(textwrap.dedent(f"""
                         ===============================================
                         {func.__name__}():
                         🟡 [CACHE MISS] - descargando datos frescos...
@@ -134,9 +132,7 @@ def use_dataframe_cache(df_cache):
                         args : {args}
                         keys : {key[2]}
                         error: {e}
-                        """
-                    )
-                )
+                        """))
 
             return result
 
@@ -539,11 +535,11 @@ def get_klines_info(symbol=None, period="5y", interval="1d", desde=None, hasta=N
 def get_ultimo_dia_mercado(market="Stock"):
     # Descarga los datos históricos del índice
     if market == "Stock":
-        (activo, datos) = get_yfinance(ticket="^GSPC", period="7d", vehiculo="download")
+        activo, datos = get_yfinance(ticket="^GSPC", period="7d", vehiculo="download")
     elif market == "Crypto":
-        (activo, datos) = get_yfinance(ticket="BTC-USD", period="7d", vehiculo="download")
+        activo, datos = get_yfinance(ticket="BTC-USD", period="7d", vehiculo="download")
     elif market == "BBVA.ARS":
-        (activo, datos) = get_yfinance(ticket="^MERV", period="7d", vehiculo="download")
+        activo, datos = get_yfinance(ticket="^MERV", period="7d", vehiculo="download")
 
     # Obtén el último día hábil como datetime.date
     if not datos.empty:
@@ -775,10 +771,10 @@ def get_index_performa(vehiculo=None, date=None):
 
     hoy = datetime.now().date()
     f_inicio = date - timedelta(days=5)
-    (symbol, rtn_index, cum_index, index_ref) = vehiculo_parm(vehiculo=vehiculo)
+    symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=vehiculo)
     performa = pd.DataFrame()
 
-    (activo, datos) = get_yfinance(ticket=symbol, vehiculo="download", desde=f_inicio, hasta=hoy)
+    activo, datos = get_yfinance(ticket=symbol, vehiculo="download", desde=f_inicio, hasta=hoy)
 
     performa[rtn_index] = datos["Close"].pct_change()
     performa[cum_index] = (1 + performa[rtn_index]).cumprod() - 1
@@ -1440,11 +1436,11 @@ def setup_fear_greed(fg: object, parm=None):
         ax.set_box_aspect(1 / 2)  # Cambia de 0.4 a 1.0 para ocupar más área
         ay.set_box_aspect(1 / 2)  # Cambia de 0.4 a 1.0 para ocupar más área
 
-        (fear, vix) = fear_vix()
-        (xf, yf, color) = xy_color(fear)
+        fear, vix = fear_vix()
+        xf, yf, color = xy_color(fear)
         char_plot(ax=ax, x=xf, y=yf, score=fear, color=color, titulo="Feeling")
 
-        (xv, yv, color) = xy_color(vix)
+        xv, yv, color = xy_color(vix)
         char_plot(ax=ay, x=xv, y=yv, score=vix, color=color, titulo="Volatility")
 
         # Cambiar el color de los ticks y etiquetas en los ejes con FixedLocator
@@ -2043,7 +2039,7 @@ def get_dividends(account=None, vehiculo=None):
             symbol = convierte_ticket_crypto(position["ticket"])
             ValueMarket += position["costobase"] + position["unrealizedpnl"]
 
-            (market, ix) = Market.select(account=account, symbol=symbol)
+            market, ix = Market.select(account=account, symbol=symbol)
             if market:
 
                 last = market[0][ix.index("lastDividendValue")]
@@ -2502,7 +2498,9 @@ def chart_trazaplan(fg=None, traza=None, cchart=None):
 # ============================================================
 # Gráfico de estrategia compartido (usable desde cualquier módulo)
 # ============================================================
-def show_strategy_chart(parent, symbol, vehiculo="Crypto", targets=None, chart_windows=None, Xposition=None, show_pm=False):
+def show_strategy_chart(
+    parent, symbol, vehiculo="Crypto", targets=None, chart_windows=None, Xposition=None, show_pm=False
+):
     """Abre ventana de gráfico de estrategia para cualquier activo.
 
     Args:

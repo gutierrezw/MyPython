@@ -246,9 +246,7 @@ if __name__ == "__main__":
     print("-" * 70)
 
     # 7% por 5 años, luego 3% perpetuo
-    result = ddm.two_stage(
-        high_growth_rate=0.07, high_growth_years=5, stable_growth_rate=0.03
-    )
+    result = ddm.two_stage(high_growth_rate=0.07, high_growth_years=5, stable_growth_rate=0.03)
 
     print(f"\nAlto crecimiento: 7% por 5 años")
     print(f"Crecimiento estable: 3% perpetuo")

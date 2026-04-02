@@ -6,7 +6,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from Modulos_python import ET, logging, requests, time, date, timedelta
 from Modulos_Mysql import MarketScreen
 
-
 _logger = logging.getLogger("InstitucionalScore")
 _EDGAR_HEADERS = {"User-Agent": "InversionesWildaga Research Bot (gutierrez.madrid.wilmer@example.com)"}
 _EDGAR_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
@@ -14,7 +13,7 @@ _EDGAR_ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_das
 _OPENFIGI_URL = "https://api.openfigi.com/v3/mapping"
 _13F_SAVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "EDGAR", "13F")
 _13F_NS = {"tf": "http://www.sec.gov/edgar/document/thirteenf/informationtable"}
-_FILING_REFRESH_DAYS = 80   # umbral para re-chequear EDGAR (< 1 trimestre)
+_FILING_REFRESH_DAYS = 80  # umbral para re-chequear EDGAR (< 1 trimestre)
 
 
 def _sec_get(url: str, timeout: int = 20) -> requests.Response | None:
@@ -42,8 +41,9 @@ def _get_latest_13f_accession(cik: str) -> tuple | None:
         return None
     try:
         filings = r.json().get("filings", {}).get("recent", {})
-        for form, acc, filing_date in zip(filings.get("form", []), filings.get("accessionNumber", []),
-                                          filings.get("filingDate", [])):
+        for form, acc, filing_date in zip(
+            filings.get("form", []), filings.get("accessionNumber", []), filings.get("filingDate", [])
+        ):
             if form == "13F-HR":
                 return acc, filing_date
     except Exception as e:
@@ -89,13 +89,12 @@ def sync_fund_filings() -> dict:
     downloaded, skipped, failed = 0, 0, 0
     hoy = date.today()
     umbral = timedelta(days=_FILING_REFRESH_DAYS)
-    pending_save = []   # acumula registros para bulk save cada 100 descargas
+    pending_save = []  # acumula registros para bulk save cada 100 descargas
 
     for i, (fund_name, cik) in enumerate(funds, 1):
         if i % 100 == 0 or i == total:
             _logger.warning(
-                f"sync_fund_filings: [{i}/{total}] descargados={downloaded} "
-                f"skipped={skipped} fallidos={failed}"
+                f"sync_fund_filings: [{i}/{total}] descargados={downloaded} " f"skipped={skipped} fallidos={failed}"
             )
 
         stored = cik_meta.get(cik)
@@ -108,7 +107,7 @@ def sync_fund_filings() -> dict:
 
             if filing_date_stored and (hoy - filing_date_stored) < umbral:
                 skipped += 1
-                continue   # filing fresco — no hace falta consultar EDGAR
+                continue  # filing fresco — no hace falta consultar EDGAR
 
         # Sin filing previo o vencido — consultar EDGAR
         time.sleep(0.5)
@@ -135,7 +134,9 @@ def sync_fund_filings() -> dict:
 
         if not os.path.exists(local_path):
             url = _EDGAR_ARCHIVES_URL.format(
-                cik=int(cik), acc_no_dashes=accession_no_dashes, filename=xml_file,
+                cik=int(cik),
+                acc_no_dashes=accession_no_dashes,
+                filename=xml_file,
             )
             r = _sec_get(url, timeout=30)
             if not r:
@@ -171,17 +172,15 @@ def resolve_cusips_openfigi(cusips: list) -> dict:
     total = len(cusips)
     batch_size = 10
     for i in range(0, total, batch_size):
-        batch = cusips[i:i + batch_size]
+        batch = cusips[i : i + batch_size]
         if i % 500 == 0 or i + batch_size >= total:
             _logger.warning(f"  OpenFIGI: [{i}/{total}] resueltos={len(result)}")
         payload = [{"idType": "ID_CUSIP", "idValue": c} for c in batch]
         try:
-            r = requests.post(_OPENFIGI_URL, json=payload,
-                              headers={"Content-Type": "application/json"}, timeout=30)
+            r = requests.post(_OPENFIGI_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
             if r.status_code == 429:
                 time.sleep(60)
-                r = requests.post(_OPENFIGI_URL, json=payload,
-                                  headers={"Content-Type": "application/json"}, timeout=30)
+                r = requests.post(_OPENFIGI_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
             r.raise_for_status()
             for cusip, item in zip(batch, r.json()):
                 data = item.get("data", [])
@@ -212,10 +211,15 @@ def parse_13f_xml(filepath: str) -> list:
             put_call = (info.findtext("tf:putCall", namespaces=_13F_NS) or "").strip().upper()
             option_type = put_call if put_call in ("CALL", "PUT") else None
             if cusip and shares:
-                positions.append({
-                    "cusip": cusip, "name": name, "shares": shares,
-                    "value": value, "option_type": option_type,
-                })
+                positions.append(
+                    {
+                        "cusip": cusip,
+                        "name": name,
+                        "shares": shares,
+                        "value": value,
+                        "option_type": option_type,
+                    }
+                )
     except Exception as e:
         _logger.warning(f"parse_13f_xml [{filepath}]: {e}")
     return positions
@@ -278,24 +282,37 @@ def sync_13f_holdings(account: str) -> dict:
             # compare contra este (permite BUY/SELL/HOLD entre trimestres consecutivos)
             prev_map[prev_key] = shares
 
-            records.append((
-                fund_id, symbol, shares, shares_prev, shares_delta, pct_change,
-                operation, filing_date, pos["value"], pos["cusip"], opt,
-            ))
+            records.append(
+                (
+                    fund_id,
+                    symbol,
+                    shares,
+                    shares_prev,
+                    shares_delta,
+                    pct_change,
+                    operation,
+                    filing_date,
+                    pos["value"],
+                    pos["cusip"],
+                    opt,
+                )
+            )
             if opt != "STK":
                 inserted_options += 1
             else:
                 inserted_holdings += 1
 
-    _logger.warning(f"sync_13f_holdings: bulk insert {len(records)} registros "
-                    f"({inserted_holdings} directos, {inserted_options} opciones)...")
+    _logger.warning(
+        f"sync_13f_holdings: bulk insert {len(records)} registros "
+        f"({inserted_holdings} directos, {inserted_options} opciones)..."
+    )
     market.bulk_upsert_fund_holdings(records)
 
     # Marcar como procesados en BD
     market.mark_filings_processed(list(all_positions.keys()))
 
     return {
-        "xml_files"        : len(unprocessed),
+        "xml_files": len(unprocessed),
         "inserted_holdings": inserted_holdings,
-        "inserted_options" : inserted_options,
+        "inserted_options": inserted_options,
     }

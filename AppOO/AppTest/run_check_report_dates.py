@@ -2,6 +2,7 @@
 run_check_report_dates.py
 Muestra distribución de report_date en fund_holdings para entender la historia disponible.
 """
+
 import sys
 import os
 

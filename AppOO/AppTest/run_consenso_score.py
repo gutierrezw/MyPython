@@ -9,7 +9,6 @@ from Modulos_Utilitarios import define_FileCache
 
 import pandas as pd
 
-
 ACCOUNT = "U4214563"
 
 
@@ -24,10 +23,7 @@ def _read_csv_signals(filename):
 
 
 def _build_net_percentiles(stats_subset):
-    nets = sorted([
-        (v.get("fh_buy_ratio") or 0.0) - (v.get("fh_sell_ratio") or 0.0)
-        for v in stats_subset.values()
-    ])
+    nets = sorted([(v.get("fh_buy_ratio") or 0.0) - (v.get("fh_sell_ratio") or 0.0) for v in stats_subset.values()])
     if len(nets) < 3:
         return 0.2, 0.5
     n = len(nets)
@@ -124,8 +120,10 @@ p33_net, p67_net = _build_net_percentiles(fh_cartera)
 
 print(f"Net percentiles — p33={p33_net:+.3f}  p67={p67_net:+.3f}")
 print("=" * 115)
-print(f"{'Symbol':<8} {'Cat':>3} {'buy_r':>6} {'sel_r':>6} {'net':>6} {'Net':>4} {'Opt':>4} {'Ana':>4} {'Mod':>4} {'Val':>4} {'Cob':>4} "
-      f"{'Suma':>5} {'N':>2} {'Pct':>6}  Señal")
+print(
+    f"{'Symbol':<8} {'Cat':>3} {'buy_r':>6} {'sel_r':>6} {'net':>6} {'Net':>4} {'Opt':>4} {'Ana':>4} {'Mod':>4} {'Val':>4} {'Cob':>4} "
+    f"{'Suma':>5} {'N':>2} {'Pct':>6}  Señal"
+)
 print("=" * 115)
 
 resultados = []
@@ -145,8 +143,12 @@ for row in cartera:
     v_cob = voto_cobertura(stats.get("fh_count"))
 
     votos = {
-        "Net": v_net, "Opt": v_opt, "Ana": v_ana,
-        "Mod": v_mod, "Val": v_val, "Cob": v_cob,
+        "Net": v_net,
+        "Opt": v_opt,
+        "Ana": v_ana,
+        "Mod": v_mod,
+        "Val": v_val,
+        "Cob": v_cob,
     }
     activos = {k: v for k, v in votos.items() if v is not None}
     suma = sum(activos.values())
@@ -160,8 +162,10 @@ for row in cartera:
         return f"{v:+d}  " if v != 0 else "  0 "
 
     net_r = buy_r - sell_r
-    print(f"{sym:<8} {categ:>3} {buy_r:>6.2f} {sell_r:>6.2f} {net_r:>+6.2f} {fmt(v_net)} {fmt(v_opt)} {fmt(v_ana)} {fmt(v_mod)} "
-          f"{fmt(v_val)} {fmt(v_cob)} {suma:>+5} {n:>2} {pct:>+.2f}   {senal}")
+    print(
+        f"{sym:<8} {categ:>3} {buy_r:>6.2f} {sell_r:>6.2f} {net_r:>+6.2f} {fmt(v_net)} {fmt(v_opt)} {fmt(v_ana)} {fmt(v_mod)} "
+        f"{fmt(v_val)} {fmt(v_cob)} {suma:>+5} {n:>2} {pct:>+.2f}   {senal}"
+    )
 
     resultados.append({"symbol": sym, "suma": suma, "n": n, "pct": pct, "senal": senal})
 

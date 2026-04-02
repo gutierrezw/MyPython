@@ -2,6 +2,7 @@
 """
 Script temporal para diagnosticar conceptos IFRS de VALE
 """
+
 import sys
 from pathlib import Path
 
@@ -22,13 +23,17 @@ print("CONCEPTOS DE CASH FLOW")
 print("=" * 70)
 
 # Buscar conceptos relacionados con Operating CF
-ocf_concepts = [name for name in facts.keys() if 'operating' in name.lower() and 'cash' in name.lower()]
+ocf_concepts = [name for name in facts.keys() if "operating" in name.lower() and "cash" in name.lower()]
 print(f"\n📊 Encontrados {len(ocf_concepts)} conceptos de Operating CF:")
 for name in sorted(ocf_concepts):
     print(f"  - {name}: {len(facts[name])} facts")
 
 # Buscar CapEx
-capex_concepts = [name for name in facts.keys() if 'property' in name.lower() and ('purchase' in name.lower() or 'acquisition' in name.lower())]
+capex_concepts = [
+    name
+    for name in facts.keys()
+    if "property" in name.lower() and ("purchase" in name.lower() or "acquisition" in name.lower())
+]
 print(f"\n🏗️  Encontrados {len(capex_concepts)} conceptos de CapEx:")
 for name in sorted(capex_concepts)[:10]:  # Limitar a 10
     print(f"  - {name}: {len(facts[name])} facts")
@@ -39,7 +44,7 @@ print("VALORES DE OPERATING CF (2024)")
 print("=" * 70)
 for name in ocf_concepts:
     for fact in facts[name]:
-        if hasattr(fact, 'contextID') and '2024' in str(fact.contextID):
-            value = fact.value if hasattr(fact, 'value') else 'N/A'
+        if hasattr(fact, "contextID") and "2024" in str(fact.contextID):
+            value = fact.value if hasattr(fact, "value") else "N/A"
             print(f"{name}: {value}")
             break  # Solo el primero de 2024

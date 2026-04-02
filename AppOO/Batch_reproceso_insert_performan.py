@@ -49,9 +49,7 @@ def plot_asset(wperf):
     fg2.clear()
     ax = fg2.add_subplot()
 
-    ax.plot(
-        wperf.index, wperf[cum_index], label="Index Cumulative Return", color="orange"
-    )
+    ax.plot(wperf.index, wperf[cum_index], label="Index Cumulative Return", color="orange")
     ax.plot(wperf.index, wperf["CumPort"], label="Cumulative Return ++portafolio")
 
     ax.set_facecolor("black")
@@ -120,9 +118,7 @@ def procesar_cuenta_desde_inicio(new_diaria=True, insert=False):
 
     #  True para construir diaria y graficar
     if new_diaria:
-        book, ix = ROp.select_booktrading(
-            accion="cartera", account=account, idivisa=divisa
-        )
+        book, ix = ROp.select_booktrading(accion="cartera", account=account, idivisa=divisa)
         path = detalle_book(account=account, vehiculo=vehiculo, book=book, ix=ix)
 
         # Leer el archivo CSV y convierte en lista
@@ -151,12 +147,8 @@ def procesar_cuenta_desde_app(new_diaria=True, insert=False):
 
     #  True para construir diaria y graficar
     if new_diaria:
-        book, ix = ROp.select_booktrading(
-            accion="diaria_app", account=account, idivisa=divisa
-        )
-        path = detalle_book(
-            account=account, vehiculo=vehiculo, book=book, ix=ix, option="app"
-        )
+        book, ix = ROp.select_booktrading(accion="diaria_app", account=account, idivisa=divisa)
+        path = detalle_book(account=account, vehiculo=vehiculo, book=book, ix=ix, option="app")
 
         # Leer CSV e inserta después de ultima diaria
         diaria, iy = read_csv_insert_diaria(path=path, insert=False)

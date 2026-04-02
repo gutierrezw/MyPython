@@ -5,6 +5,7 @@ Análisis completo del Balance Sheet de HASI para identificar estructura de equi
 
 Objetivo: Encontrar el concepto exacto que HASI usa para Total Stockholders' Equity
 """
+
 import sys
 from pathlib import Path
 
@@ -12,9 +13,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from valuation_xbrl_api import load_filing, get_fact_value
 
-print("="*80)
+print("=" * 80)
 print("🔍 ANÁLISIS COMPLETO DE BALANCE SHEET - HASI")
-print("="*80)
+print("=" * 80)
 
 # Cargar filing
 hasi_file = "EDGAR/HASI_EDGAR_Files/10K_Filings/hasi-20231231.htm"
@@ -24,14 +25,14 @@ filing = load_filing(hasi_file)
 print(f"✅ Cargado: {len(filing.facts)} conceptos únicos")
 
 # Buscar Assets primero (para comparación)
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("📊 PASO 1: IDENTIFICAR ASSETS")
-print("="*80)
+print("=" * 80)
 
 assets_concepts = {}
 for name in filing.facts.keys():
     name_lower = name.lower()
-    if 'asset' in name_lower and ('total' in name_lower or name_lower.endswith('assets')):
+    if "asset" in name_lower and ("total" in name_lower or name_lower.endswith("assets")):
         assets_concepts[name] = filing.facts[name]
 
 print(f"\n✅ Encontrados {len(assets_concepts)} conceptos de Assets:")
@@ -45,14 +46,14 @@ for concept in sorted(assets_concepts.keys()):
             print(f"  • {concept}: {value}")
 
 # Buscar Liabilities
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("📊 PASO 2: IDENTIFICAR LIABILITIES")
-print("="*80)
+print("=" * 80)
 
 liabilities_concepts = {}
 for name in filing.facts.keys():
     name_lower = name.lower()
-    if 'liabilit' in name_lower and ('total' in name_lower or name_lower.endswith('liabilities')):
+    if "liabilit" in name_lower and ("total" in name_lower or name_lower.endswith("liabilities")):
         liabilities_concepts[name] = filing.facts[name]
 
 print(f"\n✅ Encontrados {len(liabilities_concepts)} conceptos de Liabilities:")
@@ -66,16 +67,17 @@ for concept in sorted(liabilities_concepts.keys()):
             print(f"  • {concept}: {value}")
 
 # Buscar balance sheet equation: Assets = Liabilities + Equity
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("📊 PASO 3: BUSCAR CONCEPTOS DE BALANCE SHEET EQUATION")
-print("="*80)
+print("=" * 80)
 
 # Buscar LiabilitiesAndStockholdersEquity (debe = Assets)
 bal_sheet_concepts = {}
 for name in filing.facts.keys():
     name_lower = name.lower()
-    if (('liabilit' in name_lower and 'equity' in name_lower) or
-        ('liabilit' in name_lower and 'stockholder' in name_lower)):
+    if ("liabilit" in name_lower and "equity" in name_lower) or (
+        "liabilit" in name_lower and "stockholder" in name_lower
+    ):
         bal_sheet_concepts[name] = filing.facts[name]
 
 print(f"\n✅ Conceptos de Balance Sheet Equation ({len(bal_sheet_concepts)}):")
@@ -89,20 +91,22 @@ for concept in sorted(bal_sheet_concepts.keys()):
             print(f"  • {concept}: {value}")
 
 # Buscar conceptos que contengan "Equity" pero no sean disclosure notes
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("📊 PASO 4: BUSCAR CONCEPTOS DE EQUITY (EXCLUYENDO NOTES)")
-print("="*80)
+print("=" * 80)
 
 equity_balance = {}
 for name in filing.facts.keys():
     name_lower = name.lower()
     # Buscar equity pero excluir disclosure notes y adjustments
-    if ('equity' in name_lower and
-        'note' not in name_lower and
-        'disclosure' not in name_lower and
-        'text' not in name_lower and
-        'table' not in name_lower and
-        'policy' not in name_lower):
+    if (
+        "equity" in name_lower
+        and "note" not in name_lower
+        and "disclosure" not in name_lower
+        and "text" not in name_lower
+        and "table" not in name_lower
+        and "policy" not in name_lower
+    ):
 
         # Obtener primer fact para verificar si es numérico
         facts = filing.facts[name]
@@ -125,7 +129,7 @@ duration_equity = {}
 for concept, facts in equity_balance.items():
     # Verificar tipo de contexto
     if facts:
-        ctx_id = getattr(facts[0], 'contextID', None)
+        ctx_id = getattr(facts[0], "contextID", None)
         if ctx_id:
             ctx = filing.contexts.get(ctx_id)
             if ctx:
@@ -139,7 +143,7 @@ for concept in sorted(instant_equity.keys()):
     facts = instant_equity[concept]
     if facts:
         value = get_fact_value(facts[0])
-        ctx_id = getattr(facts[0], 'contextID', 'N/A')
+        ctx_id = getattr(facts[0], "contextID", "N/A")
         ctx = filing.contexts.get(ctx_id)
         date = ctx.get("instant", "N/A") if ctx else "N/A"
 
@@ -156,17 +160,19 @@ for concept in sorted(duration_equity.keys())[:10]:  # Limitar a 10
     print(f"  • {concept}")
 
 # Análisis de partners capital (HASI es partnership structure)
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("📊 PASO 5: BUSCAR PARTNERSHIP/MEMBERS CAPITAL")
-print("="*80)
+print("=" * 80)
 
 partnership_concepts = {}
 for name in filing.facts.keys():
     name_lower = name.lower()
-    if (('partner' in name_lower or 'member' in name_lower) and
-        ('capital' in name_lower or 'equity' in name_lower) and
-        'note' not in name_lower and
-        'text' not in name_lower):
+    if (
+        ("partner" in name_lower or "member" in name_lower)
+        and ("capital" in name_lower or "equity" in name_lower)
+        and "note" not in name_lower
+        and "text" not in name_lower
+    ):
 
         facts = filing.facts[name]
         if facts:
@@ -192,14 +198,14 @@ else:
     print("\n❌ No se encontraron conceptos de Partnership/Members Capital")
 
 # Verificación final: calcular equity como Assets - Liabilities
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("💡 VERIFICACIÓN: Assets - Liabilities = Equity")
-print("="*80)
+print("=" * 80)
 
 # Buscar Assets más probable
 assets_val = None
 assets_concept = None
-for concept in ['us-gaap:Assets', 'us-gaap:TotalAssets', 'hasi:Assets']:
+for concept in ["us-gaap:Assets", "us-gaap:TotalAssets", "hasi:Assets"]:
     if concept in filing.facts:
         facts = filing.facts[concept]
         if facts:
@@ -210,7 +216,7 @@ for concept in ['us-gaap:Assets', 'us-gaap:TotalAssets', 'hasi:Assets']:
 # Buscar Liabilities más probable
 liab_val = None
 liab_concept = None
-for concept in ['us-gaap:Liabilities', 'us-gaap:TotalLiabilities', 'hasi:Liabilities']:
+for concept in ["us-gaap:Liabilities", "us-gaap:TotalLiabilities", "hasi:Liabilities"]:
     if concept in filing.facts:
         facts = filing.facts[concept]
         if facts:
@@ -259,6 +265,6 @@ if assets_val and liab_val:
 else:
     print("\n⚠️  No se pudieron extraer Assets o Liabilities para verificación")
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("✅ Análisis completo")
-print("="*80)
+print("=" * 80)

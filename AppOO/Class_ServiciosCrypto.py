@@ -4,6 +4,7 @@ Class_ServiciosCrypto.py - Servicios auxiliares Crypto (Simple Earn ↔ Spot)
 Clases:
 - ServiciosCrypto: Operaciones earn/spot (subscribe, redeem, balances combinados)
 """
+
 import logging
 
 
@@ -12,6 +13,7 @@ class ServiciosCrypto:
 
     def __init__(self):
         from Class_ApiBinnace import BinanceClient  # import diferido — evita ciclo con Modulos_python chain
+
         self._spot = BinanceClient(vehiculo="Crypto").spot
         self._logger = logging.getLogger("BinanceClient")
 
@@ -22,8 +24,8 @@ class ServiciosCrypto:
             asset, spot_free, earn_amount, earn_apr, earn_product_id, can_redeem, total, usdt_value
         Solo incluye monedas con saldo > 0 en al menos una ubicación.
         """
-        spot_data  = self._spot.account_spot() or {}
-        earn_data  = self._spot.Myget_flexible_product_position() or {}
+        spot_data = self._spot.account_spot() or {}
+        earn_data = self._spot.Myget_flexible_product_position() or {}
         prices_raw = self._spot.ticker_price() or []
 
         price_map = {p["symbol"]: float(p["price"]) for p in prices_raw if isinstance(p, dict)}
@@ -34,9 +36,7 @@ class ServiciosCrypto:
             return price_map.get(f"{asset}USDT", 0.0)
 
         spot_balances = {
-            b["asset"]: float(b.get("free", 0))
-            for b in spot_data.get("balances", [])
-            if float(b.get("free", 0)) > 0
+            b["asset"]: float(b.get("free", 0)) for b in spot_data.get("balances", []) if float(b.get("free", 0)) > 0
         }
 
         earn_positions = {}
@@ -44,8 +44,8 @@ class ServiciosCrypto:
             amt = float(row.get("totalAmount", 0))
             if amt > 0:
                 earn_positions[row["asset"]] = {
-                    "amount":    amt,
-                    "apr":       float(row.get("latestAnnualPercentageRate", 0)),
+                    "amount": amt,
+                    "apr": float(row.get("latestAnnualPercentageRate", 0)),
                     "productId": row.get("productId", ""),
                     "canRedeem": bool(row.get("canRedeem", False)),
                 }
@@ -53,22 +53,24 @@ class ServiciosCrypto:
         all_assets = sorted(set(earn_positions))
         result = []
         for asset in all_assets:
-            earn_info  = earn_positions.get(asset, {})
-            spot_free  = spot_balances.get(asset, 0.0)
-            total      = spot_free + earn_info.get("amount", 0.0)
-            price      = _price_usdt(asset)
+            earn_info = earn_positions.get(asset, {})
+            spot_free = spot_balances.get(asset, 0.0)
+            total = spot_free + earn_info.get("amount", 0.0)
+            price = _price_usdt(asset)
             earn_amt = earn_info.get("amount", 0.0)
-            result.append({
-                "asset":           asset,
-                "spot_free":       spot_free,
-                "earn_amount":     earn_amt,
-                "earn_apr":        earn_info.get("apr", 0.0),
-                "earn_product_id": earn_info.get("productId", ""),
-                "can_redeem":      earn_info.get("canRedeem", False),
-                "total":           total,
-                "usdt_value":      total * price,       # spot + earn en USDT (para tabla UI)
-                "earn_usdt":       earn_amt * price,    # solo earn en USDT (para LTV)
-            })
+            result.append(
+                {
+                    "asset": asset,
+                    "spot_free": spot_free,
+                    "earn_amount": earn_amt,
+                    "earn_apr": earn_info.get("apr", 0.0),
+                    "earn_product_id": earn_info.get("productId", ""),
+                    "can_redeem": earn_info.get("canRedeem", False),
+                    "total": total,
+                    "usdt_value": total * price,  # spot + earn en USDT (para tabla UI)
+                    "earn_usdt": earn_amt * price,  # solo earn en USDT (para LTV)
+                }
+            )
         return result
 
     def earn_subscribe(self, productId: str, amount: float):
@@ -145,15 +147,17 @@ class ServiciosCrypto:
                 ajuste_coin = delta_usd / precio_col if precio_col > 0 else 0
                 ajuste_direction = "REDUCED"
 
-            analisis.append({
-                "loanCoin": loan_coin,
-                "collateralCoin": collateral_coin,
-                "ltv_actual": ltv_actual,
-                "loan_usd": loan_usd,
-                "collateral_amount": collateral_amount,
-                "collateral_usd": collateral_usd,
-                "estado": estado,
-                "ajuste_direction": ajuste_direction,
-                "ajuste_coin": round(ajuste_coin, 6),
-            })
+            analisis.append(
+                {
+                    "loanCoin": loan_coin,
+                    "collateralCoin": collateral_coin,
+                    "ltv_actual": ltv_actual,
+                    "loan_usd": loan_usd,
+                    "collateral_amount": collateral_amount,
+                    "collateral_usd": collateral_usd,
+                    "estado": estado,
+                    "ajuste_direction": ajuste_direction,
+                    "ajuste_coin": round(ajuste_coin, 6),
+                }
+            )
         return analisis

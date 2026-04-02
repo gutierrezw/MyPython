@@ -7,6 +7,7 @@ Funciones principales:
 - download_filing_file(cik, accession, filename, save_dir): Descarga un archivo específico del filing.
 - is_foreign_filer(form_list): Detecta si una empresa presenta formularios extranjeros (20-F, 6-K).
 """
+
 import sys
 
 sys.path.insert(0, "..")

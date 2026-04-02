@@ -44,31 +44,31 @@ inst_score = inst_ownership_pct * 0.40 + log(max(fh_count,1)) * 0.40 + fh_buy_ra
 # p33, p67 = _build_net_percentiles(fh_cartera)   top 33% → +1 | medio → 0 | bottom → -1
 
 # Voto Options
-CALL_RATIO_POSITIVO = 0.60   # calls/(calls+puts) ≥ 0.60 → +1
-CALL_RATIO_NEUTRO   = 0.40   # calls/(calls+puts) ≥ 0.40 → 0   (< 0.40 → -1)
+CALL_RATIO_POSITIVO = 0.60  # calls/(calls+puts) ≥ 0.60 → +1
+CALL_RATIO_NEUTRO = 0.40  # calls/(calls+puts) ≥ 0.40 → 0   (< 0.40 → -1)
 
 # Voto Cobertura (fh_count = número de fondos con posición)
-FH_COUNT_POSITIVO = 20       # ≥ 20 fondos → +1
-FH_COUNT_NEUTRO   = 5        # ≥  5 fondos → 0   (< 5 → -1)
+FH_COUNT_POSITIVO = 20  # ≥ 20 fondos → +1
+FH_COUNT_NEUTRO = 5  # ≥  5 fondos → 0   (< 5 → -1)
 
 # Señal Institucional compuesta
-INST_SCORE_ACOMPANAR  = 0.40
-BUY_RATIO_ACOMPANAR   = 0.50
-FH_COUNT_ACOMPANAR    = 20
-INST_SCORE_MANTENER   = 0.25
-FH_COUNT_MANTENER     = 10
+INST_SCORE_ACOMPANAR = 0.40
+BUY_RATIO_ACOMPANAR = 0.50
+FH_COUNT_ACOMPANAR = 20
+INST_SCORE_MANTENER = 0.25
+FH_COUNT_MANTENER = 10
 
 # inst_score blending weights
-INST_SCORE_W_YFINANCE  = 0.40   # inst_ownership_pct
-INST_SCORE_W_FH_COUNT  = 0.40   # log(max(fh_count, 1))
-INST_SCORE_W_BUY_RATIO = 0.20   # fh_buy_ratio
+INST_SCORE_W_YFINANCE = 0.40  # inst_ownership_pct
+INST_SCORE_W_FH_COUNT = 0.40  # log(max(fh_count, 1))
+INST_SCORE_W_BUY_RATIO = 0.20  # fh_buy_ratio
 
 # Tabla de decisión (pct = suma / n_activos)
-NIVEL_UNANIME  = None   # suma == n (todos positivos)
-NIVEL_CONSENSO = 0.60   # pct ≥ 0.60
-NIVEL_TENDENCIA= 0.20   # pct ≥ 0.20
-NIVEL_NEUTRO   = -0.20  # pct > -0.20
-NIVEL_ALERTA   = -0.60  # pct > -0.60
+NIVEL_UNANIME = None  # suma == n (todos positivos)
+NIVEL_CONSENSO = 0.60  # pct ≥ 0.60
+NIVEL_TENDENCIA = 0.20  # pct ≥ 0.20
+NIVEL_NEUTRO = -0.20  # pct > -0.20
+NIVEL_ALERTA = -0.60  # pct > -0.60
 # NIVEL_SALIDA si pct ≤ -0.60
 
 
@@ -76,14 +76,12 @@ NIVEL_ALERTA   = -0.60  # pct > -0.60
 # Funciones del modelo
 # ---------------------------------------------------------------------------
 
+
 def build_net_percentiles(fh_cartera: dict) -> tuple:
     """Calcula percentiles p33 y p67 del flujo neto (buy_ratio - sell_ratio)
     sobre los activos de cartera con datos 13F.
     Retorna (p33, p67) para clasificar cada activo relativamente al universo."""
-    nets = sorted(
-        (v.get("fh_buy_ratio") or 0.0) - (v.get("fh_sell_ratio") or 0.0)
-        for v in fh_cartera.values()
-    )
+    nets = sorted((v.get("fh_buy_ratio") or 0.0) - (v.get("fh_sell_ratio") or 0.0) for v in fh_cartera.values())
     if len(nets) < 3:
         return 0.2, 0.5
     n = len(nets)
@@ -138,7 +136,7 @@ def voto_valuacion(categoria_activo: str) -> int | None:
         return -1
     if categoria_activo == "N":
         return 0
-    return None   # X, T, o vacío: abstiene
+    return None  # X, T, o vacío: abstiene
 
 
 def voto_cobertura(fh_count: int) -> int:

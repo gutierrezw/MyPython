@@ -10,22 +10,22 @@ ACCOUNT = "U4214563"
 # CUSIPs verificados en SEC EDGAR para activos en cartera sin CUSIP
 # Verificar en: https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=&CIK={TICKER}&type=13F
 CUSIPS = {
-    "BTI":  "G11103104",   # British American Tobacco
-    "CCI":  "22822V101",   # Crown Castle Inc.
-    "CNH":  "N20944109",   # CNH Industrial N.V.
-    "CRNT": "M26659102",   # Ceragon Networks
-    "CTRM": "M25264105",   # Castor Maritime
-    "MPW":  "56576J101",   # Medical Properties Trust
-    "NOMD": "G65318102",   # Nomad Foods
-    "TU":   "87971M103",   # Telus Corporation
-    "UUUU": "29278H103",   # Energy Fuels Inc
+    "BTI": "G11103104",  # British American Tobacco
+    "CCI": "22822V101",  # Crown Castle Inc.
+    "CNH": "N20944109",  # CNH Industrial N.V.
+    "CRNT": "M26659102",  # Ceragon Networks
+    "CTRM": "M25264105",  # Castor Maritime
+    "MPW": "56576J101",  # Medical Properties Trust
+    "NOMD": "G65318102",  # Nomad Foods
+    "TU": "87971M103",  # Telus Corporation
+    "UUUU": "29278H103",  # Energy Fuels Inc
 }
 
 print("=" * 70)
 print(f"Resolver CUSIPs en cartera — cuenta: {ACCOUNT}")
 print("=" * 70)
 
-market   = MarketScreen()
+market = MarketScreen()
 rows, ix = market.select(account=ACCOUNT, tipo="Dividends")
 sin_cusip = {
     dict(zip(ix, r))["symbol"]

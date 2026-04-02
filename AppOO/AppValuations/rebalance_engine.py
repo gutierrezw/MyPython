@@ -2,8 +2,11 @@
 # Standard library
 # =========================
 from Modulos_python import (
-    math, Dict, 
-Tuple, Optional, List,
+    math,
+    Dict,
+    Tuple,
+    Optional,
+    List,
 )
 from Modulos_Mysql import BDsystem, MarketScreen
 
@@ -435,9 +438,7 @@ class MetodoEngine:
     # =========================
     # comunes
     # =========================
-    def _get_active_block(
-        self, info_symbol: Dict
-    ) -> Tuple[Optional[str], Optional[Dict]]:
+    def _get_active_block(self, info_symbol: Dict) -> Tuple[Optional[str], Optional[Dict]]:
         """
         Devuelve el modo activo y un bloque normalizado
         con los datos necesarios para operar.
@@ -471,9 +472,7 @@ class MetodoEngine:
 
         return modo, block
 
-    def monto_a_cantidad(
-        self, symbol: str, monto: float, allow_fraction: bool = True
-    ) -> float:
+    def monto_a_cantidad(self, symbol: str, monto: float, allow_fraction: bool = True) -> float:
         """
         Convierte monto en cantidad usando el bloque activo
         (_get_active_block) como fuente única de verdad.
@@ -613,7 +612,7 @@ class RebalanceEngine(MetodoEngine):
         Valida que DataHub tenga la estructura esperada.
         Retorna True si la estructura es válida, False en caso contrario.
         """
-        if not hasattr(self.datahub, 'manager_buysell'):
+        if not hasattr(self.datahub, "manager_buysell"):
             return False
 
         # Validación silenciosa - los errores se manejan en los métodos de gap
@@ -646,18 +645,14 @@ class RebalanceEngine(MetodoEngine):
     # FASE 2 — NORMALIZACIÓN
     # =========================
     def normalize_gaps(self) -> Dict:
-        self.normalized_gaps = {
-            dim: self._normalize_gap(value) for dim, value in self.gaps.items()
-        }
+        self.normalized_gaps = {dim: self._normalize_gap(value) for dim, value in self.gaps.items()}
         return self.normalized_gaps
 
     # =========================
     # FASE 3 — PRIORIDAD
     # =========================
     def prioritize_dimensions(self) -> List[str]:
-        self.dimension_priority = sorted(
-            self.normalized_gaps, key=lambda d: self.normalized_gaps[d], reverse=True
-        )
+        self.dimension_priority = sorted(self.normalized_gaps, key=lambda d: self.normalized_gaps[d], reverse=True)
         return self.dimension_priority
 
     # =========================
@@ -691,7 +686,7 @@ class RebalanceEngine(MetodoEngine):
                 continue
 
             metadata = self._extract_metadata(data)
- 
+
             self.candidates.append(
                 {
                     "symbol": symbol,
@@ -953,11 +948,7 @@ class RebalanceEngine(MetodoEngine):
         # Siempre es evaluable (todos los activos tienen tipo buy/dividends)
         dimensiones_evaluadas += 1
 
-        if (
-            gap_div > 0
-            and tipo == "dividends"
-            and necesita_div
-        ):
+        if gap_div > 0 and tipo == "dividends" and necesita_div:
             impacto["dividendos"] = gap_div
             score_estructural += gap_div
             dimensiones_aplicables += 1
@@ -1059,7 +1050,7 @@ class RebalanceEngine(MetodoEngine):
         # Score final
         # =========================
         # DEBUG: Imprimir valores clave para diagnóstico
-    
+
         # Si hay gaps estructurales, usar scoring completo
         if score_estructural > 0:
             # Scoring base por gaps estructurales
@@ -1084,10 +1075,9 @@ class RebalanceEngine(MetodoEngine):
                 score_base = 0.05 * valuation_factor
 
                 # Bonificación adicional si tiene metadata (ayuda a diversificar)
-                metadata_count = sum([
-                    1 for v in [meta.get("sector"), meta.get("region"), meta.get("asset_type")]
-                    if v is not None
-                ])
+                metadata_count = sum(
+                    [1 for v in [meta.get("sector"), meta.get("region"), meta.get("asset_type")] if v is not None]
+                )
                 # +10% por cada dimensión con metadata (max +30%)
                 metadata_bonus = 1.0 + (0.1 * metadata_count)
 
@@ -1167,10 +1157,10 @@ class RebalanceEngine(MetodoEngine):
             if score <= 0:
                 continue
 
-            # Obetine min inversion y la agrega a ranking, 
+            # Obetine min inversion y la agrega a ranking,
             pinvertir = vehiculo.get("Pinvertir", 0.0)
-            candidate["pinvertir"] = pinvertir 
-            
+            candidate["pinvertir"] = pinvertir
+
             if pinvertir < min_ticket:
                 continue
 
@@ -1190,7 +1180,7 @@ class RebalanceEngine(MetodoEngine):
             asignaciones.append(
                 {
                     "symbol": symbol,
-                    #"monto_sugerido": monto,
+                    # "monto_sugerido": monto,
                     "monto_sugerido": gap_valor,
                     "pinvertir": pinvertir,
                     "score": round(score, 4),

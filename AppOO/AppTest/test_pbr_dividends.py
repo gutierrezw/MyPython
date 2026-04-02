@@ -2,6 +2,7 @@
 """
 Script de diagnóstico para encontrar conceptos de dividendos en PBR (20-F IFRS)
 """
+
 import sys
 from pathlib import Path
 
@@ -27,7 +28,7 @@ print("=" * 80)
 print("\n📊 CONCEPTOS QUE CONTIENEN 'DIVIDEND':")
 print("=" * 80)
 
-dividend_concepts = [name for name in facts.keys() if 'dividend' in name.lower()]
+dividend_concepts = [name for name in facts.keys() if "dividend" in name.lower()]
 if dividend_concepts:
     for name in sorted(dividend_concepts):
         num_facts = len(facts[name])
@@ -36,9 +37,9 @@ if dividend_concepts:
 
         # Mostrar los primeros 3 valores
         for i, fact in enumerate(facts[name][:3]):
-            context_id = getattr(fact, 'contextID', 'N/A')
-            value = getattr(fact, 'value', 'N/A')
-            unit = getattr(fact, 'unit', 'N/A')
+            context_id = getattr(fact, "contextID", "N/A")
+            value = getattr(fact, "value", "N/A")
+            unit = getattr(fact, "unit", "N/A")
             print(f"       [{i+1}] Context: {context_id} | Value: {value} | Unit: {unit}")
 else:
     print("  ❌ No se encontraron conceptos con 'dividend' en el nombre")
@@ -49,11 +50,11 @@ else:
 print("\n\n💰 CONCEPTOS RELACIONADOS CON DISTRIBUCIONES A ACCIONISTAS:")
 print("=" * 80)
 
-distribution_keywords = ['distribution', 'payment', 'owner', 'shareholder', 'equity']
+distribution_keywords = ["distribution", "payment", "owner", "shareholder", "equity"]
 distribution_concepts = []
 
 for keyword in distribution_keywords:
-    matching = [name for name in facts.keys() if keyword in name.lower() and 'dividend' not in name.lower()]
+    matching = [name for name in facts.keys() if keyword in name.lower() and "dividend" not in name.lower()]
     distribution_concepts.extend(matching)
 
 # Eliminar duplicados
@@ -93,9 +94,9 @@ for concept in ifrs_dividend_concepts:
 
         # Mostrar valores
         for i, fact in enumerate(facts[concept][:3]):
-            context_id = getattr(fact, 'contextID', 'N/A')
-            value = getattr(fact, 'value', 'N/A')
-            unit = getattr(fact, 'unit', 'N/A')
+            context_id = getattr(fact, "contextID", "N/A")
+            value = getattr(fact, "value", "N/A")
+            unit = getattr(fact, "unit", "N/A")
             print(f"        [{i+1}] Context: {context_id} | Value: {value} | Unit: {unit}")
 
 if not found_ifrs:
@@ -107,7 +108,7 @@ if not found_ifrs:
 print("\n\n💵 CONCEPTOS DE CASH FLOW - ACTIVIDADES DE FINANCIAMIENTO:")
 print("=" * 80)
 
-financing_concepts = [name for name in facts.keys() if 'financing' in name.lower() and 'cash' in name.lower()]
+financing_concepts = [name for name in facts.keys() if "financing" in name.lower() and "cash" in name.lower()]
 
 if financing_concepts:
     for name in sorted(financing_concepts)[:10]:
@@ -118,8 +119,8 @@ if financing_concepts:
         # Mostrar primer valor
         if facts[name]:
             fact = facts[name][0]
-            context_id = getattr(fact, 'contextID', 'N/A')
-            value = getattr(fact, 'value', 'N/A')
+            context_id = getattr(fact, "contextID", "N/A")
+            value = getattr(fact, "value", "N/A")
             print(f"       Ejemplo: Context={context_id}, Value={value}")
 else:
     print("  ⚠️  No se encontraron conceptos de actividades de financiamiento")
@@ -130,8 +131,12 @@ else:
 print("\n\n🏢 CONCEPTOS PERSONALIZADOS DE PETROBRAS (namespace pbr:):")
 print("=" * 80)
 
-pbr_concepts = [name for name in facts.keys() if name.startswith('pbr:')]
-dividend_related_pbr = [name for name in pbr_concepts if any(kw in name.lower() for kw in ['dividend', 'distribution', 'payment', 'shareholder'])]
+pbr_concepts = [name for name in facts.keys() if name.startswith("pbr:")]
+dividend_related_pbr = [
+    name
+    for name in pbr_concepts
+    if any(kw in name.lower() for kw in ["dividend", "distribution", "payment", "shareholder"])
+]
 
 if dividend_related_pbr:
     for name in sorted(dividend_related_pbr):
@@ -141,9 +146,9 @@ if dividend_related_pbr:
 
         # Mostrar valores
         for i, fact in enumerate(facts[name][:2]):
-            context_id = getattr(fact, 'contextID', 'N/A')
-            value = getattr(fact, 'value', 'N/A')
-            unit = getattr(fact, 'unit', 'N/A')
+            context_id = getattr(fact, "contextID", "N/A")
+            value = getattr(fact, "value", "N/A")
+            unit = getattr(fact, "unit", "N/A")
             print(f"       [{i+1}] Context: {context_id} | Value: {value} | Unit: {unit}")
 else:
     print("  ℹ️  No se encontraron conceptos personalizados de PBR relacionados con dividendos")

@@ -59,9 +59,7 @@ def obtener_documentos():
     """Obtiene lista de documentos disponibles de CNV"""
     url = "https://www.cnv.gov.ar/SitioWeb/FondosComunesInversion/CuotaPartes"
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
     response = requests.get(url, headers=headers)
     soup = BeautifulSoup(response.content, "html.parser")
@@ -131,9 +129,7 @@ def descargar_excel_selenium(uuid, id_doc, fecha_str, directorio, display_log=Fa
 
     try:
         # Iniciar navegador
-        driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()), options=chrome_options
-        )
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
         # Ir a la página
         url = f"https://aif2.cnv.gov.ar/Presentations/publicview/{uuid}"
@@ -156,9 +152,7 @@ def descargar_excel_selenium(uuid, id_doc, fecha_str, directorio, display_log=Fa
         boton_descarga = None
         for selector in selectores:
             try:
-                boton_descarga = wait.until(
-                    EC.element_to_be_clickable((By.XPATH, selector))
-                )
+                boton_descarga = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
                 break
             except:
                 continue
@@ -177,9 +171,7 @@ def descargar_excel_selenium(uuid, id_doc, fecha_str, directorio, display_log=Fa
 
         # Limpiar archivos antiguos antes de renombrar
         archivos = os.listdir(directorio)
-        archivos_excel = [
-            f for f in archivos if f.endswith(".xlsx") or f.endswith(".xls")
-        ]
+        archivos_excel = [f for f in archivos if f.endswith(".xlsx") or f.endswith(".xls")]
 
         if archivos_excel:
             # Tomar el más reciente
@@ -190,9 +182,7 @@ def descargar_excel_selenium(uuid, id_doc, fecha_str, directorio, display_log=Fa
             archivo_descargado = archivos_excel[0]
 
             # Limpiar nombre: remover " (1)", " (2)", etc. que Chrome agrega cuando hay duplicados
-            nombre_limpio = re.sub(
-                r"\s*\(\d+\)", "", archivo_descargado
-            )  # Remover (1), (2), etc.
+            nombre_limpio = re.sub(r"\s*\(\d+\)", "", archivo_descargado)  # Remover (1), (2), etc.
 
             # Si tiene formato de fecha al principio (YYYYMMDD), usarlo
             # Si no, extraer fecha de fecha_str y agregar al inicio
@@ -209,9 +199,7 @@ def descargar_excel_selenium(uuid, id_doc, fecha_str, directorio, display_log=Fa
             nuevo_path = os.path.join(directorio, nombre_limpio)
 
             # Eliminar archivo antiguo si existe con el mismo nombre final
-            if os.path.exists(nuevo_path) and nuevo_path != os.path.join(
-                directorio, archivo_descargado
-            ):
+            if os.path.exists(nuevo_path) and nuevo_path != os.path.join(directorio, archivo_descargado):
                 os.remove(nuevo_path)
 
             # Renombrar el nuevo archivo
@@ -296,9 +284,7 @@ def descargar_cnv_hoy(fecha_str):
     fecha_inmediata_superior = docs_validos[0]["fecha_dt"]
 
     # Obtener todos los documentos de esa fecha
-    docs_a_descargar = [
-        d for d in docs_validos if d["fecha_dt"] == fecha_inmediata_superior
-    ]
+    docs_a_descargar = [d for d in docs_validos if d["fecha_dt"] == fecha_inmediata_superior]
 
     # Si hay múltiples documentos, tomar el más reciente (último en aparecer en la lista)
     # La lista viene ordenada cronológicamente, el último es el más reciente
@@ -311,9 +297,7 @@ def descargar_cnv_hoy(fecha_str):
     nombre_archivo = None
 
     for doc in docs_a_descargar:
-        resultado = descargar_excel_selenium(
-            doc["uuid"], doc["id"], doc["fecha"], directorio
-        )
+        resultado = descargar_excel_selenium(doc["uuid"], doc["id"], doc["fecha"], directorio)
         if resultado:  # resultado es el nombre del archivo si tuvo éxito
             exitosas += 1
             nombre_archivo = resultado
@@ -353,9 +337,7 @@ def main():
     if resultado["success"]:
         print(f"\n✅ Descarga exitosa!")
         print(f"   Archivo: {resultado['archivo']}")
-        print(
-            f"   Documentos procesados: {resultado['exitosas']}/{resultado['total']}\n"
-        )
+        print(f"   Documentos procesados: {resultado['exitosas']}/{resultado['total']}\n")
     else:
         print(f"\n❌ Error: {resultado.get('error', 'Descarga fallida')}\n")
         sys.exit(1)

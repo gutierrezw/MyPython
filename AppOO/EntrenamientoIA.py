@@ -13,4 +13,3 @@ print(datos)
 # df = modelo..preparar_dataframe(oportunidades)
 # modelo.entrenar(df)
 # modelo.guardar("modelo_ventas.pkl")
-

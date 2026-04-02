@@ -69,9 +69,7 @@ def _yahoo_session():
     for attempt in range(3):
         try:
             if _BACKOFF[attempt]:
-                _logger.warning(
-                    f"[yahoo_session] backoff {_BACKOFF[attempt]}s antes de intento {attempt + 1}"
-                )
+                _logger.warning(f"[yahoo_session] backoff {_BACKOFF[attempt]}s antes de intento {attempt + 1}")
                 time.sleep(_BACKOFF[attempt])
             # Obtener cookies — probar fc.yahoo.com primero (nuevo flujo)
             for init_url in _INIT_URLS:
@@ -92,24 +90,18 @@ def _yahoo_session():
                         break
                     if r.status_code == 429:
                         got_429 = True
-                    _logger.warning(
-                        f"[yahoo_session] intento {attempt + 1} ({crumb_url[-7:]}): HTTP {r.status_code}"
-                    )
+                    _logger.warning(f"[yahoo_session] intento {attempt + 1} ({crumb_url[-7:]}): HTTP {r.status_code}")
                 except Exception as e:
                     _logger.warning(f"[yahoo_session] intento {attempt + 1}: {e}")
             if crumb:
                 break
             if got_429 and attempt < 2:
-                _logger.warning(
-                    f"[yahoo_session] 429 detectado — esperando {_BACKOFF[attempt + 1]}s"
-                )
+                _logger.warning(f"[yahoo_session] 429 detectado — esperando {_BACKOFF[attempt + 1]}s")
         except Exception as e:
             _logger.warning(f"[yahoo_session] intento {attempt + 1} error: {e}")
     session.headers.update({"Accept": "application/json"})
     if not crumb:
-        _logger.error(
-            "[yahoo_session] crumb no obtenido — las requests pueden devolver 401"
-        )
+        _logger.error("[yahoo_session] crumb no obtenido — las requests pueden devolver 401")
     return session, crumb
 
 
@@ -178,9 +170,7 @@ class Screener(tk.Frame):
             for index, (val, k) in enumerate(xlis):
                 tree.move(k, "", index)
 
-            tree.heading(
-                col, text=col, command=lambda: sort_treeview(tree, col, not reverse)
-            )
+            tree.heading(col, text=col, command=lambda: sort_treeview(tree, col, not reverse))
             i = 0
             for item in tree.get_children():
                 xtag = "even" if i % 2 == 0 else "odd"
@@ -239,12 +229,8 @@ class Screener(tk.Frame):
             self.panel = ttk.Frame(self.win, padding=(5, 5, 5, 5), style="B.TFrame")
             self.options = ttk.Frame(self.win, padding=(5, 5, 5, 5), style="C.TFrame")
             self.win.pack(fill=tk.BOTH)
-            self.options.pack(
-                side=tk.RIGHT, fill=tk.Y
-            )  # options PRIMERO → se reserva espacio derecho
-            self.panel.pack(
-                side=tk.LEFT, fill=tk.BOTH, expand=True
-            )  # panel llena lo restante
+            self.options.pack(side=tk.RIGHT, fill=tk.Y)  # options PRIMERO → se reserva espacio derecho
+            self.panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)  # panel llena lo restante
 
             # --- CustomTreeview con columnas fijas ---
             _FIXED = ["symbol", "shortName", "categoriaActivo", "encartera"]
@@ -322,21 +308,15 @@ class Screener(tk.Frame):
                 ("website", "Website", 200, "w"),
             ]
             self.ctree = [c[0] for c in _COL_DEFS]
-            col_align = {
-                col_id: {"anchor": anc, "width": w} for col_id, _, w, anc in _COL_DEFS
-            }
+            col_align = {col_id: {"anchor": anc, "width": w} for col_id, _, w, anc in _COL_DEFS}
 
             # Prevenir que self.panel se expanda por las columnas del treeview (3500px+)
             self.panel.pack_propagate(False)
 
             # Frame contenedor en grid dentro de self.panel
             tree_frame = ttk.Frame(self.panel, style="B.TFrame")
-            tree_frame.grid(
-                column=0, row=6, columnspan=3, rowspan=4, sticky=(N, S, E, W)
-            )
-            self.panel.columnconfigure(
-                0, weight=1
-            )  # tree_frame llena el ancho del panel
+            tree_frame.grid(column=0, row=6, columnspan=3, rowspan=4, sticky=(N, S, E, W))
+            self.panel.columnconfigure(0, weight=1)  # tree_frame llena el ancho del panel
 
             self.ctree_widget = CustomTreeview(
                 master=tree_frame,
@@ -358,11 +338,7 @@ class Screener(tk.Frame):
             # Sobrescribir heading text y anchor (CustomTreeview pone text=col_id por defecto)
             # También fijar stretch=NO para que el scrollbar horizontal funcione
             for col_id, col_text, col_width, col_anchor in _COL_DEFS:
-                _t = (
-                    self.ctree_widget.tree_fixed
-                    if col_id in _FIXED
-                    else self.ctree_widget.tree_scroll
-                )
+                _t = self.ctree_widget.tree_fixed if col_id in _FIXED else self.ctree_widget.tree_scroll
                 _t.heading(col_id, text=col_text, anchor=col_anchor)
                 _t.column(
                     col_id,
@@ -391,8 +367,7 @@ class Screener(tk.Frame):
                     (
                         row[self.ix.index("website")]
                         for row in self.market
-                        if row[self.ix.index("symbol")] == symbol
-                        and self.ix.count("website")
+                        if row[self.ix.index("symbol")] == symbol and self.ix.count("website")
                     ),
                     None,
                 )
@@ -571,9 +546,7 @@ class Screener(tk.Frame):
             st1 = ttk.Label(self.options, text="SECTOR ::", style="C.TLabel")
             sector = tk.Listbox(self.options, width=24, height=5)
             sector.bind("<<ListboxSelect>>", sector_select)
-            s_scroll = ttk.Scrollbar(
-                self.options, orient=tk.VERTICAL, command=sector.yview
-            )
+            s_scroll = ttk.Scrollbar(self.options, orient=tk.VERTICAL, command=sector.yview)
             sector.config(yscrollcommand=s_scroll.set)
             st1.grid(column=0, row=16, sticky=W, pady=10)
             sector.grid(column=0, row=17, sticky=W, padx=10)
@@ -588,9 +561,7 @@ class Screener(tk.Frame):
             ct1 = ttk.Label(self.options, text="COUNTRY ::", style="C.TLabel")
             country = tk.Listbox(self.options, width=24, height=5)
             country.bind("<<ListboxSelect>>", country_select)
-            c_scroll = ttk.Scrollbar(
-                self.options, orient=tk.VERTICAL, command=country.yview
-            )
+            c_scroll = ttk.Scrollbar(self.options, orient=tk.VERTICAL, command=country.yview)
             country.config(yscrollcommand=c_scroll.set)
 
             country.insert(tk.END, "None")
@@ -818,7 +789,7 @@ class Screener(tk.Frame):
     # controla que se muestren los datos seleccionados en el screener
     def filtra_seleccion(self):
 
-        (self.market, self.ix) = self.ScMarket.select(
+        self.market, self.ix = self.ScMarket.select(
             account=self.account,
             tipo=self.s_tipo,
             country=self.s_country,
@@ -860,9 +831,7 @@ class Screener(tk.Frame):
             c, v = _color_count(h["por_renovar"], warn=50)
             self._health_labels["por_renovar"].config(text=f"🔄 {v} por renovar", fg=c)
             c, v = _color_count(inconsistencias)
-            self._health_labels["inconsistencias"].config(
-                text=f"⚠ {v} inconsistencias", fg=c
-            )
+            self._health_labels["inconsistencias"].config(text=f"⚠ {v} inconsistencias", fg=c)
 
         threading.Thread(target=_fetch, daemon=True).start()
 
@@ -894,15 +863,9 @@ class Screener(tk.Frame):
         def _read_csv_signals(filename):
             try:
                 path = define_FileCache(name=f"{filename}.CSV")
-                df = pd.read_csv(
-                    path, header=0, sep=",", encoding="utf-8", index_col=False
-                )
+                df = pd.read_csv(path, header=0, sep=",", encoding="utf-8", index_col=False)
                 df.columns = df.columns.str.strip()
-                return (
-                    set(df["Symbol"].dropna().str.strip().tolist())
-                    if "Symbol" in df.columns
-                    else set()
-                )
+                return set(df["Symbol"].dropna().str.strip().tolist()) if "Symbol" in df.columns else set()
             except (EmptyDataError, FileNotFoundError):
                 return set()
             except Exception:
@@ -938,10 +901,7 @@ class Screener(tk.Frame):
 
         def _build_net_percentiles(cartera_rows):
             nets = sorted(
-                [
-                    float(r.get("fh_buy_ratio") or 0.0) - float(r.get("fh_sell_ratio") or 0.0)
-                    for r in cartera_rows
-                ]
+                [float(r.get("fh_buy_ratio") or 0.0) - float(r.get("fh_sell_ratio") or 0.0) for r in cartera_rows]
             )
             if len(nets) < 3:
                 return 0.2, 0.5
@@ -949,11 +909,20 @@ class Screener(tk.Frame):
             return nets[n // 3], nets[(2 * n) // 3]
 
         def _build_flujo_percentiles(cartera_rows):
-            vals = sorted([
-                max(-1.0, min(1.0, ((r.get("new_entrants") or 0) - (r.get("full_exits") or 0))
-                    / max(r.get("fh_count") or 1, 1)))
-                for r in cartera_rows if r.get("fh_count")
-            ])
+            vals = sorted(
+                [
+                    max(
+                        -1.0,
+                        min(
+                            1.0,
+                            ((r.get("new_entrants") or 0) - (r.get("full_exits") or 0))
+                            / max(r.get("fh_count") or 1, 1),
+                        ),
+                    )
+                    for r in cartera_rows
+                    if r.get("fh_count")
+                ]
+            )
             if len(vals) < 3:
                 return -0.1, 0.1
             n = len(vals)
@@ -1049,9 +1018,7 @@ class Screener(tk.Frame):
             fh_sell_ratio = float(row.get("fh_sell_ratio") or 0.0)
             rec = (row.get("analyst_rec") or "").lower().replace(" ", "_")
             categ = row.get("categoriaActivo") or ""
-            senal_inst = _senal_inst(
-                row.get("inst_score"), fh_buy_ratio, row.get("fh_count")
-            )
+            senal_inst = _senal_inst(row.get("inst_score"), fh_buy_ratio, row.get("fh_count"))
             _senal = _senal_analyst(rec)
             _n_ana = str(row["analyst_count"]) if row.get("analyst_count") else ""
             senal_ana = f"{_senal:<10}  {_n_ana:>3}" if _senal and _n_ana else _senal
@@ -1060,11 +1027,7 @@ class Screener(tk.Frame):
             modelo = "▲ COMPRAR" if en_buy else ("▼ VENDER" if en_sell else "—")
             ratio = _float_ratio(row)
             float_str = _senal_float(ratio)
-            inst_val = (
-                min(row["inst_ownership_pct"], 1.0)
-                if row.get("inst_ownership_pct")
-                else None
-            )
+            inst_val = min(row["inst_ownership_pct"], 1.0) if row.get("inst_ownership_pct") else None
             inst_pct = f"{inst_val:.1%}" if inst_val else ""
             buy_r_str = f"{fh_buy_ratio:.1%}" if fh_buy_ratio else ""
             sell_r_str = f"{fh_sell_ratio:.1%}" if fh_sell_ratio else ""
@@ -1073,12 +1036,9 @@ class Screener(tk.Frame):
 
             votos = {
                 "Net": voto_net_relativo(fh_buy_ratio, fh_sell_ratio, p33_net, p67_net),
-                "Opt": voto_options(
-                    row.get("fh_call_shares"), row.get("fh_put_shares")
-                ),
+                "Opt": voto_options(row.get("fh_call_shares"), row.get("fh_put_shares")),
                 "Flujo": voto_flujo(
-                    row.get("new_entrants"), row.get("full_exits"),
-                    row.get("fh_count"), p33_flujo, p67_flujo
+                    row.get("new_entrants"), row.get("full_exits"), row.get("fh_count"), p33_flujo, p67_flujo
                 ),
                 "Ana": voto_analistas(rec),
                 "Mod": (1 if en_buy else (-1 if en_sell else 0)),
@@ -1114,7 +1074,11 @@ class Screener(tk.Frame):
             new_ent_str = str(row["new_entrants"]) if row.get("new_entrants") else ""
             full_ex_str = str(row["full_exits"]) if row.get("full_exits") else ""
             _fh_c = row.get("fh_count") or 0
-            _fn = max(-1.0, min(1.0, ((row.get("new_entrants") or 0) - (row.get("full_exits") or 0)) / max(_fh_c, 1))) if _fh_c else None
+            _fn = (
+                max(-1.0, min(1.0, ((row.get("new_entrants") or 0) - (row.get("full_exits") or 0)) / max(_fh_c, 1)))
+                if _fh_c
+                else None
+            )
             flujo_str = f"{_fn:+.2f}" if _fn is not None else ""
             filas.append(
                 {
@@ -1227,12 +1191,8 @@ class Screener(tk.Frame):
 
         n_fixed = len(_FIXED_COLS)
         for f in filas:
-            ct.tree_fixed.insert(
-                "", tk.END, values=f["values"][:n_fixed], tags=(f["tag"],)
-            )
-            ct.tree_scroll.insert(
-                "", tk.END, values=f["values"][n_fixed:], tags=(f["tag"],)
-            )
+            ct.tree_fixed.insert("", tk.END, values=f["values"][:n_fixed], tags=(f["tag"],))
+            ct.tree_scroll.insert("", tk.END, values=f["values"][n_fixed:], tags=(f["tag"],))
 
         def _open_website_consenso(event):
             tree = event.widget
@@ -1305,14 +1265,10 @@ def sync_market(account):
     def _nasdaq_fetch():
         ua = UserAgent()
         headers = {"User-Agent": ua.random, "Accept": "application/json"}
-        base_url = (
-            "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=5000"
-        )
+        base_url = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=5000"
         rows, offset = [], 0
         while True:
-            resp = requests.get(
-                f"{base_url}&offset={offset}", headers=headers, timeout=30
-            )
+            resp = requests.get(f"{base_url}&offset={offset}", headers=headers, timeout=30)
             resp.raise_for_status()
             data = resp.json().get("data", {})
             table = data.get("table") or data
@@ -1452,9 +1408,7 @@ def sync_market(account):
         if "-" in symbol:
             continue
         if symbol not in existing:
-            market.insert(
-                upd=["account", "tipo"], val=[account, "Dividends"], symbol=symbol
-            )
+            market.insert(upd=["account", "tipo"], val=[account, "Dividends"], symbol=symbol)
             existing[symbol] = "N"
             insertados += 1
         elif existing[symbol] in ("I", "S", "X"):
@@ -1650,16 +1604,8 @@ def cleanup_market(account):
                     if fd.get("numberOfAnalystOpinions", {}).get("raw")
                     else None
                 ),
-                (
-                    int(ks["sharesOutstanding"]["raw"])
-                    if ks.get("sharesOutstanding", {}).get("raw")
-                    else None
-                ),
-                (
-                    int(ks["floatShares"]["raw"])
-                    if ks.get("floatShares", {}).get("raw")
-                    else None
-                ),
+                (int(ks["sharesOutstanding"]["raw"]) if ks.get("sharesOutstanding", {}).get("raw") else None),
+                (int(ks["floatShares"]["raw"]) if ks.get("floatShares", {}).get("raw") else None),
             ]
             return campos, valores
         except Exception:
@@ -1712,10 +1658,7 @@ def cleanup_market(account):
                 sym = s.get("symbol", "").strip()
                 if not sym:
                     continue
-                if (
-                    not _safe_float(s.get("regularMarketPrice"))
-                    and existing.get(sym, {}).get("encartera") != "Y"
-                ):
+                if not _safe_float(s.get("regularMarketPrice")) and existing.get(sym, {}).get("encartera") != "Y":
                     not_found.append(sym)
                     continue
                 campos, valores = _map_quote(s)
@@ -1730,9 +1673,7 @@ def cleanup_market(account):
                 if sym not in returned:
                     not_found.append(sym)
         except Exception as e:
-            _logger.warning(
-                f"cleanup_market batch skip ({e}) — no se procesan {len(batch)} símbolos"
-            )
+            _logger.warning(f"cleanup_market batch skip ({e}) — no se procesan {len(batch)} símbolos")
             continue
 
     # ── Phase 2: Eliminar no encontrados — deslistados salen siempre, cartera o no
@@ -1875,22 +1816,16 @@ def audit_portfolio(account):
                 market.mark_booktrading_delisted(sym, account)
                 market.delete(sym, account)
                 delistados += 1
-                _logger.warning(
-                    f"audit_portfolio: delistado {sym} — eliminado market + booktrading marcado"
-                )
+                _logger.warning(f"audit_portfolio: delistado {sym} — eliminado market + booktrading marcado")
 
             elif not precio_yf:
                 sin_precio += 1
                 _logger.warning(f"audit_portfolio: sin precio {sym}  qt={qt}")
 
             elif nombre_yf and nombre_db and nombre_yf[:25] != nombre_db[:25]:
-                market.update(
-                    upd=["shortName"], val=[nombre_yf], symbol=sym, account=account
-                )
+                market.update(upd=["shortName"], val=[nombre_yf], symbol=sym, account=account)
                 nombres_upd += 1
-                _logger.warning(
-                    f"audit_portfolio: nombre actualizado {sym}  '{nombre_db}' → '{nombre_yf}'"
-                )
+                _logger.warning(f"audit_portfolio: nombre actualizado {sym}  '{nombre_db}' → '{nombre_yf}'")
 
             # CUSIP faltante → resolver via EDGAR
             if not row.get("cusip"):

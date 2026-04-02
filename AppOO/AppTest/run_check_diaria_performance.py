@@ -1,5 +1,6 @@
 import sys
 import os
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Modulos_Mysql import BDsystem
@@ -12,14 +13,17 @@ cursor = conn.cursor()
 print("=" * 60)
 print("diaria_performance — últimas fechas por symbol (Stock)")
 print("=" * 60)
-cursor.execute("""
+cursor.execute(
+    """
     SELECT symbol, max(Date) as last_date, count(*) as total
     FROM diaria_performance
     WHERE account = %s
     GROUP BY symbol
     ORDER BY last_date DESC
     LIMIT 20
-""", (account,))
+""",
+    (account,),
+)
 rows = cursor.fetchall()
 if rows:
     for r in rows:
@@ -31,11 +35,14 @@ print()
 print("=" * 60)
 print("diaria_performance — max(Date) global")
 print("=" * 60)
-cursor.execute("""
+cursor.execute(
+    """
     SELECT max(Date) as last_date, min(Date) as first_date, count(*) as total
     FROM diaria_performance
     WHERE account = %s
-""", (account,))
+""",
+    (account,),
+)
 row = cursor.fetchone()
 print(f"  first={row[1]}  last={row[0]}  total={row[2]}")
 
@@ -43,13 +50,16 @@ print()
 print("=" * 60)
 print("performa_inversion — últimas fechas (Stock)")
 print("=" * 60)
-cursor.execute("""
+cursor.execute(
+    """
     SELECT vehiculo, max(fechaclose) as last_date, count(*) as total
     FROM performa_inversion
     WHERE idcuenta = %s
     GROUP BY vehiculo
     ORDER BY last_date DESC
-""", (account,))
+""",
+    (account,),
+)
 rows = cursor.fetchall()
 if rows:
     for r in rows:

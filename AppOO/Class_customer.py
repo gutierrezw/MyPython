@@ -80,6 +80,7 @@ from Class_Analisis import AnalisisFCI, AnalisisCrypto, AnalisisStock
 from AppValuations.rebalance_engine import RebalanceEngine
 from Class_ApiIBrks import IB
 from Class_ApiBinnace import BinanceClient, BinanceStreamClient, BinanceWSApiClient
+from Class_TradingView import abrir_tradingview
 
 
 # class Manager para procesa ordenes remotas
@@ -112,16 +113,12 @@ class OrderManagerSync:
         self.inbox.append((trama, future))
 
         # log de entrada a inbox
-        self.logger.warning(
-            textwrap.dedent(
-                f"""
+        self.logger.warning(textwrap.dedent(f"""
                   =================================
                   class OrderManagerSync._request(): 
                   =================================  
                   inbox.append: {trama}
-                  """
-            )
-        )
+                  """))
         return future.result()  # bloquea hasta que el procesador complete
 
     def get_next_order(self):
@@ -139,16 +136,12 @@ class OrderManagerSync:
         future.set_result(resp)
 
         # log de respuesta al inbox
-        self.logger.warning(
-            textwrap.dedent(
-                f"""
+        self.logger.warning(textwrap.dedent(f"""
                 ===================================
                 OrderManagerSync.request(complete): 
                 ===================================  
                 inbox.append: {resp}
-                """
-            )
-        )
+                """))
 
 
 # clase para contener datos compartidos en la aplicacion
@@ -224,8 +217,8 @@ class DataHub:
     manager_sesion = {}
     manager_GyP = {
         "BotCrypto": {"Value": 0, "Inversion": 0, "dGyP": 0, "Debit": 0, "Margen": 0},
-        "Stock":     {"Debit": 0, "DebitMax": 0, "BetaPortfolio": 1.0},
-        "Crypto":    {"Debit": 0, "DebitMax": 0, "BetaPortfolio": 1.5, "Colateral": 0, "CapitalNeto": 0, "Leverage": 0},
+        "Stock": {"Debit": 0, "DebitMax": 0, "BetaPortfolio": 1.0},
+        "Crypto": {"Debit": 0, "DebitMax": 0, "BetaPortfolio": 1.5, "Colateral": 0, "CapitalNeto": 0, "Leverage": 0},
     }
     manager_positions = {"Stock": [], "Crypto": []}  # posiciones vivas por vehículo para agentes
     rebalanceo = {}
@@ -1195,7 +1188,9 @@ class MyOrders:
                         keys["quantity"] = float(keys["quantity"])
                 orden = {"orders": [keys]}
 
-                self.logger.warning(f"place_OrderStock: origen={origen} | account={account} | symbol={symbol} | order={orden}")
+                self.logger.warning(
+                    f"place_OrderStock: origen={origen} | account={account} | symbol={symbol} | order={orden}"
+                )
 
                 response = self.IClient.place_order(account_id=account, order=orden)
 
@@ -1274,7 +1269,9 @@ class MyOrders:
             try:
                 response, enviada, values = {}, {}, {}
 
-                self.logger.warning(f"place_OrderCrypto: origen={origen} | symbol={symbol} | side={pedido['side']} | qty={pedido['quantity']} | price={pedido['price']}")
+                self.logger.warning(
+                    f"place_OrderCrypto: origen={origen} | symbol={symbol} | side={pedido['side']} | qty={pedido['quantity']} | price={pedido['price']}"
+                )
 
                 response = self.BClient.get_new_order(
                     symbol=pedido["symbol"],
@@ -1305,7 +1302,9 @@ class MyOrders:
                             "hash_id_oportunidad": hash_id_Op,
                         }
                         self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
-                        self.logger.warning(f"place_OrderCrypto: OK | orderId={response['orderId']} | status={response['status']} | symbol={symbol}")
+                        self.logger.warning(
+                            f"place_OrderCrypto: OK | orderId={response['orderId']} | status={response['status']} | symbol={symbol}"
+                        )
                 else:
                     self.logger.error(f"place_OrderCrypto: sin respuesta | symbol={symbol}")
 
@@ -1325,9 +1324,7 @@ class MyOrders:
                 response, enviada, values = {}, {}, {}
 
             # Traza de orden: siempre WARNING — toda orden ejecutada debe quedar en log
-            self.logger.warning(
-                textwrap.dedent(
-                    f"""
+            self.logger.warning(textwrap.dedent(f"""
                         ====================================
                         put_completa_orden({self.vehiculo}):
                         ====================================
@@ -1338,9 +1335,7 @@ class MyOrders:
                         API_response  : {response}
                         API_confirm   : {enviada}
                         Response      : {values}
-                        """
-                )
-            )
+                        """))
 
             # Si es orden BUY exitosa, verifica si es activo nuevo para agregarlo al panel
             if values and values.get("side") == "BUY":
@@ -2143,7 +2138,7 @@ class TickerInfo(MyOrders):
             if result is None:
                 return {}, pd.DataFrame(), False
 
-            (activos, datos) = result
+            activos, datos = result
 
             # Crear clave de cache
             key_cache = (symbol, vehiculo)
@@ -2305,7 +2300,7 @@ class TickerInfo(MyOrders):
             y_datos, value, meses = pd.DataFrame(), "E", []
             if not (symbol is None):
                 if activo is None:
-                    (activo, datos, ind_update) = self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
+                    activo, datos, ind_update = self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
 
                 if isinstance(activo, yf.Ticker):
                     empresa = activo.info["shortName"]
@@ -2947,7 +2942,7 @@ class TickerInfo(MyOrders):
                     self.info[symbol]["asset_type"] = self._get_estrategia_descripcion(position.get("estrategia"))
 
                 # actualiza en diccionario self.info()
-                (d_buy, d_sell) = self.ts_oportunidades_symbol(symbol, datos)
+                d_buy, d_sell = self.ts_oportunidades_symbol(symbol, datos)
         except Exception as e:
             print("[oportunidades_sell()]: {}".format(e))
 
@@ -3018,7 +3013,7 @@ class TickerInfo(MyOrders):
                         self.info[symbol]["asset_type"] = self._get_estrategia_descripcion(position.get("estrategia"))
 
                     # actualiza en diccionario self.info()
-                    (d_buy, d_dividend) = self.ts_oportunidades_symbol(symbol, datos)
+                    d_buy, d_dividend = self.ts_oportunidades_symbol(symbol, datos)
         except Exception as e:
             print("[oportunidades_buy()]: {}".format(e))
 
@@ -3471,54 +3466,30 @@ class WidgetVehiculo(TickerInfo):
         menu.focus_set()
 
     def _abrir_tradingview(self, symbol):
-        """Genera HTML con widget TradingView para el símbolo y lo abre en el browser."""
-        html = f"""<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>{symbol} - TradingView</title>
-  <style>
-    body {{ margin: 0; padding: 0; background: #131722; }}
-    #tv_chart {{ width: 100vw; height: 100vh; }}
-  </style>
-</head>
-<body>
-  <div class="tradingview-widget-container" style="height:100vh; width:100vw;">
-    <div id="tradingview_full" style="height:100%; width:100%;"></div>
-    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script type="text/javascript">
-    new TradingView.widget({{
-      "autosize": true,
-      "symbol": "{symbol}",
-      "interval": "D",
-      "timezone": "Etc/UTC",
-      "theme": "dark",
-      "style": "1",
-      "locale": "es",
-      "toolbar_bg": "#131722",
-      "enable_publishing": false,
-      "hide_side_toolbar": false,
-      "allow_symbol_change": true,
-      "withdateranges": true,
-      "save_image": true,
-      "details": true,
-      "studies": [
-        "PUB;kPuoGBGx",
-        "PUB;1aKxXAmg",
-        "PUB;rMj56XfN"
-      ],
-      "container_id": "tradingview_full"
-    }});
-    </script>
-  </div>
-</body>
-</html>"""
-        tmp_dir = os.path.join(os.path.dirname(__file__), "tmp")
-        os.makedirs(tmp_dir, exist_ok=True)
-        html_path = os.path.join(tmp_dir, f"tv_{symbol}.html")
-        with open(html_path, "w", encoding="utf-8") as f:
-            f.write(html)
-        webbrowser.open(f"file:///{html_path.replace(os.sep, '/')}")
+        """Abre TradingView con panel de lotes y estrategia para el símbolo."""
+        found, position = buscar_ticker(self.positions, symbol)
+        posicion = {}
+        lotes = []
+        if found and position:
+            last = position.get("mrkprice") or position.get("last") or 0
+            posicion = {
+                "avgcost": position.get("avgcost") or position.get("avgCost") or 0,
+                "costo_base": position.get("costobase") or position.get("costo_base") or 0,
+                "position": position.get("position") or 0,
+                "last": last,
+                "objetivo": position.get("objetivo") or 0,
+                "stop_loss": position.get("stop_loss") or position.get("sl") or 0,
+            }
+            lotes = (
+                DataHub.get_lotesGainLost(
+                    opcion="gain",
+                    account=self.account,
+                    symbol=symbol,
+                    last=last,
+                )
+                or []
+            )
+        abrir_tradingview(symbol=symbol, vehiculo=self.vehiculo, posicion=posicion, lotes=lotes)
 
     def _abrir_grafico_estrategia(self, symbol, Xposition=None):
         """Abre el gráfico de estrategia compartido para el símbolo seleccionado."""
@@ -3688,21 +3659,21 @@ class WidgetVehiculo(TickerInfo):
 
             # rescribe valores de oportunidades sell
             message = []
-            (total, cantidad) = self.total_gain("sell")
+            total, cantidad = self.total_gain("sell")
             message.append(self.texto[0].format(total, cantidad).strip())
 
             estado: str = "normal" if cantidad > 0 else "disabled"
             self.op1.config(text=message[0].replace("_", " "), state=estado)
 
             # rescribe valores de oportunidades buy/dividends
-            (total, cantidad) = self.total_gain("buy/dividends")
+            total, cantidad = self.total_gain("buy/dividends")
             message.append(self.texto[1].format(cantidad, self.invertir).strip())
 
             estado = "normal" if cantidad > 0 else "disabled"
             self.op2.config(text=message[1].replace("_", " "), state=estado)
 
             # rescribe valores de oportunidades buy
-            (total, cantidad) = self.total_gain("buy")
+            total, cantidad = self.total_gain("buy")
             message.append(self.texto[2].format(cantidad, self.invertir).strip())
 
             estado = "normal" if cantidad > 0 else "disabled"
@@ -3716,7 +3687,15 @@ class WidgetVehiculo(TickerInfo):
         try:
             # totaliza sobre positions y deja en datos
             dgyp, costobase, mktvalue, gyp, debit, dividendos, roi, unprofit, colateral_value = (
-                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
             )
             if positions:
                 for position in positions:
@@ -3755,10 +3734,10 @@ class WidgetVehiculo(TickerInfo):
                 # comparte totalización de gyp diarias
                 per = costobase / unprofit if unprofit > 0 else 0
                 debit_max_crypto = colateral_value * 0.65
-                DataHub.manager_GyP["Crypto"]["Debit"]    = debit
+                DataHub.manager_GyP["Crypto"]["Debit"] = debit
                 DataHub.manager_GyP["Crypto"]["DebitMax"] = debit_max_crypto
-                beta_crypto  = DataHub.manager_GyP["Crypto"].get("BetaPortfolio", 1.5)
-                neto_api     = DataHub.manager_GyP["Crypto"].get("CapitalNeto", 0)
+                beta_crypto = DataHub.manager_GyP["Crypto"].get("BetaPortfolio", 1.5)
+                neto_api = DataHub.manager_GyP["Crypto"].get("CapitalNeto", 0)
                 equity_crypto = max(neto_api if neto_api > 0 else colateral_value - debit, 1.0)
                 margen = debit / equity_crypto * beta_crypto
                 cash = float(self.resumen.get(" Cash       :", 0))
@@ -3780,23 +3759,23 @@ class WidgetVehiculo(TickerInfo):
                 if self.summary:
                     base = "BASE"
                     # comparte totalización de gyp diarias
-                    dividendos   = self.summary[base]["dividends"]
-                    mktvalue     = float(self.summary[base]["netliquidationvalue"] or 0)
-                    gross_pos    = float(self.summary[base].get("stockmarketvalue") or 0) or mktvalue
+                    dividendos = self.summary[base]["dividends"]
+                    mktvalue = float(self.summary[base]["netliquidationvalue"] or 0)
+                    gross_pos = float(self.summary[base].get("stockmarketvalue") or 0) or mktvalue
                     cash_balance = float(self.summary[base]["cashbalance"] or 0)
-                    cash         = cash_balance
-                    gyp          = self.summary[base]["unrealizedpnl"]
+                    cash = cash_balance
+                    gyp = self.summary[base]["unrealizedpnl"]
 
                     per = costobase / unprofit if unprofit > 0 else 0
                     # cashbalance < 0 → deuda directa de cash (fuente IB, coincide con portal web)
                     # cashbalance ≥ 0 → puede haber deuda de margen sobre posiciones
                     deuda_actual = abs(cash_balance) if cash_balance < 0 else max(0.0, gross_pos - mktvalue)
                     debit_max_stock = mktvalue * 0.8
-                    DataHub.manager_GyP["Stock"]["Debit"]    = deuda_actual
+                    DataHub.manager_GyP["Stock"]["Debit"] = deuda_actual
                     DataHub.manager_GyP["Stock"]["DebitMax"] = debit_max_stock
-                    beta_stock   = DataHub.manager_GyP["Stock"].get("BetaPortfolio", 1.0)
+                    beta_stock = DataHub.manager_GyP["Stock"].get("BetaPortfolio", 1.0)
                     equity_stock = max(mktvalue, 1.0)
-                    margen       = (deuda_actual / equity_stock) * beta_stock
+                    margen = (deuda_actual / equity_stock) * beta_stock
 
                     # escribir en resumen para impactar los graficos vehículo
                     self.set_header_panel(
@@ -4105,7 +4084,7 @@ class WidgetVehiculo(TickerInfo):
             ResumLotes, a_gain, a_lost = DataHub.get_lotesGainLost(
                 opcion="ambos", account=account, symbol=symbol, divisa=divisa, last=last
             )
-            (book, ix) = ResumLotes["book"]
+            book, ix = ResumLotes["book"]
 
             if book:
                 # revisar que hago con el frame
@@ -4181,11 +4160,11 @@ class WidgetVehiculo(TickerInfo):
                 cv3.get_tk_widget().pack()
 
                 # Gráfica performance de dividendo
-                (market, iy) = self.Market.select(account=self.account, symbol=self.symbol)
+                market, iy = self.Market.select(account=self.account, symbol=self.symbol)
                 if market:
                     if market[0][iy.index("categoriaActivo")] in ("I", "N", "S", "X"):
                         # ubica información de yfinance.Ticker, para mostrar gráfico de dividends
-                        (activo, datos, update) = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=self.vehiculo)
+                        activo, datos, update = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=self.vehiculo)
                         self.rendimiento_dividends(
                             fg=fg2,
                             activo=activo,
@@ -4203,7 +4182,7 @@ class WidgetVehiculo(TickerInfo):
                     asset=self.symbol,
                 )
 
-                (ticket, rtn_index, cum_index, index_ref) = vehiculo_parm(vehiculo=self.vehiculo)
+                ticket, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=self.vehiculo)
                 parm = {
                     "BTC": index_ref,
                     "++ index": "++ " + self.symbol,
@@ -4233,7 +4212,7 @@ class WidgetVehiculo(TickerInfo):
                 else:
                     vehiculo = self.vehiculo
 
-                (activo, pdatos, update) = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=vehiculo)
+                activo, pdatos, update = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=vehiculo)
                 self.gchar["periodo"] = periodo if accion == "p" else self.gchar["periodo"]
                 self.gchar["tipo"] = tipo if accion == "t" else self.gchar["tipo"]
 
@@ -4559,7 +4538,7 @@ class WidgetVehiculo(TickerInfo):
                     self.gchar["name"] = position["empresa"]
 
                     # recupera información de lotes fiscales
-                    (ResumLotes, AGain, ALost) = self.get_lotes_fiscales(
+                    ResumLotes, AGain, ALost = self.get_lotes_fiscales(
                         account=self.gchar["account"],
                         symbol=self.gchar["ticket"],
                         divisa=self.gchar["divisa"],
@@ -5613,7 +5592,7 @@ class WidgetVehiculo(TickerInfo):
             return pdatos, ddatos, GainLoss
 
         try:
-            (Pdatos, self.Ddatos, GainLoss) = datos_grafico()
+            Pdatos, self.Ddatos, GainLoss = datos_grafico()
 
             parm = {"titulo": "ROI " + self.vehiculo, "aspect": 0.80}
             self.graph_ROI_vehiculo(Pdatos, parm)
