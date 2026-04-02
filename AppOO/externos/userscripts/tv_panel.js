@@ -11,10 +11,10 @@
     "use strict";
 
     const PORT = 5050;
-    let panelEl = null, bodyEl = null;
+    let panelEl = null, bodyEl = null, titleEl = null;
     let minimized = false;
     let isDragging = false, startX = 0, startY = 0, origLeft = 0, origTop = 0;
-    let lastPosicion = null, lastLotes = null;
+    let lastPosicion = null;
 
     // ── TV native drawings ─────────────────────────────────────────────────
     let _tvShapes = { zona: null, avgline: null };
@@ -234,26 +234,20 @@
         </table>
 
         <div style="font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:1px;
-                    border-bottom:1px solid #2a2e39;padding-bottom:4px;margin-bottom:6px">Consenso ${pos.consenso_suma ? `<span style="float:right;color:#d1d4dc">${pos.consenso_suma}</span>` : ""}</div>
-        <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:6px">
+                    border-bottom:1px solid #2a2e39;padding-bottom:4px;margin-bottom:6px">Consenso</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
           <tr><td style="color:#787b86;padding:2px 0">Rotación</td><td style="text-align:right">${pos.rotacion || "—"}</td></tr>
           <tr><td style="color:#787b86;padding:2px 0">Inst Señal</td><td style="text-align:right">${pos.senal_inst || "—"}</td></tr>
           <tr><td style="color:#787b86;padding:2px 0">Analistas</td><td style="text-align:right">${pos.senal_ana || "—"}</td></tr>
           <tr><td style="color:#787b86;padding:2px 0">IA Signal</td><td style="text-align:right">${pos.ia_signal || "—"}</td></tr>
+          ${pos.consenso_label ? `<tr style="border-top:1px solid #2a2e39">
+            <td style="color:#787b86;padding:4px 0 2px">Consenso</td>
+            <td style="text-align:right;padding:4px 0 2px;font-weight:bold">
+              ${pos.consenso_label}
+              ${pos.consenso_suma ? `<span style="color:#787b86;font-size:11px;margin-left:6px">${pos.consenso_suma}</span>` : ""}
+            </td>
+          </tr>` : ""}
         </table>
-        ${pos.votos && Object.keys(pos.votos).length ? `
-        <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:10px">
-          <thead><tr style="color:#787b86;border-bottom:1px solid #2a2e39">
-            ${Object.keys(pos.votos).map(k => `<th style="text-align:center;padding:2px 4px;font-weight:normal">${k}</th>`).join("")}
-          </tr></thead>
-          <tbody><tr>
-            ${Object.values(pos.votos).map(v => {
-                const c = v > 0 ? "#00FF88" : v < 0 ? "#FF6060" : "#787b86";
-                const t = v > 0 ? "▲" : v < 0 ? "▼" : "→";
-                return `<td style="text-align:center;padding:2px 4px;color:${c}">${t}</td>`;
-            }).join("")}
-          </tr></tbody>
-        </table>` : ""}
 
         <div style="font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:1px;
                     border-bottom:1px solid #2a2e39;padding-bottom:4px;margin-bottom:6px">Estrategia</div>
@@ -313,9 +307,9 @@
             borderRadius: "6px 6px 0 0",
         });
 
-        const title = document.createElement("span");
-        title.textContent = "App Panel";
-        title.style.cssText = "color:#787b86;font-size:11px;text-transform:uppercase;letter-spacing:1px";
+        titleEl = document.createElement("span");
+        titleEl.textContent = "Análisis";
+        titleEl.style.cssText = "color:#787b86;font-size:11px;text-transform:uppercase;letter-spacing:1px";
 
         const btnBar = document.createElement("div");
         btnBar.style.cssText = "display:flex;gap:8px;align-items:center";
@@ -342,7 +336,7 @@
 
         btnBar.appendChild(btnMin);
         btnBar.appendChild(btnClose);
-        header.appendChild(title);
+        header.appendChild(titleEl);
         header.appendChild(btnBar);
 
         bodyEl = document.createElement("div");
@@ -375,12 +369,12 @@
     }
 
     // ── Actualizar contenido ───────────────────────────────────────────────
-    function upsertPanel(html, posicion, lotes) {
+    function upsertPanel(html, posicion, lotes, symbol) {
         if (!panelEl) crearPanel();
         bodyEl.innerHTML = html;
         panelEl.style.display = "block";
+        if (titleEl && symbol) titleEl.textContent = `${symbol} — Análisis`;
         lastPosicion = posicion;
-        lastLotes = lotes;
         setTimeout(() => drawTvShapes(posicion, lotes), 800);
     }
 
@@ -406,11 +400,11 @@
                             try {
                                 const data = JSON.parse(r2.responseText);
                                 if (data && data.posicion && Object.keys(data.posicion).length) {
-                                    upsertPanel(buildPanel(data), data.posicion, data.lotes || []);
+                                    upsertPanel(buildPanel(data), data.posicion, data.lotes || [], sym);
                                 } else {
                                     if (panelEl) panelEl.style.display = "none";
                                     clearTvShapes();
-                                    lastPosicion = null; lastLotes = null;
+                                    lastPosicion = null;
                                 }
                             } catch (_) { }
                         },
