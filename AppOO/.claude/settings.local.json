@@ -5,5 +5,19 @@
       "Bash(find C:UsersInversionesWildagaDocumentsMyPythonEDGAR13F -name *.xml -path *0000102909*)",
       "Bash(python Ajuste_lote_sell.py)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import sys,json,subprocess,os; d=json.load(sys.stdin); f=d.get('tool_input',{}).get('file_path',''); f.endswith('.py') and os.path.exists(f) and subprocess.run(['C:/Users/InversionesWildaga/Documents/MyPython/.venv/Scripts/black.exe','--line-length','120',f])\" 2>/dev/null || true",
+            "statusMessage": "Black formatting..."
+          }
+        ]
+      }
+    ]
   }
 }
