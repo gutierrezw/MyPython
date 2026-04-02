@@ -4,6 +4,7 @@ Pobla floatShares y sharesOutstanding para todos los símbolos sin ellos.
 Usa yfinance directamente (maneja auth propia, no depende de crumb Yahoo).
 Solo actualiza si el campo está vacío o NULL.
 """
+
 import sys
 import os
 
@@ -64,8 +65,7 @@ def main():
             conn2 = mkt._conectar(tabla="update.market")
             c2 = conn2.cursor()
             c2.execute(
-                "UPDATE market SET floatShares=%s, sharesOutstanding=%s "
-                "WHERE symbol=%s AND account=%s",
+                "UPDATE market SET floatShares=%s, sharesOutstanding=%s " "WHERE symbol=%s AND account=%s",
                 (fs, so, sym_r, ACCOUNT),
             )
             conn2.commit()

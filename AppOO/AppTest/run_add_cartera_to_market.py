@@ -38,9 +38,15 @@ print(f"Paso 2 — sync_institutional solo para símbolos insertados")
 print("=" * 70)
 
 campos = [
-    "inst_ownership_pct", "insider_ownership_pct", "inst_top_holder",
-    "inst_top_holder_shares", "inst_score", "inst_funds",
-    "analyst_rec", "analyst_mean", "analyst_count",
+    "inst_ownership_pct",
+    "insider_ownership_pct",
+    "inst_top_holder",
+    "inst_top_holder_shares",
+    "inst_score",
+    "inst_funds",
+    "analyst_rec",
+    "analyst_mean",
+    "analyst_count",
 ]
 
 for sym in inserted:
@@ -52,10 +58,15 @@ for sym in inserted:
     inst_pct = raw.get("inst_ownership_pct")
     score = round(inst_pct, 4) if inst_pct is not None else None
     valores = [
-        inst_pct, raw.get("insider_ownership_pct"),
-        raw.get("inst_top_holder"), raw.get("inst_top_holder_shares"),
-        score, raw.get("inst_funds"),
-        raw.get("analyst_rec"), raw.get("analyst_mean"), raw.get("analyst_count"),
+        inst_pct,
+        raw.get("insider_ownership_pct"),
+        raw.get("inst_top_holder"),
+        raw.get("inst_top_holder_shares"),
+        score,
+        raw.get("inst_funds"),
+        raw.get("analyst_rec"),
+        raw.get("analyst_mean"),
+        raw.get("analyst_count"),
     ]
     ok = market.update(upd=campos, val=valores, symbol=sym, account=ACCOUNT)
     rec = raw.get("analyst_rec") or "—"

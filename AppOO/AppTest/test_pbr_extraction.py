@@ -2,6 +2,7 @@
 """
 Test de extracción específica de dividendos para PBR
 """
+
 import sys
 from pathlib import Path
 
@@ -9,9 +10,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from valuation_xbrl_api import load_filing, build_ttm
 
-print("="*80)
+print("=" * 80)
 print("🧪 TEST DE EXTRACCIÓN DE DIVIDENDOS - PBR")
-print("="*80)
+print("=" * 80)
 
 # Cargar el filing de PBR
 pbr_file = "EDGAR/PBR_EDGAR_Files/20F_Filings/pbrform20f_2024.htm"
@@ -23,14 +24,14 @@ print(f"   Total de facts: {len(filing.facts)}")
 print(f"   Total de contexts: {len(filing.contexts)}")
 
 # Construir TTM
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("📊 CONSTRUYENDO TTM (Trailing Twelve Months)")
-print("="*80)
+print("=" * 80)
 
 ttm = build_ttm([filing])
 
 print("\n✅ TTM construido. Resultados:")
-print("-"*80)
+print("-" * 80)
 
 # Mostrar todos los valores extraídos
 for key, value in ttm.items():
@@ -43,9 +44,9 @@ for key, value in ttm.items():
         print(f"  {key:30s}: ❌ None")
 
 # Análisis específico de dividendos
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🔍 ANÁLISIS DETALLADO DE DIVIDENDOS")
-print("="*80)
+print("=" * 80)
 
 dividends_paid = ttm.get("DividendsPaid")
 
@@ -74,12 +75,14 @@ if dividends_paid is None:
 
             # Mostrar primeros 3 facts
             for i, fact in enumerate(facts[:3]):
-                ctx_id = getattr(fact, 'contextID', 'N/A')
-                value = getattr(fact, 'value', 'N/A')
+                ctx_id = getattr(fact, "contextID", "N/A")
+                value = getattr(fact, "value", "N/A")
 
                 # Obtener info del contexto
                 ctx = filing.contexts.get(ctx_id, {})
-                ctx_type = "DURATION" if "start" in ctx and "end" in ctx else "INSTANT" if "instant" in ctx else "UNKNOWN"
+                ctx_type = (
+                    "DURATION" if "start" in ctx and "end" in ctx else "INSTANT" if "instant" in ctx else "UNKNOWN"
+                )
 
                 if "start" in ctx and "end" in ctx:
                     period = f"{ctx['start']} to {ctx['end']}"
@@ -105,9 +108,9 @@ else:
         print(f"   ⚠️ Valor es positivo (inusual, debería ser negativo)")
 
 # Comparación con el valor esperado del diagnóstico
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("📋 COMPARACIÓN CON DIAGNÓSTICO")
-print("="*80)
+print("=" * 80)
 
 expected_value = -18327000000  # Del diagnóstico anterior
 extracted_value = ttm.get("DividendsPaid")
@@ -124,6 +127,6 @@ if extracted_value:
 else:
     print("\n❌ FALLO: No se pudo extraer el valor")
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("✅ Test completado")
-print("="*80)
+print("=" * 80)

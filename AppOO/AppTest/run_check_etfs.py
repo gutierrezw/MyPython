@@ -1,4 +1,5 @@
 import sys, os
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from Modulos_Mysql import MarketScreen
 
@@ -9,12 +10,15 @@ conn = mkt._conectar(tabla="select.market")
 c = conn.cursor()
 
 print("=== Símbolos EN CARTERA — categoriaActivo actual ===")
-c.execute("""
+c.execute(
+    """
     SELECT symbol, shortName, categoriaActivo, sector, industry
     FROM market
     WHERE account=%s AND encartera='Y'
     ORDER BY categoriaActivo, symbol
-""", (ACCOUNT,))
+""",
+    (ACCOUNT,),
+)
 rows = c.fetchall()
 
 print(f"{'Symbol':<10} {'Cat':>4}  {'Nombre':<35} {'Sector':<25} {'Industry'}")

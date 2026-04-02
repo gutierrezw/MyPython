@@ -13,9 +13,7 @@ def download_folder() -> Path:
     Returns:
     str: The path to the folder.
     """
-    xdownload_folder: Path = Path(__file__).parent.joinpath(
-        'resources/clientportal.gw'
-    ).resolve()
+    xdownload_folder: Path = Path(__file__).parent.joinpath("resources/clientportal.gw").resolve()
 
     return xdownload_folder
 
@@ -28,9 +26,7 @@ def download_client_portal() -> requests.Response:
     """
 
     # Request the Client Portal
-    response = requests.get(
-        url='https://download2.interactivebrokers.com/portal/clientportal.gw.zip'
-    )
+    response = requests.get(url="https://download2.interactivebrokers.com/portal/clientportal.gw.zip")
 
     return response
 
@@ -47,9 +43,7 @@ def create_zip_file(response_content: requests.Response) -> zipfile.ZipFile:
     """
 
     # Download the Zip File.
-    zip_file_content = zipfile.ZipFile(
-        io.BytesIO(response_content.content)
-    )
+    zip_file_content = zipfile.ZipFile(io.BytesIO(response_content.content))
 
     return zip_file_content
 
@@ -64,9 +58,7 @@ class ClientPortal:
         bool: `True` if it exists, `False` otherwise.
         """
 
-        resoruces_folder: pathlib.Path = pathlib.Path(__file__).parent.joinpath(
-            'resources'
-        ).resolve()
+        resoruces_folder: pathlib.Path = pathlib.Path(__file__).parent.joinpath("resources").resolve()
 
         return resoruces_folder.exists()
 
@@ -74,9 +66,7 @@ class ClientPortal:
         """Makes the resource folder if it doesn't exist."""
 
         if not self.does_resources_directory_exist:
-            resoruces_folder: pathlib.Path = pathlib.Path(__file__).parent.joinpath(
-                'resources'
-            ).resolve()
+            resoruces_folder: pathlib.Path = pathlib.Path(__file__).parent.joinpath("resources").resolve()
             resoruces_folder.mkdir(parents=True)
 
     def download_and_extract(self) -> None:
@@ -91,9 +81,7 @@ class ClientPortal:
         client_portal_response = download_client_portal()
 
         # Create a zip file.
-        client_portal_zip: ZipFile = create_zip_file(
-            response_content=client_portal_response
-        )
+        client_portal_zip: ZipFile = create_zip_file(response_content=client_portal_response)
 
         # Extract it.
         extract_zip_file(zip_file=client_portal_zip)

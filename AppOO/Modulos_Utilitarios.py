@@ -336,12 +336,12 @@ def margin_risk_status(margen):
     80%+        🔴 Peligro  Riesgo real
     """
     if margen < 0.20:
-        return {"emoji": "🟢", "estado": "Seguro",   "accion": "OK",          "color": "#2ecc71"}
+        return {"emoji": "🟢", "estado": "Seguro", "accion": "OK", "color": "#2ecc71"}
     if margen < 0.50:
-        return {"emoji": "🟡", "estado": "Moderado", "accion": "Cuidado",     "color": "#B8860B"}
+        return {"emoji": "🟡", "estado": "Moderado", "accion": "Cuidado", "color": "#B8860B"}
     if margen < 0.80:
-        return {"emoji": "🟠", "estado": "Alto",     "accion": "Reducir",     "color": "orange"}
-    return     {"emoji": "🔴", "estado": "Peligro",  "accion": "Riesgo real", "color": "red"}
+        return {"emoji": "🟠", "estado": "Alto", "accion": "Reducir", "color": "orange"}
+    return {"emoji": "🔴", "estado": "Peligro", "accion": "Riesgo real", "color": "red"}
 
 
 def vehiculo_parm(vehiculo=None):
@@ -829,7 +829,14 @@ def style_app(main=None) -> object:
     style.configure("G.Heading", font=("Arial", 10, "bold"), background="green", foreground="white")
 
     # TCombobox
-    style.configure("TCombobox", fieldbackground="black", background="DarkCyan", foreground="white", selectbackground="DarkCyan", selectforeground="black")
+    style.configure(
+        "TCombobox",
+        fieldbackground="black",
+        background="DarkCyan",
+        foreground="white",
+        selectbackground="DarkCyan",
+        selectforeground="black",
+    )
     style.map(
         "TCombobox",
         fieldbackground=[("readonly", "black")],
@@ -963,7 +970,7 @@ def write_json_tmp(name: str, data: dict) -> None:
         pass
 
 
-_doc_windows: dict = {}   # singleton: evita abrir la misma ventana dos veces
+_doc_windows: dict = {}  # singleton: evita abrir la misma ventana dos veces
 
 
 def documentar_estructura(nombre_estructura: str, parent, colors: dict) -> None:
@@ -978,7 +985,9 @@ def documentar_estructura(nombre_estructura: str, parent, colors: dict) -> None:
         parent           : widget tk padre del Toplevel.
         colors           : dict con clave "bgcolor" para los colores de la ventana.
     """
-    from Modulos_Mysql import BDsystem  # import diferido — evita ciclo: Modulos_Utilitarios→Modulos_Mysql→Modulos_Utilitarios
+    from Modulos_Mysql import (
+        BDsystem,
+    )  # import diferido — evita ciclo: Modulos_Utilitarios→Modulos_Mysql→Modulos_Utilitarios
 
     bgcolor = colors.get("bgcolor", "black") if colors else "black"
     fgcolor = "#cccccc"
@@ -1048,8 +1057,12 @@ def documentar_estructura(nombre_estructura: str, parent, colors: dict) -> None:
         sb = tk.Scrollbar(view_frame)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         doc_text = tk.Text(
-            view_frame, wrap=tk.WORD, bg="#1e1e1e", fg=fgcolor,
-            font=("Consolas", 10), yscrollcommand=sb.set,
+            view_frame,
+            wrap=tk.WORD,
+            bg="#1e1e1e",
+            fg=fgcolor,
+            font=("Consolas", 10),
+            yscrollcommand=sb.set,
         )
         doc_text.pack(fill=tk.BOTH, expand=True)
         sb.config(command=doc_text.yview)
@@ -1080,8 +1093,11 @@ def documentar_estructura(nombre_estructura: str, parent, colors: dict) -> None:
     main_frame.pack(fill=tk.BOTH, expand=True)
 
     tk.Label(
-        main_frame, text=f"Documentación: {nombre_estructura}",
-        font=("TkDefaultFont", 12, "bold"), bg=bgcolor, fg=fgcolor,
+        main_frame,
+        text=f"Documentación: {nombre_estructura}",
+        font=("TkDefaultFont", 12, "bold"),
+        bg=bgcolor,
+        fg=fgcolor,
     ).pack(anchor=tk.W, pady=(0, 10))
 
     desc_frame = tk.Frame(main_frame, bg=bgcolor)
@@ -1091,10 +1107,10 @@ def documentar_estructura(nombre_estructura: str, parent, colors: dict) -> None:
     entry_descripcion.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
     _default_desc = {
-        "DataHub"  : "Hub central de datos en tiempo real para activos financieros",
-        "BuySell"  : "Gestor de señales de compra/venta y dividendos",
+        "DataHub": "Hub central de datos en tiempo real para activos financieros",
+        "BuySell": "Gestor de señales de compra/venta y dividendos",
         "Rebalanceo": "Motor de rebalanceo y optimización de cartera",
-        "Screener" : "Modelo de señales de consenso — cartera de dividendos",
+        "Screener": "Modelo de señales de consenso — cartera de dividendos",
     }
     if modelo_data and modelo_data.get("define_modelo"):
         entry_descripcion.insert(0, modelo_data["define_modelo"])
@@ -1115,9 +1131,14 @@ def documentar_estructura(nombre_estructura: str, parent, colors: dict) -> None:
     scrollbar = tk.Scrollbar(text_frame)
     scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
     text_docs = tk.Text(
-        text_frame, height=18, bg=entry_bg, fg=fgcolor,
-        insertbackground=fgcolor, font=("Consolas", 9),
-        wrap=tk.WORD, yscrollcommand=scrollbar.set,
+        text_frame,
+        height=18,
+        bg=entry_bg,
+        fg=fgcolor,
+        insertbackground=fgcolor,
+        font=("Consolas", 9),
+        wrap=tk.WORD,
+        yscrollcommand=scrollbar.set,
     )
     text_docs.pack(fill=tk.BOTH, expand=True)
     scrollbar.config(command=text_docs.yview)

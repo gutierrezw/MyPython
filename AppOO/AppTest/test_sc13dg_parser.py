@@ -3,6 +3,7 @@ test_sc13dg_parser.py
 Analiza TODOS los SC 13D/G de SEC EDGAR donde CCI es el sujeto.
 Muestra: filers únicos, distribución 13D/G, pct declarado, solapamiento con 13F.
 """
+
 import sys
 import os
 import re
@@ -11,12 +12,13 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-HEADERS      = {"User-Agent": "InversionesWildaga Research (research@test.com)"}
+HEADERS = {"User-Agent": "InversionesWildaga Research (research@test.com)"}
 SUBJECT_NAME = "Crown Castle"
-MAX_FILINGS  = 50   # tope para no saturar EDGAR
+MAX_FILINGS = 50  # tope para no saturar EDGAR
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
+
 
 def _get(url, **kw):
     """GET con rate-limit 0.5 s."""
@@ -49,17 +51,19 @@ def buscar_filings_efts(nombre: str, desde: str = "2020-01-01") -> list[dict]:
 
     filings = []
     for h in hits[:MAX_FILINGS]:
-        src   = h.get("_source", {})
+        src = h.get("_source", {})
         raw_id = h.get("_id", "")
         # _id puede ser "0001086364-24-008417:filename.txt" o solo accession
         accession = raw_id.split(":")[0] if ":" in raw_id else raw_id
         ciks = src.get("ciks", [])
-        filings.append({
-            "accession" : accession,
-            "form"      : src.get("form_type", ""),
-            "date"      : src.get("file_date", ""),
-            "cik_filer" : ciks[0] if ciks else None,
-        })
+        filings.append(
+            {
+                "accession": accession,
+                "form": src.get("form_type", ""),
+                "date": src.get("file_date", ""),
+                "cik_filer": ciks[0] if ciks else None,
+            }
+        )
 
     print(f"  Filings parseados: {len(filings)}")
     return filings
@@ -70,8 +74,8 @@ def obtener_sgml_header(accession: str, cik_filer: str) -> str:
     if not cik_filer:
         return ""
     acc_clean = accession.replace("-", "")
-    cik_int   = int(cik_filer.lstrip("0") or "0")
-    txt_url   = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc_clean}/{accession}.txt"
+    cik_int = int(cik_filer.lstrip("0") or "0")
+    txt_url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc_clean}/{accession}.txt"
     try:
         r = _get(txt_url, stream=True)
         content = b""
@@ -136,13 +140,11 @@ def obtener_doc_completo(accession: str, cik_filer: str, primary_doc: str = None
     if not cik_filer:
         return ""
     acc_clean = accession.replace("-", "")
-    cik_int   = int(cik_filer.lstrip("0") or "0")
+    cik_int = int(cik_filer.lstrip("0") or "0")
 
     # Intentar index JSON para hallar primary doc
     if not primary_doc:
-        idx_url = (
-            f"https://data.sec.gov/Archives/edgar/data/{cik_int}/{acc_clean}/{accession}-index.json"
-        )
+        idx_url = f"https://data.sec.gov/Archives/edgar/data/{cik_int}/{acc_clean}/{accession}-index.json"
         try:
             r = _get(idx_url)
             if r.status_code == 200:
@@ -184,6 +186,7 @@ def obtener_doc_completo(accession: str, cik_filer: str, primary_doc: str = None
 
 # ── main ────────────────────────────────────────────────────────────────────
 
+
 def main():
     filings = buscar_filings_efts(SUBJECT_NAME, desde="2020-01-01")
 
@@ -198,19 +201,19 @@ def main():
 
     registros = []
     for i, f in enumerate(filings):
-        acc    = f["accession"]
-        cik_f  = f["cik_filer"]
-        sgml   = obtener_sgml_header(acc, cik_f)
+        acc = f["accession"]
+        cik_f = f["cik_filer"]
+        sgml = obtener_sgml_header(acc, cik_f)
         header = parsear_sgml_header(sgml) if sgml else {}
 
         rec = {
-            "accession"      : acc,
-            "form"           : header.get("form_type") or f["form"],
-            "date"           : header.get("filed_date") or f["date"],
-            "filer_name"     : header.get("filer_name", "(sin nombre)"),
-            "filer_cik"      : header.get("filer_cik") or cik_f,
+            "accession": acc,
+            "form": header.get("form_type") or f["form"],
+            "date": header.get("filed_date") or f["date"],
+            "filer_name": header.get("filer_name", "(sin nombre)"),
+            "filer_cik": header.get("filer_cik") or cik_f,
             "subject_company": header.get("subject_company", ""),
-            "pct_class"      : None,
+            "pct_class": None,
         }
         print(f"  [{i+1:02d}] {rec['date']} | {rec['form']:<10} | {rec['filer_name'][:40]}")
         registros.append(rec)
@@ -231,7 +234,7 @@ def main():
 
     for rec in filers_activos:
         texto = obtener_doc_completo(rec["accession"], rec["filer_cik"])
-        pct   = parsear_pct(texto) if texto else None
+        pct = parsear_pct(texto) if texto else None
         rec["pct_class"] = pct
         pct_str = f"{pct:.2f}%" if pct else "N/A"
         print(f"  {rec['filer_name'][:40]:<40} {pct_str}")
@@ -243,6 +246,7 @@ def main():
 
     # Distribución de form types
     from collections import Counter
+
     form_dist = Counter(r["form"] for r in registros)
     print("\n  Distribución de form types:")
     for ftype, cnt in sorted(form_dist.items()):
@@ -252,18 +256,14 @@ def main():
     print(f"\n  Filers únicos (posición más reciente):")
     print(f"  {'Filer':<45} {'Form':<10} {'Fecha':<12} {'Pct':>7}")
     print(f"  {'-'*45} {'-'*10} {'-'*12} {'-'*7}")
-    filers_con_pct = sorted(
-        filers_activos,
-        key=lambda x: (x["pct_class"] or 0),
-        reverse=True
-    )
+    filers_con_pct = sorted(filers_activos, key=lambda x: (x["pct_class"] or 0), reverse=True)
     for rec in filers_con_pct:
         pct_str = f"{rec['pct_class']:.2f}%" if rec["pct_class"] else "N/A"
         print(f"  {rec['filer_name'][:45]:<45} {rec['form']:<10} {rec['date']:<12} {pct_str:>7}")
 
     # Totales
     total_pct = sum(r["pct_class"] for r in filers_activos if r["pct_class"])
-    con_pct   = sum(1 for r in filers_activos if r["pct_class"])
+    con_pct = sum(1 for r in filers_activos if r["pct_class"])
     print(f"\n  Total filers únicos     : {len(filers_activos)}")
     print(f"  Con pct_class extraído  : {con_pct}/{len(filers_activos)}")
     print(f"  Suma pct declarado      : {total_pct:.2f}%  (holders >5%)")

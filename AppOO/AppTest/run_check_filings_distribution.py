@@ -3,6 +3,7 @@ run_check_filings_distribution.py
 Muestra distribución mensual de filing_date en fund_filings para identificar
 los dos clusters Q3 y Q4 dinámicamente.
 """
+
 import sys
 import os
 

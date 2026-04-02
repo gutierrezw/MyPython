@@ -18,11 +18,7 @@ from pathlib import Path
 BASE_DIR = r"C:\Users\InversionesWildaga\Documents\MyPython\AppOO\EDGAR"
 
 # Límites esperados (debe coincidir con valuation_edgar_downloader.py)
-EXPECTED_LIMITS = {
-    "10-K": 5,
-    "10-Q": 8,
-    "20-F": 3
-}
+EXPECTED_LIMITS = {"10-K": 5, "10-Q": 8, "20-F": 3}
 
 
 # =====================================================
@@ -35,7 +31,7 @@ def extract_period_from_filename(filename: str) -> str | None:
         hasi-20241231.htm -> 2024-12-31
         hasi-20240930.htm -> 2024-09-30
     """
-    match = re.search(r'-(\d{8})\.(htm|xml)', filename)
+    match = re.search(r"-(\d{8})\.(htm|xml)", filename)
     if match:
         date_str = match.group(1)  # YYYYMMDD
         try:
@@ -61,12 +57,7 @@ def validate_date_consistency(filing: dict) -> dict:
     filename = filing.get("file", "")
     period_date = extract_period_from_filename(filename)
 
-    result = {
-        "valid": True,
-        "filing_date": filing_date,
-        "period_date": period_date,
-        "filename": filename
-    }
+    result = {"valid": True, "filing_date": filing_date, "period_date": period_date, "filename": filename}
 
     if not period_date:
         result["valid"] = False
@@ -120,10 +111,7 @@ def validate_downloads(ticker: str, display=True) -> dict:
     metadata_path = os.path.join(ticker_dir, "metadata.json")
 
     if not os.path.exists(metadata_path):
-        return {
-            "error": f"No se encontró metadata.json para {ticker}",
-            "path": metadata_path
-        }
+        return {"error": f"No se encontró metadata.json para {ticker}", "path": metadata_path}
 
     # Leer metadata
     with open(metadata_path, "r", encoding="utf-8") as f:
@@ -158,13 +146,15 @@ def validate_downloads(ticker: str, display=True) -> dict:
             valid_count += 1
         else:
             invalid_count += 1
-            issues.append({
-                "file": filing["file"],
-                "form": filing["form"],
-                "issue": validation["issue"],
-                "filing_date": validation["filing_date"],
-                "period_date": validation["period_date"]
-            })
+            issues.append(
+                {
+                    "file": filing["file"],
+                    "form": filing["form"],
+                    "issue": validation["issue"],
+                    "filing_date": validation["filing_date"],
+                    "period_date": validation["period_date"],
+                }
+            )
 
     # Identificar faltantes
     missing_forms = {}
@@ -183,7 +173,7 @@ def validate_downloads(ticker: str, display=True) -> dict:
         "counts_by_form": counts,
         "expected_counts": {f: EXPECTED_LIMITS.get(f, 5) for f in expected_forms},
         "missing_forms": missing_forms,
-        "issues": issues
+        "issues": issues,
     }
 
     if display:
@@ -266,12 +256,7 @@ def cleanup_directory(ticker: str, dry_run=True, display=True) -> dict:
 
     space_freed = sum(os.path.getsize(f) for f in orphan_files if os.path.exists(f))
 
-    result = {
-        "files_to_delete": orphan_files,
-        "deleted": False,
-        "space_freed": space_freed,
-        "metadata_updated": False
-    }
+    result = {"files_to_delete": orphan_files, "deleted": False, "space_freed": space_freed, "metadata_updated": False}
 
     if display:
         print("=" * 70)
@@ -381,11 +366,7 @@ def fix_downloads(ticker: str, display=True) -> dict:
         needs_redownload = True
         suggestions.append(f"⚠️  {len(future_issues)} archivos con fechas futuras detectadas")
 
-    result = {
-        "validation": validation,
-        "needs_redownload": needs_redownload,
-        "suggestions": suggestions
-    }
+    result = {"validation": validation, "needs_redownload": needs_redownload, "suggestions": suggestions}
 
     if display:
         print("=" * 70)
@@ -472,14 +453,16 @@ def diagnose_ttm_coverage(ticker: str, display=True) -> dict:
     # Verificar si podemos usar fallback anual
     can_use_fallback = "2024-12-31" in annuals_available
 
-    has_ttm = len(quarters_missing) == 0 or (len(quarters_missing) == 1 and can_use_fallback and "2024-12-31" in quarters_missing)
+    has_ttm = len(quarters_missing) == 0 or (
+        len(quarters_missing) == 1 and can_use_fallback and "2024-12-31" in quarters_missing
+    )
 
     result = {
         "has_ttm": has_ttm,
         "quarters_available": quarters_available,
         "quarters_missing": quarters_missing,
         "annuals_available": annuals_available,
-        "can_use_annual_fallback": can_use_fallback
+        "can_use_annual_fallback": can_use_fallback,
     }
 
     if display:

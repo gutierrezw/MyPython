@@ -6,6 +6,7 @@ Diagnóstico de conceptos de Total Equity/Stockholders' Equity en HASI
 HASI (Hannon Armstrong) es US-GAAP domestic REIT, pero Total Equity retorna null.
 Este script identifica qué concepto específico usa HASI para reportar equity.
 """
+
 import sys
 from pathlib import Path
 
@@ -13,9 +14,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from valuation_xbrl_api import load_filing, get_fact_value
 
-print("="*80)
+print("=" * 80)
 print("🔍 DIAGNÓSTICO DE TOTAL EQUITY - HASI")
-print("="*80)
+print("=" * 80)
 
 # Cargar filing más reciente de HASI
 hasi_file = "EDGAR/HASI_EDGAR_Files/10K_Filings/hasi-20231231.htm"
@@ -29,11 +30,11 @@ except Exception as e:
     sys.exit(1)
 
 # Keywords para buscar conceptos de equity
-equity_keywords = ['equity', 'stockholder', 'shareholder', 'partner', 'capital']
+equity_keywords = ["equity", "stockholder", "shareholder", "partner", "capital"]
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🔎 BÚSQUEDA DE CONCEPTOS DE EQUITY")
-print("="*80)
+print("=" * 80)
 
 equity_concepts = {}
 
@@ -51,9 +52,9 @@ us_gaap_concepts = []
 other_concepts = []
 
 for name in equity_concepts.keys():
-    if name.startswith('hasi:'):
+    if name.startswith("hasi:"):
         hasi_concepts.append(name)
-    elif name.startswith('us-gaap:'):
+    elif name.startswith("us-gaap:"):
         us_gaap_concepts.append(name)
     else:
         other_concepts.append(name)
@@ -63,6 +64,7 @@ print(f"  • hasi: {len(hasi_concepts)} conceptos")
 print(f"  • us-gaap: {len(us_gaap_concepts)} conceptos")
 print(f"  • otros: {len(other_concepts)} conceptos")
 
+
 # Función para analizar un concepto
 def analyze_concept(concept_name, facts):
     """Analiza un concepto y muestra sus características"""
@@ -71,7 +73,7 @@ def analyze_concept(concept_name, facts):
 
     for i, fact in enumerate(facts[:2]):  # Mostrar máximo 2 facts
         # Contexto
-        ctx_id = getattr(fact, 'contextID', 'N/A')
+        ctx_id = getattr(fact, "contextID", "N/A")
         ctx = filing.contexts.get(ctx_id)
 
         if ctx:
@@ -90,13 +92,13 @@ def analyze_concept(concept_name, facts):
         value = get_fact_value(fact)
 
         # Unidades y decimals
-        unit_id = getattr(fact, 'unitID', 'N/A')
-        decimals = getattr(fact, 'decimals', 'N/A')
+        unit_id = getattr(fact, "unitID", "N/A")
+        decimals = getattr(fact, "decimals", "N/A")
 
         # Dimensiones (members)
         members = []
-        if ctx and 'dims' in ctx:
-            members = list(ctx['dims'].keys())
+        if ctx and "dims" in ctx:
+            members = list(ctx["dims"].keys())
 
         print(f"  └─ Fact {i+1}/{len(facts)}:")
         print(f"      • Valor: {value}")
@@ -105,21 +107,24 @@ def analyze_concept(concept_name, facts):
         if members:
             print(f"      • Dimensiones: {members}")
 
+
 # Filtrar conceptos más relevantes (total/consolidated equity)
 total_equity_candidates = []
 for name in equity_concepts.keys():
     name_lower = name.lower()
     # Buscar "total" o "stockholders" pero evitar "attributable", "parent", "noncontrolling"
-    if (('total' in name_lower or 'stockholder' in name_lower) and
-        'equity' in name_lower and
-        'noncontrol' not in name_lower and
-        'attributable' not in name_lower and
-        'parent' not in name_lower):
+    if (
+        ("total" in name_lower or "stockholder" in name_lower)
+        and "equity" in name_lower
+        and "noncontrol" not in name_lower
+        and "attributable" not in name_lower
+        and "parent" not in name_lower
+    ):
         total_equity_candidates.append(name)
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("⭐ CANDIDATOS MÁS PROBABLES PARA TOTAL EQUITY")
-print("="*80)
+print("=" * 80)
 
 if total_equity_candidates:
     print(f"\n✅ Encontrados {len(total_equity_candidates)} candidatos:")
@@ -130,12 +135,12 @@ else:
 
 # Mostrar conceptos US-GAAP
 if us_gaap_concepts:
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("📋 TODOS LOS CONCEPTOS US-GAAP DE EQUITY")
-    print("="*80)
+    print("=" * 80)
 
     # Filtrar los más relevantes
-    relevant = [c for c in us_gaap_concepts if 'total' in c.lower() or 'stockholder' in c.lower()]
+    relevant = [c for c in us_gaap_concepts if "total" in c.lower() or "stockholder" in c.lower()]
 
     if relevant:
         print(f"\n✅ Conceptos relevantes ({len(relevant)}):")
@@ -149,17 +154,17 @@ if us_gaap_concepts:
 
 # Mostrar conceptos HASI custom
 if hasi_concepts:
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔸 CONCEPTOS CUSTOM DE HASI (hasi:)")
-    print("="*80)
+    print("=" * 80)
 
     for concept in sorted(hasi_concepts):
         analyze_concept(concept, equity_concepts[concept])
 
 # Verificar conceptos que build_ttm() está buscando
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🎯 CONCEPTOS QUE build_ttm() BUSCA ACTUALMENTE")
-print("="*80)
+print("=" * 80)
 
 current_seeking = [
     "us-gaap:StockholdersEquity",
@@ -185,9 +190,9 @@ for concept in current_seeking:
                     print(f"    └─ Valor: {value}")
 
 # Conclusiones
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("💡 CONCLUSIONES Y RECOMENDACIONES")
-print("="*80)
+print("=" * 80)
 
 if total_equity_candidates:
     print(f"\n✅ Encontrados {len(total_equity_candidates)} candidatos para Total Equity")
@@ -208,9 +213,9 @@ if not total_equity_candidates and not hasi_concepts:
     print("   2. HASI reporta equity de forma diferente (REIT structure)")
     print("   3. El valor está en un contexto con dimensiones especiales")
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("✅ Diagnóstico completo")
-print("="*80)
+print("=" * 80)
 print("\n💡 PRÓXIMOS PASOS:")
 print("  1. Revisar conceptos identificados arriba")
 print("  2. Agregar conceptos a valuation_xbrl_api.py líneas 494-508")

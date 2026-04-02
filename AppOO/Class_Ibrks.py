@@ -91,8 +91,7 @@ class IBClient:  # -------------------------------------------------------------
 
             # Log the initial Info.
             logging.info(
-                textwrap.dedent(
-                    """
+                textwrap.dedent("""
             =================
             Initialize Client:
             =================
@@ -100,8 +99,7 @@ class IBClient:  # -------------------------------------------------------------
             Operating System: {op_sys}
             Session State Path: {state_path}
             Client Portal Folder: {client_path}
-            """
-                ).format(
+            """).format(
                     serv_proc=self.server_process,
                     op_sys=self._operating_system,
                     state_path=self.session_state_path,
@@ -152,14 +150,12 @@ class IBClient:  # -------------------------------------------------------------
 
         # Log the initial Info.
         logging.info(
-            textwrap.dedent(
-                """
+            textwrap.dedent("""
         =================
         Create Session:
         =================
         Auth Response: {auth_resp}
-        """
-            ).format(
+        """).format(
                 auth_resp=auth_response,
             )
         )
@@ -199,16 +195,12 @@ class IBClient:  # -------------------------------------------------------------
             accounts = server_account_content["accounts"]
             if self.account in accounts:
                 # Log the response.
-                logging.debug(
-                    textwrap.dedent(
-                        """
+                logging.debug(textwrap.dedent("""
                 =================
                 Set Server:
                 =================
                 Server Response: {serv_resp}
-                """
-                    ).format(serv_resp=server_account_content)
-                )
+                """).format(serv_resp=server_account_content))
 
                 print(success)
                 return True
@@ -221,17 +213,13 @@ class IBClient:  # -------------------------------------------------------------
             server_account_content = self.server_accounts()
 
             # Log the response.
-            logging.debug(
-                textwrap.dedent(
-                    """
+            logging.debug(textwrap.dedent("""
             =================
             Set Server:
             =================
             Server Response: {serv_resp}
             Server Update Response: {auth_resp}
-            """
-                ).format(auth_resp=server_update_content, serv_resp=server_account_content)
-            )
+            """).format(auth_resp=server_update_content, serv_resp=server_account_content))
 
             # TO DO: Add check market hours here and then check for a mutual fund.
             if (server_account_content and "accounts" in server_account_content) or (
@@ -266,17 +254,13 @@ class IBClient:  # -------------------------------------------------------------
         file_exists = self.session_state_path.exists()
 
         # Log the response.
-        logging.debug(
-            textwrap.dedent(
-                """
+        logging.debug(textwrap.dedent("""
         =================
         Server State:
         =================
         Server State: {state}
         State File: {exist}
-        """
-            ).format(state=action, exist=file_exists)
-        )
+        """).format(state=action, exist=file_exists))
 
         if action == "save":
 
@@ -335,16 +319,12 @@ class IBClient:  # -------------------------------------------------------------
 
                     if str(process_id) in process:
                         # Log the response.
-                        logging.debug(
-                            textwrap.dedent(
-                                """
+                        logging.debug(textwrap.dedent("""
                             =================
                             Server Process:
                             =================
                             Process ID: {process}
-                            """
-                            ).format(process=process)
-                        )
+                            """).format(process=process))
 
                         return True
 
@@ -404,14 +384,10 @@ class IBClient:  # -------------------------------------------------------------
                 except EncodingWarning:
                     pass
 
-                logging.debug(
-                    """
+                logging.debug("""
                     Validate Response: {valid_resp}
                     Reauth Response: {reauth_resp}
-                    """.format(
-                        valid_resp=valid_resp, reauth_resp=reauth_resp
-                    )
-                )
+                    """.format(valid_resp=valid_resp, reauth_resp=reauth_resp))
 
             max_retries += 1
 

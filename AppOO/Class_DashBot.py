@@ -23,6 +23,7 @@
 │ (notificación)      │
 └─────────────────────┘
 """
+
 from Modulos_python import (
     asyncio,
     Bot,
@@ -102,15 +103,9 @@ class ClassAgenteIA:
 
         # Estado del agente de preservación
         self.preservation_state = {}  # {symbol: {max_price, stop_actual, last_check}}
-        self.preservation_config = (
-            {}
-        )  # {vehiculo: sub-dict "preservation"} — extraído de _params_cache
-        self.preservation_last_run = (
-            {}
-        )  # {vehiculo: datetime} — última evaluación por vehículo
-        self._params_cache = (
-            {}
-        )  # {vehiculo: full parsed parameters dict} — compartido entre agentes
+        self.preservation_config = {}  # {vehiculo: sub-dict "preservation"} — extraído de _params_cache
+        self.preservation_last_run = {}  # {vehiculo: datetime} — última evaluación por vehículo
+        self._params_cache = {}  # {vehiculo: full parsed parameters dict} — compartido entre agentes
 
     # decorador para limitar ejecuciones
     def wait_rate(intervalo_segundos: int, persist: bool = False):
@@ -312,9 +307,7 @@ class ClassAgenteIA:
     def Agente_downloads_filings_EDGAR(self):
         try:
             # desacrga la estructura positions
-            self.positions = self.PlanInversion.select_inversion(
-                tipoin=self.vehiculo, ticket="all"
-            )
+            self.positions = self.PlanInversion.select_inversion(tipoin=self.vehiculo, ticket="all")
 
             counter = 1
             for positio in self.positions:
@@ -340,18 +333,14 @@ class ClassAgenteIA:
                 found = download_filing(ticker=ticker)
                 if not found:
                     self.NotFound.append(ticker)
-                    self.logger.warning(
-                        textwrap.dedent(
-                            f"""
+                    self.logger.warning(textwrap.dedent(f"""
                             ==============================================================================================
                             Agente_downloads_filings_EDGAR(): 
                             = 
                             🚨 FILINGS DENEGADO. Posible deslistado del ticker: {ticker}
                             ==============================================================================================
 
-                            """
-                        )
-                    )
+                            """))
 
                 elif found:
                     # controla que no haga mas de 2 downloads en EDGAR
@@ -390,9 +379,7 @@ class ClassAgenteIA:
             return
         try:
             result = sync_edgar_funds()
-            self.logger.warning(
-                f"EdgarFunds: total={result['total']} insertados={result['inserted']}"
-            )
+            self.logger.warning(f"EdgarFunds: total={result['total']} insertados={result['inserted']}")
         except Exception as e:
             self.logger.error(f"Agente_EdgarFunds(): {e}")
 
@@ -465,15 +452,11 @@ class ClassAgenteIA:
         try:
             params = self._load_params("Crypto")
             if not params:
-                self.logger.warning(
-                    "Agente_LtvControl: sin parameters en sesion Crypto → SKIP"
-                )
+                self.logger.warning("Agente_LtvControl: sin parameters en sesion Crypto → SKIP")
                 return
             lconfig = params.get("ltv")
             if not lconfig:
-                self.logger.warning(
-                    "Agente_LtvControl: sin bloque 'ltv' en parameters → SKIP"
-                )
+                self.logger.warning("Agente_LtvControl: sin bloque 'ltv' en parameters → SKIP")
                 return
             svc = ServiciosCrypto()
             analisis = svc.ltv_check_and_adjust(lconfig)
@@ -490,7 +473,9 @@ class ClassAgenteIA:
                         adjustType=item["ajuste_direction"],
                         amount=item["ajuste_coin"],
                     )
-                    ajuste_str = f"{item['ajuste_direction']} {item['ajuste_coin']:.4f} {item['collateralCoin']} → {resp}"
+                    ajuste_str = (
+                        f"{item['ajuste_direction']} {item['ajuste_coin']:.4f} {item['collateralCoin']} → {resp}"
+                    )
                 else:
                     ajuste_str = "sin ajuste"
                 self.logger.warning(
@@ -500,14 +485,14 @@ class ClassAgenteIA:
                 )
 
             # sincronizar DataHub con datos exactos de API → panel siempre consistente
-            total_col   = sum(i["collateral_usd"] for i in analisis)
-            total_deuda = sum(i["loan_usd"]        for i in analisis)
+            total_col = sum(i["collateral_usd"] for i in analisis)
+            total_deuda = sum(i["loan_usd"] for i in analisis)
             capital_neto = total_col - total_deuda
-            leverage_c   = total_col / max(capital_neto, 1.0)
-            DataHub.manager_GyP["Crypto"]["Colateral"]   = total_col
+            leverage_c = total_col / max(capital_neto, 1.0)
+            DataHub.manager_GyP["Crypto"]["Colateral"] = total_col
             DataHub.manager_GyP["Crypto"]["CapitalNeto"] = capital_neto
-            DataHub.manager_GyP["Crypto"]["Debit"]       = total_deuda
-            DataHub.manager_GyP["Crypto"]["Leverage"]    = leverage_c
+            DataHub.manager_GyP["Crypto"]["Debit"] = total_deuda
+            DataHub.manager_GyP["Crypto"]["Leverage"] = leverage_c
 
         except Exception as e:
             self.logger.error(f"Agente_LtvControl(): {e}")
@@ -525,10 +510,7 @@ class ClassAgenteIA:
             rows, ix = result
             if not rows or not ix:
                 return
-            beta_map = {
-                dict(zip(ix, row))["symbol"]: dict(zip(ix, row)).get("beta")
-                for row in rows
-            }
+            beta_map = {dict(zip(ix, row))["symbol"]: dict(zip(ix, row)).get("beta") for row in rows}
             total_val, beta_sum = 0.0, 0.0
             for p in positions:
                 val = float(p.get("mktvalue", 0))
@@ -553,8 +535,8 @@ class ClassAgenteIA:
             if not positions:
                 return
             orig_names = [p["ticket"] for p in positions]
-            yf_names   = [s[:-4] + "-USD" if s.endswith("USDT") else s for s in orig_names]
-            name_map   = dict(zip(yf_names, orig_names))
+            yf_names = [s[:-4] + "-USD" if s.endswith("USDT") else s for s in orig_names]
+            name_map = dict(zip(yf_names, orig_names))
             raw = yf.download(yf_names, period="6mo", auto_adjust=True, progress=False)
             if raw.empty:
                 return
@@ -566,21 +548,22 @@ class ClassAgenteIA:
             returns = close.pct_change().dropna()
             if returns.empty or len(returns) < 10:
                 return
-            btc_col    = next((c for c in returns.columns if "BTC" in c.upper()), None)
+            btc_col = next((c for c in returns.columns if "BTC" in c.upper()), None)
             market_ret = returns[btc_col] if btc_col else returns.mean(axis=1)
             market_var = market_ret.var()
             if market_var == 0:
                 return
-            beta_map  = {col: returns[col].cov(market_ret) / market_var for col in returns.columns}
+            beta_map = {col: returns[col].cov(market_ret) / market_var for col in returns.columns}
             total_val = sum(float(p.get("mktvalue", 0)) for p in positions)
             if total_val <= 0:
                 return
             beta_port = sum(
-                (float(p.get("mktvalue", 0)) / total_val) * beta_map.get(p["ticket"], 1.5)
-                for p in positions
+                (float(p.get("mktvalue", 0)) / total_val) * beta_map.get(p["ticket"], 1.5) for p in positions
             )
             DataHub.manager_GyP["Crypto"]["BetaPortfolio"] = round(max(beta_port, 0.1), 3)
-            self.logger.warning(f"CryptoBeta: β={DataHub.manager_GyP['Crypto']['BetaPortfolio']:.3f}  ({len(positions)} posiciones)")
+            self.logger.warning(
+                f"CryptoBeta: β={DataHub.manager_GyP['Crypto']['BetaPortfolio']:.3f}  ({len(positions)} posiciones)"
+            )
         except Exception as e:
             self.logger.error(f"Agente_CryptoBeta(): {e}")
 
@@ -597,9 +580,7 @@ class ClassAgenteIA:
                 if DataHub.manager_sesion.get(vehiculo):
                     self._preservation_run_vehiculo(vehiculo)
                 else:
-                    self.logger.warning(
-                        f"Agente_ManagerPreservation({vehiculo}): sesion no activa → SKIP"
-                    )
+                    self.logger.warning(f"Agente_ManagerPreservation({vehiculo}): sesion no activa → SKIP")
             except Exception as e:
                 self.logger.error(f"Agente_ManagerPreservation({vehiculo}): {e}")
 
@@ -616,9 +597,7 @@ class ClassAgenteIA:
                 self._params_cache[vehiculo] = None
             else:
                 self._params_cache[vehiculo] = json.loads(
-                    params_raw.decode("utf-8")
-                    if isinstance(params_raw, bytes)
-                    else params_raw
+                    params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw
                 )
         return self._params_cache.get(vehiculo)
 
@@ -632,16 +611,12 @@ class ClassAgenteIA:
         if vehiculo not in self.preservation_config:
             params = self._load_params(vehiculo)
             if not params:
-                self.logger.warning(
-                    f"Preservation({vehiculo}): sin parameters en sesion → SKIP"
-                )
+                self.logger.warning(f"Preservation({vehiculo}): sin parameters en sesion → SKIP")
                 self.preservation_config[vehiculo] = None
                 return None, 0, False
             pconfig = params.get("preservation")
             if not pconfig:
-                self.logger.warning(
-                    f"Preservation({vehiculo}): sin bloque 'preservation' en parameters → SKIP"
-                )
+                self.logger.warning(f"Preservation({vehiculo}): sin bloque 'preservation' en parameters → SKIP")
                 self.preservation_config[vehiculo] = None
                 return None, 0, False
             self.preservation_config[vehiculo] = pconfig
@@ -694,9 +669,7 @@ class ClassAgenteIA:
 
         # 1. Cargar posiciones activas
         positions = self.PlanInversion.select_inversion(tipoin=vehiculo, ticket="all")
-        self.logger.warning(
-            f"Preservation({vehiculo}): {len(positions)} posiciones cargadas"
-        )
+        self.logger.warning(f"Preservation({vehiculo}): {len(positions)} posiciones cargadas")
 
         for positio in positions:
             symbol = positio.get("ticket")
@@ -715,9 +688,7 @@ class ClassAgenteIA:
             if roi < roi_minimo:
                 continue
 
-            self.logger.warning(
-                f"Preservation({vehiculo}/{symbol}): ROI={roi:.1%} ≥ {roi_minimo:.0%} → evaluando"
-            )
+            self.logger.warning(f"Preservation({vehiculo}/{symbol}): ROI={roi:.1%} ≥ {roi_minimo:.0%} → evaluando")
 
             # estado previo del símbolo
             state = self.preservation_state.get(symbol, {})
@@ -725,17 +696,13 @@ class ClassAgenteIA:
             # 4. Obtener precio actual (DataHub)
             last = DataHub.preservation_get_price(symbol, positio)
             if not last or last <= 0:
-                self.logger.warning(
-                    f"Preservation({vehiculo}/{symbol}): sin precio → SKIP"
-                )
+                self.logger.warning(f"Preservation({vehiculo}/{symbol}): sin precio → SKIP")
                 continue
 
             # 5. Calcular ATR (DataHub)
             atr, atr_error = DataHub.preservation_get_atr(symbol, vehiculo)
             if atr is None:
-                self.logger.warning(
-                    f"Preservation({vehiculo}/{symbol}): {atr_error} → SKIP"
-                )
+                self.logger.warning(f"Preservation({vehiculo}/{symbol}): {atr_error} → SKIP")
                 continue
 
             # 6. Actualizar max_price
@@ -751,16 +718,12 @@ class ClassAgenteIA:
             stop_final = max(stop_anterior, stop_calculado)
 
             # 9. Cantidad a proteger (DataHub — respeta lotSize en Crypto)
-            qty = DataHub.preservation_calc_qty(
-                self.account, vehiculo, symbol, last, base_limit
-            )
+            qty = DataHub.preservation_calc_qty(self.account, vehiculo, symbol, last, base_limit)
             if qty <= 0:
                 continue
 
             # 10. Construir trama de orden STOP (DataHub)
-            trama = DataHub.preservation_build_trama(
-                vehiculo, account, symbol, conid, stop_final, max_price, 10
-            )
+            trama = DataHub.preservation_build_trama(vehiculo, account, symbol, conid, stop_final, max_price, 10)
 
             order_id_prev = state.get("order_id")
 
@@ -771,9 +734,7 @@ class ClassAgenteIA:
                     f"Preservation({vehiculo}/{symbol}): base_limit {base_limit}, Order: {trama},  Previo: {order_id_prev}"
                 )
                 if order_id_prev:
-                    DataHub.preservation_cancel_order(
-                        vehiculo, account, order_id_prev, symbol
-                    )
+                    DataHub.preservation_cancel_order(vehiculo, account, order_id_prev, symbol)
 
                 response = DataHub.preservation_send_order(vehiculo, trama)
                 order_id = DataHub.preservation_extract_order_id(response)
@@ -835,18 +796,14 @@ class Telegram:
 
         if chat_id not in self.userAuth:
             # 🛑 Acción de Seguridad: Loguea el ID del nuevo usuario
-            self.logger.warning(
-                textwrap.dedent(
-                    f"""
+            self.logger.warning(textwrap.dedent(f"""
                   ==============================================================================================
                   handle_segurity_message(): 
                   = 
                   🚨 ACCESO DENEGADO. Nuevo chat_id para autorizar: {chat_id} | Nombre: {nombre_usuario}
                   ==============================================================================================
 
-                  """
-                )
-            )
+                  """))
 
             await update.message.reply_text(
                 f"❌ Acceso Denegado. Por favor, contacta al administrador. ID de Chat asignado: `{chat_id}`",
@@ -903,23 +860,15 @@ class Telegram:
                 self.telegram_app = ApplicationBuilder().token(self.TOKEN).build()
 
                 self.telegram_app.add_handler(CommandHandler("menu", self.handle_menu))
+                self.telegram_app.add_handler(CommandHandler("start", self.handle_segurity_message))
                 self.telegram_app.add_handler(
-                    CommandHandler("start", self.handle_segurity_message)
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_segurity_message)
                 )
-                self.telegram_app.add_handler(
-                    MessageHandler(
-                        filters.TEXT & ~filters.COMMAND, self.handle_segurity_message
-                    )
-                )
-                self.telegram_app.add_handler(
-                    CallbackQueryHandler(self.handle_callback)
-                )
+                self.telegram_app.add_handler(CallbackQueryHandler(self.handle_callback))
 
                 # Captura errores de red dentro del loop de polling (ConnectError, NetworkError, etc.)
                 async def _telegram_error_handler(update, context):
-                    self.logger.warning(
-                        f"Telegram network error (ignorado): {context.error}"
-                    )
+                    self.logger.warning(f"Telegram network error (ignorado): {context.error}")
 
                 self.telegram_app.add_error_handler(_telegram_error_handler)
 
@@ -927,9 +876,7 @@ class Telegram:
                 async def _send_welcome():
                     await self.telegram_app.initialize()
                     self.bot = self.telegram_app.bot
-                    await self.send_Telegram(
-                        f"🏁 Bot interno iniciado session: {datetime.now()}"
-                    )
+                    await self.send_Telegram(f"🏁 Bot interno iniciado session: {datetime.now()}")
                     await self.handle_menu()
                     await self.telegram_app.shutdown()
 
@@ -986,9 +933,7 @@ class Telegram:
 
                     # si hash_id no es proporcionado, envía mensaje simple
                     elif hash_id is None:
-                        sent_message = await bot.send_message(
-                            chat_id=CHAT_ID, text=texto, parse_mode="Markdown"
-                        )
+                        sent_message = await bot.send_message(chat_id=CHAT_ID, text=texto, parse_mode="Markdown")
                         await self._save_message(sent_message, CHAT_ID)
                         return
 
@@ -996,12 +941,8 @@ class Telegram:
                     elif hash_id is not None:
                         botones = [
                             [
-                                InlineKeyboardButton(
-                                    "✅ Aprobar", callback_data=f"aprobar|{hash_id}"
-                                ),
-                                InlineKeyboardButton(
-                                    "❌ Rechazar", callback_data=f"rechazar|{hash_id}"
-                                ),
+                                InlineKeyboardButton("✅ Aprobar", callback_data=f"aprobar|{hash_id}"),
+                                InlineKeyboardButton("❌ Rechazar", callback_data=f"rechazar|{hash_id}"),
                             ]
                         ]
                         reply_markup = InlineKeyboardMarkup(botones)
@@ -1059,9 +1000,7 @@ class Telegram:
             response = DataHub.QremoteOrder[vehiculo]._request(trama)
             return response, symbol
         except Exception as e:
-            self.logger.error(
-                f"put_order_stockTelegram(): {e}\n{traceback.format_exc()}"
-            )
+            self.logger.error(f"put_order_stockTelegram(): {e}\n{traceback.format_exc()}")
             return {}, None
 
     def put_order_cryptoTelegram(self, op, ix):
@@ -1077,9 +1016,7 @@ class Telegram:
             tipo_op = op[ix.index("tipo")]  # 'sell' o 'buy'
 
             # obtiene conid desde tabla otros_activos
-            crypto, found = self.RepositorioOportunidades.select_otros_activos(
-                symbol=symbol
-            )
+            crypto, found = self.RepositorioOportunidades.select_otros_activos(symbol=symbol)
             conid = crypto[0]["idcrypto"] if found else None
 
             # crea instancia de TickerInfo para Crypto
@@ -1101,9 +1038,7 @@ class Telegram:
             prc = PriceOportunidad if PriceOportunidad > last else last
 
             # crea la orden en formato Crypto
-            order = Crypto.format_orden(
-                vehiculo, symbol, conid, tip, prc, opt, tim, qty
-            )
+            order = Crypto.format_orden(vehiculo, symbol, conid, tip, prc, opt, tim, qty)
 
             trama = {
                 "account": account,
@@ -1117,9 +1052,7 @@ class Telegram:
             response = DataHub.QremoteOrder[vehiculo]._request(trama)
             return response, symbol
         except Exception as e:
-            self.logger.error(
-                f"put_order_cryptoTelegram(): {e}\n{traceback.format_exc()}"
-            )
+            self.logger.error(f"put_order_cryptoTelegram(): {e}\n{traceback.format_exc()}")
             return {}, None
 
     # enlace con TickerInfo() para colocar orders
@@ -1128,9 +1061,7 @@ class Telegram:
             values, symbol, vehiculo = {}, None, None
 
             # recupera info() de Oportunidad sell
-            oportunidad, ix = self.RepositorioOportunidades.obtener_id_por_hash(
-                hash_id=hash_id
-            )
+            oportunidad, ix = self.RepositorioOportunidades.obtener_id_por_hash(hash_id=hash_id)
 
             if not oportunidad:
                 return {}, None, None
@@ -1157,9 +1088,7 @@ class Telegram:
 
             return values, symbol, vehiculo
         except Exception as e:
-            self.logger.error(
-                f"put_order_aprovate_telegram(): {e}\n{traceback.format_exc()}"
-            )
+            self.logger.error(f"put_order_aprovate_telegram(): {e}\n{traceback.format_exc()}")
             return {}, None, None
 
     # Maneja los callbacks de los botones de aprobación/rechazo
@@ -1174,23 +1103,17 @@ class Telegram:
 
             # solicita put Order & wait response de ManagerOrderQueue
             if accion == "aprobar":
-                response, symbol, vehiculo = self.put_order_aprovate_telegram(
-                    hash_id=args[0]
-                )
+                response, symbol, vehiculo = self.put_order_aprovate_telegram(hash_id=args[0])
 
                 if response and response.get("status"):
                     status = response.get("status", "Pendiente")
                     price = response.get("price", 0)
                     message = f"✅ Oportunidad procesada: {status}\n"
-                    message += (
-                        f"Symbol {symbol}: @price {round(price, 4) if price else 0}"
-                    )
+                    message += f"Symbol {symbol}: @price {round(price, 4) if price else 0}"
                 else:
                     broker = "IB Gateway" if vehiculo == "Stock" else "Binance API"
                     message = f"⚠️ Sin servicio de broker.\n"
-                    message += (
-                        f"Symbol: {symbol or 'N/A'}\nVerifique conexión {broker}."
-                    )
+                    message += f"Symbol: {symbol or 'N/A'}\nVerifique conexión {broker}."
 
                 await query.edit_message_text(message)
 
@@ -1228,14 +1151,10 @@ class Telegram:
                 await self.send_top10_telegram(forzar=True)
 
             elif accion == "menu_reconnect":
-                await query.edit_message_text(
-                    "⚙️ Ajustes: próximamente más opciones.", parse_mode="Markdown"
-                )
+                await query.edit_message_text("⚙️ Ajustes: próximamente más opciones.", parse_mode="Markdown")
 
             elif accion == "performan":
-                await query.edit_message_text(
-                    "🎯 Perfonance: Ganancias y Perdidas.", parse_mode="Markdown"
-                )
+                await query.edit_message_text("🎯 Perfonance: Ganancias y Perdidas.", parse_mode="Markdown")
 
             elif accion == "OrdersExec":
                 self.MostrarOpcionMenu_enTelegram = "ListOrder"
@@ -1399,9 +1318,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
         # Activa/desactiva IA---------------------------------------------------------------------------------------
         Imagen_tk = BDsystem.select_image(idd=334, size=(32, 32))
-        self.IA = tk.Button(
-            self.iconos, image=Imagen_tk, bg=self.bgcolor, relief=tk.FLAT
-        )
+        self.IA = tk.Button(self.iconos, image=Imagen_tk, bg=self.bgcolor, relief=tk.FLAT)
         self.IA.imagen = Imagen_tk
 
         # define area de Chat ---------------------------------------------------------------------------------------
@@ -1471,9 +1388,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self.enviar_mensaje(mensaje)
 
     def ver_consejos(self):
-        mensaje = (
-            "💡 Consejo de hoy: Rebalancear tu cartera puede mejorar tu rendimiento."
-        )
+        mensaje = "💡 Consejo de hoy: Rebalancear tu cartera puede mejorar tu rendimiento."
         self.enviar_mensaje(mensaje)
 
         # muestra botón flotante
@@ -1494,9 +1409,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             # look read CSV sell
             with DataHub.lockCsvAi:
-                df = pd.read_csv(
-                    path, header=0, sep=",", encoding="utf-8", index_col=False
-                )
+                df = pd.read_csv(path, header=0, sep=",", encoding="utf-8", index_col=False)
             if df.empty:
                 return vacio
 
@@ -1515,9 +1428,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             # Filtrar recomendaciones válidas
             if "%Roi" in df.columns and "Profit" in df.columns:
-                df_recom = df[
-                    (df["%Roi"] >= DataHub.MaxRoi) & (df["Profit"] >= DataHub.MinProfit)
-                ]
+                df_recom = df[(df["%Roi"] >= DataHub.MaxRoi) & (df["Profit"] >= DataHub.MinProfit)]
                 return df_recom if not df_recom.empty else df
             return df
         except (EmptyDataError, FileNotFoundError):
@@ -1535,9 +1446,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             # look read CSV buy
             with DataHub.lockCsvAi:
-                df = pd.read_csv(
-                    path, header=0, sep=",", encoding="utf-8", index_col=False
-                )
+                df = pd.read_csv(path, header=0, sep=",", encoding="utf-8", index_col=False)
             if df.empty:
                 return vacio
 
@@ -1558,8 +1467,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             # ganancia_precio >= MinGananciaPrecio (ej: 5%) y score >= MinScoreBuy (ej: 0.5)
             if "score" in df.columns and "ganancia_precio" in df.columns:
                 df_recom = df[
-                    (df["ganancia_precio"] >= DataHub.MinGananciaPrecio)
-                    & (df["score"] >= DataHub.MinScoreBuy)
+                    (df["ganancia_precio"] >= DataHub.MinGananciaPrecio) & (df["score"] >= DataHub.MinScoreBuy)
                 ]
                 return df_recom if not df_recom.empty else df
             return df
@@ -1634,9 +1542,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             message = f"🤖 *BotTrader* ({env}) | Trades: {trades}\n"
             message += f"```\n"
-            message += (
-                f"{'symbol':<9} {'price':>9} {'qty':>8} {'pnl%':>7} {'pnl$':>8}\n"
-            )
+            message += f"{'symbol':<9} {'price':>9} {'qty':>8} {'pnl%':>7} {'pnl$':>8}\n"
             message += f"{'-' * 54}\n"
             message += "\n".join(lines)
             message += f"\n{'-' * 54}\n"
@@ -1644,9 +1550,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             message += "```"
 
             if waiting:
-                message += (
-                    f"\n⏳ *Esperando señal:* {', '.join(p['symbol'] for p in waiting)}"
-                )
+                message += f"\n⏳ *Esperando señal:* {', '.join(p['symbol'] for p in waiting)}"
 
             await self.send_Telegram(message, None)
         except Exception as e:
@@ -1711,9 +1615,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         try:
             # Verificar si debe enviar (control de frecuencia)
             if not forzar:
-                debe_enviar_sell, ranking_sell = self.Agente_message_Manager_Top10(
-                    "sell"
-                )
+                debe_enviar_sell, ranking_sell = self.Agente_message_Manager_Top10("sell")
                 debe_enviar_buy, ranking_buy = self.Agente_message_Manager_Top10("buy")
 
                 if not debe_enviar_sell and not debe_enviar_buy:
@@ -1735,9 +1637,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     row.get("Recomendado"),
                 )
                 # Enviar con origen "top10" para identificar que viene del ranking
-                await self.opportunity_handler_message_sell(
-                    hash_id=hash_id, row=row, origen="top10"
-                )
+                await self.opportunity_handler_message_sell(hash_id=hash_id, row=row, origen="top10")
 
             # Enviar oportunidades de BUY individualmente
             for row in top_buy:
@@ -1751,9 +1651,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     row.get("Recomendado"),
                 )
                 # Enviar con origen "top10" para identificar que viene del ranking
-                await self.opportunity_handler_message_buy(
-                    hash_id=hash_id, row=row, origen="top10"
-                )
+                await self.opportunity_handler_message_buy(hash_id=hash_id, row=row, origen="top10")
 
             # Actualizar registro de último envío
             self.ultimo_top10_sell = {
@@ -1773,15 +1671,15 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         def _log_schedule_status():
             """Loguea tabla de estado de agentes al arrancar agentesIA."""
             _AGENTES = {
-                "Agente_MarketScreener":     86400,
+                "Agente_MarketScreener": 86400,
                 "Agente_InstitucionalScore": 86400,
-                "Agente_EdgarFunds":         2592000,
-                "Agente_FundFilings":        604800,
-                "Agente_13FHoldings":        86400,
-                "Agente_13FScores":          86400,
-                "Agente_AuditPortfolio":     2592000,
-                "Agente_LtvControl":         300,
-                "Agente_StockBeta":          3600,
+                "Agente_EdgarFunds": 2592000,
+                "Agente_FundFilings": 604800,
+                "Agente_13FHoldings": 86400,
+                "Agente_13FScores": 86400,
+                "Agente_AuditPortfolio": 2592000,
+                "Agente_LtvControl": 300,
+                "Agente_StockBeta": 3600,
             }
 
             def _fmt_intervalo(seg):
@@ -1856,9 +1754,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     time.sleep(15)
                     self.counter += 1
 
-                    DataHub.update_self_procesos(
-                        proces="thread", tarea=task_name, itera=self.counter
-                    )
+                    DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=self.counter)
             except Exception as e:
                 print(f"agentesIA(): {e}")
 
@@ -2027,16 +1923,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             if insert:
                 # Verifica que este TRUE mostrar las ventas
                 if self.MostrarOpcionMenu_enTelegram == "Sell":
-                    await self.opportunity_handler_message_sell(
-                        hash_id=hash_id, row=row, origen=origen
-                    )
+                    await self.opportunity_handler_message_sell(hash_id=hash_id, row=row, origen=origen)
         except Exception as e:
             print(f"opportunity_handler(): {e}")
 
     # Obtener oportunidades desde modelo IA
-    async def evaluar_oportunidades_sell_con_IA(
-        self, df_sell=None, umbral_venta=0.65, umbral_observacion=0.35
-    ):
+    async def evaluar_oportunidades_sell_con_IA(self, df_sell=None, umbral_venta=0.65, umbral_observacion=0.35):
         """
         Sistema de dos umbrales:
         - confianza >= umbral_venta (0.65): Enviar a Telegram para vender
@@ -2055,8 +1947,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             else:
                 # Rango de umbrales (observación)
                 df_filtrado = df_merged[
-                    (df_merged["confianza"] >= umbral_min)
-                    & (df_merged["confianza"] < umbral_max)
+                    (df_merged["confianza"] >= umbral_min) & (df_merged["confianza"] < umbral_max)
                 ].copy()
                 if estado:
                     df_filtrado["estado_ia"] = estado
@@ -2068,9 +1959,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             # Sin modelo: enviar todas las oportunidades para etiquetar y ganar experiencia
             if self.IAsell.modelo is None:
-                self.logger.info(
-                    "evaluar_oportunidades_sell_con_IA(): Sin modelo, enviando para etiquetado"
-                )
+                self.logger.info("evaluar_oportunidades_sell_con_IA(): Sin modelo, enviando para etiquetado")
                 for _, row in df_sell.iterrows():
                     await self.oportunity_handler_sell(row=row, origen="system")
                 return
@@ -2096,16 +1985,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             # Aplicar predicción IA
             df = self.IAsell.aplanar_datos_tecnicos(df_in)
             if df is None or df.empty:
-                self.logger.warning(
-                    "evaluar_oportunidades_sell_con_IA(): df aplanado vacío"
-                )
+                self.logger.warning("evaluar_oportunidades_sell_con_IA(): df aplanado vacío")
                 return
 
             resultado = self.IAsell.predecir_modelo(df)
             if resultado is None or resultado.empty:
-                self.logger.warning(
-                    "evaluar_oportunidades_sell_con_IA(): resultado predicción vacío"
-                )
+                self.logger.warning("evaluar_oportunidades_sell_con_IA(): resultado predicción vacío")
                 return
 
             # Merge por hash_id (O(n) en vez de O(n²))
@@ -2169,16 +2054,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             last = row.get("last", 0)
 
             if modo == "system":
-                mensaje = (
-                    f"🟢 *System Buy: ${symbol} ({vehiculo};  @price: {last:.4f})*\n"
-                )
+                mensaje = f"🟢 *System Buy: ${symbol} ({vehiculo};  @price: {last:.4f})*\n"
                 mensaje += "```\n"
             elif modo == "top10":
                 score = row.get("score", 0) or 0
                 gap = (row.get("ganancia_precio", 0) or 0) * 100
-                mensaje = (
-                    f"🟢📊 *TOP Buy: ${symbol} ({vehiculo};  @price: {last:.4f})*\n"
-                )
+                mensaje = f"🟢📊 *TOP Buy: ${symbol} ({vehiculo};  @price: {last:.4f})*\n"
                 mensaje += f"*Score: {score:.1f} | Gap: {gap:.2f}%*\n"
                 mensaje += "```\n"
             elif modo == "ia":
@@ -2188,23 +2069,13 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             mensaje += f"{'Métrica':<18} {'Valor':>12}\n"
             mensaje += f"{'-' * 45}\n"
-            mensaje += (
-                f"{'Ganancia Precio'  :<18} {row.get('ganancia_precio', 0):>12.2%}\n"
-            )
-            mensaje += (
-                f"{'Ganancia Inv.'    :<18} {row.get('ganancia_inversion', 0):>12.2f}\n"
-            )
-            mensaje += (
-                f"{'Dividend Yield'   :<18} {row.get('dividend_yield', 0):>12.2%}\n"
-            )
+            mensaje += f"{'Ganancia Precio'  :<18} {row.get('ganancia_precio', 0):>12.2%}\n"
+            mensaje += f"{'Ganancia Inv.'    :<18} {row.get('ganancia_inversion', 0):>12.2f}\n"
+            mensaje += f"{'Dividend Yield'   :<18} {row.get('dividend_yield', 0):>12.2%}\n"
             mensaje += f"{'Monto Invertir'   :<18} {row.get('pinvertir', 0):>12.2f}\n"
-            mensaje += (
-                f"{'Cantidad Buy'     :<18} {row.get('cantidad_buy', 0):>12.1f}\n"
-            )
+            mensaje += f"{'Cantidad Buy'     :<18} {row.get('cantidad_buy', 0):>12.1f}\n"
             mensaje += f"{'Prec. preBuy'     :<18} {row.get('avgcost', 0):>12.4f}\n"
-            mensaje += (
-                f"{'Prec. posBuy'     :<18} {row.get('avgcost_post', 0):>12.4f}\n"
-            )
+            mensaje += f"{'Prec. posBuy'     :<18} {row.get('avgcost_post', 0):>12.4f}\n"
             mensaje += f"{'Objetivo'         :<18} {row.get('objetivo', 0):>12.4f}\n"
             mensaje += f"{'Valoracion'       :<18} {""}\n"
 
@@ -2294,16 +2165,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             if insert:
                 # Verifica que esté TRUE mostrar las compras
                 if self.MostrarOpcionMenu_enTelegram == "Buy":
-                    await self.opportunity_handler_message_buy(
-                        hash_id=hash_id, row=row, origen=origen
-                    )
+                    await self.opportunity_handler_message_buy(hash_id=hash_id, row=row, origen=origen)
         except Exception as e:
             self.logger.error(f"oportunity_handler_buy(): {e}")
 
     # Obtener oportunidades de compra desde modelo IA
-    async def evaluar_oportunidades_buy_con_IA(
-        self, df_buy=None, umbral_compra=0.65, umbral_observacion=0.35
-    ):
+    async def evaluar_oportunidades_buy_con_IA(self, df_buy=None, umbral_compra=0.65, umbral_observacion=0.35):
         """
         Sistema de dos umbrales para Buy:
         - confianza >= umbral_compra (0.65): Enviar a Telegram para comprar
@@ -2320,8 +2187,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 )
             else:
                 df_filtrado = df_merged[
-                    (df_merged["confianza"] >= umbral_min)
-                    & (df_merged["confianza"] < umbral_max)
+                    (df_merged["confianza"] >= umbral_min) & (df_merged["confianza"] < umbral_max)
                 ].copy()
                 if estado:
                     df_filtrado["estado_ia"] = estado
@@ -2333,9 +2199,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             # Sin modelo: enviar todas las oportunidades para etiquetar y ganar experiencia
             if self.IAbuy.modelo is None:
-                self.logger.info(
-                    "evaluar_oportunidades_buy_con_IA(): Sin modelo, enviando para etiquetado"
-                )
+                self.logger.info("evaluar_oportunidades_buy_con_IA(): Sin modelo, enviando para etiquetado")
                 for _, row in df_buy.iterrows():
                     await self.oportunity_handler_buy(row=row, origen="system")
                 return
@@ -2361,16 +2225,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             # Aplicar predicción IA
             df = self.IAbuy.aplanar_datos_tecnicos(df_in)
             if df is None or df.empty:
-                self.logger.warning(
-                    "evaluar_oportunidades_buy_con_IA(): df aplanado vacío"
-                )
+                self.logger.warning("evaluar_oportunidades_buy_con_IA(): df aplanado vacío")
                 return
 
             resultado = self.IAbuy.predecir_modelo(df)
             if resultado is None or resultado.empty:
-                self.logger.warning(
-                    "evaluar_oportunidades_buy_con_IA(): resultado predicción vacío"
-                )
+                self.logger.warning("evaluar_oportunidades_buy_con_IA(): resultado predicción vacío")
                 return
 
             # Merge por hash_id
@@ -2412,9 +2272,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         try:
             # Obtener todas las oportunidades del tipo (sin filtro de estado)
             # Filtraremos solo por recomendado in [1, -1] que es el indicador real de decisión
-            oportunidades, ix = self.RepositorioOportunidades.obtener_por_tipo(
-                tipo=tipo
-            )
+            oportunidades, ix = self.RepositorioOportunidades.obtener_por_tipo(tipo=tipo)
 
             registros = []
             errores_parseo = {
@@ -2467,31 +2325,23 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
                     # Extraer datos de indicadores diarios (preferencia)
                     indicadores_diaria = (
-                        indicadores.get("diaria", {})
-                        if isinstance(indicadores.get("diaria"), dict)
-                        else {}
+                        indicadores.get("diaria", {}) if isinstance(indicadores.get("diaria"), dict) else {}
                     )
 
                     # Extraer EMAs largos y cortos
                     emas_largos = (
                         indicadores_diaria.get("ema(20,50,100,200)", {})
-                        if isinstance(
-                            indicadores_diaria.get("ema(20,50,100,200)"), dict
-                        )
+                        if isinstance(indicadores_diaria.get("ema(20,50,100,200)"), dict)
                         else {}
                     )
                     emas_cortos = (
                         indicadores_diaria.get("ema(09,21,055,144)", {})
-                        if isinstance(
-                            indicadores_diaria.get("ema(09,21,055,144)"), dict
-                        )
+                        if isinstance(indicadores_diaria.get("ema(09,21,055,144)"), dict)
                         else {}
                     )
                     fibo = (
                         indicadores_diaria.get("retroceso_fibonacci", {})
-                        if isinstance(
-                            indicadores_diaria.get("retroceso_fibonacci"), dict
-                        )
+                        if isinstance(indicadores_diaria.get("retroceso_fibonacci"), dict)
                         else {}
                     )
 

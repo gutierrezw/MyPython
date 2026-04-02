@@ -525,9 +525,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             if str(orden.get("id_order")) == order_id:
                                 orden["status"] = status
                                 break
-                        self.logger.warning(
-                            f"sor(Stock): symbol={symbol} orderId={order_id} status={status}"
-                        )
+                        self.logger.warning(f"sor(Stock): symbol={symbol} orderId={order_id} status={status}")
                 except Exception as e:
                     print(f"[on_message_IBrks_websocket(sor)]: {e}")
 
@@ -1040,7 +1038,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         found, self_position = buscar_ticker(self.positions, asset)
 
                         # obtiene información de dividendos
-                        (yf_activo, datos, ind_update) = self.ts_yfinance_symbol(symbol=asset, vehiculo=self.vehiculo)
+                        yf_activo, datos, ind_update = self.ts_yfinance_symbol(symbol=asset, vehiculo=self.vehiculo)
 
                         keys_asset = values["position"]
                         position["mrkprice"] = self_position["mrkprice"]
@@ -1332,7 +1330,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     symbol = key["contractDesc"]
 
                     # obtiene información de dividendos
-                    (yf_activo, datos, ind_update) = self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
+                    yf_activo, datos, ind_update = self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
 
                     objetivo, x_open, price, empresa = 0.0, 0.0, 0.0, ""
                     sector = key["sector"] if "sector" in key else "buscar"
@@ -2521,8 +2519,9 @@ class DashMain:
                     tree.heading(key, text=cols[i])
 
                     heard.column(key, width=width, minwidth=width, anchor=tk.E)
-                    heard.heading(key, text=cols[i],
-                                  command=lambda _k=key, _i=i: sort_children_by_col(_k, False, cols[_i]))
+                    heard.heading(
+                        key, text=cols[i], command=lambda _k=key, _i=i: sort_children_by_col(_k, False, cols[_i])
+                    )
 
                 tree.tag_configure("green", background="green", foreground="white")
                 tree.tag_configure("red", background="red", foreground="white")
@@ -2671,10 +2670,10 @@ class DashMain:
                     if fh.date() != today:
                         continue
                     simbolo = t.get("symbol", "")
-                    side    = "BUY" if t.get("side", "") == "B" else "SELL"
-                    precio  = t.get("price", "")
-                    cant    = t.get("size", "")
-                    values  = ["", "", simbolo, side, "", precio, cant, "", str(fh), "", "", "", ""]
+                    side = "BUY" if t.get("side", "") == "B" else "SELL"
+                    precio = t.get("price", "")
+                    cant = t.get("size", "")
+                    values = ["", "", simbolo, side, "", precio, cant, "", str(fh), "", "", "", ""]
                     tree.insert(Stock, "end", text="{:>3.0f}".format(nro), values=values)
                     nro += 1
 
@@ -2686,12 +2685,12 @@ class DashMain:
                         continue
                     simbolo = row[ix.index("simbolo")]
                     raw_cod = row[ix.index("codigo")]
-                    codigo  = "BUY" if raw_cod == "O" else "SELL" if raw_cod == "C" else raw_cod
-                    cant    = row[ix.index("cantidad")]
-                    basico  = row[ix.index("basico")]
-                    gp      = row[ix.index("gprealizadas")]
-                    fh      = row[ix.index("fechahora")]
-                    values  = ["", "", simbolo, codigo, "", basico, cant, "", str(fh), "", "", gp, ""]
+                    codigo = "BUY" if raw_cod == "O" else "SELL" if raw_cod == "C" else raw_cod
+                    cant = row[ix.index("cantidad")]
+                    basico = row[ix.index("basico")]
+                    gp = row[ix.index("gprealizadas")]
+                    fh = row[ix.index("fechahora")]
+                    values = ["", "", simbolo, codigo, "", basico, cant, "", str(fh), "", "", gp, ""]
                     tree.insert(Crypto, "end", text="{:>3.0f}".format(nro), values=values)
                     nro += 1
             except Exception as e:
@@ -2933,7 +2932,7 @@ class DashMain:
             positions = self.PlanInversion.select_inversion(tipoin="Stock", ticket="all")
             for position in positions:
                 symbol = convierte_ticket_crypto(position["ticket"])
-                (market, ix) = self.Market.select(account="U4214563", symbol=symbol)
+                market, ix = self.Market.select(account="U4214563", symbol=symbol)
 
                 if market:
                     last = market[0][ix.index("lastDividendValue")] or 0
@@ -2987,7 +2986,7 @@ class DashMain:
 
             for position in cartera:
                 symbol = convierte_ticket_crypto(position["ticket"])
-                (market, ix) = self.Market.select(account="U4214563", symbol=symbol)
+                market, ix = self.Market.select(account="U4214563", symbol=symbol)
 
                 exdiv, rend, dividends = "", 0.0, [0] * 12
                 if market:
@@ -3048,7 +3047,7 @@ class DashMain:
 
             for position in cartera:
                 symbol = convierte_ticket_crypto(position["ticket"])
-                (market, ix) = self.Market.select(account="U4214563", symbol=symbol)
+                market, ix = self.Market.select(account="U4214563", symbol=symbol)
 
                 exdiv, rend, dividends = "", 0.0, [0] * 12
                 if market:
@@ -3362,17 +3361,27 @@ class DashMain:
 
         def treeview_Region(option=None, windows=None):
             try:
-                fixed_columns = ["País", "Symbol", "Capital", "Mkt Value", "PnL", "Retorno%", "Peso%", "Year $", "%Yield"]
+                fixed_columns = [
+                    "País",
+                    "Symbol",
+                    "Capital",
+                    "Mkt Value",
+                    "PnL",
+                    "Retorno%",
+                    "Peso%",
+                    "Year $",
+                    "%Yield",
+                ]
                 alignments = {
-                    "País":      {"width": 148, "anchor": "w"},
-                    "Symbol":    {"width": 100, "anchor": "w"},
-                    "Capital":   {"width": 90,  "anchor": "e"},
-                    "Mkt Value": {"width": 95,  "anchor": "e"},
-                    "PnL":       {"width": 88,  "anchor": "e"},
-                    "Retorno%":  {"width": 78,  "anchor": "e"},
-                    "Peso%":     {"width": 68,  "anchor": "e"},
-                    "Year $":    {"width": 80,  "anchor": "e"},
-                    "%Yield":    {"width": 74,  "anchor": "e"},
+                    "País": {"width": 148, "anchor": "w"},
+                    "Symbol": {"width": 100, "anchor": "w"},
+                    "Capital": {"width": 90, "anchor": "e"},
+                    "Mkt Value": {"width": 95, "anchor": "e"},
+                    "PnL": {"width": 88, "anchor": "e"},
+                    "Retorno%": {"width": 78, "anchor": "e"},
+                    "Peso%": {"width": 68, "anchor": "e"},
+                    "Year $": {"width": 80, "anchor": "e"},
+                    "%Yield": {"width": 74, "anchor": "e"},
                 }
                 columns = list(alignments.keys())
 
@@ -3411,66 +3420,78 @@ class DashMain:
                 total_cap_sum, total_mkt_sum, total_pnl_sum, total_div_sum = 0.0, 0.0, 0.0, 0.0
 
                 for country, activos in sorted(d_country.items()):
-                    cap_pais  = sum(a["costobase"] for a in activos)
-                    mkt_pais  = sum(a["costobase"] + a["unrealizedpnl"] for a in activos)
-                    pnl_pais  = mkt_pais - cap_pais
-                    div_pais  = sum(a.get("dividendo", 0) or 0 for a in activos)
+                    cap_pais = sum(a["costobase"] for a in activos)
+                    mkt_pais = sum(a["costobase"] + a["unrealizedpnl"] for a in activos)
+                    pnl_pais = mkt_pais - cap_pais
+                    div_pais = sum(a.get("dividendo", 0) or 0 for a in activos)
                     retorno_pais = pnl_pais / cap_pais if cap_pais > 0 else 0
-                    peso_pais    = cap_pais / total_capital_global
-                    yield_pais   = div_pais / cap_pais if cap_pais > 0 else 0
+                    peso_pais = cap_pais / total_capital_global
+                    yield_pais = div_pais / cap_pais if cap_pais > 0 else 0
 
-                    tree.insert_row(texto=country, padre=None, values=[
-                        country, "",
-                        "{:,.0f}".format(cap_pais),
-                        "{:,.0f}".format(mkt_pais),
-                        "{:+,.0f}".format(pnl_pais),
-                        "{:.2%}".format(retorno_pais),
-                        "{:.1%}".format(peso_pais),
-                        "{:,.1f}".format(div_pais),
-                        "{:.2%}".format(yield_pais),
-                    ])
+                    tree.insert_row(
+                        texto=country,
+                        padre=None,
+                        values=[
+                            country,
+                            "",
+                            "{:,.0f}".format(cap_pais),
+                            "{:,.0f}".format(mkt_pais),
+                            "{:+,.0f}".format(pnl_pais),
+                            "{:.2%}".format(retorno_pais),
+                            "{:.1%}".format(peso_pais),
+                            "{:,.1f}".format(div_pais),
+                            "{:.2%}".format(yield_pais),
+                        ],
+                    )
 
                     for activo in sorted(activos, key=lambda a: a["symbol"]):
                         symbol = activo["symbol"]
-                        cap    = activo["costobase"]
-                        mkt    = activo["costobase"] + activo["unrealizedpnl"]
-                        pnl    = activo["unrealizedpnl"]
-                        div    = activo.get("dividendo", 0) or 0
-                        retorno   = pnl / cap if cap > 0 else 0
-                        peso      = cap / total_capital_global
+                        cap = activo["costobase"]
+                        mkt = activo["costobase"] + activo["unrealizedpnl"]
+                        pnl = activo["unrealizedpnl"]
+                        div = activo.get("dividendo", 0) or 0
+                        retorno = pnl / cap if cap > 0 else 0
+                        peso = cap / total_capital_global
                         yield_pct = div / cap if cap > 0 else 0
 
                         if cap < min_base:
                             min_base, ticket = cap, symbol
 
-                        tree.insert_row(texto=None, padre=country, values=[
-                            "", symbol,
-                            "{:,.0f}".format(cap),
-                            "{:,.0f}".format(mkt),
-                            "{:+,.0f}".format(pnl),
-                            "{:.2%}".format(retorno),
-                            "{:.1%}".format(peso),
-                            "{:,.1f}".format(div),
-                            "{:.2%}".format(yield_pct),
-                        ])
+                        tree.insert_row(
+                            texto=None,
+                            padre=country,
+                            values=[
+                                "",
+                                symbol,
+                                "{:,.0f}".format(cap),
+                                "{:,.0f}".format(mkt),
+                                "{:+,.0f}".format(pnl),
+                                "{:.2%}".format(retorno),
+                                "{:.1%}".format(peso),
+                                "{:,.1f}".format(div),
+                                "{:.2%}".format(yield_pct),
+                            ],
+                        )
                         total_cap_sum += cap
                         total_mkt_sum += mkt
                         total_pnl_sum += pnl
                         total_div_sum += div
 
                 retorno_total = total_pnl_sum / total_cap_sum if total_cap_sum > 0 else 0
-                yield_total   = total_div_sum / total_cap_sum if total_cap_sum > 0 else 0
-                tree.insert_row(summary=[
-                    "",                                           # País  (vacío)
-                    "",                                           # Symbol (vacío)
-                    "{:,.0f}".format(total_cap_sum),             # Capital
-                    "{:,.0f}".format(total_mkt_sum),             # Mkt Value
-                    "{:+,.0f}".format(total_pnl_sum),            # PnL
-                    "{:.2%}".format(retorno_total),              # Retorno%
-                    "100%",                                       # Peso%
-                    "{:,.1f}".format(total_div_sum),             # Year $
-                    "{:.2%}".format(yield_total),                # %Yield
-                ])
+                yield_total = total_div_sum / total_cap_sum if total_cap_sum > 0 else 0
+                tree.insert_row(
+                    summary=[
+                        "",  # País  (vacío)
+                        "",  # Symbol (vacío)
+                        "{:,.0f}".format(total_cap_sum),  # Capital
+                        "{:,.0f}".format(total_mkt_sum),  # Mkt Value
+                        "{:+,.0f}".format(total_pnl_sum),  # PnL
+                        "{:.2%}".format(retorno_total),  # Retorno%
+                        "100%",  # Peso%
+                        "{:,.1f}".format(total_div_sum),  # Year $
+                        "{:.2%}".format(yield_total),  # %Yield
+                    ]
+                )
 
                 grafico_rendimiento_symbol(symbol=ticket, windows=windows)
             except Exception as e:
@@ -5020,10 +5041,12 @@ class DashMain:
             high_limit_gyp = _mul * limit_gyp
 
             # deuda total Stock + Crypto vs límite máximo
-            total_debit    = (DataHub.manager_GyP.get("Stock",  {}).get("Debit",    0)
-                            + DataHub.manager_GyP.get("Crypto", {}).get("Debit",    0))
-            total_debitmax = (DataHub.manager_GyP.get("Stock",  {}).get("DebitMax", 0)
-                            + DataHub.manager_GyP.get("Crypto", {}).get("DebitMax", 0))
+            total_debit = DataHub.manager_GyP.get("Stock", {}).get("Debit", 0) + DataHub.manager_GyP.get(
+                "Crypto", {}
+            ).get("Debit", 0)
+            total_debitmax = DataHub.manager_GyP.get("Stock", {}).get("DebitMax", 0) + DataHub.manager_GyP.get(
+                "Crypto", {}
+            ).get("DebitMax", 0)
 
             # update progressos
             self.GypProgress.update_values(low_limit_gyp, ganancias_dia, high_limit_gyp)

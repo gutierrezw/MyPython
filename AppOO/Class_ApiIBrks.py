@@ -281,16 +281,12 @@ class IB(IBClient):
         auth_response = self.is_authenticated()
 
         # Log the initial Info.
-        self.logger.info(
-            textwrap.dedent(
-                f"""
+        self.logger.info(textwrap.dedent(f"""
            =================
            Create Session:
            =================
            Auth Response: {auth_response}
-           """
-            )
-        )
+           """))
 
         # Finally make sure we are authenticated.   >daga2004
         # print('create_session:', auth_response)
@@ -589,17 +585,13 @@ class IB(IBClient):
                         data = {"raw_text": response.text}
 
                     self._network_error_logged = False  # reset: Gateway volvió a responder
-                    self.logger.debug(
-                        textwrap.dedent(
-                            f"""
+                    self.logger.debug(textwrap.dedent(f"""
                             ================
                             _make_request(): SUCCESS
                             ================
                             URL: {response.url}
                             Code: {status_code}
-                            """
-                        )
-                    )
+                            """))
                     return data
                 except ValueError:
                     self.logger.error(
@@ -608,9 +600,7 @@ class IB(IBClient):
                     return {"raw_text": response.text}
             else:
                 # Error HTTP
-                self.logger.error(
-                    textwrap.dedent(
-                        f"""
+                self.logger.error(textwrap.dedent(f"""
                         ================
                         _make_request(): HTTP ERROR
                         ================  
@@ -620,25 +610,19 @@ class IB(IBClient):
                         json   : {json}
                         Body   : {response.text[:500]}
                         headers: {headers}
-                        """
-                    )
-                )
+                        """))
                 return {}
 
         except requests.exceptions.RequestException as e:
             if not self._network_error_logged:
-                self.logger.error(
-                    textwrap.dedent(
-                        f"""
+                self.logger.error(textwrap.dedent(f"""
                     ================
                     _make_request(): NETWORK EXCEPTION
                     ================
                     URL: {url}
                     Type: {req_type}
                     Error: {e}
-                    """
-                    )
-                )
+                    """))
                 self._network_error_logged = True
             else:
                 self.logger.debug(f"_make_request(): NETWORK EXCEPTION (suprimido) | {url}")

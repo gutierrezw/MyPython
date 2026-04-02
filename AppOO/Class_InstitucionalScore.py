@@ -12,7 +12,6 @@ from Modulos_python import (
 )
 from Modulos_Mysql import MarketScreen
 
-
 _logger = logging.getLogger("InstitucionalScore")
 _EDGAR_HEADERS = {"User-Agent": "InversionesWildaga Research Bot (gutierrez.madrid.wilmer@example.com)"}
 _EDGAR_IDX_URLS = [
@@ -54,8 +53,8 @@ class InstitucionalScore:
             top_holder = str(holders.iloc[0]["Holder"]) if holders_count > 0 else None
             top_shares = int(holders.iloc[0]["Shares"]) if holders_count > 0 else None
 
-            analyst_rec   = info.get("recommendationKey")
-            analyst_mean  = _safe_float(info.get("recommendationMean"))
+            analyst_rec = info.get("recommendationKey")
+            analyst_mean = _safe_float(info.get("recommendationMean"))
             analyst_count = info.get("numberOfAnalystOpinions")
 
             return {
@@ -110,14 +109,26 @@ def sync_institutional(account) -> dict:
         score = round(inst_pct, 4) if inst_pct is not None else None
 
         campos = [
-            "inst_ownership_pct", "insider_ownership_pct", "inst_top_holder",
-            "inst_top_holder_shares", "inst_score", "inst_funds",
-            "analyst_rec", "analyst_mean", "analyst_count",
+            "inst_ownership_pct",
+            "insider_ownership_pct",
+            "inst_top_holder",
+            "inst_top_holder_shares",
+            "inst_score",
+            "inst_funds",
+            "analyst_rec",
+            "analyst_mean",
+            "analyst_count",
         ]
         valores = [
-            inst_pct, raw.get("insider_ownership_pct"), raw.get("inst_top_holder"),
-            raw.get("inst_top_holder_shares"), score, raw.get("inst_funds"),
-            raw.get("analyst_rec"), raw.get("analyst_mean"), raw.get("analyst_count"),
+            inst_pct,
+            raw.get("insider_ownership_pct"),
+            raw.get("inst_top_holder"),
+            raw.get("inst_top_holder_shares"),
+            score,
+            raw.get("inst_funds"),
+            raw.get("analyst_rec"),
+            raw.get("analyst_mean"),
+            raw.get("analyst_count"),
         ]
         ok = inst.market.update(upd=campos, val=valores, symbol=symbol, account=account)
         if ok:
@@ -143,7 +154,7 @@ def _parse_edgar_13f_funds() -> list:
                 if idx < 2:
                     continue
                 company_name = line[:idx].strip()
-                rest = line[idx + len("13F-HR"):].strip().split()
+                rest = line[idx + len("13F-HR") :].strip().split()
                 if not rest:
                     continue
                 cik = rest[0].strip().zfill(10)
@@ -188,17 +199,13 @@ def sync_13f_scores(account: str) -> dict:
 
     for symbol, mkt in inst_fields.items():
         stats = fh_stats.get(symbol, {})
-        fh_count        = stats.get("fh_count", 0)
-        fh_total_value  = stats.get("fh_total_value")
-        fh_buy_ratio    = stats.get("fh_buy_ratio", 0.0)
+        fh_count = stats.get("fh_count", 0)
+        fh_total_value = stats.get("fh_total_value")
+        fh_buy_ratio = stats.get("fh_buy_ratio", 0.0)
         fh_total_shares = stats.get("fh_total_shares", 0)
 
         float_shares = mkt.get("floatShares") or mkt.get("sharesOutstanding")
-        fh_ownership_pct = (
-            round(fh_total_shares / float_shares, 4)
-            if float_shares and fh_total_shares
-            else None
-        )
+        fh_ownership_pct = round(fh_total_shares / float_shares, 4) if float_shares and fh_total_shares else None
 
         has_ownership = fh_ownership_pct is not None
         has_13f = fh_count > 0
@@ -208,33 +215,50 @@ def sync_13f_scores(account: str) -> dict:
             continue
 
         new_entrants = stats.get("new_entrants") or 0
-        full_exits   = stats.get("full_exits") or 0
-        flujo_neto   = max(-1.0, min(1.0, (new_entrants - full_exits) / max(fh_count, 1)))
+        full_exits = stats.get("full_exits") or 0
+        flujo_neto = max(-1.0, min(1.0, (new_entrants - full_exits) / max(fh_count, 1)))
 
         score = round(
             (fh_ownership_pct or 0.0) * 0.40
             + math.log(max(fh_count, 1)) * 0.20
             + fh_buy_ratio * 0.20
-            + flujo_neto   * 0.20,
+            + flujo_neto * 0.20,
             4,
         )
-        fh_sell_ratio      = stats.get("fh_sell_ratio")
-        fh_call_shares    = stats.get("fh_call_shares")
-        fh_put_shares     = stats.get("fh_put_shares")
+        fh_sell_ratio = stats.get("fh_sell_ratio")
+        fh_call_shares = stats.get("fh_call_shares")
+        fh_put_shares = stats.get("fh_put_shares")
         delta_call_shares = stats.get("delta_call_shares")
-        delta_put_shares  = stats.get("delta_put_shares")
+        delta_put_shares = stats.get("delta_put_shares")
         ok = inst.market.update(
-            upd=["inst_score", "fh_count", "fh_total_value", "fh_buy_ratio", "fh_sell_ratio",
-                 "fh_call_shares", "fh_put_shares", "new_entrants", "full_exits",
-                 "delta_call_shares", "delta_put_shares", "inst_ownership_pct"],
-            val=[score, fh_count if fh_count else None, fh_total_value,
-                 fh_buy_ratio if fh_buy_ratio else None,
-                 fh_sell_ratio if fh_sell_ratio else None,
-                 fh_call_shares, fh_put_shares,
-                 new_entrants if new_entrants else None,
-                 full_exits if full_exits else None,
-                 delta_call_shares, delta_put_shares,
-                 fh_ownership_pct],
+            upd=[
+                "inst_score",
+                "fh_count",
+                "fh_total_value",
+                "fh_buy_ratio",
+                "fh_sell_ratio",
+                "fh_call_shares",
+                "fh_put_shares",
+                "new_entrants",
+                "full_exits",
+                "delta_call_shares",
+                "delta_put_shares",
+                "inst_ownership_pct",
+            ],
+            val=[
+                score,
+                fh_count if fh_count else None,
+                fh_total_value,
+                fh_buy_ratio if fh_buy_ratio else None,
+                fh_sell_ratio if fh_sell_ratio else None,
+                fh_call_shares,
+                fh_put_shares,
+                new_entrants if new_entrants else None,
+                full_exits if full_exits else None,
+                delta_call_shares,
+                delta_put_shares,
+                fh_ownership_pct,
+            ],
             symbol=symbol,
             account=account,
         )

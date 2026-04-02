@@ -3,6 +3,7 @@
 test_pbr_no_regression.py
 Verificar que PBR sigue extrayendo deuda correctamente después de agregar conceptos VALE
 """
+
 import sys
 from pathlib import Path
 
@@ -11,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from valuation_xbrl_api import get_zip_files
 from valuation_arelle_engine import run_valuation
 
-print("="*80)
+print("=" * 80)
 print("🧪 TEST DE NO REGRESIÓN - PBR (Petrobras)")
-print("="*80)
+print("=" * 80)
 
 # Get PBR filings
 ticker_dir = "EDGAR/PBR_EDGAR_Files"
@@ -27,16 +28,16 @@ result = run_valuation(
     ticker="PBR",
     price=13.50,  # Current market price approx
     company_name="Petróleo Brasileiro S.A. - Petrobras",
-    company_type="foreign"
+    company_type="foreign",
 )
 
 if result:
     fundamentals = result.get("fundamentals", {})
 
     # Balance Sheet
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("📊 BALANCE SHEET - DEUDA")
-    print("="*80)
+    print("=" * 80)
 
     balance = fundamentals.get("balance_sheet", {})
 
@@ -52,9 +53,9 @@ if result:
     print(f"  Net Debt:             {fmt(balance.get('net_debt'))}")
 
     # Leverage Ratios
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("📈 RATIOS DE APALANCAMIENTO")
-    print("="*80)
+    print("=" * 80)
 
     leverage = fundamentals.get("leverage_ratios", {})
 
@@ -66,27 +67,27 @@ if result:
     print(f"  Net Debt-to-Equity:   {fmt_pct(leverage.get('net_debt_to_equity'))}")
 
     # Enterprise Value
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("💰 ENTERPRISE VALUE")
-    print("="*80)
+    print("=" * 80)
 
     ev = fundamentals.get("enterprise_value", {})
 
     print(f"\n  Market Cap:           {fmt(ev.get('market_cap'))}")
     print(f"  Enterprise Value:     {fmt(ev.get('enterprise_value'))}")
 
-    ev_ocf = ev.get('ev_to_ocf')
+    ev_ocf = ev.get("ev_to_ocf")
     ev_ocf_str = f"{ev_ocf:.2f}x" if ev_ocf else "None"
     print(f"  EV/Operating CF:      {ev_ocf_str}")
 
     # Validación
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("✅ VALIDACIÓN DE NO REGRESIÓN")
-    print("="*80)
+    print("=" * 80)
 
-    total_debt = balance.get('total_debt')
-    short_term = balance.get('short_term_debt')
-    long_term = balance.get('long_term_debt')
+    total_debt = balance.get("total_debt")
+    short_term = balance.get("short_term_debt")
+    long_term = balance.get("long_term_debt")
 
     if total_debt and total_debt > 0:
         print(f"\n✅ Total Debt extraída correctamente: ${total_debt:,.0f}")
@@ -109,17 +110,17 @@ if result:
             else:
                 print(f"⚠️  Discrepancia: Total={total_debt:,.0f} vs Sum={expected_total:,.0f}")
 
-        d_to_e = leverage.get('debt_to_equity')
+        d_to_e = leverage.get("debt_to_equity")
         if d_to_e:
             print(f"✅ Debt-to-Equity calculado: {d_to_e:.2f}%")
 
-        ev_val = ev.get('enterprise_value')
+        ev_val = ev.get("enterprise_value")
         if ev_val:
             print(f"✅ Enterprise Value calculado: ${ev_val:,.0f}")
 
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("🎉 PBR: NO REGRESIÓN - TODO FUNCIONA CORRECTAMENTE")
-        print("="*80)
+        print("=" * 80)
     else:
         print("\n❌ REGRESIÓN DETECTADA: No se extrajeron métricas de deuda de PBR")
         print("⚠️  Los cambios para VALE rompieron la extracción de PBR")
@@ -127,6 +128,6 @@ if result:
 else:
     print("\n❌ Analysis returned None")
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("✅ Test de no regresión completo")
-print("="*80)
+print("=" * 80)

@@ -5,6 +5,7 @@ Solo actualiza si el valor está vacío o es NULL.
 
 Correr:  python AppTest/run_fetch_shares_cartera.py
 """
+
 import sys
 import os
 
@@ -46,8 +47,7 @@ def main():
                 conn2 = mkt._conectar(tabla="update.market")
                 c2 = conn2.cursor()
                 c2.execute(
-                    "UPDATE market SET sharesOutstanding=%s, floatShares=%s "
-                    "WHERE symbol=%s AND account=%s",
+                    "UPDATE market SET sharesOutstanding=%s, floatShares=%s " "WHERE symbol=%s AND account=%s",
                     (new_so, new_fs, symbol, ACCOUNT),
                 )
                 conn2.commit()

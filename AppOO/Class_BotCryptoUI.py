@@ -337,10 +337,10 @@ class TradingBotSpot:
         data = df if df is not None else self.df
         if data is None or "ema_fast" not in data.columns or "ema_slow" not in data.columns:
             return "RANGE"
-        ema_fast = data["ema_fast"].iloc[-1]   # EMA9
-        ema_slow = data["ema_slow"].iloc[-1]   # EMA21
-        ema100   = data["ema100"].iloc[-1] if "ema100" in data.columns else ema_slow
-        price    = data["Close"].iloc[-1]
+        ema_fast = data["ema_fast"].iloc[-1]  # EMA9
+        ema_slow = data["ema_slow"].iloc[-1]  # EMA21
+        ema100 = data["ema100"].iloc[-1] if "ema100" in data.columns else ema_slow
+        price = data["Close"].iloc[-1]
         # BULL: precio > EMA9 > EMA21 > EMA100 (alineación alcista completa)
         if price > ema_fast and ema_fast > ema_slow and ema_slow > ema100:
             return "BULL"
@@ -765,10 +765,14 @@ class OrderManager:
         if self.repositorio and self.account:
             try:
                 from datetime import datetime
+
                 timestamp = datetime.fromtimestamp(msg["T"] / 1000.0)
                 values = {"status": status, "stampSubmit": timestamp}
                 self.repositorio.update_order_trader(
-                    account=self.account, values=values, symbol=symbol, orderid=str(order_id),
+                    account=self.account,
+                    values=values,
+                    symbol=symbol,
+                    orderid=str(order_id),
                 )
             except Exception as e:
                 print(f"[OrderManager.on_execution_report() DB sync]: {e}")
@@ -1679,11 +1683,11 @@ class BotCryptoUI:
         """Construye risk_config desde self.config. Única fuente de verdad para todos los bots."""
         return {
             "risk_per_trade": self.config.get("risk_per_trade", 0.02),
-            "tp1_pct":        self.config.get("tp1_pct",        0.015),
-            "tp1_atr_mult":   self.config.get("tp1_atr_mult",   1.5),
-            "stop_loss_pct":  self.config.get("stop_loss_pct",  0.02),
-            "tp1_size":       self.config.get("tp1_size",       0.33),
-            "trail_mult":     self.config.get("trail_mult",     1.5),
+            "tp1_pct": self.config.get("tp1_pct", 0.015),
+            "tp1_atr_mult": self.config.get("tp1_atr_mult", 1.5),
+            "stop_loss_pct": self.config.get("stop_loss_pct", 0.02),
+            "tp1_size": self.config.get("tp1_size", 0.33),
+            "trail_mult": self.config.get("trail_mult", 1.5),
             "cooldown_hours": self.config.get("cooldown_hours", 4),
         }
 
@@ -1823,7 +1827,9 @@ class BotCryptoUI:
         update = diaria_book_performance(account=self.ACCOUNT, vehiculo=self.VEHICULO, proces=t_wait)
         if update:
             data = read_json_tmp(_FILE)
-            data[_KEY] = ultimo_cierre.strftime("%Y-%m-%d") if hasattr(ultimo_cierre, "strftime") else str(ultimo_cierre)
+            data[_KEY] = (
+                ultimo_cierre.strftime("%Y-%m-%d") if hasattr(ultimo_cierre, "strftime") else str(ultimo_cierre)
+            )
             write_json_tmp(_FILE, data)
             proceso_update_performance(account=self.ACCOUNT, vehiculo=self.VEHICULO)
 
@@ -2802,7 +2808,8 @@ class BotCryptoUI:
                                 "intent": order.get("type", side),
                                 "entry_price": entry,
                                 "sl_price": bot.state.get("stop_loss"),
-                                "tp1_target": bot.state.get("tp1_target") or (round(entry * (1 + tp1_pct), 6) if entry else None),
+                                "tp1_target": bot.state.get("tp1_target")
+                                or (round(entry * (1 + tp1_pct), 6) if entry else None),
                                 "tp2_target": round(entry * (1 + tp2_pct), 6) if entry and tp2_pct else None,
                                 "pnl_pct": pnl_pct,
                                 "tp1_done": bot.state.get("tp1_done"),
@@ -3677,7 +3684,9 @@ class BotCryptoUI:
                         self._cargar_posicion_existente(bot, symbol)
 
                         pre_bots[symbol] = bot
-                        self.logger.warning(f"_trabajo_pesado: {symbol} OK | df={len(bot.df) if bot.df is not None else 0}")
+                        self.logger.warning(
+                            f"_trabajo_pesado: {symbol} OK | df={len(bot.df) if bot.df is not None else 0}"
+                        )
                     except Exception as e:
                         self.logger.error(f"{symbol}: Error preparando bot: {e}")
 
@@ -4213,12 +4222,14 @@ class BotCryptoUI:
         try:
             # 1. Cerrar posición si existe (cancel SL + market sell)
             if tiene_posicion and self.bot_manager:
+
                 def _cerrar_posicion():
                     try:
                         self.bot_manager._execute_exit(bot, reason="MANUAL")
                         self.logger.warning(f"X {symbol}: Posición cerrada (MANUAL)")
                     except Exception as e:
                         self.logger.error(f"X {symbol}: Error cerrando posición: {e}")
+
                 threading.Thread(target=_cerrar_posicion, daemon=True).start()
 
             # 2. Detener bot
@@ -5396,14 +5407,14 @@ class BotCryptoUI:
                 # Verificar régimen actual — si BEAR, salir inmediatamente
                 regime = bot._check_market_regime() if bot.df is not None else "RANGE"
                 if regime == "BEAR":
-                    self.logger.warning(
-                        f"📥 {symbol}: Estado restaurado pero régimen BEAR → EXIT inmediato"
-                    )
+                    self.logger.warning(f"📥 {symbol}: Estado restaurado pero régimen BEAR → EXIT inmediato")
+
                     def _exit_bear_saved():
                         try:
                             self.bot_manager._execute_exit(bot, reason="BEAR_LOAD")
                         except Exception as e:
                             self.logger.error(f"{symbol}: Error en EXIT por régimen BEAR (saved): {e}")
+
                     threading.Thread(target=_exit_bear_saved, daemon=True).start()
                     return
                 notional = bot.state.get("remaining_qty", 0) * bot.state["entry_price"]
@@ -5517,14 +5528,14 @@ class BotCryptoUI:
             # Verificar régimen actual — si BEAR, salir inmediatamente
             regime = self.bot_manager._check_market_regime(bot.df) if self.bot_manager else "RANGE"
             if regime == "BEAR":
-                self.logger.warning(
-                    f"📥 {symbol}: Posición existente detectada pero régimen BEAR → EXIT inmediato"
-                )
+                self.logger.warning(f"📥 {symbol}: Posición existente detectada pero régimen BEAR → EXIT inmediato")
+
                 def _exit_bear():
                     try:
                         self.bot_manager._execute_exit(bot, reason="BEAR_LOAD")
                     except Exception as e:
                         self.logger.error(f"{symbol}: Error en EXIT por régimen BEAR: {e}")
+
                 threading.Thread(target=_exit_bear, daemon=True).start()
                 return
 

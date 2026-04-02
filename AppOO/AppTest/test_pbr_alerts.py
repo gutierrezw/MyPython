@@ -2,6 +2,7 @@
 """
 Test de alertas mejoradas para PBR
 """
+
 import sys
 import json
 from pathlib import Path
@@ -11,27 +12,21 @@ sys.path.insert(0, str(Path(__file__).parent))
 from valuation_xbrl_api import get_zip_files
 from valuation_arelle_engine import run_valuation
 
-print("="*80)
+print("=" * 80)
 print("🧪 TEST DE ALERTAS MEJORADAS - PBR")
-print("="*80)
+print("=" * 80)
 
 # Get PBR filings
 ticker_dir = "EDGAR/PBR_EDGAR_Files"
 file_list = get_zip_files(ticker_dir, display_logs=False)
 
 # Run valuation
-result = run_valuation(
-    file_list=file_list,
-    ticker="PBR",
-    price=14.85,
-    company_name="Petrobras",
-    company_type="foreign"
-)
+result = run_valuation(file_list=file_list, ticker="PBR", price=14.85, company_name="Petrobras", company_type="foreign")
 
 if result:
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("⚠️ SISTEMA DE ALERTAS")
-    print("="*80)
+    print("=" * 80)
 
     alerts = result.get("alerts", {})
     risk = result.get("risk_assessment", {})
@@ -54,7 +49,7 @@ if result:
         for alert in warnings:
             print(f"\n  {alert.get('type')}")
             print(f"  {alert.get('message')}")
-            if 'recommendation' in alert:
+            if "recommendation" in alert:
                 print(f"  Recomendación: {alert.get('recommendation')}")
     else:
         print("\n✅ No hay advertencias")
@@ -68,9 +63,9 @@ if result:
             print(f"  {alert.get('message')}")
 
     # Overall risk
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("📊 EVALUACIÓN DE RIESGO")
-    print("="*80)
+    print("=" * 80)
     print(f"\n  Nivel: {risk.get('level')}")
     print(f"  {risk.get('message')}")
     print(f"\n  Critical: {risk.get('critical_count')}")
@@ -78,9 +73,9 @@ if result:
     print(f"  Info: {risk.get('info_count')}")
 
     # Métricas clave
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("📈 MÉTRICAS CLAVE")
-    print("="*80)
+    print("=" * 80)
 
     per_share = result.get("per_share_metrics", {})
     fundamentals = result.get("fundamentals", {})
@@ -104,6 +99,6 @@ if result:
         payout_ni = (div_ps / eps) * 100
         print(f"  ⚠️ Payout (EPS):      {payout_ni:.1f}% (no aplicable para capital intensivo)")
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("✅ Test complete")
-print("="*80)
+print("=" * 80)

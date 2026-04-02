@@ -4,9 +4,7 @@
 # ================================================
 
 
-def generate_alerts(
-    ttm: dict, vals: dict, reit_metrics: dict, dividend_analysis: dict = None
-):
+def generate_alerts(ttm: dict, vals: dict, reit_metrics: dict, dividend_analysis: dict = None):
     """
     Genera alertas automáticas basadas en métricas clave.
 

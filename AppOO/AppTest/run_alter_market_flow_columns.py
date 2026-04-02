@@ -3,6 +3,7 @@ run_alter_market_flow_columns.py
 Agrega las 4 columnas de señales de flujo institucional a la tabla market.
 Ejecutar una sola vez.
 """
+
 import sys
 import os
 
@@ -15,10 +16,10 @@ conn = mkt._conectar(tabla="select.market")
 c = conn.cursor()
 
 nuevas = [
-    ("new_entrants",       "INT DEFAULT NULL"),
-    ("full_exits",         "INT DEFAULT NULL"),
-    ("delta_call_shares",  "BIGINT DEFAULT NULL"),
-    ("delta_put_shares",   "BIGINT DEFAULT NULL"),
+    ("new_entrants", "INT DEFAULT NULL"),
+    ("full_exits", "INT DEFAULT NULL"),
+    ("delta_call_shares", "BIGINT DEFAULT NULL"),
+    ("delta_put_shares", "BIGINT DEFAULT NULL"),
 ]
 
 c.execute("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='market'")

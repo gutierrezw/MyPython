@@ -3552,4 +3552,3 @@ class system_status(tk.Frame):
     # ============================================================================
     def _documentar_estructura(self, nombre_estructura="DataHub"):
         documentar_estructura(nombre_estructura, self.system, {"bgcolor": self.bgcolor})
-

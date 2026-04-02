@@ -6,6 +6,7 @@ Diagnóstico exhaustivo de conceptos de Operating Cash Flow en FMC
 FMC Corporation es US-GAAP domestic, por lo que debería usar conceptos estándar.
 Este script identifica qué concepto específico usa FMC.
 """
+
 import sys
 from pathlib import Path
 
@@ -13,9 +14,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from valuation_xbrl_api import load_filing, get_fact_value
 
-print("="*80)
+print("=" * 80)
 print("🔍 DIAGNÓSTICO DE OPERATING CASH FLOW - FMC")
-print("="*80)
+print("=" * 80)
 
 # Cargar filing más reciente de FMC
 fmc_file = "EDGAR/FMC_EDGAR_Files/10K_Filings/fmc-20241231.htm"
@@ -29,18 +30,18 @@ except Exception as e:
     sys.exit(1)
 
 # Keywords para buscar conceptos de cash flow
-keywords = ['cash', 'operating', 'activities']
+keywords = ["cash", "operating", "activities"]
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🔎 BÚSQUEDA DE CONCEPTOS DE CASH FLOW")
-print("="*80)
+print("=" * 80)
 
 cash_flow_concepts = {}
 
 for name in filing.facts.keys():
     name_lower = name.lower()
     # Buscar conceptos que contengan cash AND operating
-    if ('cash' in name_lower or 'cashflow' in name_lower) and 'operat' in name_lower:
+    if ("cash" in name_lower or "cashflow" in name_lower) and "operat" in name_lower:
         cash_flow_concepts[name] = filing.facts[name]
 
 print(f"\n✅ Encontrados {len(cash_flow_concepts)} conceptos de Operating Cash Flow")
@@ -51,9 +52,9 @@ us_gaap_concepts = []
 other_concepts = []
 
 for name in cash_flow_concepts.keys():
-    if name.startswith('fmc:'):
+    if name.startswith("fmc:"):
         fmc_concepts.append(name)
-    elif name.startswith('us-gaap:'):
+    elif name.startswith("us-gaap:"):
         us_gaap_concepts.append(name)
     else:
         other_concepts.append(name)
@@ -63,6 +64,7 @@ print(f"  • fmc: {len(fmc_concepts)} conceptos")
 print(f"  • us-gaap: {len(us_gaap_concepts)} conceptos")
 print(f"  • otros: {len(other_concepts)} conceptos")
 
+
 # Función para analizar un concepto
 def analyze_concept(concept_name, facts):
     """Analiza un concepto y muestra sus características"""
@@ -71,7 +73,7 @@ def analyze_concept(concept_name, facts):
 
     for i, fact in enumerate(facts[:3]):  # Mostrar máximo 3 facts
         # Contexto
-        ctx_id = getattr(fact, 'contextID', 'N/A')
+        ctx_id = getattr(fact, "contextID", "N/A")
         ctx = filing.contexts.get(ctx_id)
 
         if ctx:
@@ -90,13 +92,13 @@ def analyze_concept(concept_name, facts):
         value = get_fact_value(fact)
 
         # Unidades y decimals
-        unit_id = getattr(fact, 'unitID', 'N/A')
-        decimals = getattr(fact, 'decimals', 'N/A')
+        unit_id = getattr(fact, "unitID", "N/A")
+        decimals = getattr(fact, "decimals", "N/A")
 
         # Dimensiones (members)
         members = []
-        if ctx and 'dims' in ctx:
-            members = list(ctx['dims'].keys())
+        if ctx and "dims" in ctx:
+            members = list(ctx["dims"].keys())
 
         print(f"  └─ Fact {i+1}/{len(facts)}:")
         print(f"      • Valor: {value}")
@@ -105,37 +107,38 @@ def analyze_concept(concept_name, facts):
         if members:
             print(f"      • Dimensiones: {members}")
 
+
 # Mostrar conceptos US-GAAP
 if us_gaap_concepts:
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("⭐ CONCEPTOS US-GAAP (ESTÁNDAR)")
-    print("="*80)
+    print("=" * 80)
 
     for concept in sorted(us_gaap_concepts):
         analyze_concept(concept, cash_flow_concepts[concept])
 
 # Mostrar conceptos FMC custom
 if fmc_concepts:
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔸 CONCEPTOS CUSTOM DE FMC (fmc:)")
-    print("="*80)
+    print("=" * 80)
 
     for concept in sorted(fmc_concepts):
         analyze_concept(concept, cash_flow_concepts[concept])
 
 # Mostrar otros conceptos
 if other_concepts:
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("📋 OTROS CONCEPTOS")
-    print("="*80)
+    print("=" * 80)
 
     for concept in sorted(other_concepts):
         analyze_concept(concept, cash_flow_concepts[concept])
 
 # Buscar conceptos específicos que build_ttm() está buscando
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("🎯 CONCEPTOS QUE build_ttm() BUSCA ACTUALMENTE")
-print("="*80)
+print("=" * 80)
 
 current_seeking = [
     "us-gaap:NetCashProvidedByUsedInOperatingActivities",
@@ -158,7 +161,7 @@ if not any(concept in cash_flow_concepts for concept in current_seeking):
     all_cash_operating = []
     for name in filing.facts.keys():
         name_lower = name.lower()
-        if 'cash' in name_lower and 'operat' in name_lower:
+        if "cash" in name_lower and "operat" in name_lower:
             all_cash_operating.append(name)
 
     if all_cash_operating:
@@ -174,9 +177,9 @@ if not any(concept in cash_flow_concepts for concept in current_seeking):
                     print(f"    └─ Valor: {value}")
 
 # Conclusiones
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("💡 CONCLUSIONES Y RECOMENDACIONES")
-print("="*80)
+print("=" * 80)
 
 if us_gaap_concepts:
     print(f"\n✅ FMC usa {len(us_gaap_concepts)} conceptos US-GAAP estándar")
@@ -197,9 +200,9 @@ if not us_gaap_concepts and not fmc_concepts:
     print("   2. FMC reporta cash flow de forma diferente")
     print("   3. El valor está en un contexto con dimensiones especiales")
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("✅ Diagnóstico completo")
-print("="*80)
+print("=" * 80)
 print("\n💡 PRÓXIMOS PASOS:")
 print("  1. Revisar conceptos identificados arriba")
 print("  2. Agregar conceptos a valuation_xbrl_api.py líneas 463-475")
