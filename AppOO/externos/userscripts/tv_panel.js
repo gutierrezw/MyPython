@@ -18,7 +18,7 @@
     let lastPosicion = null;
 
     // ── TV native drawings ─────────────────────────────────────────────────
-    let _tvShapes = { zona: null, avgline: null };
+    let _tvShapes = { zona: null, avgline: null, objline: null };
     let _lastDrawKey = "";   // evitar redibujar si los valores no cambiaron
     let _dec = 2;            // decimales precio: 2=Stock/FCI, 4=Crypto
     // Tipos de shapes que crea este script — usados para limpieza por tipo
@@ -76,7 +76,8 @@
         const t2 = Math.floor(Date.now() / 1000);
 
         // Evitar redibujar si los valores no cambiaron
-        const drawKey = `${avgcost}|${minP}|${maxP}|${t1}`;
+        const objetivo = posicion.objetivo || 0;
+        const drawKey = `${avgcost}|${minP}|${maxP}|${t1}|${objetivo}`;
         if (drawKey === _lastDrawKey) return;
         _lastDrawKey = drawKey;
 
@@ -120,6 +121,26 @@
             } catch (_) {}
         }
 
+        // Línea objetivo azul
+        if (objetivo) {
+            try {
+                _tvShapes.objline = ac.createShape(
+                    { price: objetivo },
+                    {
+                        shape: "horizontal_line",
+                        lock: false,
+                        overrides: {
+                            linecolor: "#2196F3",
+                            linewidth: 2,
+                            linestyle: 1,
+                            showLabel: true,
+                            text: `obj $${objetivo.toFixed(_dec)}`,
+                            horzLabelsAlign: "left",
+                        },
+                    }
+                );
+            } catch (_) {}
+        }
     }
 
     // ── Heartbeat ──────────────────────────────────────────────────────────
