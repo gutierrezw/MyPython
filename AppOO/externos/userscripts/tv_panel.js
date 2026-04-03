@@ -21,6 +21,7 @@
     let _tvShapes = { zona: null, avgline: null };
     let _lastDrawKey = "";   // evitar redibujar si los valores no cambiaron
     let _dec = 2;            // decimales precio: 2=Stock/FCI, 4=Crypto
+    const _SS_KEY = "app_tv_shape_ids";
 
     function tvChart() {
         try {
@@ -29,15 +30,29 @@
         } catch (_) { return null; }
     }
 
+    function _saveShapeIds() {
+        try { sessionStorage.setItem(_SS_KEY, JSON.stringify(_tvShapes)); } catch (_) {}
+    }
+
+    function _loadShapeIds() {
+        try {
+            const saved = JSON.parse(sessionStorage.getItem(_SS_KEY) || "{}");
+            if (saved.zona)   _tvShapes.zona   = saved.zona;
+            if (saved.avgline) _tvShapes.avgline = saved.avgline;
+        } catch (_) {}
+    }
+
     function clearTvShapes() {
         const ac = tvChart();
         if (!ac) return;
+        _loadShapeIds();   // recuperar IDs de sesión anterior si los hay
         ["zona", "avgline"].forEach(k => {
             if (_tvShapes[k]) {
                 try { ac.removeEntity(_tvShapes[k]); } catch (_) {}
                 _tvShapes[k] = null;
             }
         });
+        try { sessionStorage.removeItem(_SS_KEY); } catch (_) {}
     }
 
     function drawTvShapes(posicion, lotes) {
@@ -105,6 +120,8 @@
                 );
             } catch (_) {}
         }
+
+        _saveShapeIds();   // persistir IDs para poder limpiarlos al recargar
     }
 
     // ── Heartbeat ──────────────────────────────────────────────────────────
