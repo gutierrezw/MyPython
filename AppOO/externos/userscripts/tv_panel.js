@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TradingView — App Panel
 // @namespace    http://tampermonkey.net/
-// @version      1.7
+// @version      1.8
 // @match        https://www.tradingview.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -20,6 +20,7 @@
     // ── TV native drawings ─────────────────────────────────────────────────
     let _tvShapes = { zona: null, avgline: null };
     let _lastDrawKey = "";   // evitar redibujar si los valores no cambiaron
+    let _dec = 2;            // decimales precio: 2=Stock/FCI, 4=Crypto
 
     function tvChart() {
         try {
@@ -43,15 +44,18 @@
         const ac = tvChart();
         if (!ac) return;
 
+        // Solo lotes de ganancia (posición abierta actual) — los lost distorsionan fechas y precios
+        const gainLotes = lotes.filter(l => (l.gyp == null || l.gyp >= 0));
+
         const avgcost = posicion.avgcost || 0;
-        const prices = lotes.map(l => l.precio || 0).filter(p => p > 0);
+        const prices = gainLotes.map(l => l.precio || 0).filter(p => p > 0);
         if (!prices.length && !avgcost) return;
 
         const minP = prices.length ? Math.min(...prices) : avgcost;
         const maxP = prices.length ? Math.max(...prices) : avgcost;
 
-        // Fecha del lote más antiguo → epoch segundos
-        const fechas = lotes
+        // Fecha del lote más antiguo (solo gains) → epoch segundos
+        const fechas = gainLotes
             .map(l => l.fechahora || l.fecha || "")
             .filter(f => f)
             .map(f => Math.floor(new Date(f.replace(" ", "T")).getTime() / 1000))
@@ -97,7 +101,7 @@
                             linewidth: 2,
                             linestyle: 1,
                             showLabel: true,
-                            text: `base $${avgcost.toFixed(2)}`,
+                            text: `base $${avgcost.toFixed(_dec)}`,
                         },
                     }
                 );
@@ -143,6 +147,9 @@
     function buildPanel(data) {
         const pos = data.posicion || {};
         const lotes = data.lotes || [];
+        const vehiculo = data.vehiculo || "Stock";
+        const isCrypto = vehiculo === "Crypto";
+        _dec = isCrypto ? 4 : 2;
 
         const avgcost = pos.avgcost || 0;
         const last = pos.last || 0;
@@ -176,7 +183,7 @@
         const filaLast = `
             <tr style="background:#1a3a6b">
               <td colspan="2" style="padding:3px 5px;color:#d1d4dc;font-weight:bold">last</td>
-              <td style="text-align:right;padding:3px 5px;color:cyan">${fmt(last)}</td>
+              <td style="text-align:right;padding:3px 5px;color:cyan">${fmt(last, _dec)}</td>
               <td style="text-align:right;padding:3px 5px;color:#aaa">${fmts(position)}</td>
               <td style="text-align:right;padding:3px 5px;color:#aaa">${fmt(position)}</td>
               <td style="text-align:right;padding:3px 5px;color:${gColor}">${fmts(gyp_total)}</td>
@@ -213,7 +220,7 @@
             return `<tr style="background:#152a1e">
               <td style="color:#aaa;padding:2px 5px">${i + 1}</td>
               <td style="color:#aaa;padding:2px 5px;font-size:10px;white-space:nowrap">${l.fechahora || l.fecha || ""}</td>
-              <td style="text-align:right;padding:2px 5px">${fmt(l.precio)}</td>
+              <td style="text-align:right;padding:2px 5px">${fmt(l.precio, _dec)}</td>
               <td style="text-align:right;padding:2px 5px;color:#aaa">${fmts(l.cantidad)}</td>
               <td style="text-align:right;padding:2px 5px;color:#aaa">${fmt(acumCant)}</td>
               <td style="text-align:right;padding:2px 5px;color:${ac}">${fmts(acumGyp)}</td>
@@ -224,43 +231,47 @@
             </tr>`;
         }).join("");
 
+        const td1 = `style="color:#787b86;padding:2px 0;width:55%"`;
+        const td2 = `style="text-align:right;padding:2px 0"`;
+
         return `
         <div style="font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:1px;
                     border-bottom:1px solid #2a2e39;padding-bottom:4px;margin-bottom:6px">Posición</div>
         <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
-          <tr><td style="color:#787b86;padding:2px 0">Precio medio</td><td style="text-align:right">${fmt(avgcost)}</td></tr>
-          <tr><td style="color:#787b86;padding:2px 0">Cantidad</td><td style="text-align:right">${fmt(position, 4)}</td></tr>
-          <tr><td style="color:#787b86;padding:2px 0">Costo base</td><td style="text-align:right">${fmt(costo)}</td></tr>
-          <tr><td style="color:#787b86;padding:2px 0">Precio actual</td><td id="tv-last" style="text-align:right;color:cyan">${fmt(last)}</td></tr>
-          <tr><td style="color:#787b86;padding:2px 0">G/P</td>
-              <td id="tv-gyp" style="text-align:right;color:${gColor}">${fmts(gyp_total)} (${fmtsp(roi_total)})</td></tr>
+          <tr><td ${td1}>Precio medio</td><td ${td2}>${fmt(avgcost, _dec)}</td></tr>
+          <tr><td ${td1}>Cantidad</td><td ${td2}>${fmt(position, 4)}</td></tr>
+          <tr><td ${td1}>Costo base</td><td ${td2}>${fmt(costo)}</td></tr>
+          <tr><td ${td1}>Precio actual</td><td id="tv-last" ${td2} style="padding:2px 0;color:cyan">${fmt(last, _dec)}</td></tr>
+          <tr><td ${td1}>G/P</td>
+              <td id="tv-gyp" ${td2} style="padding:2px 0;color:${gColor}">${fmts(gyp_total)} (${fmtsp(roi_total)})</td></tr>
         </table>
 
+        ${!isCrypto ? `
         <div style="font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:1px;
                     border-bottom:1px solid #2a2e39;padding-bottom:4px;margin-bottom:6px">Consenso</div>
         <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
-          <tr><td style="color:#787b86;padding:2px 0">Rotación</td><td style="text-align:right">${pos.rotacion || "—"}</td></tr>
-          <tr><td style="color:#787b86;padding:2px 0">Inst Señal</td><td style="text-align:right">${pos.senal_inst || "—"}</td></tr>
-          <tr><td style="color:#787b86;padding:2px 0">Analistas</td><td style="text-align:right">${pos.senal_ana || "—"}</td></tr>
-          <tr><td style="color:#787b86;padding:2px 0">IA Signal</td><td style="text-align:right">${pos.ia_signal || "—"}</td></tr>
+          <tr><td ${td1}>Rotación</td><td ${td2}>${pos.rotacion || "—"}</td></tr>
+          <tr><td ${td1}>Inst Señal</td><td ${td2}>${pos.senal_inst || "—"}</td></tr>
+          <tr><td ${td1}>Analistas</td><td ${td2}>${pos.senal_ana || "—"}</td></tr>
+          <tr><td ${td1}>IA Signal</td><td ${td2}>${pos.ia_signal || "—"}</td></tr>
           ${pos.consenso_label ? `<tr style="border-top:1px solid #2a2e39">
-            <td style="color:#787b86;padding:4px 0 2px">Consenso</td>
-            <td style="text-align:right;padding:4px 0 2px;font-weight:bold">
+            <td ${td1} style="color:#787b86;padding:4px 0 2px">Consenso</td>
+            <td style="padding:4px 0 2px;font-weight:bold">
               ${pos.consenso_label}
               ${pos.consenso_suma ? `<span style="color:#787b86;font-size:11px;margin-left:6px">${pos.consenso_suma}</span>` : ""}
             </td>
           </tr>` : ""}
-        </table>
+        </table>` : ""}
 
         <div style="font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:1px;
                     border-bottom:1px solid #2a2e39;padding-bottom:4px;margin-bottom:6px">Estrategia</div>
         <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
-          <tr><td style="color:#787b86;padding:2px 0">Precio entrada</td><td style="text-align:right">${fmt(avgcost)}</td></tr>
-          <tr><td style="color:#787b86;padding:2px 0">Objetivo</td>
-              <td style="text-align:right;color:#00FF88">${fmt(objetivo)} (${fmtsp(obj_pct)})</td></tr>
-          <tr><td style="color:#787b86;padding:2px 0">Ref. SL</td>
-              <td style="text-align:right;color:#FF6060">${fmt(sl)} (${fmtsp(sl_pct)})</td></tr>
-          <tr><td style="color:#787b86;padding:2px 0">R/R</td><td style="text-align:right">1:${rr.toFixed(1)}</td></tr>
+          <tr><td ${td1}>Precio entrada</td><td ${td2}>${fmt(avgcost, _dec)}</td></tr>
+          <tr><td ${td1}>Objetivo</td>
+              <td ${td2} style="padding:2px 0;color:#00FF88">${fmt(objetivo, _dec)} (${fmtsp(obj_pct)})</td></tr>
+          <tr><td ${td1}>Ref. SL</td>
+              <td ${td2} style="padding:2px 0;color:#FF6060">${fmt(sl, _dec)} (${fmtsp(sl_pct)})</td></tr>
+          <tr><td ${td1}>R/R</td><td ${td2}>1:${rr.toFixed(1)}</td></tr>
         </table>
 
         <div style="font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:1px;
@@ -294,7 +305,7 @@
         panelEl = document.createElement("div");
         panelEl.id = "app-tv-panel";
         Object.assign(panelEl.style, {
-            position: "fixed", top: "80px", left: "50px", width: "560px",
+            position: "fixed", top: "120px", left: "50px", width: "560px",
             background: "#1e2130", color: "#d1d4dc",
             borderRadius: "6px", border: "1px solid #2a2e39",
             fontFamily: "Arial,sans-serif", fontSize: "12px",
@@ -404,7 +415,21 @@
                             try {
                                 const data = JSON.parse(r2.responseText);
                                 if (data && data.posicion && Object.keys(data.posicion).length) {
-                                    upsertPanel(buildPanel(data), data.posicion, data.lotes || [], sym);
+                                    // Obtener precio live antes de renderizar para que nunca sea stale
+                                    GM_xmlhttpRequest({
+                                        method: "GET",
+                                        url: `http://localhost:${PORT}/price?symbol=${sym}`,
+                                        onload: (rp) => {
+                                            try {
+                                                const pd = JSON.parse(rp.responseText);
+                                                if (pd.last) data.posicion.last = pd.last;
+                                            } catch (_) {}
+                                            upsertPanel(buildPanel(data), data.posicion, data.lotes || [], sym);
+                                        },
+                                        onerror: () => {
+                                            upsertPanel(buildPanel(data), data.posicion, data.lotes || [], sym);
+                                        },
+                                    });
                                 } else {
                                     if (panelEl) panelEl.style.display = "none";
                                     clearTvShapes();
@@ -440,7 +465,7 @@
                     // actualizar celdas sin redibujar el panel completo
                     const elLast = document.getElementById("tv-last");
                     const elGyp  = document.getElementById("tv-gyp");
-                    if (elLast) elLast.textContent = fmt(last);
+                    if (elLast) elLast.textContent = fmt(last, _dec);
                     if (elGyp)  { elGyp.textContent = `${fmts(gyp)} (${fmtsp(roi)})`; elGyp.style.color = color; }
                     lastPosicion.last = last;
                 } catch (_) {}
