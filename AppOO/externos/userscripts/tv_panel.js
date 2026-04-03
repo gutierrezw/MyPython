@@ -135,7 +135,7 @@
                             linestyle: 1,
                             showLabel: true,
                             text: `obj $${objetivo.toFixed(_dec)}`,
-                            horzLabelsAlign: "left",
+                            textcolor: "#2196F3",
                         },
                     }
                 );
