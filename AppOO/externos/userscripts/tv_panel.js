@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         TradingView — App Panel
 // @namespace    http://tampermonkey.net/
-// @version      1.5
+// @version      1.7
 // @match        https://www.tradingview.com/*
 // @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
 // @connect      localhost
 // ==/UserScript==
 
@@ -21,8 +22,10 @@
     let _lastDrawKey = "";   // evitar redibujar si los valores no cambiaron
 
     function tvChart() {
-        try { return window.TradingViewApi && TradingViewApi.activeChart(); }
-        catch (_) { return null; }
+        try {
+            const api = unsafeWindow.TradingViewApi;
+            return api ? api.activeChart() : null;
+        } catch (_) { return null; }
     }
 
     function clearTvShapes() {
@@ -252,6 +255,7 @@
         <div style="font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:1px;
                     border-bottom:1px solid #2a2e39;padding-bottom:4px;margin-bottom:6px">Estrategia</div>
         <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
+          <tr><td style="color:#787b86;padding:2px 0">Precio entrada</td><td style="text-align:right">${fmt(avgcost)}</td></tr>
           <tr><td style="color:#787b86;padding:2px 0">Objetivo</td>
               <td style="text-align:right;color:#00FF88">${fmt(objetivo)} (${fmtsp(obj_pct)})</td></tr>
           <tr><td style="color:#787b86;padding:2px 0">Ref. SL</td>
@@ -290,7 +294,7 @@
         panelEl = document.createElement("div");
         panelEl.id = "app-tv-panel";
         Object.assign(panelEl.style, {
-            position: "fixed", top: "50px", left: "50px", width: "560px",
+            position: "fixed", top: "80px", left: "50px", width: "560px",
             background: "#1e2130", color: "#d1d4dc",
             borderRadius: "6px", border: "1px solid #2a2e39",
             fontFamily: "Arial,sans-serif", fontSize: "12px",
