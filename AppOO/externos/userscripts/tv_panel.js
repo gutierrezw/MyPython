@@ -44,18 +44,20 @@
         const ac = tvChart();
         if (!ac) return;
 
-        // Solo lotes de ganancia (posición abierta actual) — los lost distorsionan fechas y precios
+        // Precios: solo gain lotes para evitar distorsión de lost con precios altos
+        // Si no hay gains (todo en pérdida), usar todos los lotes como fallback
         const gainLotes = lotes.filter(l => (l.gyp == null || l.gyp >= 0));
+        const priceLotes = gainLotes.length ? gainLotes : lotes;
 
         const avgcost = posicion.avgcost || 0;
-        const prices = gainLotes.map(l => l.precio || 0).filter(p => p > 0);
+        const prices = priceLotes.map(l => l.precio || 0).filter(p => p > 0);
         if (!prices.length && !avgcost) return;
 
         const minP = prices.length ? Math.min(...prices) : avgcost;
         const maxP = prices.length ? Math.max(...prices) : avgcost;
 
-        // Fecha del lote más antiguo (solo gains) → epoch segundos
-        const fechas = gainLotes
+        // Fecha más antigua de TODOS los lotes (gain + lost) → cubre el historial completo
+        const fechas = lotes
             .map(l => l.fechahora || l.fecha || "")
             .filter(f => f)
             .map(f => Math.floor(new Date(f.replace(" ", "T")).getTime() / 1000))
