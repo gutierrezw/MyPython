@@ -3520,10 +3520,17 @@ class WidgetVehiculo(TickerInfo):
         lotes = []
         if found and position:
             last = position.get("mrkprice") or position.get("last") or 0
+            _costo_base = position.get("costobase") or position.get("costo_base") or 0
+            _position = position.get("position") or 0
+            _avgcost = (
+                position.get("avgcost")
+                or position.get("avgCost")
+                or (_costo_base / _position if _costo_base and _position else 0)
+            )
             posicion = {
-                "avgcost": position.get("avgcost") or position.get("avgCost") or 0,
-                "costo_base": position.get("costobase") or position.get("costo_base") or 0,
-                "position": position.get("position") or 0,
+                "avgcost": _avgcost,
+                "costo_base": _costo_base,
+                "position": _position,
                 "last": last,
                 "objetivo": position.get("objetivo") or 0,
                 "stop_loss": position.get("stop_loss") or position.get("sl") or 0,
