@@ -44,13 +44,9 @@
         const ac = tvChart();
         if (!ac) return;
 
-        // Precios: solo gain lotes para evitar distorsión de lost con precios altos
-        // Si no hay gains (todo en pérdida), usar todos los lotes como fallback
-        const gainLotes = lotes.filter(l => (l.gyp == null || l.gyp >= 0));
-        const priceLotes = gainLotes.length ? gainLotes : lotes;
-
+        // Precios y fechas: todos los lotes (gain + lost) — zona cubre el historial completo
         const avgcost = posicion.avgcost || 0;
-        const prices = priceLotes.map(l => l.precio || 0).filter(p => p > 0);
+        const prices = lotes.map(l => l.precio || 0).filter(p => p > 0);
         if (!prices.length && !avgcost) return;
 
         const minP = prices.length ? Math.min(...prices) : avgcost;
