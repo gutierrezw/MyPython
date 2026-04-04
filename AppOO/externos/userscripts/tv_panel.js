@@ -36,7 +36,7 @@
         if (!ac) return;
 
         // 1. Eliminar por referencia (shapes creados en esta sesión)
-        ["zona", "avgline"].forEach(k => {
+        ["zona", "avgline", "objline"].forEach(k => {
             if (_tvShapes[k]) {
                 try { ac.removeEntity(_tvShapes[k]); } catch (_) {}
                 _tvShapes[k] = null;
@@ -427,7 +427,13 @@
         panelEl.style.display = "block";
         if (titleEl && symbol) titleEl.textContent = `${symbol} — Análisis`;
         lastPosicion = posicion;
-        setTimeout(() => drawTvShapes(posicion, lotes), 800);
+        // Retry hasta que TV API esté lista (necesario tras navegación/recarga)
+        let _attempts = 0;
+        const _tryDraw = () => {
+            if (tvChart()) { drawTvShapes(posicion, lotes); }
+            else if (_attempts++ < 10) { setTimeout(_tryDraw, 1000); }
+        };
+        setTimeout(_tryDraw, 800);
     }
 
     // ── Loop principal ─────────────────────────────────────────────────────
