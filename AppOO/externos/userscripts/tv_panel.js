@@ -136,8 +136,12 @@
         GM_xmlhttpRequest({ method: "GET", url: `http://localhost:${PORT}/ping`, onerror: () => { } });
     }
 
-    // ── Leer símbolo actual de TV desde la URL ─────────────────────────────
+    // ── Leer símbolo actual de TV — API primero, URL como fallback ───────
     function tvSymbol() {
+        try {
+            const sym = tvChart().symbol();
+            if (sym) return sym.split(":").pop();
+        } catch (_) {}
         const m = window.location.href.match(/[?&]symbol=([^&]+)/);
         return m ? decodeURIComponent(m[1]).split(":").pop() : "";
     }
