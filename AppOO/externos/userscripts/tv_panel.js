@@ -136,12 +136,8 @@
         GM_xmlhttpRequest({ method: "GET", url: `http://localhost:${PORT}/ping`, onerror: () => { } });
     }
 
-    // ── Leer símbolo actual de TV — API primero, URL como fallback ───────
+    // ── Leer símbolo actual de TV desde la URL ─────────────────────────────
     function tvSymbol() {
-        try {
-            const sym = tvChart().symbol();
-            if (sym) return sym.split(":").pop();
-        } catch (_) {}
         const m = window.location.href.match(/[?&]symbol=([^&]+)/);
         return m ? decodeURIComponent(m[1]).split(":").pop() : "";
     }
@@ -153,27 +149,20 @@
         }, 2000);
     }
 
-    // ── Guardar layout TV antes de cambiar símbolo ────────────────────────
-    function tvSave() {
-        try {
-            document.dispatchEvent(new KeyboardEvent("keydown", {
-                key: "s", ctrlKey: true, bubbles: true, cancelable: true
-            }));
-        } catch (_) {}
-    }
-
-    // ── Navegar a nuevo símbolo sin recargar página (preserva timeframe y layout)
+    // ── Navegar a nuevo símbolo preservando timeframe ─────────────────────
     function navegarSi(symbol) {
         if (!symbol || symbol === tvSymbol()) return;
         const prefix = (symbol.includes("USDT") || symbol.includes("BTC")) ? "BINANCE:" : "";
-        tvSave();
-        setTimeout(() => {
-            try {
-                tvChart().setSymbol(`${prefix}${symbol}`);
-            } catch (_) {
-                window.location.href = `https://www.tradingview.com/chart/?symbol=${prefix}${symbol}`;
-            }
-        }, 300);
+        // Leer intervalo desde API TV (más confiable que la URL)
+        let interval = "";
+        try {
+            const res = tvChart().getResolution();
+            if (res) interval = `&interval=${res}`;
+        } catch (_) {
+            const m = window.location.href.match(/[?&]interval=([^&]+)/);
+            if (m) interval = `&interval=${m[1]}`;
+        }
+        window.location.href = `https://www.tradingview.com/chart/?symbol=${prefix}${symbol}${interval}`;
     }
 
     // Auto-scale al cargar la página
@@ -453,7 +442,7 @@
                     const cambia = cur && cur !== tvSymbol();
                     navegarSi(cur);
                     if (cambia) autoScalePanes();
-                    const sym = cur || tvSymbol();  // cur es la fuente de verdad del servidor
+                    const sym = tvSymbol() || cur;
                     if (!sym) return;
 
                     GM_xmlhttpRequest({
