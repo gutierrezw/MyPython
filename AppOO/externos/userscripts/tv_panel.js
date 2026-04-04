@@ -21,9 +21,6 @@
     let _tvShapes = { zona: null, avgline: null, objline: null };
     let _lastDrawKey = "";   // evitar redibujar si los valores no cambiaron
     let _dec = 2;            // decimales precio: 2=Stock/FCI, 4=Crypto
-    // Tipos de shapes que crea este script — usados para limpieza por tipo
-    const _OUR_SHAPES = new Set(["horizontal_line", "rectangle"]);
-
     function tvChart() {
         try {
             const api = unsafeWindow.TradingViewApi;
@@ -43,15 +40,6 @@
             }
         });
 
-        // 2. Eliminar por tipo — cubre shapes que quedaron de sesiones anteriores
-        //    aunque TV les haya asignado nuevos IDs al recargar
-        try {
-            (ac.getAllShapes() || []).forEach(s => {
-                if (_OUR_SHAPES.has(s.name)) {
-                    try { ac.removeEntity(s.id); } catch (_) {}
-                }
-            });
-        } catch (_) {}
     }
 
     function drawTvShapes(posicion, lotes) {
@@ -161,13 +149,19 @@
         }, 2000);
     }
 
-    // ── Navegar a nuevo símbolo preservando timeframe e intervalo ─────────
+    // ── Navegar a nuevo símbolo preservando timeframe ─────────────────────
     function navegarSi(symbol) {
         if (!symbol || symbol === tvSymbol()) return;
         const prefix = (symbol.includes("USDT") || symbol.includes("BTC")) ? "BINANCE:" : "";
-        // Preservar intervalo actual de la URL (ej: &interval=W)
-        const mInterval = window.location.href.match(/[?&]interval=([^&]+)/);
-        const interval = mInterval ? `&interval=${mInterval[1]}` : "";
+        // Leer intervalo desde API TV (más confiable que la URL)
+        let interval = "";
+        try {
+            const res = tvChart().getResolution();
+            if (res) interval = `&interval=${res}`;
+        } catch (_) {
+            const m = window.location.href.match(/[?&]interval=([^&]+)/);
+            if (m) interval = `&interval=${m[1]}`;
+        }
         window.location.href = `https://www.tradingview.com/chart/?symbol=${prefix}${symbol}${interval}`;
     }
 
