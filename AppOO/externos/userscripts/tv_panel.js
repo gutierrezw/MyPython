@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TradingView — App Panel
 // @namespace    http://tampermonkey.net/
-// @version      1.8
+// @version      1.9
 // @match        https://www.tradingview.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -32,14 +32,21 @@
         const ac = tvChart();
         if (!ac) return;
 
-        // 1. Eliminar por referencia (shapes creados en esta sesión)
-        ["zona", "avgline", "objline"].forEach(k => {
-            if (_tvShapes[k]) {
-                try { ac.removeEntity(_tvShapes[k]); } catch (_) {}
-                _tvShapes[k] = null;
-            }
-        });
+        // Eliminar todos los shapes nuestros — por color/texto para cubrir sesiones anteriores
+        try {
+            (ac.getAllShapes() || []).forEach(s => {
+                try {
+                    const p = ac.getShapeById(s.id).getProperties();
+                    const esNuestro =
+                        (s.name === "rectangle"       && p.backgroundColor === "rgba(200,170,0,0.12)") ||
+                        (s.name === "horizontal_line" && p.linecolor === "#FFD700") ||
+                        (s.name === "horizontal_line" && p.linecolor === "#2196F3");
+                    if (esNuestro) ac.removeEntity(s.id);
+                } catch (_) {}
+            });
+        } catch (_) {}
 
+        ["zona", "avgline", "objline"].forEach(k => { _tvShapes[k] = null; });
     }
 
     function drawTvShapes(posicion, lotes) {
@@ -103,6 +110,7 @@
                             linestyle: 1,
                             showLabel: true,
                             text: `base $${avgcost.toFixed(_dec)}`,
+                            textcolor: "#FFD700",
                         },
                     }
                 );
@@ -149,6 +157,15 @@
         }, 2000);
     }
 
+    // ── Guardar layout TV antes de navegar (evita mensaje "perderás cambios")
+    function tvSave() {
+        try {
+            unsafeWindow.document.dispatchEvent(new KeyboardEvent("keydown", {
+                key: "s", ctrlKey: true, bubbles: true, cancelable: true
+            }));
+        } catch (_) {}
+    }
+
     // ── Navegar a nuevo símbolo preservando timeframe ─────────────────────
     function navegarSi(symbol) {
         if (!symbol || symbol === tvSymbol()) return;
@@ -162,7 +179,10 @@
             const m = window.location.href.match(/[?&]interval=([^&]+)/);
             if (m) interval = `&interval=${m[1]}`;
         }
-        window.location.href = `https://www.tradingview.com/chart/?symbol=${prefix}${symbol}${interval}`;
+        tvSave();
+        setTimeout(() => {
+            window.location.href = `https://www.tradingview.com/chart/?symbol=${prefix}${symbol}${interval}`;
+        }, 300);
     }
 
     // Auto-scale al cargar la página
