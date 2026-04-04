@@ -149,14 +149,23 @@
         }, 2000);
     }
 
+    // ── Guardar layout TV antes de cambiar símbolo ────────────────────────
+    function tvSave() {
+        try {
+            document.dispatchEvent(new KeyboardEvent("keydown", {
+                key: "s", ctrlKey: true, bubbles: true, cancelable: true
+            }));
+        } catch (_) {}
+    }
+
     // ── Navegar a nuevo símbolo sin recargar página (preserva timeframe y layout)
     function navegarSi(symbol) {
         if (!symbol || symbol === tvSymbol()) return;
         const prefix = (symbol.includes("USDT") || symbol.includes("BTC")) ? "BINANCE:" : "";
         try {
-            tvChart().setSymbol(`${prefix}${symbol}`);
+            tvSave();  // guardar cambios pendientes antes de cambiar símbolo
+            setTimeout(() => tvChart().setSymbol(`${prefix}${symbol}`), 300);
         } catch (_) {
-            // Fallback solo si la API no está disponible
             window.location.href = `https://www.tradingview.com/chart/?symbol=${prefix}${symbol}`;
         }
     }
