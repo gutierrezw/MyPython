@@ -451,7 +451,7 @@
                     const cambia = cur && cur !== tvSymbol();
                     navegarSi(cur);
                     if (cambia) autoScalePanes();
-                    const sym = tvSymbol() || cur;
+                    const sym = cur || tvSymbol();  // cur es la fuente de verdad del servidor
                     if (!sym) return;
 
                     GM_xmlhttpRequest({
