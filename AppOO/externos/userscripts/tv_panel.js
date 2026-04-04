@@ -161,11 +161,14 @@
         }, 2000);
     }
 
-    // ── Navegar a nuevo símbolo sin abrir pestaña nueva ────────────────────
+    // ── Navegar a nuevo símbolo preservando timeframe e intervalo ─────────
     function navegarSi(symbol) {
         if (!symbol || symbol === tvSymbol()) return;
         const prefix = (symbol.includes("USDT") || symbol.includes("BTC")) ? "BINANCE:" : "";
-        window.location.href = `https://www.tradingview.com/chart/?symbol=${prefix}${symbol}`;
+        // Preservar intervalo actual de la URL (ej: &interval=W)
+        const mInterval = window.location.href.match(/[?&]interval=([^&]+)/);
+        const interval = mInterval ? `&interval=${mInterval[1]}` : "";
+        window.location.href = `https://www.tradingview.com/chart/?symbol=${prefix}${symbol}${interval}`;
     }
 
     // Auto-scale al cargar la página
