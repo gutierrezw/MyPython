@@ -166,12 +166,14 @@
     function navegarSi(symbol) {
         if (!symbol || symbol === tvSymbol()) return;
         const prefix = (symbol.includes("USDT") || symbol.includes("BTC")) ? "BINANCE:" : "";
-        try {
-            tvSave();  // guardar cambios pendientes antes de cambiar símbolo
-            setTimeout(() => tvChart().setSymbol(`${prefix}${symbol}`), 300);
-        } catch (_) {
-            window.location.href = `https://www.tradingview.com/chart/?symbol=${prefix}${symbol}`;
-        }
+        tvSave();
+        setTimeout(() => {
+            try {
+                tvChart().setSymbol(`${prefix}${symbol}`);
+            } catch (_) {
+                window.location.href = `https://www.tradingview.com/chart/?symbol=${prefix}${symbol}`;
+            }
+        }, 300);
     }
 
     // Auto-scale al cargar la página
