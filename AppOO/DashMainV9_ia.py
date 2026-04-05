@@ -1974,7 +1974,7 @@ class DashMain:
         self.nb.add(self.win8, text="Crowfonding    ", state="disabled")
         self.nb.add(self.win2, text="Screener       ")
         self.nb.add(self.win3, text="Gestión        ")
-        self.nb.add(self.win9, text="Finance        ")
+        self.nb.add(self.win9, text="FinanceArs     ")
         self.nb.add(self.win5, text="System         ")
 
         # frames de Gráficos y figuras principales

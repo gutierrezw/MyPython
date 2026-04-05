@@ -4321,15 +4321,22 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         finally:
             conn.close()
 
-    def get_kpis(self, date_from: str, date_to: str, account_id: int | None = None) -> dict:
+    @staticmethod
+    def _ids_clause(account_ids: list[int] | None) -> tuple[str, list]:
+        """Helper: genera cláusula WHERE y params para filtro por lista de account_ids."""
+        if not account_ids:
+            return "", []
+        placeholders = ",".join(["%s"] * len(account_ids))
+        return f"AND t.account_id IN ({placeholders})", list(account_ids)
+
+    def get_kpis(self, date_from: str, date_to: str, account_ids: list[int] | None = None) -> dict:
         """
         Retorna KPIs del período para moneda ARS:
           ingresos, gastos, ing_usdt, gas_usdt, total_txns.
+        account_ids: None=todas, []=ninguna, [1,2,...]=filtro.
         """
-        account_filter = "AND t.account_id = %s" if account_id else ""
-        params = [date_from, date_to]
-        if account_id:
-            params.append(account_id)
+        clause, extra = self._ids_clause(account_ids)
+        params = [date_from, date_to] + extra
 
         conn = self._conectar("fin_transactions.kpis")
         try:
@@ -4342,7 +4349,7 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                        COALESCE(SUM(CASE WHEN t.type='expense' THEN t.amount_usdt ELSE 0 END), 0),
                        COUNT(*)
                    FROM fin_transactions t
-                   WHERE t.date BETWEEN %s AND %s {account_filter}
+                   WHERE t.date BETWEEN %s AND %s {clause}
                      AND t.currency = 'ARS'""",
                 params,
             )
@@ -4362,15 +4369,13 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         finally:
             conn.close()
 
-    def get_categories_expense(self, date_from: str, date_to: str, account_id: int | None = None) -> list[dict]:
+    def get_categories_expense(self, date_from: str, date_to: str, account_ids: list[int] | None = None) -> list[dict]:
         """
         Retorna gastos agrupados por categoría para el período.
         Resultado: [{"name": str, "total": float, "pct": float}, ...]
         """
-        account_filter = "AND t.account_id = %s" if account_id else ""
-        params = [date_from, date_to]
-        if account_id:
-            params.append(account_id)
+        clause, extra = self._ids_clause(account_ids)
+        params = [date_from, date_to] + extra
 
         conn = self._conectar("fin_transactions.categories")
         try:
@@ -4382,7 +4387,7 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                    FROM fin_transactions t
                    LEFT JOIN fin_categories c ON c.id = t.category_id
                    WHERE t.type = 'expense'
-                     AND t.date BETWEEN %s AND %s {account_filter}
+                     AND t.date BETWEEN %s AND %s {clause}
                      AND t.currency = 'ARS'
                    GROUP BY c.name
                    ORDER BY total DESC
@@ -4399,50 +4404,187 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             conn.close()
 
     def get_transactions(
-        self, date_from: str, date_to: str, account_id: int | None = None, limit: int = 200
+        self, date_from: str, date_to: str, account_ids: list[int] | None = None, limit: int = 200
     ) -> list[dict]:
         """
         Retorna últimas transacciones del período.
         Resultado: [{"date", "type", "amount", "currency", "description", "category", "account"}, ...]
         """
-        account_filter = "AND t.account_id = %s" if account_id else ""
-        params = [date_from, date_to]
-        if account_id:
-            params.append(account_id)
-        params.append(limit)
+        clause, extra = self._ids_clause(account_ids)
+        params = [date_from, date_to] + extra + [limit]
 
         conn = self._conectar("fin_transactions.select")
         try:
             cursor = conn.cursor()
             cursor.execute(
                 f"""SELECT
-                       t.date, t.type, t.amount, t.currency,
+                       t.id, t.date, t.type, t.amount, t.currency,
                        COALESCE(t.description, t.raw_description),
                        COALESCE(c.name, 'Sin categoría'),
-                       CONCAT(b.name, ' — ', a.name)
+                       t.category_id,
+                       CONCAT(a.name,
+                              IF(a.account_number_last4 IS NOT NULL,
+                                 CONCAT(' ****', a.account_number_last4), ''))
                    FROM fin_transactions t
                    LEFT JOIN fin_categories c ON c.id = t.category_id
                    LEFT JOIN fin_accounts   a ON a.id = t.account_id
                    LEFT JOIN fin_banks      b ON b.id = a.bank_id
-                   WHERE t.date BETWEEN %s AND %s {account_filter}
+                   WHERE t.date BETWEEN %s AND %s {clause}
                    ORDER BY t.date DESC
                    LIMIT %s""",
                 params,
             )
             return [
                 {
-                    "date": str(r[0]),
-                    "type": r[1],
-                    "amount": float(r[2]),
-                    "currency": r[3],
-                    "description": r[4],
-                    "category": r[5],
-                    "account": r[6],
+                    "txn_id": r[0],
+                    "date": str(r[1]),
+                    "type": r[2],
+                    "amount": float(r[3]),
+                    "currency": r[4],
+                    "description": r[5],
+                    "category": r[6],
+                    "category_id": r[7],
+                    "account": r[8],
                 }
                 for r in cursor.fetchall()
             ]
         except (Exception, connect.Error) as e:
             print(f"[Mysql:: FinanceScreen.get_transactions()]: {e}")
             return []
+        finally:
+            conn.close()
+
+    def get_categories(self) -> list[tuple]:
+        """Retorna todas las categorías activas: [(id, name), ...]."""
+        conn = self._conectar("fin_categories.select")
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name FROM fin_categories ORDER BY name")
+            return cursor.fetchall()
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.get_categories()]: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def update_txn_category(self, txn_id: int, category_id: int | None) -> bool:
+        """Actualiza la categoría de una transacción. Retorna True si tuvo efecto."""
+        conn = self._conectar("fin_transactions.update")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE fin_transactions SET category_id=%s, classified_by='manual' WHERE id=%s",
+                (category_id, txn_id),
+            )
+            conn.commit()
+            return cursor.rowcount == 1
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.update_txn_category()]: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def save_rule(self, pattern: str, match_type: str, category_id: int, priority: int = 50) -> bool:
+        """
+        Inserta o actualiza una regla en fin_import_rules (creada por el usuario).
+        priority=50 → reglas de usuario tienen mayor precedencia que las del sistema (100).
+        Luego aplica retroactivamente la regla a todas las transacciones sin categoría
+        que coincidan, para que el aprendizaje tenga efecto inmediato en el historial.
+        Retorna True si se insertó o actualizó.
+        """
+        import re as _re
+
+        conn = self._conectar("fin_import_rules.upsert")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO fin_import_rules
+                       (pattern, match_type, category_id, priority, created_by)
+                   VALUES (%s, %s, %s, %s, 'user')
+                   ON DUPLICATE KEY UPDATE
+                       category_id = VALUES(category_id),
+                       priority    = VALUES(priority),
+                       is_active   = 1,
+                       created_by  = 'user'""",
+                (pattern.strip(), match_type, category_id, priority),
+            )
+            conn.commit()
+            inserted = cursor.rowcount >= 1
+
+            # ── aplicación retroactiva ────────────────────────────────────────
+            # Cargar txns sin categoría
+            cursor.execute(
+                "SELECT id, COALESCE(description, raw_description) FROM fin_transactions WHERE category_id IS NULL"
+            )
+            uncategorized = cursor.fetchall()
+
+            p = pattern.strip()
+            p_upper = p.upper()
+            matched_ids = []
+            for txn_id, desc in uncategorized:
+                if not desc:
+                    continue
+                d = desc.upper()
+                hit = False
+                if match_type == "exact":
+                    hit = d == p_upper
+                elif match_type == "contains":
+                    hit = p_upper in d
+                elif match_type == "startswith":
+                    hit = d.startswith(p_upper)
+                elif match_type == "regex":
+                    hit = bool(_re.search(p, desc, _re.IGNORECASE))
+                if hit:
+                    matched_ids.append(txn_id)
+
+            if matched_ids:
+                placeholders = ",".join(["%s"] * len(matched_ids))
+                cursor.execute(
+                    f"UPDATE fin_transactions SET category_id=%s, classified_by='rule' "
+                    f"WHERE id IN ({placeholders})",
+                    [category_id] + matched_ids,
+                )
+                conn.commit()
+
+            return inserted
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.save_rule()]: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def save_rule_count_retro(self, pattern: str, match_type: str) -> int:
+        """
+        Cuenta cuántas transacciones sin categoría coincidirían con el patrón.
+        Útil para mostrar un preview en el popup antes de confirmar.
+        """
+        import re as _re
+
+        conn = self._conectar("fin_import_rules.preview")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, COALESCE(description, raw_description) FROM fin_transactions WHERE category_id IS NULL"
+            )
+            rows = cursor.fetchall()
+            p = pattern.strip()
+            p_upper = p.upper()
+            count = 0
+            for _, desc in rows:
+                if not desc:
+                    continue
+                d = desc.upper()
+                if match_type == "exact":
+                    count += d == p_upper
+                elif match_type == "contains":
+                    count += p_upper in d
+                elif match_type == "startswith":
+                    count += d.startswith(p_upper)
+                elif match_type == "regex":
+                    count += bool(_re.search(p, desc, _re.IGNORECASE))
+            return count
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.save_rule_count_retro()]: {e}")
+            return 0
         finally:
             conn.close()
