@@ -451,17 +451,43 @@ class ClassAgenteIA:
     def Agente_LtvControl(self):
         try:
             params = self._load_params("Crypto")
-            if not params:
-                self.logger.warning("Agente_LtvControl: sin parameters en sesion Crypto → SKIP")
-                return
-            lconfig = params.get("ltv")
-            if not lconfig:
-                self.logger.warning("Agente_LtvControl: sin bloque 'ltv' en parameters → SKIP")
-                return
+            lconfig = (params or {}).get("ltv", {})
+
             svc = ServiciosCrypto()
             analisis = svc.ltv_check_and_adjust(lconfig)
             if not analisis:
                 self.logger.warning("Agente_LtvControl: sin préstamos activos")
+                return
+
+            # Siempre sincronizar DataHub — independiente de si hay lconfig o no
+            total_col = sum(i["collateral_usd"] for i in analisis)
+            total_deuda = sum(i["loan_usd"] for i in analisis)
+
+            # capital_neto = earn balance de activos en garantía - deuda
+            # misma base que _seccion_deuda en AnalisisCrypto (earn_spot_balances)
+            try:
+                earn_balances = svc.earn_spot_balances()
+                earn_map = {b["asset"]: b.get("usdt_value", 0.0) for b in earn_balances}
+                col_assets = {i["collateralCoin"] for i in analisis}
+                capital_earn_col = sum(earn_map.get(a, 0.0) for a in col_assets)
+            except Exception as e_earn:
+                self.logger.error(f"LtvControl earn_spot_balances: {e_earn}")
+                capital_earn_col = 0.0
+            capital_neto = (capital_earn_col if capital_earn_col > 0 else total_col) - total_deuda
+
+            DataHub.manager_GyP["Crypto"]["Colateral"] = total_col
+            DataHub.manager_GyP["Crypto"]["CapitalNeto"] = capital_neto
+            DataHub.manager_GyP["Crypto"]["Debit"] = total_deuda
+            DataHub.manager_GyP["Crypto"]["Leverage"] = total_col / max(capital_neto, 1.0)
+            beta_actual = DataHub.manager_GyP["Crypto"].get("BetaPortfolio", 1.5)
+            mrg_actual = total_deuda / max(capital_neto, 1.0) * beta_actual
+            self.logger.warning(
+                f"LtvControl DataHub: col={total_col:.2f} earn_col={capital_earn_col:.2f} "
+                f"deuda={total_deuda:.2f} neto={capital_neto:.2f} beta={beta_actual:.3f} → mrg={mrg_actual:.2%}"
+            )
+
+            # Ajuste LTV — solo si hay config explícita
+            if not lconfig:
                 return
             for item in analisis:
                 gap = item["ltv_actual"] - lconfig.get("target", 0.50)
@@ -484,16 +510,6 @@ class ClassAgenteIA:
                     f"deuda={item['loan_usd']:.2f} | {ajuste_str}"
                 )
 
-            # sincronizar DataHub con datos exactos de API → panel siempre consistente
-            total_col = sum(i["collateral_usd"] for i in analisis)
-            total_deuda = sum(i["loan_usd"] for i in analisis)
-            capital_neto = total_col - total_deuda
-            leverage_c = total_col / max(capital_neto, 1.0)
-            DataHub.manager_GyP["Crypto"]["Colateral"] = total_col
-            DataHub.manager_GyP["Crypto"]["CapitalNeto"] = capital_neto
-            DataHub.manager_GyP["Crypto"]["Debit"] = total_deuda
-            DataHub.manager_GyP["Crypto"]["Leverage"] = leverage_c
-
         except Exception as e:
             self.logger.error(f"Agente_LtvControl(): {e}")
 
@@ -504,7 +520,7 @@ class ClassAgenteIA:
             positions = [p for p in DataHub.manager_positions.get("Stock", []) if float(p.get("mktvalue", 0)) > 0]
             if not positions:
                 return
-            result = MarketScreen().select(account=self.account, tipo="Dividends")
+            result = MarketScreen().select_all(account=self.account)
             if not result:
                 return
             rows, ix = result
