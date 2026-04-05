@@ -359,13 +359,11 @@ class BinanceSpot(Spot):
     # C2C / EARN
     # =========================
     @handle_binance_exceptions
-    def get_c2c_trade_history(self, tradeType=None, startTimestamp=None, endTimestamp=None, rows=100):
-        return self.c2c_trade_history(
-            tradeType=tradeType,
-            startTimestamp=startTimestamp,
-            endTimestamp=endTimestamp,
-            rows=rows,
-        )
+    def get_c2c_trade_history(self, tradeType=None, startTimestamp=None, endTimestamp=None, rows=100, fiat=None):
+        kwargs = dict(tradeType=tradeType, startTimestamp=startTimestamp, endTimestamp=endTimestamp, rows=rows)
+        if fiat:
+            kwargs["fiat"] = fiat
+        return self.c2c_trade_history(**kwargs)
 
     def get_simple_earn_account(self):
         url_path = f"{self._base_url}/sapi/v1/simple-earn/account"

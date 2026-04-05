@@ -4268,3 +4268,181 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             return sql, ix
         except conn.ProgrammingError as error:
             print("[Mysql:: select_order_trader({})]: {}".format(vehiculo, error))
+
+
+class FinanceScreen(BDsystem):  # -------------------------------------------------------------------------------------
+    """
+    Operaciones DB para el módulo de Finanzas Personales.
+    Tablas: fin_accounts, fin_banks, fin_transactions, fin_categories, fin_import_rules.
+    """
+
+    def __init__(self):
+        self.display = False
+
+    def _conectar(self, tabla=None):
+        return BDsystem.connect_dbase(tabla, display=self.display)
+
+    def get_accounts(self) -> list[tuple]:
+        """Retorna lista de cuentas activas: (label, account_id, bank_name, account_name)."""
+        conn = self._conectar("fin_accounts.select")
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""SELECT CONCAT(b.name, ' — ', a.name), a.id, b.name, a.name
+                   FROM fin_accounts a
+                   JOIN fin_banks b ON b.id = a.bank_id
+                   WHERE a.is_active = 1
+                   ORDER BY b.name, a.name""")
+            return cursor.fetchall()
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.get_accounts()]: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def get_account_id(self, label: str) -> int | None:
+        """Resuelve account_id a partir del label 'Banco — Cuenta'."""
+        parts = label.split(" — ", 1)
+        if len(parts) != 2:
+            return None
+        conn = self._conectar("fin_accounts.select")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT a.id FROM fin_accounts a
+                   JOIN fin_banks b ON b.id = a.bank_id
+                   WHERE b.name = %s AND a.name = %s""",
+                (parts[0], parts[1]),
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.get_account_id()]: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def get_kpis(self, date_from: str, date_to: str, account_id: int | None = None) -> dict:
+        """
+        Retorna KPIs del período para moneda ARS:
+          ingresos, gastos, ing_usdt, gas_usdt, total_txns.
+        """
+        account_filter = "AND t.account_id = %s" if account_id else ""
+        params = [date_from, date_to]
+        if account_id:
+            params.append(account_id)
+
+        conn = self._conectar("fin_transactions.kpis")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""SELECT
+                       COALESCE(SUM(CASE WHEN t.type='income'  THEN t.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN t.type='expense' THEN t.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN t.type='income'  THEN t.amount_usdt ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN t.type='expense' THEN t.amount_usdt ELSE 0 END), 0),
+                       COUNT(*)
+                   FROM fin_transactions t
+                   WHERE t.date BETWEEN %s AND %s {account_filter}
+                     AND t.currency = 'ARS'""",
+                params,
+            )
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "ingresos": float(row[0]),
+                    "gastos": float(row[1]),
+                    "ing_usdt": float(row[2]),
+                    "gas_usdt": float(row[3]),
+                    "total_txns": int(row[4]),
+                }
+            return {}
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.get_kpis()]: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    def get_categories_expense(self, date_from: str, date_to: str, account_id: int | None = None) -> list[dict]:
+        """
+        Retorna gastos agrupados por categoría para el período.
+        Resultado: [{"name": str, "total": float, "pct": float}, ...]
+        """
+        account_filter = "AND t.account_id = %s" if account_id else ""
+        params = [date_from, date_to]
+        if account_id:
+            params.append(account_id)
+
+        conn = self._conectar("fin_transactions.categories")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""SELECT
+                       COALESCE(c.name, 'Sin categoría'),
+                       SUM(t.amount) AS total
+                   FROM fin_transactions t
+                   LEFT JOIN fin_categories c ON c.id = t.category_id
+                   WHERE t.type = 'expense'
+                     AND t.date BETWEEN %s AND %s {account_filter}
+                     AND t.currency = 'ARS'
+                   GROUP BY c.name
+                   ORDER BY total DESC
+                   LIMIT 12""",
+                params,
+            )
+            rows = cursor.fetchall()
+            total = sum(float(r[1]) for r in rows) or 1
+            return [{"name": r[0], "total": float(r[1]), "pct": float(r[1]) / total * 100} for r in rows]
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.get_categories_expense()]: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def get_transactions(
+        self, date_from: str, date_to: str, account_id: int | None = None, limit: int = 200
+    ) -> list[dict]:
+        """
+        Retorna últimas transacciones del período.
+        Resultado: [{"date", "type", "amount", "currency", "description", "category", "account"}, ...]
+        """
+        account_filter = "AND t.account_id = %s" if account_id else ""
+        params = [date_from, date_to]
+        if account_id:
+            params.append(account_id)
+        params.append(limit)
+
+        conn = self._conectar("fin_transactions.select")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""SELECT
+                       t.date, t.type, t.amount, t.currency,
+                       COALESCE(t.description, t.raw_description),
+                       COALESCE(c.name, 'Sin categoría'),
+                       CONCAT(b.name, ' — ', a.name)
+                   FROM fin_transactions t
+                   LEFT JOIN fin_categories c ON c.id = t.category_id
+                   LEFT JOIN fin_accounts   a ON a.id = t.account_id
+                   LEFT JOIN fin_banks      b ON b.id = a.bank_id
+                   WHERE t.date BETWEEN %s AND %s {account_filter}
+                   ORDER BY t.date DESC
+                   LIMIT %s""",
+                params,
+            )
+            return [
+                {
+                    "date": str(r[0]),
+                    "type": r[1],
+                    "amount": float(r[2]),
+                    "currency": r[3],
+                    "description": r[4],
+                    "category": r[5],
+                    "account": r[6],
+                }
+                for r in cursor.fetchall()
+            ]
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.get_transactions()]: {e}")
+            return []
+        finally:
+            conn.close()
