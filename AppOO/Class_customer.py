@@ -3863,6 +3863,17 @@ class WidgetVehiculo(TickerInfo):
                 neto_api = DataHub.manager_GyP["Crypto"].get("CapitalNeto", 0)
                 equity_crypto = max(neto_api if neto_api > 0 else colateral_value - debit, 1.0)
                 margen = debit / equity_crypto * beta_crypto
+                _log_dfc = logging.getLogger("DataFrameCache")
+                if neto_api <= 0:
+                    _log_dfc.warning(
+                        f"Panel Crypto mrg (FALLBACK equity): debit={debit:.2f} col_val={colateral_value:.2f} "
+                        f"beta={beta_crypto:.3f} → {margen:.2%}  [neto_api=0 — LtvControl aún no corrió]"
+                    )
+                else:
+                    _log_dfc.debug(
+                        f"Panel Crypto mrg: debit={debit:.2f} neto_api={neto_api:.2f} "
+                        f"equity={equity_crypto:.2f} beta={beta_crypto:.3f} → {margen:.2%}"
+                    )
                 cash = float(self.resumen.get(" Cash       :", 0))
 
                 # escribir en resumen para impactar los graficos vehículo

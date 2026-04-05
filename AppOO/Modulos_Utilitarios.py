@@ -338,10 +338,10 @@ def margin_risk_status(margen):
     if margen < 0.20:
         return {"emoji": "🟢", "estado": "Seguro", "accion": "OK", "color": "#2ecc71"}
     if margen < 0.50:
-        return {"emoji": "🟡", "estado": "Moderado", "accion": "Cuidado", "color": "#B8860B"}
+        return {"emoji": "🟡", "estado": "Moderado", "accion": "Cuidado", "color": "#f1c40f"}
     if margen < 0.80:
-        return {"emoji": "🟠", "estado": "Alto", "accion": "Reducir", "color": "orange"}
-    return {"emoji": "🔴", "estado": "Peligro", "accion": "Riesgo real", "color": "red"}
+        return {"emoji": "🟠", "estado": "Alto", "accion": "Reducir", "color": "#e67e22"}
+    return {"emoji": "🔴", "estado": "Peligro", "accion": "Riesgo real", "color": "#e74c3c"}
 
 
 def vehiculo_parm(vehiculo=None):

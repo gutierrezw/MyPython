@@ -1172,6 +1172,19 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             print("[Mysql:: select_market]: {}".format(error))
             return [], []
 
+    def select_all(self, account):
+        """Retorna todas las filas de market para la cuenta sin filtro de tipo."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT * FROM market WHERE account = %s", (account,))
+            sql = cursor.fetchall()
+            ix = [c[0] for c in cursor.description]
+            return sql, ix
+        except (Exception, connect.Error) as e:
+            print(f"[MarketScreen.select_all]: {e}")
+            return [], []
+
     def insert(self, upd=None, val=None, symbol=None):
         """
         @param upd:  list() de campos para insertar en market
