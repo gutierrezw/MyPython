@@ -131,7 +131,7 @@ class AnalisisBase:
                 command=eexit,
             ).grid(row=999, column=0, columnspan=2, pady=20)
         except Exception as e:
-            print(f"[AnalisisBase.mostrar_ventana]: {e}")
+            _logger.error(f"[AnalisisBase.mostrar_ventana]: {e}")
             traceback.print_exc()
 
     def _poblar_contenido(self, frame):
@@ -397,7 +397,7 @@ class AnalisisBase:
             return row + 1
 
         except Exception as e:
-            print(f"[crear_grafico_vs_indice]: {e}")
+            _logger.error(f"[crear_grafico_vs_indice]: {e}")
             traceback.print_exc()
             return row
 
@@ -588,7 +588,7 @@ class AnalisisBase:
                 canvas.draw()
             return row + 1
         except Exception as e:
-            print(f"[crear_grafico_evolucion_combinado]: {e}")
+            _logger.error(f"[crear_grafico_evolucion_combinado]: {e}")
             traceback.print_exc()
             return row
 
@@ -781,7 +781,7 @@ class AnalisisBase:
             return row + 1
 
         except Exception as e:
-            print(f"[crear_grafico_todas_posiciones]: {e}")
+            _logger.error(f"[crear_grafico_todas_posiciones]: {e}")
             traceback.print_exc()
             return row
 
@@ -817,7 +817,7 @@ class AnalisisBase:
                             proceso_update_performance(account=account, vehiculo=self.vehiculo)
                     except Exception as e:
                         errores.append(str(e))
-                        print(f"[reconstruir_diaria_performance/{self.vehiculo}]: {e}")
+                        _logger.error(f"[reconstruir_diaria_performance/{self.vehiculo}]: {e}")
 
                 msg = "✓ Reconstruido" if not errores else f"Errores: {'; '.join(errores)}"
                 color = "#2ecc71" if not errores else "#e74c3c"
@@ -827,7 +827,7 @@ class AnalisisBase:
                     btn.after(0, lambda: btn.config(state="normal", text="Reconstruir Performance"))
 
             except Exception as e:
-                print(f"[reconstruir_diaria_performance]: {e}")
+                _logger.error(f"[reconstruir_diaria_performance]: {e}")
                 if btn:
                     btn.after(0, lambda: btn.config(state="normal", text="Reconstruir Performance"))
 
@@ -892,7 +892,7 @@ class AnalisisFCI(AnalisisBase):
 
                     except Exception as e:
                         errores.append(f"{veh}: {e}")
-                        print(f"[reconstruir_diaria_performance/{veh}]: {e}")
+                        _logger.error(f"[reconstruir_diaria_performance/{veh}]: {e}")
 
                 # Feedback en UI (desde thread → after)
                 msg = "✓ Reconstruido" if not errores else f"Errores: {'; '.join(errores)}"
@@ -903,7 +903,7 @@ class AnalisisFCI(AnalisisBase):
                     btn.after(0, lambda: btn.config(state="normal", text="Reconstruir Performance"))
 
             except Exception as e:
-                print(f"[reconstruir_diaria_performance]: {e}")
+                _logger.error(f"[reconstruir_diaria_performance]: {e}")
                 if btn:
                     btn.after(0, lambda: btn.config(state="normal", text="Reconstruir Performance"))
 
@@ -1061,7 +1061,7 @@ class AnalisisFCI(AnalisisBase):
 
             return len(self.df_historico)
         except Exception as e:
-            print(f"[cargar_datos_historicos]: {e}")
+            _logger.error(f"[cargar_datos_historicos]: {e}")
             return 0
 
     def obtener_lotes_desde_info(self):
@@ -1103,7 +1103,7 @@ class AnalisisFCI(AnalisisBase):
             self.df_lotes = pd.DataFrame(lotes)
             return len(self.df_lotes)
         except Exception as e:
-            print(f"[obtener_lotes_desde_info]: {e}")
+            _logger.error(f"[obtener_lotes_desde_info]: {e}")
             return 0
 
     def calcular_metricas_fondo(self, grupo):
@@ -1181,7 +1181,7 @@ class AnalisisFCI(AnalisisBase):
 
             return self.metricas
         except Exception as e:
-            print(f"[calcular_metricas_todos]: {e}")
+            _logger.error(f"[calcular_metricas_todos]: {e}")
             return pd.DataFrame()
 
     def generar_scoring(self, row):
@@ -1248,7 +1248,9 @@ class AnalisisFCI(AnalisisBase):
             if gyp is not None and float(gyp) > 0:
                 umbral_ganancia = float(gyp) * 100  # ratio decimal → porcentaje
         except Exception as e:
-            print(f"[analizar_lotes_venta] No se pudo leer gypPrecio, usando default {self.UMBRAL_GANANCIA_MIN}%: {e}")
+            _logger.error(
+                f"[analizar_lotes_venta] No se pudo leer gypPrecio, usando default {self.UMBRAL_GANANCIA_MIN}%: {e}"
+            )
 
         # Agregar score del fondo
         if not self.metricas.empty:
@@ -1350,6 +1352,37 @@ class AnalisisCrypto(AnalisisBase):
         except Exception as e:
             _logger.error(f"_calcular_beta_portfolio(): {e}")
 
+    def _refresh_mrg_display(self):
+        """Actualiza Beta y % Mrg/Risk en Analysis luego de que el thread de yfinance computa el beta real."""
+        if not hasattr(self, "_entry_beta") or not hasattr(self, "_entry_mrg") or not hasattr(self, "_mrg_data"):
+            return
+        try:
+            if not self._entry_beta.winfo_exists():
+                return
+        except Exception:
+            return
+        from Class_customer import DataHub  # import diferido — evita ciclo
+
+        beta = DataHub.manager_GyP["Crypto"].get("BetaPortfolio", 1.5)
+        total_deuda, capital_neto = self._mrg_data
+        equity = max(capital_neto, 1.0)
+        mrg = (total_deuda / equity) * beta
+        mrs = margin_risk_status(mrg)
+
+        for entry in (self._entry_beta, self._entry_mrg):
+            entry.config(state="normal")
+
+        self._entry_beta.delete(0, "end")
+        self._entry_beta.insert(0, f"{beta:.2f}")
+        self._entry_beta.config(state="readonly")
+
+        self._entry_mrg.delete(0, "end")
+        self._entry_mrg.insert(
+            0,
+            f"{mrg:.1%}  {mrs['emoji']} {mrs['estado']} — {mrs['accion']}  (deuda/equity × β={beta:.2f})",
+        )
+        self._entry_mrg.config(state="readonly", fg=mrs["color"])
+
     def _fetch_historico_yfinance(self):
         """Override: convierte BTCUSDT→BTC-USD para yfinance y descarga 6 meses."""
         try:
@@ -1425,6 +1458,7 @@ class AnalisisCrypto(AnalisisBase):
         def _cargar_y_render_crypto():
             df_hist = self._fetch_historico_yfinance()
             self._calcular_beta_portfolio(df_hist)
+            frame_chart.after(0, self._refresh_mrg_display)
             frame_chart.after(0, lambda: self._render_grafico_evolucion(frame_chart, df_hist))
 
         threading.Thread(target=_cargar_y_render_crypto, daemon=True).start()
@@ -1477,7 +1511,7 @@ class AnalisisCrypto(AnalisisBase):
                     )
                 return prestamos
             except Exception as e:
-                print(f"[_get_loan_data]: {e}")
+                _logger.error(f"[_get_loan_data]: {e}")
                 return []
 
         def _crear_grafico_prestamos(parent, prestamos, earn_map_local, row):
@@ -1689,7 +1723,7 @@ class AnalisisCrypto(AnalisisBase):
             from Class_ServiciosCrypto import ServiciosCrypto  # import diferido — evita ciclo con Modulos_python chain
 
             earn_balances = ServiciosCrypto().earn_spot_balances()
-            earn_map = {b["asset"]: b.get("earn_usdt", 0.0) for b in earn_balances}
+            earn_map = {b["asset"]: b.get("usdt_value", 0.0) for b in earn_balances}
         except Exception:
             earn_map = {}
         col_assets = {p["activo"] for p in prestamos}
@@ -1707,16 +1741,19 @@ class AnalisisCrypto(AnalisisBase):
         _mrg_risk_c = (total_deuda / _equity_c) * _beta_c
         _mrs_c = margin_risk_status(_mrg_risk_c)
 
-        # sincronizar con panel — usa datos exactos de API
-        DataHub.manager_GyP["Crypto"]["Colateral"] = total_col
-        DataHub.manager_GyP["Crypto"]["CapitalNeto"] = capital_neto
-        DataHub.manager_GyP["Crypto"]["Debit"] = total_deuda
-        DataHub.manager_GyP["Crypto"]["Leverage"] = leverage_crypto
+        # sincronizar con panel — solo si tenemos datos válidos de API (evita reset a 0 cuando falla)
+        if prestamos:
+            DataHub.manager_GyP["Crypto"]["Colateral"] = total_col
+            DataHub.manager_GyP["Crypto"]["CapitalNeto"] = capital_neto
+            DataHub.manager_GyP["Crypto"]["Debit"] = total_deuda
+            DataHub.manager_GyP["Crypto"]["Leverage"] = leverage_crypto
+        else:
+            _logger.error("[_seccion_deuda]: prestamos vacío — DataHub no actualizado, se conservan valores previos")
 
         ltv_binance = total_deuda / total_col if total_col > 0 else 0
 
         row = self.crear_seccion(frame, "Análisis de Préstamos Flexibles", row)
-        row = self.crear_campo(frame, "Capital disponible (earn):", f"${capital_earn_col:,.2f} USD", row)
+        row = self.crear_campo(frame, "Capital disponible (earn):", f"${capital_base:,.2f} USD", row)
         row = self.crear_campo(frame, "Deuda Total:", f"${total_deuda:,.2f} USDT", row)
         color_neto = "green" if capital_neto >= 0 else "red"
         row = self.crear_campo(frame, "Capital Neto:", f"${capital_neto:,.2f} USD", row, fg_valor=color_neto)
@@ -1727,14 +1764,32 @@ class AnalisisCrypto(AnalisisBase):
             frame, "LTV Binance actual:", f"{ltv_binance:.2%}  (ref. simulador — deuda / col. bloqueado)", row
         )
         row = self.crear_campo(frame, "Leverage:", f"{leverage_crypto:.2f}x  (col bloqueado / capital_neto)", row)
-        row = self.crear_campo(frame, "Beta Portfolio:", f"{_beta_c:.2f}  (calculado al abrir análisis)", row)
-        row = self.crear_campo(
-            frame,
-            "% Mrg/Risk:",
-            f"{_mrg_risk_c:.1%}  {_mrs_c['emoji']} {_mrs_c['estado']} — {_mrs_c['accion']}  (deuda/equity × β={_beta_c:.2f})",
-            row,
-            fg_valor=_mrs_c["color"],
+        # Beta y % Mrg/Risk — entradas con referencia para actualizar luego de que el thread de yfinance compute el beta real
+        tk.Label(
+            frame, text="Beta Portfolio:", bg=self.BG_COLOR, fg=self.VALUE_FG, font=("Segoe UI", 9), anchor="w"
+        ).grid(row=row, column=0, sticky="w", padx=10, pady=3)
+        self._entry_beta = tk.Entry(
+            frame, width=45, bg=self.ENTRY_BG, fg=self.VALUE_FG, font=("Segoe UI", 9), relief="flat"
         )
+        self._entry_beta.insert(0, f"{_beta_c:.2f}  (actualizando...)")
+        self._entry_beta.config(state="readonly")
+        self._entry_beta.grid(row=row, column=1, padx=10, pady=3, sticky="w")
+        row += 1
+
+        tk.Label(frame, text="% Mrg/Risk:", bg=self.BG_COLOR, fg=self.VALUE_FG, font=("Segoe UI", 9), anchor="w").grid(
+            row=row, column=0, sticky="w", padx=10, pady=3
+        )
+        self._entry_mrg = tk.Entry(
+            frame, width=45, bg=self.ENTRY_BG, fg=_mrs_c["color"], font=("Segoe UI", 9), relief="flat"
+        )
+        self._entry_mrg.insert(
+            0,
+            f"{_mrg_risk_c:.1%}  {_mrs_c['emoji']} {_mrs_c['estado']} — {_mrs_c['accion']}  (deuda/equity × β={_beta_c:.2f})",
+        )
+        self._entry_mrg.config(state="readonly")
+        self._entry_mrg.grid(row=row, column=1, padx=10, pady=3, sticky="w")
+        self._mrg_data = (total_deuda, capital_neto)
+        row += 1
 
         row = _crear_grafico_prestamos(frame, prestamos, earn_map, row)
 
@@ -2147,7 +2202,7 @@ class AnalisisCrypto(AnalisisBase):
             return len(self.df_lotes)
 
         except Exception as e:
-            print(f"[AnalisisCrypto.obtener_lotes_desde_info]: {e}")
+            _logger.error(f"[AnalisisCrypto.obtener_lotes_desde_info]: {e}")
             return 0
 
     def obtener_resumen(self):
