@@ -72,6 +72,7 @@ from Class_IA_modelos import ModeloOportunidadesSell
 from Class_SystemStatus import system_status
 from Class_BotCryptoUI import BotCryptoUI
 from Class_TradingView import start_tv_server, stop_tv_server, start_price_sync
+from Class_Finance import FinancePanel
 
 
 # class para manipular vehiculo
@@ -735,16 +736,19 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
         # cargas ultimas compras de USDT
         def trade_USDT_diario():
-            def get_trader_insert_fiat(trama=None):
+            # ARS: compra USDT con ARS (BUY). VES: vende USDT por bolívares (SELL).
+            fiat_config = {"ARS": "BUY", "VES": "SELL"}
+
+            def get_trader_insert_fiat(trama=None, fiat=None, trade_type=None):
                 try:
-                    fiat, symbol, trader = "ARS", "USDT", []
+                    symbol, trader = "USDT", []
                     for keys, values in trama.items():
                         if keys == "data":
                             for i, rows in enumerate(values):
 
                                 date = datetime.fromtimestamp(rows["createTime"] / 1000)
                                 if (
-                                    (rows["tradeType"] == "BUY")
+                                    (rows["tradeType"] == trade_type)
                                     and (rows["orderStatus"] == "COMPLETED")
                                     and (rows["fiat"] == fiat)
                                 ):
@@ -765,7 +769,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                     values.update({"codigo": "O"})
                                     trader.append(values)
 
-                    # orden de mas descendete los trader's
+                    # orden ascendente por fecha
                     asc_trader = sorted(trader, key=lambda x: x["fechahora"], reverse=False)
 
                     # valida los trader antes de insert booktrading
@@ -779,7 +783,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                     return asc_trader
                 except Exception as error:
-                    print(f"get_trader_insert_fiat(): {e}")
+                    print(f"get_trader_insert_fiat(): {error}")
 
             try:
                 hasta = datetime.today()
@@ -787,11 +791,15 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 start_time = int(desde.timestamp() * 1000)
                 end_time = int(hasta.timestamp() * 1000)
 
-                response = self.BClient.get_c2c_trade_history(
-                    tradeType="BUY", startTimestamp=start_time, endTimestamp=end_time
-                )
-                if response:
-                    x_trader = get_trader_insert_fiat(trama=response)
+                for fiat, trade_type in fiat_config.items():
+                    response = self.BClient.get_c2c_trade_history(
+                        tradeType=trade_type,
+                        startTimestamp=start_time,
+                        endTimestamp=end_time,
+                        fiat=fiat,
+                    )
+                    if response:
+                        get_trader_insert_fiat(trama=response, fiat=fiat, trade_type=trade_type)
             except Exception as e:
                 print(f"trade_USDT_diario(): {e}")
 
@@ -1944,6 +1952,7 @@ class DashMain:
         self.win6 = ttk.Frame(self.nb, style="C.TFrame", width=self.dw, height=self.dh)
         self.win7 = ttk.Frame(self.nb, style="C.TFrame", width=self.dw, height=self.dh)
         self.win8 = ttk.Frame(self.nb, style="C.TFrame", width=self.dw, height=self.dh)
+        self.win9 = ttk.Frame(self.nb, style="C.TFrame", width=self.dw, height=self.dh)
 
         # Añadir padding a los frames
         self.win0.pack(fill=tk.BOTH, expand=True)
@@ -1955,6 +1964,7 @@ class DashMain:
         self.win6.pack(fill=tk.BOTH, expand=True)
         self.win7.pack(fill=tk.BOTH, expand=True)
         self.win8.pack(fill=tk.BOTH, expand=True)
+        self.win9.pack(fill=tk.BOTH, expand=True)
 
         self.nb.add(self.win1, text="Crypto         ")
         self.nb.add(self.win0, text="Stock          ")
@@ -1964,6 +1974,7 @@ class DashMain:
         self.nb.add(self.win8, text="Crowfonding    ", state="disabled")
         self.nb.add(self.win2, text="Screener       ")
         self.nb.add(self.win3, text="Gestión        ")
+        self.nb.add(self.win9, text="Finance        ")
         self.nb.add(self.win5, text="System         ")
 
         # frames de Gráficos y figuras principales
@@ -5120,6 +5131,10 @@ class DashMain:
             repositorio=self.RepositorioOportunidades,
         )
         self.bot_crypto_ui.inicializar()
+
+        self.finance = FinancePanel(master=self.win9, colores=self.colors)
+        self.finance.pack(fill=tk.BOTH, expand=True)
+        self.finance.inicializar()
 
         self.system = system_status(master=self.win5, colores=self.colors)
 
