@@ -58,6 +58,7 @@ from Modulos_python import (
 sys.path.insert(0, "..")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "AppValuations"))
 from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion, MarketScreen
+from Class_BankStatements import scan_extractos
 from Class_Screener import sync_market, audit_portfolio
 from Class_InstitucionalScore import (
     sync_institutional,
@@ -582,6 +583,15 @@ class ClassAgenteIA:
             )
         except Exception as e:
             self.logger.error(f"Agente_CryptoBeta(): {e}")
+
+    # agente extractos bancarios — escanea tmp/extractos/ y carga PDFs nuevos cada hora
+    @wait_rate(3600, persist=True)
+    def Agente_ExtractosWatcher(self):
+        try:
+            result = scan_extractos()
+            self.logger.warning(f"Agente_ExtractosWatcher: {result}")
+        except Exception as e:
+            self.logger.error(f"Agente_ExtractosWatcher(): {e}")
 
     # agente defensivo: protege ganancias con órdenes STOP dinámicas
     async def Agente_ManagerPreservation(self):
