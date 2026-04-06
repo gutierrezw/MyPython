@@ -248,6 +248,14 @@ ACCOUNTS_BY_BANK = {
             "institution": "Banco BBVA Argentina S.A.",
         },
         {
+            "name": "BBVA CA ARS",
+            "type": "savings",
+            "currency": "ARS",
+            "account_ref": "196-009369/5",
+            "account_number_last4": "9369",
+            "institution": "Banco BBVA Argentina S.A.",
+        },
+        {
             "name": "BBVA CA USD",
             "type": "savings",
             "currency": "USD",
