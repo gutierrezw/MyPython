@@ -57,6 +57,7 @@ from operator import itemgetter
 from pathlib import Path
 from zipfile import ZipFile
 from pymysql import connect, Error
+import pdfplumber
 from sqlalchemy import create_engine
 from dateutil import parser
 from dataclasses import dataclass

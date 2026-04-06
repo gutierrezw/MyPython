@@ -6,14 +6,7 @@ Adaptadores implementados:
                      Columnas: FECHA | DESCRIPCIÓN | NRO. CUPÓN | PESOS | DÓLARES
   - BbvaArCuenta   : BBVA AR cuenta corriente ARS
                      Columnas: FECHA | ORIGEN | CONCEPTO | DÉBITO | CRÉDITO | SALDO
-
-Uso:
-    python AppTest/load_statement.py <ruta_pdf> [--adapter bbva_cuenta] [--dry-run]
-
-Dependencias:
-    pip install pdfplumber   (pymysql ya instalado en el entorno del proyecto)
-
-Siguiente: SantanderAr
+  - SantanderAr    : PDF unificado Santander (cuenta ARS/USD, Visa, AmEx, débito)
 """
 
 import sys
@@ -27,8 +20,7 @@ from decimal import Decimal, InvalidOperation
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pdfplumber
-from pymysql import connect, Error
+from Modulos_python import pdfplumber, connect, Error
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger("load_statement")
@@ -485,7 +477,7 @@ class BbvaArCuenta:
     X_CONCEPTO_MIN = 134
     X_DEBITO_MIN = 400
     X_CREDITO_MIN = 474
-    X_SALDO_MIN = 540
+    X_SALDO_MIN = 515
 
     SKIP_MARKERS = {
         "SALDO ANTERIOR",
@@ -494,6 +486,9 @@ class BbvaArCuenta:
         "TOTAL CRÉDITOS",
         "Página",
     }
+
+    # Monto incrustado al final del concepto: "-4.700,00" o "-27.000,00"
+    RE_INLINE_AMOUNT = re.compile(r"\s+(-?\d{1,3}(?:\.\d{3})*,\d{2})\s*$")
 
     def __init__(self, pdf_path: str, account_ref: str, dry_run: bool = False):
         self.pdf_path = pdf_path
@@ -621,6 +616,7 @@ class BbvaArCuenta:
             debito = parse_amount_ar(r.get("debito", ""))
             credito = parse_amount_ar(r.get("credito", ""))
 
+            concepto = r["concepto"].strip()
             if debito is not None and debito != 0:
                 amount = abs(debito)
                 txn_type = "expense"
@@ -628,10 +624,21 @@ class BbvaArCuenta:
                 amount = abs(credito)
                 txn_type = "income"
             else:
-                logger.warning(f"  Sin monto: {r['concepto'][:60]} — omitida")
-                continue
-
-            concepto = r["concepto"].strip()
+                # Fallback: monto incrustado al final del concepto (ej: "CR/DB DEBIN -4.700,00")
+                m_inline = self.RE_INLINE_AMOUNT.search(concepto)
+                if m_inline:
+                    inline_val = parse_amount_ar(m_inline.group(1))
+                    if inline_val is not None:
+                        amount = abs(inline_val)
+                        txn_type = "expense" if inline_val > 0 else "income"
+                        concepto = concepto[: m_inline.start()].strip()
+                        logger.info(f"  Monto extraído del concepto: {amount} ({txn_type})")
+                    else:
+                        logger.warning(f"  Sin monto: {r['concepto'][:60]} — omitida")
+                        continue
+                else:
+                    logger.warning(f"  Sin monto: {r['concepto'][:60]} — omitida")
+                    continue
             cat_id, classified_by = apply_rules(concepto, cursor)
 
             txns.append(
@@ -671,17 +678,30 @@ class BbvaArCuenta:
                 continue
             debito = parse_amount_ar(r.get("debito", ""))
             credito = parse_amount_ar(r.get("credito", ""))
+            concepto = r["concepto"].strip()
             if debito is not None and debito != 0:
                 amount, txn_type = abs(debito), "expense"
             elif credito is not None and credito != 0:
                 amount, txn_type = abs(credito), "income"
             else:
-                logger.warning(f"  Sin monto: {r['concepto'][:60]} — omitida")
-                stats["errors"] += 1
-                continue
+                m_inline = self.RE_INLINE_AMOUNT.search(concepto)
+                if m_inline:
+                    inline_val = parse_amount_ar(m_inline.group(1))
+                    if inline_val is not None:
+                        amount = abs(inline_val)
+                        txn_type = "expense" if inline_val > 0 else "income"
+                        concepto = concepto[: m_inline.start()].strip()
+                    else:
+                        logger.warning(f"  Sin monto: {concepto[:60]} — omitida")
+                        stats["errors"] += 1
+                        continue
+                else:
+                    logger.warning(f"  Sin monto: {concepto[:60]} — omitida")
+                    stats["errors"] += 1
+                    continue
             logger.info(
                 f"  {txn_date} | {txn_type:8s} | ARS {amount:>12.2f} | "
-                f"orig={r.get('origen') or '-':>4s} | {r['concepto'][:50]}"
+                f"orig={r.get('origen') or '-':>4s} | {concepto[:50]}"
             )
             stats["inserted"] += 1
         return stats
@@ -771,6 +791,24 @@ class BbvaArCuenta:
         conn.commit()
         cursor.close()
         return stats
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Adaptador BBVA AR — Caja de Ahorros ARS
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class BbvaArAhorro(BbvaArCuenta):
+    """
+    Parsea el PDF de resumen de caja de ahorros BBVA Argentina.
+
+    Layout idéntico a BbvaArCuenta — mismas columnas posicionales.
+    Solo difiere el SECTION_NAME para el registro de imports.
+
+    account_ref típico: '196-009369/5'
+    """
+
+    SECTION_NAME = "bbva_ahorro"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1368,6 +1406,7 @@ class SantanderAr:
 ADAPTER_MAP = {
     "bbva_tc": BbvaArTarjeta,
     "bbva_cuenta": BbvaArCuenta,
+    "bbva_ahorro": BbvaArAhorro,
     "santander": SantanderAr,
 }
 
@@ -1390,11 +1429,41 @@ def main():
         action="store_true",
         help="Parsear y mostrar sin escribir en BD",
     )
+    parser.add_argument(
+        "--inspect",
+        action="store_true",
+        help="Mostrar coordenadas X/Y de palabras del PDF (calibración de columnas)",
+    )
+    parser.add_argument(
+        "--inspect-page",
+        type=int,
+        default=0,
+        help="Página a inspeccionar con --inspect (default: 0)",
+    )
+    parser.add_argument(
+        "--inspect-words",
+        type=int,
+        default=100,
+        help="Cantidad de palabras a mostrar con --inspect (default: 100)",
+    )
     args = parser.parse_args()
 
     if not os.path.isfile(args.pdf):
         logger.error(f"Archivo no encontrado: {args.pdf}")
         sys.exit(1)
+
+    if args.inspect:
+        with pdfplumber.open(args.pdf) as pdf:
+            page = pdf.pages[args.inspect_page]
+            words = page.extract_words(x_tolerance=3, y_tolerance=3)
+            print(
+                f"Página {args.inspect_page} — {len(words)} palabras, mostrando {min(args.inspect_words, len(words))}"
+            )
+            print(f"{'x0':>8}  {'top':>8}  texto")
+            print("-" * 50)
+            for w in words[: args.inspect_words]:
+                print(f"{w['x0']:8.1f}  {w['top']:8.1f}  {w['text']}")
+        sys.exit(0)
 
     AdapterClass = ADAPTER_MAP[args.adapter]
     # SantanderAr es multi-sección: no requiere --account-ref
