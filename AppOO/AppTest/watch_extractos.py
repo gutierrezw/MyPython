@@ -1,6 +1,6 @@
 """
 CLI para procesar manualmente PDFs de la carpeta tmp/extractos/.
-La lógica vive en Class_BankStatements.py.
+La lógica vive en Class_Finance.py.
 
 Uso:
     python AppTest/watch_extractos.py          # procesa lo que haya y sale
@@ -12,7 +12,7 @@ import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from Class_BankStatements import scan_extractos
+from Class_Finance import scan_extractos
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s")
 

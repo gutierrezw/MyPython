@@ -1,6 +1,6 @@
 """
 CLI para importar extractos bancarios manualmente.
-La lógica de parseo vive en Class_BankStatements.py.
+La lógica de parseo vive en Class_Finance.py.
 
 Uso:
     python AppTest/load_statement.py <ruta_pdf> --adapter bbva_ahorro --account-ref "196-009369/5"
@@ -16,7 +16,7 @@ import logging
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Modulos_python import pdfplumber, connect, Error
-from Class_BankStatements import ADAPTER_MAP, SantanderAr, DB_CONFIG
+from Class_Finance import ADAPTER_MAP, SantanderAr, DB_CONFIG
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger("load_statement")
