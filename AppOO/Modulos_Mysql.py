@@ -4383,14 +4383,13 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             cursor.execute(
                 f"""SELECT
                        COALESCE(c.name, 'Sin categoría'),
-                       SUM(t.amount) AS total
+                       COALESCE(SUM(t.amount_usdt), SUM(t.amount)) AS total_usdt
                    FROM fin_transactions t
                    LEFT JOIN fin_categories c ON c.id = t.category_id
                    WHERE t.type = 'expense'
                      AND t.date BETWEEN %s AND %s {clause}
-                     AND t.currency = 'ARS'
                    GROUP BY c.name
-                   ORDER BY total DESC
+                   ORDER BY total_usdt DESC
                    LIMIT 12""",
                 params,
             )
@@ -4399,6 +4398,36 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             return [{"name": r[0], "total": float(r[1]), "pct": float(r[1]) / total * 100} for r in rows]
         except (Exception, connect.Error) as e:
             print(f"[Mysql:: FinanceScreen.get_categories_expense()]: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def get_categories_income(self, date_from: str, date_to: str, account_ids: list[int] | None = None) -> list[dict]:
+        """Retorna ingresos agrupados por categoría para el período."""
+        clause, extra = self._ids_clause(account_ids)
+        params = [date_from, date_to] + extra
+
+        conn = self._conectar("fin_transactions.categories_income")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""SELECT
+                       COALESCE(c.name, 'Sin categoría'),
+                       COALESCE(SUM(t.amount_usdt), SUM(t.amount)) AS total_usdt
+                   FROM fin_transactions t
+                   LEFT JOIN fin_categories c ON c.id = t.category_id
+                   WHERE t.type = 'income'
+                     AND t.date BETWEEN %s AND %s {clause}
+                   GROUP BY c.name
+                   ORDER BY total_usdt DESC
+                   LIMIT 8""",
+                params,
+            )
+            rows = cursor.fetchall()
+            total = sum(float(r[1]) for r in rows) or 1
+            return [{"name": r[0], "total": float(r[1]), "pct": float(r[1]) / total * 100} for r in rows]
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.get_categories_income()]: {e}")
             return []
         finally:
             conn.close()
@@ -4455,15 +4484,98 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             conn.close()
 
     def get_categories(self) -> list[tuple]:
-        """Retorna todas las categorías activas: [(id, name), ...]."""
+        """Retorna todas las categorías activas: [(id, name, category_type), ...]."""
         conn = self._conectar("fin_categories.select")
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, name FROM fin_categories ORDER BY name")
+            cursor.execute("SELECT id, name, category_type FROM fin_categories ORDER BY name")
             return cursor.fetchall()
         except (Exception, connect.Error) as e:
             print(f"[Mysql:: FinanceScreen.get_categories()]: {e}")
             return []
+        finally:
+            conn.close()
+
+    def add_category(self, name: str, category_type: str) -> tuple[bool, str]:
+        """Inserta una nueva categoría. Retorna (ok, mensaje)."""
+        name = name.strip()
+        if not name:
+            return False, "El nombre no puede estar vacío."
+        conn = self._conectar("fin_categories.insert")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO fin_categories (name, category_type) VALUES (%s, %s)",
+                (name, category_type),
+            )
+            conn.commit()
+            return True, f"Categoría '{name}' creada."
+        except (Exception, connect.Error) as e:
+            return False, str(e)
+        finally:
+            conn.close()
+
+    def delete_category(self, cat_id: int) -> tuple[bool, str]:
+        """Elimina categoría si no tiene transacciones asociadas. Retorna (ok, mensaje)."""
+        conn = self._conectar("fin_categories.delete")
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM fin_transactions WHERE category_id=%s", (cat_id,))
+            count = cursor.fetchone()[0]
+            if count > 0:
+                return (
+                    False,
+                    f"No se puede eliminar: tiene {count} transacción{'es' if count > 1 else ''} asignada{'s' if count > 1 else ''}.",
+                )
+            cursor.execute("DELETE FROM fin_categories WHERE id=%s", (cat_id,))
+            conn.commit()
+            return True, "Categoría eliminada."
+        except (Exception, connect.Error) as e:
+            return False, str(e)
+        finally:
+            conn.close()
+
+    def get_last_loaded_period(self) -> tuple[int, int]:
+        """Retorna (mes, año) del último mes con transacciones cargadas (sin fechas futuras)."""
+        conn = self._conectar("fin_transactions.last_period")
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT YEAR(MAX(date)), MONTH(MAX(date)) FROM fin_transactions WHERE date <= CURDATE()")
+            row = cursor.fetchone()
+            if row and row[0]:
+                return int(row[1]), int(row[0])
+        except (Exception, connect.Error):
+            pass
+        finally:
+            conn.close()
+        from datetime import datetime as _dt
+
+        now = _dt.now()
+        return now.month, now.year
+
+    def get_tasa(self, currency: str, fecha) -> float | None:
+        """Devuelve tasa fiat→USDT más cercana a fecha desde booktrading.
+        USD → 1.0 directo. ARS/VES → busca en booktrading por categoria."""
+        if currency == "USD":
+            return 1.0
+        categoria = {"ARS": "ARS", "VES": "VES"}.get(currency)
+        if not categoria:
+            return None
+        conn = self._conectar("booktrading.tasa")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT preciotrans FROM booktrading
+                   WHERE categoria=%s AND simbolo='USDT' AND preciotrans > 0
+                   ORDER BY ABS(TIMESTAMPDIFF(SECOND, fechahora, %s))
+                   LIMIT 1""",
+                (categoria, fecha),
+            )
+            row = cursor.fetchone()
+            return float(row[0]) if row else None
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.get_tasa()]: {e}")
+            return None
         finally:
             conn.close()
 
