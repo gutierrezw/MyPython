@@ -289,10 +289,11 @@ class _CategoryBar(tk.Frame):
     Clic en fila activa → deselecciona (on_select(None)).
     """
 
-    def __init__(self, parent, bgcolor, on_select):
+    def __init__(self, parent, bgcolor, on_select, bar_color=None):
         super().__init__(parent, bg=bgcolor)
         self.bgcolor = bgcolor
         self._on_select = on_select
+        self._bar_color = bar_color or _ACCENT
         self._active_cat: str | None = None
         self._rows: list[tuple] = []  # (frame, name_label, canvas, amount_label)
 
@@ -304,20 +305,21 @@ class _CategoryBar(tk.Frame):
         self._active_cat = None
 
         max_pct = max((d["pct"] for d in data), default=1) or 1
-        bar_w = 120
+        bar_w = 80
 
         for d in data[:12]:
             name = d["name"]
+            display = name if len(name) <= 20 else name[:19] + "…"
             row_frame = tk.Frame(self, bg=self.bgcolor, cursor="hand2")
             row_frame.pack(fill=tk.X, pady=1)
 
             name_lbl = tk.Label(
                 row_frame,
-                text=name,
+                text=display,
                 font=_FONT_LABEL,
                 bg=self.bgcolor,
                 fg="white",
-                width=16,
+                width=20,
                 anchor="w",
                 cursor="hand2",
             )
@@ -326,7 +328,7 @@ class _CategoryBar(tk.Frame):
             filled = max(int(bar_w * d["pct"] / max_pct), 2)
             canvas = tk.Canvas(row_frame, width=bar_w, height=14, bg=self.bgcolor, highlightthickness=0)
             canvas.pack(side=tk.LEFT, padx=4)
-            canvas.create_rectangle(0, 2, filled, 12, fill=_ACCENT, outline="", tags="bar")
+            canvas.create_rectangle(0, 2, filled, 12, fill=self._bar_color, outline="", tags="bar")
 
             amt_lbl = tk.Label(
                 row_frame,
@@ -402,8 +404,8 @@ class _CategoryEditPopup(tk.Toplevel):
         self._txn_row = txn_row
         self._on_save = on_save
         self._db_preview = db_preview  # callable(pattern, match_type) → int
-        self._cat_map = {name: cid for cid, name in categories}
-        cat_names = [name for _, name in categories]
+        self._cat_map = {name: cid for cid, name, *_ in categories}
+        cat_names = [name for _, name, *_ in categories]
 
         raw_desc = txn_row.get("description", "")
 
@@ -567,6 +569,140 @@ class _CategoryEditPopup(tk.Toplevel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+class _CategoryManagerPopup(tk.Toplevel):
+    """
+    Popup para agregar o eliminar categorías de fin_categories.
+    Muestra lista con botón – por fila y campo + para agregar nueva.
+    """
+
+    _TYPES = ["expense", "income", "transfer"]
+
+    def __init__(self, parent, categories: list[tuple], db: "FinanceScreen", on_change):
+        super().__init__(parent)
+        self.title("Administrar categorías")
+        self.resizable(False, True)
+        self.configure(bg=_CARD_BG)
+        self.grab_set()
+        self._db = db
+        self._on_change = on_change
+        self._categories = list(categories)
+
+        # ── lista existente con scrollbar ─────────────────────────────────
+        tk.Label(self, text="Categorías existentes", font=_FONT_HEADER, bg=_CARD_BG, fg=_ACCENT).pack(
+            anchor="w", padx=14, pady=(12, 4)
+        )
+
+        list_container = tk.Frame(self, bg=_CARD_BG)
+        list_container.pack(fill=tk.BOTH, expand=True, padx=14)
+
+        scrollbar = tk.Scrollbar(list_container, orient=tk.VERTICAL)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        canvas = tk.Canvas(list_container, bg=_CARD_BG, highlightthickness=0, yscrollcommand=scrollbar.set, height=300)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=canvas.yview)
+
+        self._list_frame = tk.Frame(canvas, bg=_CARD_BG)
+        canvas.create_window((0, 0), window=self._list_frame, anchor="nw")
+
+        def _on_frame_configure(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_mousewheel(e):
+            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+
+        self._list_frame.bind("<Configure>", _on_frame_configure)
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+        self._list_frame.bind("<MouseWheel>", _on_mousewheel)
+
+        self._render_list()
+
+        tk.Frame(self, bg=_NEUTRAL, height=1).pack(fill=tk.X, padx=14, pady=10)
+
+        # ── agregar nueva ──────────────────────────────────────────────────
+        tk.Label(self, text="Nueva categoría", font=_FONT_HEADER, bg=_CARD_BG, fg=_ACCENT).pack(
+            anchor="w", padx=14, pady=(0, 4)
+        )
+
+        add_row = tk.Frame(self, bg=_CARD_BG)
+        add_row.pack(fill=tk.X, padx=14, pady=(0, 6))
+
+        self._var_name = tk.StringVar()
+        tk.Entry(
+            add_row,
+            textvariable=self._var_name,
+            font=_FONT_LABEL,
+            bg="#2A2A3E",
+            fg=_WHITE,
+            insertbackground=_WHITE,
+            relief=tk.FLAT,
+            width=22,
+        ).pack(side=tk.LEFT, ipady=4, padx=(0, 6))
+
+        self._var_type = tk.StringVar(value="expense")
+        ttk.Combobox(add_row, textvariable=self._var_type, values=self._TYPES, state="readonly", width=10).pack(
+            side=tk.LEFT, padx=(0, 6)
+        )
+
+        tk.Button(
+            add_row,
+            text="+",
+            font=_FONT_HEADER,
+            bg=_POSITIVE,
+            fg=_WHITE,
+            relief=tk.FLAT,
+            padx=10,
+            cursor="hand2",
+            command=self._add,
+        ).pack(side=tk.LEFT)
+
+        self._lbl_msg = tk.Label(self, text="", font=_FONT_SUB, bg=_CARD_BG, fg=_NEUTRAL)
+        self._lbl_msg.pack(padx=14, pady=(0, 10))
+
+    def _render_list(self):
+        for w in self._list_frame.winfo_children():
+            w.destroy()
+        for cat_id, name, cat_type in sorted(self._categories, key=lambda x: x[1]):
+            row = tk.Frame(self._list_frame, bg=_CARD_BG)
+            row.pack(fill=tk.X, pady=1)
+            type_color = {"income": _POSITIVE, "expense": _NEGATIVE, "transfer": _GOLD}.get(cat_type, _NEUTRAL)
+            tk.Label(row, text=f"[{cat_type}]", font=_FONT_SUB, bg=_CARD_BG, fg=type_color, width=10, anchor="w").pack(
+                side=tk.LEFT
+            )
+            tk.Label(row, text=name, font=_FONT_LABEL, bg=_CARD_BG, fg=_WHITE, anchor="w", width=26).pack(side=tk.LEFT)
+            tk.Button(
+                row,
+                text="−",
+                font=_FONT_LABEL,
+                bg=_NEGATIVE,
+                fg=_WHITE,
+                relief=tk.FLAT,
+                padx=6,
+                cursor="hand2",
+                command=lambda cid=cat_id, cname=name: self._delete(cid, cname),
+            ).pack(side=tk.RIGHT)
+
+    def _add(self):
+        name = self._var_name.get().strip()
+        cat_type = self._var_type.get()
+        ok, msg = self._db.add_category(name, cat_type)
+        if ok:
+            cats = self._db.get_categories()
+            self._categories = list(cats)
+            self._render_list()
+            self._var_name.set("")
+            self._on_change()
+        self._lbl_msg.config(text=msg, fg=_POSITIVE if ok else _NEGATIVE)
+
+    def _delete(self, cat_id: int, name: str):
+        ok, msg = self._db.delete_category(cat_id)
+        if ok:
+            self._categories = [(cid, n, ct) for cid, n, ct in self._categories if cid != cat_id]
+            self._render_list()
+            self._on_change()
+        self._lbl_msg.config(text=msg, fg=_POSITIVE if ok else _NEGATIVE)
+
+
 class FinancePanel(tk.Frame):
     """
     Tab Finance — resumen de finanzas personales.
@@ -592,8 +728,7 @@ class FinancePanel(tk.Frame):
         super().__init__(master, bg=bg)
         self.bgcolor = bg
         self._db = FinanceScreen()
-        self._sel_month = datetime.now().month
-        self._sel_year = datetime.now().year
+        self._sel_month, self._sel_year = self._db.get_last_loaded_period()
 
         self._accounts: list[tuple] = []
         self._categories: list[tuple] = []  # [(id, name), ...]
@@ -647,9 +782,21 @@ class FinancePanel(tk.Frame):
             command=self.refresh,
         ).pack(side=tk.LEFT, padx=(8, 0))
 
-        # ── chips de banco/cuenta (se pueblan en inicializar) ─────────────────
-        self._chip_frame = tk.Frame(self, bg=self.bgcolor)
-        self._chip_frame.pack(fill=tk.X, padx=10, pady=(2, 4))
+        # ── chips de banco/cuenta — canvas scrollable horizontal ─────────────
+        chip_canvas = tk.Canvas(self, bg=self.bgcolor, height=28, highlightthickness=0)
+        chip_canvas.pack(fill=tk.X, padx=10, pady=(2, 4))
+        self._chip_frame = tk.Frame(chip_canvas, bg=self.bgcolor)
+        chip_canvas.create_window((0, 0), window=self._chip_frame, anchor="nw")
+
+        def _on_chips_resize(e):
+            chip_canvas.configure(scrollregion=chip_canvas.bbox("all"))
+
+        def _on_chip_scroll(e):
+            chip_canvas.xview_scroll(int(-1 * (e.delta / 120)), "units")
+
+        self._chip_frame.bind("<Configure>", _on_chips_resize)
+        chip_canvas.bind("<MouseWheel>", _on_chip_scroll)
+        self._chip_frame.bind("<MouseWheel>", _on_chip_scroll)
 
         # ── separador ────────────────────────────────────────────────────────
         tk.Frame(self, bg=_NEUTRAL, height=1).pack(fill=tk.X, padx=10, pady=2)
@@ -677,9 +824,42 @@ class FinancePanel(tk.Frame):
         left = tk.Frame(body, bg=self.bgcolor)
         left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
 
-        _SectionLabel(left, "Gastos por categoría").pack(anchor="w", pady=(0, 6))
+        cat_hdr = tk.Frame(left, bg=self.bgcolor)
+        cat_hdr.pack(fill=tk.X, pady=(0, 6))
+        _SectionLabel(cat_hdr, "Gastos por categoría").pack(side=tk.LEFT)
+        tk.Button(
+            cat_hdr,
+            text="+",
+            font=_FONT_CHIP,
+            bg=_POSITIVE,
+            fg=_WHITE,
+            relief=tk.FLAT,
+            padx=6,
+            pady=1,
+            cursor="hand2",
+            command=self._open_category_manager,
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        tk.Button(
+            cat_hdr,
+            text="−",
+            font=_FONT_CHIP,
+            bg=_NEGATIVE,
+            fg=_WHITE,
+            relief=tk.FLAT,
+            padx=6,
+            pady=1,
+            cursor="hand2",
+            command=self._open_category_manager,
+        ).pack(side=tk.RIGHT)
+
         self._cat_bar = _CategoryBar(left, self.bgcolor, on_select=self._on_category_select)
         self._cat_bar.pack(fill=tk.BOTH, expand=True)
+
+        tk.Frame(left, bg=_NEUTRAL, height=1).pack(fill=tk.X, pady=6)
+
+        _SectionLabel(left, "Ingresos por categoría").pack(anchor="w", pady=(0, 6))
+        self._cat_bar_income = _CategoryBar(left, self.bgcolor, on_select=self._on_category_select, bar_color=_POSITIVE)
+        self._cat_bar_income.pack(fill=tk.BOTH, expand=True)
 
         tk.Frame(body, bg=_NEUTRAL, width=1).pack(side=tk.LEFT, fill=tk.Y, padx=6)
 
@@ -793,6 +973,23 @@ class FinancePanel(tk.Frame):
 
     # ── lógica filtro categoría ───────────────────────────────────────────────
 
+    def _open_category_manager(self):
+        """Abre popup de administración de categorías (+/-)."""
+        _CategoryManagerPopup(
+            self,
+            self._categories,
+            db=self._db,
+            on_change=self._reload_categories,
+        )
+
+    def _reload_categories(self):
+        """Recarga categorías desde BD y refresca la barra."""
+        self._categories = self._db.get_categories()
+        date_from, date_to = self._period()
+        account_ids = self._selected_account_ids()
+        self._cat_bar.load(self._db.get_categories_expense(date_from, date_to, account_ids))
+        self._cat_bar_income.load(self._db.get_categories_income(date_from, date_to, account_ids))
+
     def _on_category_select(self, cat_name: str | None):
         self._txn_table.set_category_filter(cat_name)
         if cat_name:
@@ -886,6 +1083,7 @@ class FinancePanel(tk.Frame):
             self._clear_category_filter()
 
             self._cat_bar.load(self._db.get_categories_expense(date_from, date_to, account_ids))
+            self._cat_bar_income.load(self._db.get_categories_income(date_from, date_to, account_ids))
 
             txns = self._db.get_transactions(date_from, date_to, account_ids)
             self._txn_table.load(txns)
@@ -923,6 +1121,7 @@ DESCONOCIDOS_DIR = os.path.join(EXTRACTOS_DIR, "desconocidos")
 # (keyword_en_pdf, adapter_key, account_ref)  account_ref=None → multi-sección
 
 DETECTION_RULES = [
+    ("CITIBANK, N. A.", "citibank_us", None),
     ("Santander", "santander", None),
     ("196-009369/5", "bbva_ahorro", "196-009369/5"),
     ("196-004699/4", "bbva_cuenta", "196-004699/4"),
@@ -947,16 +1146,56 @@ MESES_ES = {
 
 _INSERT_TXN_SQL = """
     INSERT IGNORE INTO fin_transactions
-        (date, type, amount, currency, category_id, account_id,
+        (date, type, amount, currency, amount_usdt, category_id, account_id,
          description, raw_description, raw_description_detail,
          comprobante, import_id, classified_by,
          installment_current, installment_total)
     VALUES
-        (%(date)s, %(type)s, %(amount)s, %(currency)s, %(category_id)s,
-         %(account_id)s, %(description)s, %(raw_description)s,
+        (%(date)s, %(type)s, %(amount)s, %(currency)s, %(amount_usdt)s,
+         %(category_id)s, %(account_id)s, %(description)s, %(raw_description)s,
          %(raw_description_detail)s, %(comprobante)s, %(import_id)s,
          %(classified_by)s, %(installment_current)s, %(installment_total)s)
 """
+
+
+def _get_tasa_cursor(currency: str, txn_date, cursor) -> float | None:
+    """Tasa fiat→USDT más cercana a txn_date usando cursor existente."""
+    if currency == "USD":
+        return 1.0
+    categoria = {"ARS": "ARS", "VES": "VES"}.get(currency)
+    if not categoria:
+        return None
+    cursor.execute(
+        "SELECT preciotrans FROM booktrading "
+        "WHERE categoria=%s AND simbolo='USDT' AND preciotrans > 0 "
+        "ORDER BY ABS(TIMESTAMPDIFF(SECOND, fechahora, %s)) LIMIT 1",
+        (categoria, txn_date),
+    )
+    row = cursor.fetchone()
+    return float(row[0]) if row else None
+
+
+def _calc_usdt(amount: Decimal, currency: str, txn_date, cursor) -> Decimal | None:
+    """Calcula amount_usdt usando la tasa más cercana a txn_date."""
+    tasa = _get_tasa_cursor(currency, txn_date, cursor)
+    if tasa is None or tasa == 0:
+        return None
+    if currency == "USD":
+        return amount
+    return (amount / Decimal(str(tasa))).quantize(Decimal("0.00000001"))
+
+
+def parse_amount_us(text: str) -> Decimal | None:
+    """Convierte número formato US '1,234.56' → Decimal('1234.56')."""
+    if not text:
+        return None
+    text = text.strip().replace(" ", "").replace(",", "")
+    if not text or text in ("-", "—"):
+        return None
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        return None
 
 
 def sha256_file(path: str) -> str:
@@ -1160,6 +1399,7 @@ class BbvaArTarjeta:
                     "type": txn_type,
                     "amount": abs(amount),
                     "currency": currency,
+                    "amount_usdt": _calc_usdt(abs(amount), currency, r["date"], cursor),
                     "category_id": cat_id,
                     "account_id": account_id,
                     "description": desc_clean,
@@ -1236,8 +1476,10 @@ class BbvaArTarjeta:
                 _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
                 stats["errors"] += 1
         cursor.execute(
-            "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s WHERE id=%s",
-            (stats["rows_found"], stats["inserted"], stats["skipped"], import_id),
+            "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s,"
+            "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
+            "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
+            (stats["rows_found"], stats["inserted"], stats["skipped"], import_id, import_id, import_id),
         )
         conn.commit()
         cursor.close()
@@ -1265,6 +1507,8 @@ class BbvaArCuenta:
     SECTION_NAME = "bbva_cuenta"
     RE_DATE = re.compile(r"^\d{2}/\d{2}$")
     RE_INLINE_AMOUNT = re.compile(r"\s+(-?\d{1,3}(?:\.\d{3})*,\d{2})\s*$")
+    # Código interno BBVA: 11XXXXXXXX20260128DIGITAL → fecha cierre YYYYMMDD
+    RE_BBVA_CLOSE = re.compile(r"1\d{8}(20\d{2})(\d{2})\d{2}DIGITAL")
 
     X_ORIGEN_MIN = 97
     X_CONCEPTO_MIN = 134
@@ -1285,14 +1529,23 @@ class BbvaArCuenta:
         self.account_ref = account_ref.strip()
         self.dry_run = dry_run
         self.file_hash = sha256_file(pdf_path)
-        self._year: int | None = None
+        self._end_year: int = datetime.now().year
+        self._end_month: int = datetime.now().month
 
-    def _infer_year(self, words: list[dict]) -> int:
+    def _infer_period(self, words: list[dict]):
+        """Extrae año y mes de cierre del código interno BBVA o primer año encontrado."""
+        for w in words:
+            m = self.RE_BBVA_CLOSE.search(w["text"])
+            if m:
+                self._end_year = int(m.group(1))
+                self._end_month = int(m.group(2))
+                return
+        # fallback: primer año mencionado
         for w in words:
             m = re.search(r"\b(20\d{2})\b", w["text"])
             if m:
-                return int(m.group(1))
-        return datetime.now().year
+                self._end_year = int(m.group(1))
+                return
 
     def _is_date(self, text: str) -> bool:
         return bool(self.RE_DATE.match(text.strip()))
@@ -1302,8 +1555,10 @@ class BbvaArCuenta:
         if not m:
             return None
         day, month = int(m.group(1)), int(m.group(2))
+        # Fechas cuyo mes supera el mes de cierre → pertenecen al año anterior
+        year = self._end_year if month <= self._end_month else self._end_year - 1
         try:
-            return date(self._year or datetime.now().year, month, day)
+            return date(year, month, day)
         except ValueError:
             return None
 
@@ -1341,8 +1596,8 @@ class BbvaArCuenta:
             all_words = []
             for page in pdf.pages:
                 all_words.extend(page.extract_words(x_tolerance=3, y_tolerance=3))
-            self._year = self._infer_year(all_words)
-            _logger.info(f"  Año inferido: {self._year}")
+            self._infer_period(all_words)
+            _logger.info(f"  BBVA CA — período cierre: {self._end_month}/{self._end_year}")
             for page in pdf.pages:
                 words = [w for w in page.extract_words(x_tolerance=3, y_tolerance=3) if w["x0"] < 570]
                 lines = self._words_to_lines(words)
@@ -1412,6 +1667,7 @@ class BbvaArCuenta:
                     "type": txn_type,
                     "amount": amount,
                     "currency": "ARS",
+                    "amount_usdt": _calc_usdt(amount, "ARS", txn_date, cursor),
                     "category_id": cat_id,
                     "account_id": account_id,
                     "description": concepto,
@@ -1485,8 +1741,10 @@ class BbvaArCuenta:
                 _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
                 stats["errors"] += 1
         cursor.execute(
-            "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s WHERE id=%s",
-            (stats["rows_found"], stats["inserted"], stats["skipped"], import_id),
+            "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s,"
+            "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
+            "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
+            (stats["rows_found"], stats["inserted"], stats["skipped"], import_id, import_id, import_id),
         )
         conn.commit()
         cursor.close()
@@ -1621,8 +1879,10 @@ class SantanderAr:
     def _extract_all(self) -> dict[str, list[dict]]:
         result: dict[str, list[dict]] = {k: [] for k in self.ACCOUNT_REF_MAP}
         state = "none"
+        prev_state = "none"
         product_ctx = "none"
         pending_san = False
+        last_fecha_str = ""
 
         with pdfplumber.open(self.pdf_path) as pdf:
             for page in pdf.pages:
@@ -1695,31 +1955,36 @@ class SantanderAr:
                         state = "none"
                         continue
 
+                    if state != prev_state:
+                        last_fecha_str = ""
+                        prev_state = state
+
                     if state == "cuenta_ars":
-                        self._process_cuenta_line(line, result["cuenta_ars"])
+                        last_fecha_str = self._process_cuenta_line(line, result["cuenta_ars"], last_fecha_str)
                     elif state == "cuenta_usd":
-                        self._process_cuenta_usd_line(line, result["cuenta_usd"])
+                        last_fecha_str = self._process_cuenta_usd_line(line, result["cuenta_usd"], last_fecha_str)
                     elif state in ("visa", "amex"):
-                        self._process_tc_line(line, result[state])
-                    elif state in ("debito", "debito_pagos"):
-                        self._process_debito_line(line, result["debito"], expense=True)
+                        last_fecha_str = self._process_tc_line(line, result[state], last_fecha_str)
+                    # debito omitido — sus transacciones ya están en cuenta_ars (duplicado)
 
         return result
 
-    def _process_cuenta_line(self, line: list[dict], rows: list[dict]):
+    def _process_cuenta_line(self, line: list[dict], rows: list[dict], last_fecha_str: str = "") -> str:
         cols = {k: [] for k in ("fecha", "comprobante", "concepto", "monto_ca", "monto_cc", "saldo")}
         for w in line:
             cols[self._classify_cuenta(w)].append(w["text"])
         fecha_str = " ".join(cols["fecha"]).strip()
-        concepto = " ".join(cols["concepto"]).strip()
         if not self._is_date(fecha_str):
-            return
+            fecha_str = last_fecha_str
+        if not fecha_str:
+            return last_fecha_str
+        concepto = " ".join(cols["concepto"]).strip()
         if any(s in concepto.upper() for s in ("SALDO INICIAL", "SALDO ANTERIOR")):
-            return
+            return fecha_str
         monto_tokens = cols["monto_ca"] or cols["monto_cc"]
         amount = self._parse_signed_tokens(monto_tokens)
         if amount is None:
-            return
+            return fecha_str
         rows.append(
             {
                 "fecha_str": fecha_str,
@@ -1731,21 +1996,24 @@ class SantanderAr:
                 "currency": "ARS",
             }
         )
+        return fecha_str
 
-    def _process_cuenta_usd_line(self, line: list[dict], rows: list[dict]):
+    def _process_cuenta_usd_line(self, line: list[dict], rows: list[dict], last_fecha_str: str = "") -> str:
         cols = {k: [] for k in ("fecha", "comprobante", "concepto", "monto_ca", "monto_cc", "saldo")}
         for w in line:
             cols[self._classify_cuenta(w)].append(w["text"])
         fecha_str = " ".join(cols["fecha"]).strip()
         if not self._is_date(fecha_str):
-            return
+            fecha_str = last_fecha_str
+        if not fecha_str:
+            return last_fecha_str
         concepto = " ".join(cols["concepto"]).strip()
         if any(s in concepto.upper() for s in ("SALDO INICIAL", "SALDO ANTERIOR")):
-            return
+            return fecha_str
         monto_tokens = cols["monto_ca"] or cols["monto_cc"]
         amount = self._parse_signed_tokens(monto_tokens)
         if amount is None:
-            return
+            return fecha_str
         rows.append(
             {
                 "fecha_str": fecha_str,
@@ -1757,19 +2025,22 @@ class SantanderAr:
                 "currency": "USD",
             }
         )
+        return fecha_str
 
-    def _process_tc_line(self, line: list[dict], rows: list[dict]):
+    def _process_tc_line(self, line: list[dict], rows: list[dict], last_fecha_str: str = "") -> str:
         cols = {k: [] for k in ("fecha", "comprobante", "descripcion", "cuota", "pesos", "dolares")}
         for w in line:
             cols[self._classify_tc(w)].append(w["text"])
         fecha_str = " ".join(cols["fecha"]).strip()
         if not self._is_date(fecha_str):
-            return
+            fecha_str = last_fecha_str
+        if not fecha_str:
+            return last_fecha_str
         desc = " ".join(cols["descripcion"]).strip()
         if not desc:
-            return
+            return fecha_str
         if any(s in desc.upper() for s in ("SALDO ANTERIOR", "TU PAGO", "CR.", "CR.$")):
-            return
+            return fecha_str
         if cols["pesos"]:
             amount = self._parse_signed_tokens(cols["pesos"])
             currency = "ARS"
@@ -1777,9 +2048,9 @@ class SantanderAr:
             amount = self._parse_signed_tokens(cols["dolares"])
             currency = "USD"
         else:
-            return
+            return fecha_str
         if amount is None:
-            return
+            return fecha_str
         cuota_text = " ".join(cols["cuota"]).strip()
         inst_cur, inst_tot = None, None
         m = self.RE_CUOTA_SAN.match(cuota_text)
@@ -1798,20 +2069,23 @@ class SantanderAr:
                 "installment_total": inst_tot,
             }
         )
+        return fecha_str
 
-    def _process_debito_line(self, line: list[dict], rows: list[dict], expense: bool):
+    def _process_debito_line(self, line: list[dict], rows: list[dict], expense: bool, last_fecha_str: str = "") -> str:
         cols = {k: [] for k in ("fecha", "comprobante", "descripcion", "importe")}
         for w in line:
             cols[self._classify_debito(w)].append(w["text"])
         fecha_str = " ".join(cols["fecha"]).strip()
         if not self._is_date(fecha_str):
-            return
+            fecha_str = last_fecha_str
+        if not fecha_str:
+            return last_fecha_str
         desc = " ".join(cols["descripcion"]).strip()
         if not desc:
-            return
+            return fecha_str
         amount = self._parse_signed_tokens(cols["importe"])
         if amount is None:
-            return
+            return fecha_str
         rows.append(
             {
                 "fecha_str": fecha_str,
@@ -1825,6 +2099,7 @@ class SantanderAr:
                 "installment_total": None,
             }
         )
+        return fecha_str
 
     def _build_transactions(self, rows, account_id, import_id, section_key, cursor) -> list[dict]:
         txns = []
@@ -1832,13 +2107,15 @@ class SantanderAr:
             if not r.get("date"):
                 _logger.warning(f"  [{section_key}] Fecha inválida: {r.get('fecha_str')} — omitida")
                 continue
+            currency = r.get("currency", "ARS")
             cat_id, classified_by = apply_rules(r["concepto"], cursor)
             txns.append(
                 {
                     "date": r["date"],
                     "type": r["type"],
                     "amount": r["amount"],
-                    "currency": r.get("currency", "ARS"),
+                    "currency": currency,
+                    "amount_usdt": _calc_usdt(r["amount"], currency, r["date"], cursor),
                     "category_id": cat_id,
                     "account_id": account_id,
                     "description": r["concepto"],
@@ -1930,8 +2207,316 @@ class SantanderAr:
                     _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
                     stats["errors"] += 1
             cursor.execute(
-                "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s WHERE id=%s",
-                (len(rows), inserted_sec, import_id),
+                "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,"
+                "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
+                "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
+                (len(rows), inserted_sec, import_id, import_id, import_id),
+            )
+            conn.commit()
+            _logger.info(f"  [{section_key}] {len(rows)} filas → {inserted_sec} insertadas")
+
+        cursor.close()
+        return stats
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Adaptador Citibank US — Checking + Savings (estado de cuenta mensual)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class CitibankUs:
+    """
+    Parsea el PDF mensual de Citibank USA (Regular Checking + Savings Plus).
+
+    Secciones detectadas por encabezado:
+        CHECKING ACTIVITY  → account_ref CITI-9135153751
+        SAVINGS ACTIVITY   → account_ref CITI-9137165365
+
+    Columnas por X (layout fijo Citi):
+        x < 90       → fecha  (MM/DD)
+        90 ≤ x < 390 → descripción
+        390 ≤ x < 480 → amount_subtracted (débito)
+        480 ≤ x < 560 → amount_added (crédito)
+        x ≥ 560      → balance (ignorado)
+
+    Fecha: MM/DD — año inferido del header "Statement Period Dec 15 - Jan 12, 2026"
+    """
+
+    ACCOUNT_REF_MAP = {
+        "checking": "CITI-9135153751",
+        "savings": "CITI-9137165365",
+    }
+    SECTION_NAME_MAP = {
+        "checking": "citi_checking",
+        "savings": "citi_savings",
+    }
+
+    RE_DATE = re.compile(r"^\d{2}/\d{2}$")
+    RE_STMT_PERIOD = re.compile(r"(\w+)\s+\d+\s*-\s*(\w+)\s+\d+,\s*(20\d{2})", re.IGNORECASE)
+
+    MESES_EN = {
+        "jan": 1,
+        "feb": 2,
+        "mar": 3,
+        "apr": 4,
+        "may": 5,
+        "jun": 6,
+        "jul": 7,
+        "aug": 8,
+        "sep": 9,
+        "oct": 10,
+        "nov": 11,
+        "dec": 12,
+    }
+
+    SKIP_DESC = {"Total Subtracted/Added", "Beginning Balance", "Ending Balance"}
+
+    def __init__(self, pdf_path: str, dry_run: bool = False):
+        self.pdf_path = pdf_path
+        self.dry_run = dry_run
+        self.file_hash = sha256_file(pdf_path)
+        self._end_year: int = datetime.now().year
+        self._end_month: int = datetime.now().month
+
+    def _infer_period(self, text: str):
+        """Extrae año y mes de cierre del statement period. Ej: 'Dec 15 - Jan 12, 2026' → end_month=1, end_year=2026."""
+        m = self.RE_STMT_PERIOD.search(text)
+        if m:
+            self._end_month = self.MESES_EN.get(m.group(2).lower()[:3], self._end_month)
+            self._end_year = int(m.group(3))
+
+    def _is_date(self, text: str) -> bool:
+        return bool(self.RE_DATE.match(text.strip()))
+
+    def _parse_date(self, fecha_str: str) -> date | None:
+        m = re.match(r"(\d{2})/(\d{2})$", fecha_str.strip())
+        if not m:
+            return None
+        month, day = int(m.group(1)), int(m.group(2))
+        # Transacciones cuyo mes es mayor al mes de cierre → pertenecen al año anterior
+        year = self._end_year if month <= self._end_month else self._end_year - 1
+        try:
+            return date(year, month, day)
+        except ValueError:
+            return None
+
+    def _words_to_lines(self, words: list[dict], y_tol: float = 3.0) -> list[list[dict]]:
+        if not words:
+            return []
+        lines, current = [], [words[0]]
+        for w in words[1:]:
+            if abs(w["top"] - current[0]["top"]) <= y_tol:
+                current.append(w)
+            else:
+                lines.append(sorted(current, key=lambda x: x["x0"]))
+                current = [w]
+        lines.append(sorted(current, key=lambda x: x["x0"]))
+        return lines
+
+    def _classify_word(self, w: dict) -> str:
+        x = w["x0"]
+        if x < 75:
+            return "fecha"
+        if x < 355:
+            return "desc"
+        if x < 450:
+            return "subtracted"
+        if x < 530:
+            return "added"
+        return "balance"
+
+    def _extract_all(self) -> dict[str, list[dict]]:
+        result = {"checking": [], "savings": []}
+        state = "none"
+
+        with pdfplumber.open(self.pdf_path) as pdf:
+            full_text = " ".join(
+                w["text"] for page in pdf.pages[:2] for w in page.extract_words(x_tolerance=3, y_tolerance=3)
+            )
+            self._infer_period(full_text)
+            _logger.info(f"  Citi — período cierre: {self._end_month}/{self._end_year}")
+
+            for page in pdf.pages:
+                words = [w for w in page.extract_words(x_tolerance=3, y_tolerance=3) if w["x0"] < 600]
+                lines = self._words_to_lines(words)
+                pending_row: dict | None = None  # fila abierta esperando continuación desc
+
+                for line in lines:
+                    text = " ".join(w["text"] for w in line)
+                    upper = text.upper()
+
+                    if "CHECKING ACTIVITY" in upper:
+                        state = "checking"
+                        pending_row = None
+                        continue
+                    if "SAVINGS ACTIVITY" in upper:
+                        state = "savings"
+                        pending_row = None
+                        continue
+                    if state == "none":
+                        continue
+                    if any(s.upper() in upper for s in self.SKIP_DESC):
+                        if pending_row:
+                            result[state].append(pending_row)
+                            pending_row = None
+                        continue
+                    if "ALL TRANSACTION TIMES" in upper or "APY AND INTEREST" in upper:
+                        pending_row = None
+                        continue
+
+                    cols = {"fecha": [], "desc": [], "subtracted": [], "added": [], "balance": []}
+                    for w in line:
+                        cols[self._classify_word(w)].append(w["text"])
+
+                    fecha_str = " ".join(cols["fecha"]).strip()
+                    desc = " ".join(cols["desc"]).strip()
+
+                    if not self._is_date(fecha_str):
+                        # línea de continuación de descripción (sin fecha, sin montos)
+                        if pending_row and desc and not cols["subtracted"] and not cols["added"]:
+                            pending_row["concepto"] += " " + desc
+                        else:
+                            pending_row = None
+                        continue
+
+                    # nueva fila con fecha
+                    if pending_row:
+                        result[state].append(pending_row)
+                    pending_row = None
+
+                    if not desc:
+                        continue
+
+                    subtracted = parse_amount_us(" ".join(cols["subtracted"]))
+                    added = parse_amount_us(" ".join(cols["added"]))
+
+                    if added is not None and added != 0:
+                        amount, txn_type = added, "income"
+                    elif subtracted is not None and subtracted != 0:
+                        amount, txn_type = subtracted, "expense"
+                    else:
+                        continue
+
+                    pending_row = {
+                        "fecha_str": fecha_str,
+                        "date": self._parse_date(fecha_str),
+                        "concepto": desc,
+                        "amount": abs(amount),
+                        "type": txn_type,
+                        "currency": "USD",
+                    }
+
+                if pending_row:
+                    result[state].append(pending_row)
+                    pending_row = None
+
+        return result
+
+    def _build_transactions(self, rows, account_id, import_id, section_key, cursor) -> list[dict]:
+        txns = []
+        for r in rows:
+            if not r.get("date"):
+                _logger.warning(f"  [{section_key}] Fecha inválida: {r.get('fecha_str')} — omitida")
+                continue
+            cat_id, classified_by = apply_rules(r["concepto"], cursor)
+            txns.append(
+                {
+                    "date": r["date"],
+                    "type": r["type"],
+                    "amount": r["amount"],
+                    "currency": "USD",
+                    "amount_usdt": r["amount"],  # USD = USDT directo
+                    "category_id": cat_id,
+                    "account_id": account_id,
+                    "description": r["concepto"],
+                    "raw_description": r["concepto"],
+                    "raw_description_detail": None,
+                    "comprobante": None,
+                    "import_id": import_id,
+                    "classified_by": classified_by,
+                    "installment_current": None,
+                    "installment_total": None,
+                }
+            )
+        return txns
+
+    def preview(self) -> dict:
+        stats = {"inserted": 0, "skipped": 0, "errors": 0, "rows_found": 0}
+        all_rows = self._extract_all()
+        for section_key, rows in all_rows.items():
+            if not rows:
+                continue
+            _logger.info(f"\n  ── {section_key} ({self.ACCOUNT_REF_MAP[section_key]}) — {len(rows)} filas ──")
+            stats["rows_found"] += len(rows)
+            for r in rows:
+                if not r.get("date"):
+                    stats["errors"] += 1
+                    continue
+                _logger.info(f"  {r['date']} | {r['type']:8s} | USD {r['amount']:>10.2f} | {r['concepto'][:60]}")
+                stats["inserted"] += 1
+        return stats
+
+    def load(self, conn) -> dict:
+        stats = {"inserted": 0, "skipped": 0, "errors": 0, "rows_found": 0}
+        cursor = conn.cursor()
+        account_ids: dict[str, int] = {}
+        bank_ids: dict[str, int] = {}
+        for section_key, acct_ref in self.ACCOUNT_REF_MAP.items():
+            cursor.execute("SELECT id, bank_id FROM fin_accounts WHERE account_ref=%s AND is_active=1", (acct_ref,))
+            row = cursor.fetchone()
+            if row:
+                account_ids[section_key] = row[0]
+                bank_ids[section_key] = row[1]
+            else:
+                _logger.warning(f"  Cuenta no encontrada: {acct_ref} ({section_key}) — omitida")
+
+        import_ids: dict[str, int] = {}
+        filename = os.path.basename(self.pdf_path)
+        for section_key, section_name in self.SECTION_NAME_MAP.items():
+            if section_key not in account_ids:
+                continue
+            cursor.execute(
+                "SELECT id FROM fin_statement_imports WHERE file_hash=%s AND section=%s",
+                (self.file_hash, section_name),
+            )
+            if cursor.fetchone():
+                _logger.warning(f"  [{section_key}] Ya importado — omitido")
+                import_ids[section_key] = -1
+                continue
+            cursor.execute(
+                "INSERT INTO fin_statement_imports (account_id,bank_id,filename,file_hash,section,status) "
+                "VALUES (%s,%s,%s,%s,%s,'pending')",
+                (account_ids[section_key], bank_ids[section_key], filename, self.file_hash, section_name),
+            )
+            conn.commit()
+            import_ids[section_key] = cursor.lastrowid
+
+        all_rows = self._extract_all()
+        for section_key, rows in all_rows.items():
+            if import_ids.get(section_key) == -1:
+                continue
+            if section_key not in account_ids or section_key not in import_ids:
+                continue
+            stats["rows_found"] += len(rows)
+            import_id = import_ids[section_key]
+            txns = self._build_transactions(rows, account_ids[section_key], import_id, section_key, cursor)
+            inserted_sec = 0
+            for txn in txns:
+                try:
+                    cursor.execute(_INSERT_TXN_SQL, txn)
+                    if cursor.rowcount == 1:
+                        stats["inserted"] += 1
+                        inserted_sec += 1
+                    else:
+                        stats["skipped"] += 1
+                except Error as e:
+                    _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
+                    stats["errors"] += 1
+            cursor.execute(
+                "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,"
+                "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
+                "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
+                (len(rows), inserted_sec, import_id, import_id, import_id),
             )
             conn.commit()
             _logger.info(f"  [{section_key}] {len(rows)} filas → {inserted_sec} insertadas")
@@ -1949,6 +2534,7 @@ ADAPTER_MAP = {
     "bbva_cuenta": BbvaArCuenta,
     "bbva_ahorro": BbvaArAhorro,
     "santander": SantanderAr,
+    "citibank_us": CitibankUs,
 }
 
 
