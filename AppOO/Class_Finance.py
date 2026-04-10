@@ -151,7 +151,7 @@ class _Chip(tk.Label):
 
 
 class _KpiCard(tk.Frame):
-    """Tarjeta con título, valor grande y subtexto."""
+    """Tarjeta con título, valor grande y dos líneas de subtexto."""
 
     def __init__(self, parent, title="", value_color=None):
         super().__init__(parent, bg=_CARD_BG, bd=0, highlightthickness=1, highlightbackground=_NEUTRAL)
@@ -161,11 +161,14 @@ class _KpiCard(tk.Frame):
         self._val_lbl = tk.Label(self, text="—", font=_FONT_VALUE, bg=_CARD_BG, fg=self._vcolor)
         self._val_lbl.pack(anchor="w", padx=10)
         self._sub_lbl = tk.Label(self, text="", font=_FONT_SUB, bg=_CARD_BG, fg=_NEUTRAL)
-        self._sub_lbl.pack(anchor="w", padx=10, pady=(0, 8))
+        self._sub_lbl.pack(anchor="w", padx=10, pady=(0, 2))
+        self._sub2_lbl = tk.Label(self, text="", font=_FONT_SUB, bg=_CARD_BG, fg=_NEUTRAL)
+        self._sub2_lbl.pack(anchor="w", padx=10, pady=(0, 8))
 
-    def update_value(self, value, sub="", color=None):
+    def update_value(self, value, sub="", sub2="", color=None):
         self._val_lbl.config(text=value, fg=color or self._vcolor)
         self._sub_lbl.config(text=sub)
+        self._sub2_lbl.config(text=sub2)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -284,10 +287,13 @@ class _TxnTable(tk.Frame):
 
 class _CategoryBar(tk.Frame):
     """
-    Lista de categorías con barra proporcional y monto.
+    Lista scrollable de categorías con barra proporcional y monto.
     Clic en una fila → llama on_select(cat_name).
     Clic en fila activa → deselecciona (on_select(None)).
     """
+
+    _ROW_H = 18  # altura estimada por fila en px
+    _MAX_H = 280  # altura máxima visible del panel
 
     def __init__(self, parent, bgcolor, on_select, bar_color=None):
         super().__init__(parent, bg=bgcolor)
@@ -295,22 +301,52 @@ class _CategoryBar(tk.Frame):
         self._on_select = on_select
         self._bar_color = bar_color or _ACCENT
         self._active_cat: str | None = None
-        self._rows: list[tuple] = []  # (frame, name_label, canvas, amount_label)
+        self._rows: list[tuple] = []
 
-    def load(self, data: list[dict]):
-        """data = [{"name": str, "total": float, "pct": float}, ...]"""
-        for w in self.winfo_children():
+        # canvas scrollable
+        self._canvas = tk.Canvas(self, bg=bgcolor, highlightthickness=0, width=380)
+        self._vsb = ttk.Scrollbar(self, orient="vertical", command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=self._vsb.set)
+        self._canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self._inner = tk.Frame(self._canvas, bg=bgcolor)
+        self._canvas_window = self._canvas.create_window((0, 0), window=self._inner, anchor="nw")
+
+        self._inner.bind("<Configure>", self._on_inner_configure)
+        self._canvas.bind("<Configure>", self._on_canvas_resize)
+        self._canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self.bind("<MouseWheel>", self._on_mousewheel)
+
+    def _on_inner_configure(self, _event=None):
+        total_h = self._inner.winfo_reqheight()
+        visible_h = min(total_h, self._MAX_H)
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"), height=visible_h)
+        self._vsb.pack(side=tk.RIGHT, fill=tk.Y) if total_h > self._MAX_H else self._vsb.pack_forget()
+
+    def _on_canvas_resize(self, event):
+        self._canvas.itemconfig(self._canvas_window, width=event.width)
+
+    def _on_mousewheel(self, event):
+        self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def load(self, data: list[dict], income_total: float = 0):
+        """data = [{"name": str, "total": float, "pct": float}, ...]
+        income_total: si > 0 muestra columna %ing a la derecha del monto.
+        """
+        for w in self._inner.winfo_children():
             w.destroy()
         self._rows.clear()
         self._active_cat = None
 
         max_pct = max((d["pct"] for d in data), default=1) or 1
         bar_w = 80
+        show_pct_ing = income_total > 0
 
-        for d in data[:12]:
+        for d in data:
             name = d["name"]
             display = name if len(name) <= 20 else name[:19] + "…"
-            row_frame = tk.Frame(self, bg=self.bgcolor, cursor="hand2")
+            row_frame = tk.Frame(self._inner, bg=self.bgcolor, cursor="hand2")
             row_frame.pack(fill=tk.X, pady=1)
 
             name_lbl = tk.Label(
@@ -342,15 +378,32 @@ class _CategoryBar(tk.Frame):
             )
             amt_lbl.pack(side=tk.LEFT)
 
-            self._rows.append((row_frame, name_lbl, canvas, amt_lbl, name))
+            pct_lbl = None
+            if show_pct_ing:
+                pct_val = d["total"] / income_total * 100
+                pct_lbl = tk.Label(
+                    row_frame,
+                    text=f"{pct_val:.1f}%",
+                    font=_FONT_LABEL,
+                    bg=self.bgcolor,
+                    fg=_NEUTRAL,
+                    width=6,
+                    anchor="e",
+                    cursor="hand2",
+                )
+                pct_lbl.pack(side=tk.LEFT, padx=(2, 0))
 
-            # bind clic en todos los widgets de la fila
-            for widget in (row_frame, name_lbl, canvas, amt_lbl):
+            self._rows.append((row_frame, name_lbl, canvas, amt_lbl, name, pct_lbl))
+
+            bind_targets = [row_frame, name_lbl, canvas, amt_lbl]
+            if pct_lbl:
+                bind_targets.append(pct_lbl)
+            for widget in bind_targets:
                 widget.bind("<Button-1>", lambda _e, n=name: self._click(n))
+                widget.bind("<MouseWheel>", self._on_mousewheel)
 
     def _click(self, cat_name: str):
         if self._active_cat == cat_name:
-            # deseleccionar
             self._active_cat = None
             self._on_select(None)
         else:
@@ -359,17 +412,21 @@ class _CategoryBar(tk.Frame):
         self._highlight()
 
     def _highlight(self):
-        for row_frame, name_lbl, canvas, amt_lbl, name in self._rows:
+        for row_frame, name_lbl, canvas, amt_lbl, name, pct_lbl in self._rows:
             if name == self._active_cat:
                 row_frame.config(bg=_BLACK)
                 name_lbl.config(bg=_BLACK, fg=_WHITE)
                 canvas.config(bg=_BLACK)
                 amt_lbl.config(bg=_BLACK)
+                if pct_lbl:
+                    pct_lbl.config(bg=_BLACK)
             else:
                 row_frame.config(bg=self.bgcolor)
                 name_lbl.config(bg=self.bgcolor, fg="white")
                 canvas.config(bg=self.bgcolor)
                 amt_lbl.config(bg=self.bgcolor)
+                if pct_lbl:
+                    pct_lbl.config(bg=self.bgcolor)
 
     def clear_filter(self):
         self._active_cat = None
@@ -807,10 +864,10 @@ class FinancePanel(tk.Frame):
 
         self._kpi_income = _KpiCard(kpi_row, "Ingresos", value_color=_POSITIVE)
         self._kpi_expense = _KpiCard(kpi_row, "Gastos", value_color=_NEGATIVE)
+        self._kpi_invest = _KpiCard(kpi_row, "Invertido", value_color=_GOLD)
         self._kpi_balance = _KpiCard(kpi_row, "Balance")
-        self._kpi_usdt = _KpiCard(kpi_row, "≈ USDT", value_color=_GOLD)
 
-        for card in (self._kpi_income, self._kpi_expense, self._kpi_balance, self._kpi_usdt):
+        for card in (self._kpi_income, self._kpi_expense, self._kpi_invest, self._kpi_balance):
             card.pack(side=tk.LEFT, padx=6, ipadx=8, ipady=4, fill=tk.X, expand=True)
 
         # ── separador ────────────────────────────────────────────────────────
@@ -820,13 +877,12 @@ class FinancePanel(tk.Frame):
         body = tk.Frame(self, bg=self.bgcolor)
         body.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
 
-        # panel izquierdo — categorías
+        # panel izquierdo — categorías con tabs
         left = tk.Frame(body, bg=self.bgcolor)
         left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
 
         cat_hdr = tk.Frame(left, bg=self.bgcolor)
-        cat_hdr.pack(fill=tk.X, pady=(0, 6))
-        _SectionLabel(cat_hdr, "Gastos por categoría").pack(side=tk.LEFT)
+        cat_hdr.pack(fill=tk.X, pady=(0, 4))
         tk.Button(
             cat_hdr,
             text="+",
@@ -852,14 +908,33 @@ class FinancePanel(tk.Frame):
             command=self._open_category_manager,
         ).pack(side=tk.RIGHT)
 
-        self._cat_bar = _CategoryBar(left, self.bgcolor, on_select=self._on_category_select)
-        self._cat_bar.pack(fill=tk.BOTH, expand=True)
+        style = ttk.Style()
+        style.configure("Cat.TNotebook", background=self.bgcolor, borderwidth=0)
+        style.configure("Cat.TNotebook.Tab", background="#1A1A2E", foreground=_NEUTRAL, font=_FONT_CHIP, padding=(8, 3))
+        style.map("Cat.TNotebook.Tab", background=[("selected", "#2A2A3E")], foreground=[("selected", _WHITE)])
 
-        tk.Frame(left, bg=_NEUTRAL, height=1).pack(fill=tk.X, pady=6)
+        cat_nb = ttk.Notebook(left, style="Cat.TNotebook")
+        cat_nb.pack(fill=tk.BOTH, expand=True)
 
-        _SectionLabel(left, "Ingresos por categoría").pack(anchor="w", pady=(0, 6))
-        self._cat_bar_income = _CategoryBar(left, self.bgcolor, on_select=self._on_category_select, bar_color=_POSITIVE)
-        self._cat_bar_income.pack(fill=tk.BOTH, expand=True)
+        tab_expense = tk.Frame(cat_nb, bg=self.bgcolor)
+        tab_income = tk.Frame(cat_nb, bg=self.bgcolor)
+        tab_transfer = tk.Frame(cat_nb, bg=self.bgcolor)
+        cat_nb.add(tab_expense, text="Gastos")
+        cat_nb.add(tab_income, text="Ingresos")
+        cat_nb.add(tab_transfer, text="Transferencias")
+
+        self._cat_bar = _CategoryBar(tab_expense, self.bgcolor, on_select=self._on_category_select, bar_color=_NEGATIVE)
+        self._cat_bar.pack(fill=tk.BOTH, expand=True, pady=4)
+
+        self._cat_bar_income = _CategoryBar(
+            tab_income, self.bgcolor, on_select=self._on_category_select, bar_color=_POSITIVE
+        )
+        self._cat_bar_income.pack(fill=tk.BOTH, expand=True, pady=4)
+
+        self._cat_bar_transfer = _CategoryBar(
+            tab_transfer, self.bgcolor, on_select=self._on_category_select, bar_color=_GOLD
+        )
+        self._cat_bar_transfer.pack(fill=tk.BOTH, expand=True, pady=4)
 
         tk.Frame(body, bg=_NEUTRAL, width=1).pack(side=tk.LEFT, fill=tk.Y, padx=6)
 
@@ -989,6 +1064,7 @@ class FinancePanel(tk.Frame):
         account_ids = self._selected_account_ids()
         self._cat_bar.load(self._db.get_categories_expense(date_from, date_to, account_ids))
         self._cat_bar_income.load(self._db.get_categories_income(date_from, date_to, account_ids))
+        self._cat_bar_transfer.load(self._db.get_categories_transfer(date_from, date_to, account_ids))
 
     def _on_category_select(self, cat_name: str | None):
         self._txn_table.set_category_filter(cat_name)
@@ -1068,22 +1144,41 @@ class FinancePanel(tk.Frame):
             kpi = self._db.get_kpis(date_from, date_to, account_ids)
             if kpi:
                 balance = kpi["ingresos"] - kpi["gastos"]
-                balance_usdt = kpi["ing_usdt"] - kpi["gas_usdt"]
                 bal_color = _POSITIVE if balance >= 0 else _NEGATIVE
+                pct_gastos = (kpi["gastos"] / kpi["ingresos"] * 100) if kpi["ingresos"] else 0
+                pct_invest = (kpi["invertido"] / kpi["ingresos"] * 100) if kpi["ingresos"] else 0
 
-                self._kpi_income.update_value(_fmt_ars(kpi["ingresos"]), sub=f"≈ {_fmt_usdt(kpi['ing_usdt'])}")
-                self._kpi_expense.update_value(_fmt_ars(kpi["gastos"]), sub=f"≈ {_fmt_usdt(kpi['gas_usdt'])}")
-                self._kpi_balance.update_value(_fmt_ars(balance), sub=f"≈ {_fmt_usdt(balance_usdt)}", color=bal_color)
-                self._kpi_usdt.update_value(_fmt_usdt(balance_usdt), sub=f"{kpi['total_txns']} transacciones")
+                self._kpi_income.update_value(
+                    _fmt_ars(kpi["ingresos"]),
+                    sub=f"≈ {_fmt_usdt(kpi['ing_usdt'])}",
+                    sub2=f"{kpi['total_txns']} transacciones",
+                )
+                self._kpi_expense.update_value(
+                    _fmt_ars(kpi["gastos"]),
+                    sub=f"≈ {_fmt_usdt(kpi['gas_usdt'])}",
+                    sub2=f"{pct_gastos:.1f}% de ingresos",
+                )
+                self._kpi_invest.update_value(
+                    _fmt_ars(kpi["invertido"]),
+                    sub=f"≈ {_fmt_usdt(kpi['ing_usdt'] - kpi['gas_usdt'])}",
+                    sub2=f"{pct_invest:.1f}% de ingresos",
+                )
+                self._kpi_balance.update_value(
+                    _fmt_ars(balance), sub=f"Invertido: {_fmt_ars(kpi['invertido'])}", color=bal_color
+                )
             else:
-                for card in (self._kpi_income, self._kpi_expense, self._kpi_balance, self._kpi_usdt):
+                for card in (self._kpi_income, self._kpi_expense, self._kpi_invest, self._kpi_balance):
                     card.update_value("—", sub="Sin datos")
 
             # reset filtro de categoría al refrescar
             self._clear_category_filter()
 
-            self._cat_bar.load(self._db.get_categories_expense(date_from, date_to, account_ids))
+            income_total = kpi.get("ingresos", 0) if kpi else 0
+            self._cat_bar.load(
+                self._db.get_categories_expense(date_from, date_to, account_ids), income_total=income_total
+            )
             self._cat_bar_income.load(self._db.get_categories_income(date_from, date_to, account_ids))
+            self._cat_bar_transfer.load(self._db.get_categories_transfer(date_from, date_to, account_ids))
 
             txns = self._db.get_transactions(date_from, date_to, account_ids)
             self._txn_table.load(txns)
@@ -1232,8 +1327,8 @@ def parse_date_bbva_tc(text: str) -> date | None:
     return None
 
 
-def apply_rules(desc: str, cursor=None) -> tuple[int | None, str | None]:
-    """Busca la primera regla activa coincidente para desc.
+def apply_rules(desc: str, cursor=None, detail: str = "") -> tuple[int | None, str | None]:
+    """Busca la primera regla activa coincidente para desc (y opcionalmente detail).
     Devuelve (category_id, 'rule') o (None, None)."""
     if cursor is None:
         return None, None
@@ -1241,7 +1336,8 @@ def apply_rules(desc: str, cursor=None) -> tuple[int | None, str | None]:
         "SELECT id, pattern, match_type, category_id " "FROM fin_import_rules WHERE is_active=1 ORDER BY priority, id"
     )
     rules = cursor.fetchall()
-    desc_upper = desc.upper()
+    combined = (desc + " " + detail).strip() if detail else desc
+    desc_upper = combined.upper()
     for rule_id, pattern, match_type, cat_id in rules:
         p = pattern.upper()
         matched = False
@@ -1512,7 +1608,7 @@ class BbvaArCuenta:
 
     X_ORIGEN_MIN = 97
     X_CONCEPTO_MIN = 134
-    X_DEBITO_MIN = 400
+    X_DEBITO_MIN = 370
     X_CREDITO_MIN = 474
     X_SALDO_MIN = 515
 
@@ -1632,12 +1728,17 @@ class BbvaArCuenta:
         return rows
 
     def _resolve_amount(self, r: dict) -> tuple[Decimal | None, str]:
-        """Resuelve monto y tipo desde columnas DÉBITO/CRÉDITO o fallback inline."""
+        """Resuelve monto y tipo desde columnas DÉBITO/CRÉDITO o fallback inline.
+
+        BBVA CA: negativo en col DÉBITO = dinero que SALE (expense/transfer)
+                 positivo en col DÉBITO = dinero que ENTRA (income/transfer)
+        """
         debito = parse_amount_ar(r.get("debito", ""))
         credito = parse_amount_ar(r.get("credito", ""))
         concepto = r["concepto"].strip()
         if debito is not None and debito != 0:
-            return abs(debito), "expense" if debito > 0 else "income", concepto
+            # negativo = sale dinero (expense), positivo = entra dinero (income)
+            return abs(debito), "expense" if debito < 0 else "income", concepto
         if credito is not None and credito != 0:
             return abs(credito), "income", concepto
         m_inline = self.RE_INLINE_AMOUNT.search(concepto)
@@ -1866,6 +1967,17 @@ class SantanderAr:
             return "pesos"
         return "dolares"
 
+    def _classify_tc_pagos(self, w: dict) -> str:
+        """Sección 'Pago anterior y devoluciones' — sin columna comprobante."""
+        x = w["x0"]
+        if x < 65:
+            return "fecha"
+        if x < 410:
+            return "descripcion"
+        if x < 500:
+            return "pesos"
+        return "dolares"
+
     def _classify_debito(self, w: dict) -> str:
         x = w["x0"]
         if x < 60:
@@ -1941,6 +2053,7 @@ class SantanderAr:
                         continue
                     if state == "tc_pagos" and "CONSUMOS DEL MES" in upper:
                         state = product_ctx
+                        last_fecha_str = ""
                         continue
                     if product_ctx == "debito" and "ESTABLECIMIENTO" in upper and "IMPORTE" in upper:
                         state = "debito"
@@ -1965,6 +2078,10 @@ class SantanderAr:
                         last_fecha_str = self._process_cuenta_usd_line(line, result["cuenta_usd"], last_fecha_str)
                     elif state in ("visa", "amex"):
                         last_fecha_str = self._process_tc_line(line, result[state], last_fecha_str)
+                    elif state == "tc_pagos":
+                        last_fecha_str = self._process_tc_line(
+                            line, result[product_ctx], last_fecha_str, classifier=self._classify_tc_pagos
+                        )
                     # debito omitido — sus transacciones ya están en cuenta_ars (duplicado)
 
         return result
@@ -1984,6 +2101,9 @@ class SantanderAr:
         monto_tokens = cols["monto_ca"] or cols["monto_cc"]
         amount = self._parse_signed_tokens(monto_tokens)
         if amount is None:
+            # línea sin monto: es detalle de la transacción anterior
+            if concepto and rows:
+                rows[-1]["detail"] = concepto
             return fecha_str
         rows.append(
             {
@@ -2013,6 +2133,9 @@ class SantanderAr:
         monto_tokens = cols["monto_ca"] or cols["monto_cc"]
         amount = self._parse_signed_tokens(monto_tokens)
         if amount is None:
+            # línea sin monto: es detalle de la transacción anterior
+            if concepto and rows:
+                rows[-1]["detail"] = concepto
             return fecha_str
         rows.append(
             {
@@ -2027,10 +2150,11 @@ class SantanderAr:
         )
         return fecha_str
 
-    def _process_tc_line(self, line: list[dict], rows: list[dict], last_fecha_str: str = "") -> str:
+    def _process_tc_line(self, line: list[dict], rows: list[dict], last_fecha_str: str = "", classifier=None) -> str:
         cols = {k: [] for k in ("fecha", "comprobante", "descripcion", "cuota", "pesos", "dolares")}
+        classify = classifier or self._classify_tc
         for w in line:
-            cols[self._classify_tc(w)].append(w["text"])
+            cols[classify(w)].append(w["text"])
         fecha_str = " ".join(cols["fecha"]).strip()
         if not self._is_date(fecha_str):
             fecha_str = last_fecha_str
@@ -2039,7 +2163,10 @@ class SantanderAr:
         desc = " ".join(cols["descripcion"]).strip()
         if not desc:
             return fecha_str
-        if any(s in desc.upper() for s in ("SALDO ANTERIOR", "TU PAGO", "CR.", "CR.$")):
+        if (
+            any(s in desc.upper() for s in ("SALDO ANTERIOR", "CR.", "CR.$", "TRANSFERENCIA DEUDA"))
+            or desc.upper() == "TOTAL"
+        ):
             return fecha_str
         if cols["pesos"]:
             amount = self._parse_signed_tokens(cols["pesos"])
@@ -2048,6 +2175,9 @@ class SantanderAr:
             amount = self._parse_signed_tokens(cols["dolares"])
             currency = "USD"
         else:
+            # línea sin monto: es detalle de la transacción anterior
+            if desc and rows:
+                rows[-1]["detail"] = desc
             return fecha_str
         if amount is None:
             return fecha_str
@@ -2108,7 +2238,8 @@ class SantanderAr:
                 _logger.warning(f"  [{section_key}] Fecha inválida: {r.get('fecha_str')} — omitida")
                 continue
             currency = r.get("currency", "ARS")
-            cat_id, classified_by = apply_rules(r["concepto"], cursor)
+            detail = r.get("detail", "")
+            cat_id, classified_by = apply_rules(r["concepto"], cursor, detail=detail)
             txns.append(
                 {
                     "date": r["date"],
@@ -2118,9 +2249,9 @@ class SantanderAr:
                     "amount_usdt": _calc_usdt(r["amount"], currency, r["date"], cursor),
                     "category_id": cat_id,
                     "account_id": account_id,
-                    "description": r["concepto"],
+                    "description": f"{r['concepto']} — {detail}" if detail else r["concepto"],
                     "raw_description": r["concepto"],
-                    "raw_description_detail": None,
+                    "raw_description_detail": detail or None,
                     "comprobante": r.get("comprobante"),
                     "import_id": import_id,
                     "classified_by": classified_by,
