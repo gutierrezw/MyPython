@@ -4343,12 +4343,14 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             cursor = conn.cursor()
             cursor.execute(
                 f"""SELECT
-                       COALESCE(SUM(CASE WHEN t.type='income'  THEN t.amount ELSE 0 END), 0),
-                       COALESCE(SUM(CASE WHEN t.type='expense' THEN t.amount ELSE 0 END), 0),
-                       COALESCE(SUM(CASE WHEN t.type='income'  THEN t.amount_usdt ELSE 0 END), 0),
-                       COALESCE(SUM(CASE WHEN t.type='expense' THEN t.amount_usdt ELSE 0 END), 0),
-                       COUNT(*)
+                       COALESCE(SUM(CASE WHEN t.type='income'  AND COALESCE(c.category_type,'expense') != 'transfer' THEN t.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN t.type='expense' AND COALESCE(c.category_type,'expense') != 'transfer' THEN t.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN t.type='income'  AND COALESCE(c.category_type,'expense') != 'transfer' THEN t.amount_usdt ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN t.type='expense' AND COALESCE(c.category_type,'expense') != 'transfer' THEN t.amount_usdt ELSE 0 END), 0),
+                       COUNT(*),
+                       COALESCE(SUM(CASE WHEN t.type='expense' AND COALESCE(c.category_type,'expense') = 'transfer' THEN t.amount ELSE 0 END), 0)
                    FROM fin_transactions t
+                   LEFT JOIN fin_categories c ON c.id = t.category_id
                    WHERE t.date BETWEEN %s AND %s {clause}
                      AND t.currency = 'ARS'""",
                 params,
@@ -4361,6 +4363,7 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                     "ing_usdt": float(row[2]),
                     "gas_usdt": float(row[3]),
                     "total_txns": int(row[4]),
+                    "invertido": float(row[5]),
                 }
             return {}
         except (Exception, connect.Error) as e:
@@ -4369,13 +4372,12 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         finally:
             conn.close()
 
-    def get_categories_expense(self, date_from: str, date_to: str, account_ids: list[int] | None = None) -> list[dict]:
-        """
-        Retorna gastos agrupados por categoría para el período.
-        Resultado: [{"name": str, "total": float, "pct": float}, ...]
-        """
+    def _get_categories_by_type(
+        self, cat_type: str, date_from: str, date_to: str, account_ids: list[int] | None = None
+    ) -> list[dict]:
+        """Agrupa transacciones por categoría filtrando por category_type de la categoría."""
         clause, extra = self._ids_clause(account_ids)
-        params = [date_from, date_to] + extra
+        params = [cat_type, date_from, date_to] + extra
 
         conn = self._conectar("fin_transactions.categories")
         try:
@@ -4386,51 +4388,29 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                        COALESCE(SUM(t.amount_usdt), SUM(t.amount)) AS total_usdt
                    FROM fin_transactions t
                    LEFT JOIN fin_categories c ON c.id = t.category_id
-                   WHERE t.type = 'expense'
+                   WHERE COALESCE(c.category_type, 'expense') = %s
                      AND t.date BETWEEN %s AND %s {clause}
                    GROUP BY c.name
-                   ORDER BY total_usdt DESC
-                   LIMIT 12""",
+                   ORDER BY total_usdt DESC""",
                 params,
             )
             rows = cursor.fetchall()
             total = sum(float(r[1]) for r in rows) or 1
             return [{"name": r[0], "total": float(r[1]), "pct": float(r[1]) / total * 100} for r in rows]
         except (Exception, connect.Error) as e:
-            print(f"[Mysql:: FinanceScreen.get_categories_expense()]: {e}")
+            print(f"[Mysql:: FinanceScreen._get_categories_by_type({cat_type})]: {e}")
             return []
         finally:
             conn.close()
+
+    def get_categories_expense(self, date_from: str, date_to: str, account_ids: list[int] | None = None) -> list[dict]:
+        return self._get_categories_by_type("expense", date_from, date_to, account_ids)
 
     def get_categories_income(self, date_from: str, date_to: str, account_ids: list[int] | None = None) -> list[dict]:
-        """Retorna ingresos agrupados por categoría para el período."""
-        clause, extra = self._ids_clause(account_ids)
-        params = [date_from, date_to] + extra
+        return self._get_categories_by_type("income", date_from, date_to, account_ids)
 
-        conn = self._conectar("fin_transactions.categories_income")
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                f"""SELECT
-                       COALESCE(c.name, 'Sin categoría'),
-                       COALESCE(SUM(t.amount_usdt), SUM(t.amount)) AS total_usdt
-                   FROM fin_transactions t
-                   LEFT JOIN fin_categories c ON c.id = t.category_id
-                   WHERE t.type = 'income'
-                     AND t.date BETWEEN %s AND %s {clause}
-                   GROUP BY c.name
-                   ORDER BY total_usdt DESC
-                   LIMIT 8""",
-                params,
-            )
-            rows = cursor.fetchall()
-            total = sum(float(r[1]) for r in rows) or 1
-            return [{"name": r[0], "total": float(r[1]), "pct": float(r[1]) / total * 100} for r in rows]
-        except (Exception, connect.Error) as e:
-            print(f"[Mysql:: FinanceScreen.get_categories_income()]: {e}")
-            return []
-        finally:
-            conn.close()
+    def get_categories_transfer(self, date_from: str, date_to: str, account_ids: list[int] | None = None) -> list[dict]:
+        return self._get_categories_by_type("transfer", date_from, date_to, account_ids)
 
     def get_transactions(
         self, date_from: str, date_to: str, account_ids: list[int] | None = None, limit: int = 200
