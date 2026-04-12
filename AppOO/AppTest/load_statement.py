@@ -16,7 +16,7 @@ import logging
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Modulos_python import pdfplumber, connect, Error
-from Class_Finance import ADAPTER_MAP, SantanderAr, CitibankUs, DB_CONFIG
+from Class_Finance import ADAPTER_MAP, SantanderAr, CitibankUs, BinanceC2c, DB_CONFIG
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger("load_statement")
@@ -56,7 +56,7 @@ def main():
         sys.exit(0)
 
     AdapterClass = ADAPTER_MAP[args.adapter]
-    multi_section = AdapterClass in (SantanderAr, CitibankUs)
+    multi_section = AdapterClass in (SantanderAr, CitibankUs, BinanceC2c)
     if not multi_section and not args.account_ref:
         logger.error("--account-ref es requerido para este adaptador.")
         sys.exit(1)

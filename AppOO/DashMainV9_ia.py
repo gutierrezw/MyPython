@@ -1823,6 +1823,11 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     url = f"wss://localhost:{DataHub.ib_gateway_port}/v1/api/ws"
                     while True:
 
+                        # Si activos está vacío (race con api_vehiculo_iteractive) reintentar en 5s
+                        if not self.activos:
+                            time.sleep(5)
+                            continue
+
                         self.WsStock = MyWebsocket(
                             url=url,
                             logger=False,

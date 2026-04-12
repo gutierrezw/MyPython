@@ -463,6 +463,32 @@ class BinanceClient:
         except Exception as e:
             self.logger.error(f"signature_message(): {e}")
 
+    def _sign_rest(self, params: dict) -> dict:
+        """Firma para endpoints REST SAPI/API — solo timestamp+signature en query, apiKey en header."""
+        private_key = serialization.load_pem_private_key(data=self.private_key, password=None)
+        params["timestamp"] = int(time.time() * 1000)
+        payload = "&".join(f"{k}={v}" for k, v in params.items())
+        signature = b64encode(private_key.sign(payload.encode("ASCII"))).decode("ASCII")
+        params["signature"] = signature
+        return params
+
+    def fetch_pay_transactions(self, start_ms: int, end_ms: int, limit: int = 100) -> list[dict]:
+        """
+        Consulta /sapi/v1/pay/transactions en Binance.
+        Requiere que la API key tenga permiso 'Binance Pay' habilitado.
+        Retorna lista de transacciones Pay del período.
+        """
+        params = {"startTimestamp": start_ms, "endTimestamp": end_ms, "limit": limit}
+        signed = self._sign_rest(params)
+        headers = {"X-MBX-APIKEY": self.API_KEY}
+        url = "https://api.binance.com/sapi/v1/pay/transactions"
+        r = requests.get(url, headers=headers, params=signed, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        if data.get("code") != "000000":
+            raise ValueError(f"Binance Pay API: {data.get('message')} (code={data.get('code')})")
+        return data.get("data", [])
+
 
 # =============================================================================
 # WEBSOCKET STREAMS: BinanceStreamClient

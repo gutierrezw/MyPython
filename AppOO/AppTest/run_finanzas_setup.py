@@ -44,11 +44,6 @@ CREATE TABLE IF NOT EXISTS fin_banks (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     name            VARCHAR(80)  NOT NULL,
     country         CHAR(2)      NOT NULL DEFAULT 'AR',
-    adapter_class   VARCHAR(80),
-    date_format     VARCHAR(20),
-    delimiter       CHAR(1)      DEFAULT ',',
-    encoding        VARCHAR(20)  DEFAULT 'utf-8',
-    currency        CHAR(3)      DEFAULT 'ARS',
     gmail_sender    VARCHAR(120),
     notes           TEXT,
     is_active       TINYINT(1)   NOT NULL DEFAULT 1,
@@ -169,22 +164,14 @@ BANKS = [
     {
         "name": "Santander",
         "country": "AR",
-        "adapter_class": "SantanderArPdf",
-        "date_format": "%d/%m/%y",
-        "currency": "ARS",
         "gmail_sender": "notificaciones@santander.com.ar",
-        "notes": "PDF unificado: cuenta + Visa TC + AmEx TC + Débito en un solo archivo. "
-        "Secciones detectadas por header. Formato fecha DD/MM/YY.",
+        "notes": "PDF unificado: cuenta + Visa TC + AmEx TC + Débito en un solo archivo. Secciones detectadas por header.",
     },
     {
         "name": "BBVA",
         "country": "AR",
-        "adapter_class": "BbvaArPdf",
-        "date_format": "%d-%b-%y",
-        "currency": "ARS",
         "gmail_sender": "notificaciones@bbva.com.ar",
-        "notes": "PDFs separados por producto: cuenta, Visa, Mastercard. "
-        "TC usa fecha DD-Mon-YY (mes en español). Cuota embebida en descripción C.NN/NN.",
+        "notes": "PDFs separados por producto: cuenta, Visa, Mastercard. TC fecha DD-Mon-YY. Cuota embebida C.NN/NN.",
     },
 ]
 
@@ -457,12 +444,9 @@ def create_tables(cursor):
 
 def insert_banks(cursor):
     sql = """
-        INSERT INTO fin_banks (name, country, adapter_class, date_format, currency, gmail_sender, notes)
-        VALUES (%(name)s, %(country)s, %(adapter_class)s, %(date_format)s,
-                %(currency)s, %(gmail_sender)s, %(notes)s)
+        INSERT INTO fin_banks (name, country, gmail_sender, notes)
+        VALUES (%(name)s, %(country)s, %(gmail_sender)s, %(notes)s)
         ON DUPLICATE KEY UPDATE
-            adapter_class = VALUES(adapter_class),
-            date_format   = VALUES(date_format),
             gmail_sender  = VALUES(gmail_sender),
             notes         = VALUES(notes)
     """

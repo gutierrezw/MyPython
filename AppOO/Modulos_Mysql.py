@@ -4283,11 +4283,11 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         return BDsystem.connect_dbase(tabla, display=self.display)
 
     def get_accounts(self) -> list[tuple]:
-        """Retorna lista de cuentas activas: (label, account_id, bank_name, account_name)."""
+        """Retorna lista de cuentas activas: (label, account_id, bank_name, account_name, short_name)."""
         conn = self._conectar("fin_accounts.select")
         try:
             cursor = conn.cursor()
-            cursor.execute("""SELECT CONCAT(b.name, ' — ', a.name), a.id, b.name, a.name
+            cursor.execute("""SELECT CONCAT(b.name, ' — ', a.name), a.id, b.name, a.name, a.short_name
                    FROM fin_accounts a
                    JOIN fin_banks b ON b.id = a.bank_id
                    WHERE a.is_active = 1
@@ -4329,6 +4329,97 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         placeholders = ",".join(["%s"] * len(account_ids))
         return f"AND t.account_id IN ({placeholders})", list(account_ids)
 
+    def sync_binance_investment(self, year: int, month: int) -> dict:
+        """
+        Calcula el USDT neto retenido en Binance para el mes dado y hace upsert
+        de una transacción sintética (classified_by='synthetic') con category_type='investment'.
+        Fórmula: Compra USDT − Venta USDT USD − Remesa VES − Remesa Pay.
+        Llama automáticamente desde load() de C2C y Pay, y desde save_rule() si afecta USDT.
+        """
+        from calendar import monthrange
+        from datetime import date as _date
+        from decimal import Decimal
+
+        last_day = monthrange(year, month)[1]
+        date_from = _date(year, month, 1)
+        date_to = _date(year, month, last_day)
+        comprobante = f"BINANCE-INV-{year:04d}-{month:02d}"
+
+        conn = self._conectar("sync_binance_investment")
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM fin_accounts WHERE account_ref='BINANCE-USDT' AND is_active=1")
+            row = cur.fetchone()
+            if not row:
+                return {"net_usdt": 0, "action": "no_account"}
+            account_id = row[0]
+
+            cur.execute("SELECT id FROM fin_categories WHERE name='Retención USDT'")
+            row = cur.fetchone()
+            if not row:
+                return {"net_usdt": 0, "action": "no_category"}
+            retention_cat_id = row[0]
+
+            cur.execute(
+                """SELECT
+                       COALESCE(SUM(CASE WHEN type='income'  THEN amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END), 0)
+                   FROM fin_transactions
+                   WHERE account_id=%s AND currency='USDT'
+                     AND date BETWEEN %s AND %s
+                     AND (classified_by IS NULL OR classified_by != 'synthetic')""",
+                (account_id, date_from, date_to),
+            )
+            income, expense = cur.fetchone()
+            net = round(float(income) - float(expense), 8)
+
+            cur.execute(
+                "SELECT id FROM fin_transactions WHERE comprobante=%s AND account_id=%s",
+                (comprobante, account_id),
+            )
+            existing = cur.fetchone()
+
+            if net <= 0:
+                if existing:
+                    cur.execute("DELETE FROM fin_transactions WHERE id=%s", (existing[0],))
+                    conn.commit()
+                return {"net_usdt": net, "action": "deleted"}
+
+            if existing:
+                cur.execute(
+                    "UPDATE fin_transactions SET amount=%s, amount_usdt=%s, date=%s, category_id=%s " "WHERE id=%s",
+                    (Decimal(str(net)), Decimal(str(net)), date_to, retention_cat_id, existing[0]),
+                )
+                action = "updated"
+            else:
+                cur.execute(
+                    """INSERT INTO fin_transactions
+                           (date, type, amount, currency, amount_usdt, category_id, account_id,
+                            description, raw_description, raw_description_detail,
+                            comprobante, classified_by)
+                       VALUES (%s,'expense',%s,'USDT',%s,%s,%s,%s,%s,'',%s,'synthetic')""",
+                    (
+                        date_to,
+                        Decimal(str(net)),
+                        Decimal(str(net)),
+                        retention_cat_id,
+                        account_id,
+                        f"USDT retenido {year}-{month:02d}",
+                        "BINANCE RETENCION USDT",
+                        comprobante,
+                    ),
+                )
+                action = "inserted"
+
+            conn.commit()
+            cur.close()
+            return {"net_usdt": net, "action": action}
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.sync_binance_investment()]: {e}")
+            return {"net_usdt": 0, "action": "error"}
+        finally:
+            conn.close()
+
     def get_kpis(self, date_from: str, date_to: str, account_ids: list[int] | None = None) -> dict:
         """
         Retorna KPIs del período para moneda ARS:
@@ -4343,27 +4434,28 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             cursor = conn.cursor()
             cursor.execute(
                 f"""SELECT
-                       COALESCE(SUM(CASE WHEN t.type='income'  AND COALESCE(c.category_type,'expense') != 'transfer' THEN t.amount ELSE 0 END), 0),
-                       COALESCE(SUM(CASE WHEN t.type='expense' AND COALESCE(c.category_type,'expense') != 'transfer' THEN t.amount ELSE 0 END), 0),
-                       COALESCE(SUM(CASE WHEN t.type='income'  AND COALESCE(c.category_type,'expense') != 'transfer' THEN t.amount_usdt ELSE 0 END), 0),
-                       COALESCE(SUM(CASE WHEN t.type='expense' AND COALESCE(c.category_type,'expense') != 'transfer' THEN t.amount_usdt ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN COALESCE(c.category_type,'expense') = 'income'      THEN t.amount_usdt ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN COALESCE(c.category_type,'expense') = 'expense'     THEN t.amount_usdt ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN t.currency='ARS' AND COALESCE(c.category_type,'expense') = 'income'     THEN t.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN t.currency='ARS' AND COALESCE(c.category_type,'expense') = 'expense'    THEN t.amount ELSE 0 END), 0),
                        COUNT(*),
-                       COALESCE(SUM(CASE WHEN t.type='expense' AND COALESCE(c.category_type,'expense') = 'transfer' THEN t.amount ELSE 0 END), 0)
+                       COALESCE(SUM(CASE WHEN COALESCE(c.category_type,'expense') = 'investment'  THEN t.amount_usdt ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN t.currency='ARS' AND COALESCE(c.category_type,'expense') = 'investment' THEN t.amount ELSE 0 END), 0)
                    FROM fin_transactions t
                    LEFT JOIN fin_categories c ON c.id = t.category_id
-                   WHERE t.date BETWEEN %s AND %s {clause}
-                     AND t.currency = 'ARS'""",
+                   WHERE t.date BETWEEN %s AND %s {clause}""",
                 params,
             )
             row = cursor.fetchone()
             if row:
                 return {
-                    "ingresos": float(row[0]),
-                    "gastos": float(row[1]),
-                    "ing_usdt": float(row[2]),
-                    "gas_usdt": float(row[3]),
+                    "ingresos": float(row[0]),  # USD equivalente — coincide con categorías
+                    "gastos": float(row[1]),  # USD equivalente — coincide con categorías
+                    "ingresos_ars": float(row[2]),  # subtotal ARS pesos
+                    "gastos_ars": float(row[3]),  # subtotal ARS pesos
                     "total_txns": int(row[4]),
-                    "invertido": float(row[5]),
+                    "invertido": float(row[5]),  # USD equivalente
+                    "invertido_ars": float(row[6]),  # subtotal ARS pesos
                 }
             return {}
         except (Exception, connect.Error) as e:
@@ -4411,6 +4503,49 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
 
     def get_categories_transfer(self, date_from: str, date_to: str, account_ids: list[int] | None = None) -> list[dict]:
         return self._get_categories_by_type("transfer", date_from, date_to, account_ids)
+
+    def get_categories_investment(
+        self, date_from: str, date_to: str, account_ids: list[int] | None = None
+    ) -> list[dict]:
+        return self._get_categories_by_type("investment", date_from, date_to, account_ids)
+
+    def get_monthly_evolution(self, months: int = 6, account_ids: list[int] | None = None) -> list[dict]:
+        """Retorna los últimos N meses con totales de ingresos, gastos e inversiones en USD."""
+        clause, extra = self._ids_clause(account_ids)
+        conn = self._conectar("fin_transactions.evolution")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""SELECT
+                        YEAR(t.date)  AS yr,
+                        MONTH(t.date) AS mo,
+                        COALESCE(SUM(CASE WHEN COALESCE(c.category_type,'expense')='income'     THEN t.amount_usdt ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN COALESCE(c.category_type,'expense')='expense'    THEN t.amount_usdt ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN COALESCE(c.category_type,'expense')='investment' THEN t.amount_usdt ELSE 0 END), 0)
+                    FROM fin_transactions t
+                    LEFT JOIN fin_categories c ON c.id = t.category_id
+                    WHERE t.date >= DATE_SUB(CURDATE(), INTERVAL %s MONTH) {clause}
+                    GROUP BY yr, mo
+                    ORDER BY yr, mo""",
+                [months] + extra,
+            )
+            _MESES = ["", "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+            return [
+                {
+                    "year": int(r[0]),
+                    "month": int(r[1]),
+                    "label": _MESES[int(r[1])],
+                    "ingresos": float(r[2]),
+                    "gastos": float(r[3]),
+                    "invertido": float(r[4]),
+                }
+                for r in cursor.fetchall()
+            ]
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql::FinanceScreen.get_monthly_evolution()]: {e}")
+            return []
+        finally:
+            conn.close()
 
     def get_transactions(
         self, date_from: str, date_to: str, account_ids: list[int] | None = None, limit: int = 200
@@ -4576,6 +4711,20 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         finally:
             conn.close()
 
+    def update_txn_date(self, txn_id: int, new_date: str) -> bool:
+        """Corrige la fecha de una transacción (desfase banco vs operación). Retorna True si tuvo efecto."""
+        conn = self._conectar("fin_transactions.update_date")
+        try:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE fin_transactions SET date=%s WHERE id=%s", (new_date, txn_id))
+            conn.commit()
+            return cursor.rowcount == 1
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.update_txn_date()]: {e}")
+            return False
+        finally:
+            conn.close()
+
     def save_rule(self, pattern: str, match_type: str, category_id: int, priority: int = 50) -> bool:
         """
         Inserta o actualiza una regla en fin_import_rules (creada por el usuario).
@@ -4604,16 +4753,17 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             inserted = cursor.rowcount >= 1
 
             # ── aplicación retroactiva ────────────────────────────────────────
-            # Cargar txns sin categoría
+            # Cargar txns sin categoría O auto-clasificadas por regla (no manual)
             cursor.execute(
-                "SELECT id, COALESCE(description, raw_description) FROM fin_transactions WHERE category_id IS NULL"
+                "SELECT id, COALESCE(raw_description, description) FROM fin_transactions "
+                "WHERE classified_by IS NULL OR classified_by = 'rule'"
             )
-            uncategorized = cursor.fetchall()
+            candidates = cursor.fetchall()
 
             p = pattern.strip()
             p_upper = p.upper()
             matched_ids = []
-            for txn_id, desc in uncategorized:
+            for txn_id, desc in candidates:
                 if not desc:
                     continue
                 d = desc.upper()
@@ -4633,10 +4783,22 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                 placeholders = ",".join(["%s"] * len(matched_ids))
                 cursor.execute(
                     f"UPDATE fin_transactions SET category_id=%s, classified_by='rule' "
-                    f"WHERE id IN ({placeholders})",
+                    f"WHERE id IN ({placeholders}) AND classified_by != 'manual'",
                     [category_id] + matched_ids,
                 )
                 conn.commit()
+
+                # Si alguna transacción USDT fue afectada, recalcular inversión por mes
+                id_pl = ",".join(["%s"] * len(matched_ids))
+                cursor.execute(
+                    f"SELECT DISTINCT YEAR(date), MONTH(date) FROM fin_transactions "
+                    f"WHERE id IN ({id_pl}) AND currency='USDT'",
+                    matched_ids,
+                )
+                usdt_months = cursor.fetchall()
+
+            for year, month in (usdt_months if matched_ids else []):
+                self.sync_binance_investment(year, month)
 
             return inserted
         except (Exception, connect.Error) as e:
@@ -4656,7 +4818,8 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, COALESCE(description, raw_description) FROM fin_transactions WHERE category_id IS NULL"
+                "SELECT id, COALESCE(raw_description, description) FROM fin_transactions "
+                "WHERE classified_by IS NULL OR classified_by = 'rule'"
             )
             rows = cursor.fetchall()
             p = pattern.strip()
