@@ -9,14 +9,19 @@ from Modulos_python import (
     time,
     datetime,
     date,
+    timezone,
     Decimal,
     InvalidOperation,
     logging,
     pdfplumber,
     connect,
     Error,
+    Figure,
+    FigureCanvasTkAgg,
+    ticker,
 )
 from Modulos_Mysql import FinanceScreen
+from Class_ApiBinnace import BinanceClient
 
 _logger = logging.getLogger("Finance")
 
@@ -57,6 +62,19 @@ def _fmt_ars(v) -> str:
 def _fmt_usdt(v) -> str:
     try:
         return f"U$ {float(v):,.2f}"
+    except Exception:
+        return "—"
+
+
+def _fmt_amount(v, currency: str) -> str:
+    """Formatea monto según divisa: ARS=$ , USD=U$ , cualquier otra=número plano."""
+    try:
+        val = float(v)
+        if currency == "ARS":
+            return f"$ {val:,.0f}".replace(",", ".")
+        if currency == "USD":
+            return f"U$ {val:,.2f}"
+        return f"{val:,.2f}"  # VES u otras: número sin símbolo
     except Exception:
         return "—"
 
@@ -107,8 +125,8 @@ class _Chip(tk.Label):
             font=_FONT_CHIP,
             bg=self._BG_OFF,
             fg=self._FG_OFF,
-            padx=7,
-            pady=3,
+            padx=4,
+            pady=2,
             bd=1,
             relief=tk.SOLID,
             cursor="hand2",
@@ -186,9 +204,10 @@ class _TxnTable(tk.Frame):
     COLS = ("Fecha", "Cuenta", "Descripción", "Categoría", "Moneda", "Monto")
     WIDTHS = (80, 150, 320, 140, 60, 110)
 
-    def __init__(self, parent, bgcolor, on_category_edit):
+    def __init__(self, parent, bgcolor, on_category_edit, on_date_edit=None):
         super().__init__(parent, bg=bgcolor)
-        self._on_category_edit = on_category_edit  # callback(txn_id, iid)
+        self._on_category_edit = on_category_edit  # callback(txn_id, iid, row)
+        self._on_date_edit = on_date_edit  # callback(txn_id, iid, row)
         self._all_rows: list[dict] = []
         self._cat_filter: str | None = None  # nombre de categoría activo
         self._build()
@@ -220,14 +239,14 @@ class _TxnTable(tk.Frame):
         if not iid:
             return
         col = self.tree.identify_column(event.x)
-        # col "#4" = Categoría (índice 1-based)
-        if col != "#4":
-            return
-        # buscar fila original por iid
         for r in self._all_rows:
-            if r.get("_iid") == iid:
+            if r.get("_iid") != iid:
+                continue
+            if col == "#1" and self._on_date_edit:  # Fecha
+                self._on_date_edit(r["txn_id"], iid, r)
+            elif col == "#4":  # Categoría
                 self._on_category_edit(r["txn_id"], iid, r)
-                return
+            return
 
     def load(self, rows: list[dict]):
         """Carga todas las filas; aplica filtro de categoría si hay uno activo."""
@@ -253,13 +272,23 @@ class _TxnTable(tk.Frame):
         if self._cat_filter and self._cat_filter != new_cat_name:
             self.tree.detach(iid)
 
+    def update_row_date(self, iid: str, new_date: str):
+        """Actualiza la fecha visible de una fila ya insertada."""
+        vals = list(self.tree.item(iid, "values"))
+        vals[0] = new_date
+        self.tree.item(iid, values=vals)
+        for r in self._all_rows:
+            if r.get("_iid") == iid:
+                r["date"] = new_date
+                break
+
     def _render(self):
         self.tree.delete(*self.tree.get_children())
         rows = self._all_rows
         if self._cat_filter:
             rows = [r for r in rows if r.get("category") == self._cat_filter]
         for r in rows:
-            monto = _fmt_ars(r["amount"]) if r.get("currency") == "ARS" else _fmt_usdt(r["amount"])
+            monto = _fmt_amount(r["amount"], r.get("currency", "ARS"))
             iid = self.tree.insert(
                 "",
                 tk.END,
@@ -621,6 +650,103 @@ class _CategoryEditPopup(tk.Toplevel):
         self.destroy()
 
 
+class _DateEditPopup(tk.Toplevel):
+    """
+    Ventana flotante para corregir la fecha de una transacción.
+    Útil para ajustar el desfase BBVA (fecha acreditación vs fecha operación).
+    on_save(txn_id, iid, new_date_str)  new_date_str en formato YYYY-MM-DD
+    """
+
+    def __init__(self, parent, txn_row: dict, on_save):
+        super().__init__(parent)
+        self.title("Corregir fecha")
+        self.resizable(False, False)
+        self.configure(bg=_CARD_BG)
+        self.grab_set()
+
+        self._txn_row = txn_row
+        self._on_save = on_save
+
+        tk.Label(self, text="Transacción:", font=_FONT_LABEL, bg=_CARD_BG, fg=_NEUTRAL).pack(
+            anchor="w", padx=14, pady=(12, 0)
+        )
+        tk.Label(self, text=txn_row.get("description", "")[:60], font=_FONT_HEADER, bg=_CARD_BG, fg=_WHITE).pack(
+            anchor="w", padx=14, pady=(0, 8)
+        )
+
+        tk.Frame(self, bg=_NEUTRAL, height=1).pack(fill=tk.X, padx=14, pady=(0, 8))
+
+        tk.Label(self, text="Fecha actual:", font=_FONT_LABEL, bg=_CARD_BG, fg=_NEUTRAL).pack(anchor="w", padx=14)
+        tk.Label(self, text=str(txn_row.get("date", "")), font=_FONT_HEADER, bg=_CARD_BG, fg=_GOLD).pack(
+            anchor="w", padx=14, pady=(0, 10)
+        )
+
+        tk.Label(self, text="Nueva fecha (YYYY-MM-DD):", font=_FONT_LABEL, bg=_CARD_BG, fg=_NEUTRAL).pack(
+            anchor="w", padx=14
+        )
+        self._var_date = tk.StringVar(value=str(txn_row.get("date", "")))
+        tk.Entry(
+            self,
+            textvariable=self._var_date,
+            font=_FONT_HEADER,
+            bg="#0D0D1A",
+            fg=_WHITE,
+            insertbackground=_WHITE,
+            relief=tk.FLAT,
+            width=16,
+        ).pack(padx=14, pady=(4, 12))
+
+        self._lbl_error = tk.Label(self, text="", font=_FONT_SUB, bg=_CARD_BG, fg=_NEGATIVE)
+        self._lbl_error.pack(anchor="w", padx=14)
+
+        btn_row = tk.Frame(self, bg=_CARD_BG)
+        btn_row.pack(fill=tk.X, padx=14, pady=14)
+
+        tk.Button(
+            btn_row,
+            text="Guardar",
+            font=_FONT_LABEL,
+            bg=_ACCENT,
+            fg=_BLACK,
+            relief=tk.FLAT,
+            padx=12,
+            pady=4,
+            cursor="hand2",
+            command=self._save,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        tk.Button(
+            btn_row,
+            text="Cancelar",
+            font=_FONT_LABEL,
+            bg="#2A2A3E",
+            fg=_NEUTRAL,
+            relief=tk.FLAT,
+            padx=12,
+            pady=4,
+            cursor="hand2",
+            command=self.destroy,
+        ).pack(side=tk.LEFT)
+
+        self.bind("<Return>", lambda _e: self._save())
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self._center(parent)
+
+    def _center(self, parent):
+        self.update_idletasks()
+        px = parent.winfo_rootx() + parent.winfo_width() // 2 - self.winfo_width() // 2
+        py = parent.winfo_rooty() + parent.winfo_height() // 2 - self.winfo_height() // 2
+        self.geometry(f"+{px}+{py}")
+
+    def _save(self):
+        date_str = self._var_date.get().strip()
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+            self._lbl_error.config(text="Formato inválido — usa YYYY-MM-DD")
+            return
+        self._on_save(self._txn_row["txn_id"], self._txn_row.get("_iid"), date_str)
+        self.destroy()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Panel principal
 # ─────────────────────────────────────────────────────────────────────────────
@@ -760,6 +886,60 @@ class _CategoryManagerPopup(tk.Toplevel):
         self._lbl_msg.config(text=msg, fg=_POSITIVE if ok else _NEGATIVE)
 
 
+class _EvolucionChart(tk.Frame):
+    """Gráfico de evolución anual: Ingresos / Gastos / Invertido (12 meses)."""
+
+    def __init__(self, parent, bgcolor):
+        super().__init__(parent, bg=bgcolor)
+        self._fig = Figure(figsize=(4.2, 3.2), dpi=80, facecolor=_BLACK)
+        self._fig.subplots_adjust(left=0.13, right=0.97, top=0.88, bottom=0.10)
+        self._ax = self._fig.add_subplot(111)
+        self._canvas = FigureCanvasTkAgg(self._fig, master=self)
+        self._canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def load(self, rows: list[dict]):
+        ax = self._ax
+        ax.clear()
+        ax.set_facecolor("#111111")
+        ax.set_title("Evolución anual  (U$)", fontsize=8, color=_WHITE, pad=4, loc="left")
+        ax.spines[:].set_color("#333333")
+        ax.tick_params(colors=_NEUTRAL, labelsize=7)
+
+        if not rows:
+            ax.text(0.5, 0.5, "Sin datos", ha="center", va="center", color=_NEUTRAL, transform=ax.transAxes, fontsize=8)
+            self._canvas.draw()
+            return
+
+        xs = list(range(len(rows)))
+        labels = [r["label"] for r in rows]
+        ingresos = [r["ingresos"] for r in rows]
+        gastos = [r["gastos"] for r in rows]
+        invertido = [r["invertido"] for r in rows]
+
+        ax.plot(xs, ingresos, color=_POSITIVE, marker="o", markersize=3, linewidth=1.5, label="Ingresos")
+        ax.plot(xs, gastos, color=_NEGATIVE, marker="o", markersize=3, linewidth=1.5, label="Gastos")
+        ax.plot(xs, invertido, color=_GOLD, marker="o", markersize=3, linewidth=1.2, linestyle="--", label="Invertido")
+
+        for i, (ing, gas) in enumerate(zip(ingresos, gastos)):
+            if gas > ing:
+                ax.axvspan(i - 0.4, i + 0.4, alpha=0.12, color=_NEGATIVE)
+
+        ax.set_xticks(xs)
+        ax.set_xticklabels(labels, fontsize=7, color=_WHITE)
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f"{v:,.0f}"))
+        ax.legend(
+            fontsize=6,
+            facecolor="#111111",
+            labelcolor=_WHITE,
+            framealpha=0.4,
+            loc="upper left",
+            handlelength=1.2,
+            borderpad=0.4,
+            labelspacing=0.3,
+        )
+        self._canvas.draw()
+
+
 class FinancePanel(tk.Frame):
     """
     Tab Finance — resumen de finanzas personales.
@@ -839,9 +1019,43 @@ class FinancePanel(tk.Frame):
             command=self.refresh,
         ).pack(side=tk.LEFT, padx=(8, 0))
 
-        # ── chips de banco/cuenta — canvas scrollable horizontal ─────────────
-        chip_canvas = tk.Canvas(self, bg=self.bgcolor, height=28, highlightthickness=0)
-        chip_canvas.pack(fill=tk.X, padx=10, pady=(2, 4))
+        # ── chips de banco/cuenta — canvas scrollable horizontal con flechas ──
+        chip_row = tk.Frame(self, bg=self.bgcolor)
+        chip_row.pack(fill=tk.X, padx=10, pady=(2, 4))
+
+        def _scroll_left():
+            chip_canvas.xview_scroll(-3, "units")
+
+        def _scroll_right():
+            chip_canvas.xview_scroll(3, "units")
+
+        tk.Button(
+            chip_row,
+            text="◀",
+            font=("Segoe UI", 7),
+            bg=self.bgcolor,
+            fg=_NEUTRAL,
+            relief=tk.FLAT,
+            bd=0,
+            cursor="hand2",
+            command=_scroll_left,
+        ).pack(side=tk.LEFT)
+
+        chip_canvas = tk.Canvas(chip_row, bg=self.bgcolor, height=26, highlightthickness=0)
+        chip_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        tk.Button(
+            chip_row,
+            text="▶",
+            font=("Segoe UI", 7),
+            bg=self.bgcolor,
+            fg=_NEUTRAL,
+            relief=tk.FLAT,
+            bd=0,
+            cursor="hand2",
+            command=_scroll_right,
+        ).pack(side=tk.LEFT)
+
         self._chip_frame = tk.Frame(chip_canvas, bg=self.bgcolor)
         chip_canvas.create_window((0, 0), window=self._chip_frame, anchor="nw")
 
@@ -877,9 +1091,9 @@ class FinancePanel(tk.Frame):
         body = tk.Frame(self, bg=self.bgcolor)
         body.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
 
-        # panel izquierdo — categorías con tabs
+        # panel izquierdo — categorías + gráficos
         left = tk.Frame(body, bg=self.bgcolor)
-        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        left.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 10))
 
         cat_hdr = tk.Frame(left, bg=self.bgcolor)
         cat_hdr.pack(fill=tk.X, pady=(0, 4))
@@ -913,14 +1127,20 @@ class FinancePanel(tk.Frame):
         style.configure("Cat.TNotebook.Tab", background="#1A1A2E", foreground=_NEUTRAL, font=_FONT_CHIP, padding=(8, 3))
         style.map("Cat.TNotebook.Tab", background=[("selected", "#2A2A3E")], foreground=[("selected", _WHITE)])
 
-        cat_nb = ttk.Notebook(left, style="Cat.TNotebook")
+        cat_wrap = tk.Frame(left, bg=self.bgcolor, height=280)
+        cat_wrap.pack(fill=tk.X)
+        cat_wrap.pack_propagate(False)
+
+        cat_nb = ttk.Notebook(cat_wrap, style="Cat.TNotebook")
         cat_nb.pack(fill=tk.BOTH, expand=True)
 
         tab_expense = tk.Frame(cat_nb, bg=self.bgcolor)
         tab_income = tk.Frame(cat_nb, bg=self.bgcolor)
+        tab_invest = tk.Frame(cat_nb, bg=self.bgcolor)
         tab_transfer = tk.Frame(cat_nb, bg=self.bgcolor)
         cat_nb.add(tab_expense, text="Gastos")
         cat_nb.add(tab_income, text="Ingresos")
+        cat_nb.add(tab_invest, text="Inversiones")
         cat_nb.add(tab_transfer, text="Transferencias")
 
         self._cat_bar = _CategoryBar(tab_expense, self.bgcolor, on_select=self._on_category_select, bar_color=_NEGATIVE)
@@ -931,10 +1151,20 @@ class FinancePanel(tk.Frame):
         )
         self._cat_bar_income.pack(fill=tk.BOTH, expand=True, pady=4)
 
+        self._cat_bar_invest = _CategoryBar(
+            tab_invest, self.bgcolor, on_select=self._on_category_select, bar_color=_GOLD
+        )
+        self._cat_bar_invest.pack(fill=tk.BOTH, expand=True, pady=4)
+
         self._cat_bar_transfer = _CategoryBar(
-            tab_transfer, self.bgcolor, on_select=self._on_category_select, bar_color=_GOLD
+            tab_transfer, self.bgcolor, on_select=self._on_category_select, bar_color=_NEUTRAL
         )
         self._cat_bar_transfer.pack(fill=tk.BOTH, expand=True, pady=4)
+
+        tk.Frame(left, bg=_NEUTRAL, height=1).pack(fill=tk.X, pady=4)
+
+        self._evol_chart = _EvolucionChart(left, self.bgcolor)
+        self._evol_chart.pack(fill=tk.BOTH, expand=True)
 
         tk.Frame(body, bg=_NEUTRAL, width=1).pack(side=tk.LEFT, fill=tk.Y, padx=6)
 
@@ -965,7 +1195,12 @@ class FinancePanel(tk.Frame):
         self._lbl_status = tk.Label(hdr, text="", font=_FONT_SUB, bg=_BLACK, fg=_WHITE, padx=6, pady=2)
         self._lbl_status.pack(side=tk.RIGHT)
 
-        self._txn_table = _TxnTable(right, self.bgcolor, on_category_edit=self._on_category_edit)
+        self._txn_table = _TxnTable(
+            right,
+            self.bgcolor,
+            on_category_edit=self._on_category_edit,
+            on_date_edit=self._on_date_edit,
+        )
         self._txn_table.pack(fill=tk.BOTH, expand=True)
 
     def _build_chips(self):
@@ -990,8 +1225,8 @@ class FinancePanel(tk.Frame):
             bc.pack(side=tk.LEFT, padx=2)
             self._bank_chips[bank_name] = bc
 
-            for _label, acct_id, bname, aname in accts:
-                short = aname.replace(bname, "").strip(" -—")
+            for _label, acct_id, bname, aname, short_name in accts:
+                short = short_name or aname.replace(bname, "").strip(" -—")
                 ac = _Chip(self._chip_frame, short, self._on_chip_account, self.bgcolor)
                 ac._bank = bank_name  # type: ignore[attr-defined]
                 ac._acct_id = acct_id  # type: ignore[attr-defined]
@@ -1064,6 +1299,7 @@ class FinancePanel(tk.Frame):
         account_ids = self._selected_account_ids()
         self._cat_bar.load(self._db.get_categories_expense(date_from, date_to, account_ids))
         self._cat_bar_income.load(self._db.get_categories_income(date_from, date_to, account_ids))
+        self._cat_bar_invest.load(self._db.get_categories_investment(date_from, date_to, account_ids))
         self._cat_bar_transfer.load(self._db.get_categories_transfer(date_from, date_to, account_ids))
 
     def _on_category_select(self, cat_name: str | None):
@@ -1077,7 +1313,8 @@ class FinancePanel(tk.Frame):
 
     def _clear_category_filter(self):
         self._txn_table.set_category_filter(None)
-        self._cat_bar.clear_filter()
+        for bar in (self._cat_bar, self._cat_bar_income, self._cat_bar_invest, self._cat_bar_transfer):
+            bar.clear_filter()
         self._lbl_txn_section.config(text="  Últimas transacciones  ")
         self._btn_clear_cat.pack_forget()
         self._update_status()
@@ -1121,6 +1358,19 @@ class FinancePanel(tk.Frame):
             else:
                 _logger.warning(f"Regla ya existente o error: [{match_type}] '{pattern}'")
 
+    # ── lógica edición de fecha ───────────────────────────────────────────────
+
+    def _on_date_edit(self, txn_id: int, iid: str, txn_row: dict):
+        """Abre popup para corregir la fecha de txn_id."""
+        _DateEditPopup(self, txn_row, on_save=self._save_date)
+
+    def _save_date(self, txn_id: int, iid: str, new_date: str):
+        """Persiste el cambio de fecha en la BD y actualiza la fila visible."""
+        ok = self._db.update_txn_date(txn_id, new_date)
+        if ok and iid:
+            self._txn_table.update_row_date(iid, new_date)
+            self._update_status()
+
     # ── helpers privados ──────────────────────────────────────────────────────
 
     def _period(self) -> tuple[str, str]:
@@ -1149,22 +1399,22 @@ class FinancePanel(tk.Frame):
                 pct_invest = (kpi["invertido"] / kpi["ingresos"] * 100) if kpi["ingresos"] else 0
 
                 self._kpi_income.update_value(
-                    _fmt_ars(kpi["ingresos"]),
-                    sub=f"≈ {_fmt_usdt(kpi['ing_usdt'])}",
+                    _fmt_usdt(kpi["ingresos"]),
+                    sub=f"ARS {kpi['ingresos_ars']:,.0f}".replace(",", ".") if kpi["ingresos_ars"] else "",
                     sub2=f"{kpi['total_txns']} transacciones",
                 )
                 self._kpi_expense.update_value(
-                    _fmt_ars(kpi["gastos"]),
-                    sub=f"≈ {_fmt_usdt(kpi['gas_usdt'])}",
+                    _fmt_usdt(kpi["gastos"]),
+                    sub=f"ARS {kpi['gastos_ars']:,.0f}".replace(",", ".") if kpi["gastos_ars"] else "",
                     sub2=f"{pct_gastos:.1f}% de ingresos",
                 )
                 self._kpi_invest.update_value(
-                    _fmt_ars(kpi["invertido"]),
-                    sub=f"≈ {_fmt_usdt(kpi['ing_usdt'] - kpi['gas_usdt'])}",
+                    _fmt_usdt(kpi["invertido"]),
+                    sub=f"ARS {kpi['invertido_ars']:,.0f}".replace(",", ".") if kpi["invertido_ars"] else "",
                     sub2=f"{pct_invest:.1f}% de ingresos",
                 )
                 self._kpi_balance.update_value(
-                    _fmt_ars(balance), sub=f"Invertido: {_fmt_ars(kpi['invertido'])}", color=bal_color
+                    _fmt_usdt(balance), sub=f"Invertido: {_fmt_usdt(kpi['invertido'])}", color=bal_color
                 )
             else:
                 for card in (self._kpi_income, self._kpi_expense, self._kpi_invest, self._kpi_balance):
@@ -1178,7 +1428,10 @@ class FinancePanel(tk.Frame):
                 self._db.get_categories_expense(date_from, date_to, account_ids), income_total=income_total
             )
             self._cat_bar_income.load(self._db.get_categories_income(date_from, date_to, account_ids))
+            self._cat_bar_invest.load(self._db.get_categories_investment(date_from, date_to, account_ids))
             self._cat_bar_transfer.load(self._db.get_categories_transfer(date_from, date_to, account_ids))
+
+            self._evol_chart.load(self._db.get_monthly_evolution(12, account_ids))
 
             txns = self._db.get_transactions(date_from, date_to, account_ids)
             self._txn_table.load(txns)
@@ -1222,6 +1475,7 @@ DETECTION_RULES = [
     ("196-004699/4", "bbva_cuenta", "196-004699/4"),
     ("1269461197", "bbva_tc", "TC-1269461197"),
     ("1175839390", "bbva_tc", "TC-1175839390"),
+    ("0102****9412", "bdv_ves", "BDV-9412"),
 ]
 
 MESES_ES = {
@@ -1251,6 +1505,45 @@ _INSERT_TXN_SQL = """
          %(raw_description_detail)s, %(comprobante)s, %(import_id)s,
          %(classified_by)s, %(installment_current)s, %(installment_total)s)
 """
+
+_NEAR_DUP_SQL = """
+    SELECT id FROM fin_transactions
+    WHERE account_id = %s AND date = %s AND raw_description = %s
+      AND currency = %s AND ABS(amount - %s) < 2.0
+      AND (installment_current <=> %s)
+    LIMIT 1
+"""
+
+
+def _is_near_duplicate(cursor, txn: dict) -> bool:
+    """True si ya existe una transacción con mismo cuenta/fecha/descripción, monto ±$2
+    y mismo número de cuota (NULL-safe). Evita falsos positivos con cuotas distintas."""
+    cursor.execute(
+        _NEAR_DUP_SQL,
+        (
+            txn["account_id"],
+            txn["date"],
+            txn["raw_description"],
+            txn.get("currency", "ARS"),
+            txn["amount"],
+            txn.get("installment_current"),
+        ),
+    )
+    return cursor.fetchone() is not None
+
+
+def _dedup_raw_descriptions(txns: list[dict]) -> list[dict]:
+    """Numera raw_description cuando el mismo (account_id, date, amount, raw_description)
+    aparece más de una vez en el batch. Ej: dos 'Pago de tarjeta de credito' $150k el mismo día
+    quedan como '...' y '... (2)' para que el unique index no rechace el segundo."""
+    seen: dict[tuple, int] = {}
+    for txn in txns:
+        key = (txn["account_id"], txn["date"], txn["amount"], txn["raw_description"])
+        count = seen.get(key, 0) + 1
+        seen[key] = count
+        if count > 1:
+            txn["raw_description"] = f"{txn['raw_description']} ({count})"
+    return txns
 
 
 def _get_tasa_cursor(currency: str, txn_date, cursor) -> float | None:
@@ -1563,11 +1856,14 @@ class BbvaArTarjeta:
         import_id = cursor.lastrowid
         raw_rows = self._extract_rows()
         stats["rows_found"] = len(raw_rows)
-        txns = self._build_transactions(raw_rows, account_id, import_id, cursor)
+        txns = _dedup_raw_descriptions(self._build_transactions(raw_rows, account_id, import_id, cursor))
         for txn in txns:
             try:
-                cursor.execute(_INSERT_TXN_SQL, txn)
-                stats["inserted" if cursor.rowcount == 1 else "skipped"] += 1
+                if _is_near_duplicate(cursor, txn):
+                    stats["skipped"] += 1
+                else:
+                    cursor.execute(_INSERT_TXN_SQL, txn)
+                    stats["inserted" if cursor.rowcount == 1 else "skipped"] += 1
             except Error as e:
                 _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
                 stats["errors"] += 1
@@ -1771,7 +2067,7 @@ class BbvaArCuenta:
                     "amount_usdt": _calc_usdt(amount, "ARS", txn_date, cursor),
                     "category_id": cat_id,
                     "account_id": account_id,
-                    "description": concepto,
+                    "description": f"{concepto} — {r['origen']}" if r.get("origen") else concepto,
                     "raw_description": concepto,
                     "raw_description_detail": r.get("origen"),
                     "comprobante": None,
@@ -1833,11 +2129,14 @@ class BbvaArCuenta:
         import_id = cursor.lastrowid
         raw_rows = self._extract_rows()
         stats["rows_found"] = len(raw_rows)
-        txns = self._build_transactions(raw_rows, account_id, import_id, cursor)
+        txns = _dedup_raw_descriptions(self._build_transactions(raw_rows, account_id, import_id, cursor))
         for txn in txns:
             try:
-                cursor.execute(_INSERT_TXN_SQL, txn)
-                stats["inserted" if cursor.rowcount == 1 else "skipped"] += 1
+                if _is_near_duplicate(cursor, txn):
+                    stats["skipped"] += 1
+                else:
+                    cursor.execute(_INSERT_TXN_SQL, txn)
+                    stats["inserted" if cursor.rowcount == 1 else "skipped"] += 1
             except Error as e:
                 _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
                 stats["errors"] += 1
@@ -2324,16 +2623,21 @@ class SantanderAr:
                 continue
             stats["rows_found"] += len(rows)
             import_id = import_ids[section_key]
-            txns = self._build_transactions(rows, account_ids[section_key], import_id, section_key, cursor)
+            txns = _dedup_raw_descriptions(
+                self._build_transactions(rows, account_ids[section_key], import_id, section_key, cursor)
+            )
             inserted_sec = 0
             for txn in txns:
                 try:
-                    cursor.execute(_INSERT_TXN_SQL, txn)
-                    if cursor.rowcount == 1:
-                        stats["inserted"] += 1
-                        inserted_sec += 1
-                    else:
+                    if _is_near_duplicate(cursor, txn):
                         stats["skipped"] += 1
+                    else:
+                        cursor.execute(_INSERT_TXN_SQL, txn)
+                        if cursor.rowcount == 1:
+                            stats["inserted"] += 1
+                            inserted_sec += 1
+                        else:
+                            stats["skipped"] += 1
                 except Error as e:
                     _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
                     stats["errors"] += 1
@@ -2630,16 +2934,21 @@ class CitibankUs:
                 continue
             stats["rows_found"] += len(rows)
             import_id = import_ids[section_key]
-            txns = self._build_transactions(rows, account_ids[section_key], import_id, section_key, cursor)
+            txns = _dedup_raw_descriptions(
+                self._build_transactions(rows, account_ids[section_key], import_id, section_key, cursor)
+            )
             inserted_sec = 0
             for txn in txns:
                 try:
-                    cursor.execute(_INSERT_TXN_SQL, txn)
-                    if cursor.rowcount == 1:
-                        stats["inserted"] += 1
-                        inserted_sec += 1
-                    else:
+                    if _is_near_duplicate(cursor, txn):
                         stats["skipped"] += 1
+                    else:
+                        cursor.execute(_INSERT_TXN_SQL, txn)
+                        if cursor.rowcount == 1:
+                            stats["inserted"] += 1
+                            inserted_sec += 1
+                        else:
+                            stats["skipped"] += 1
                 except Error as e:
                     _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
                     stats["errors"] += 1
@@ -2657,6 +2966,535 @@ class CitibankUs:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Parser: Banco de Venezuela (BDV) — moneda nacional (VES)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class BdvVes:
+    """
+    Parser para extractos del Banco de Venezuela — cuenta en bolívares (VES).
+
+    Columnas posicionales del PDF:
+      x < 80        → Referencia
+      80 ≤ x < 316  → Descripción
+      316 ≤ x < 368 → Fecha  (DD/MM/YYYY)
+      368 ≤ x < 414 → Mov    (SI / NC / ND)
+      414 ≤ x < 475 → Débito
+      475 ≤ x < 540 → Crédito
+      x ≥ 540       → Saldo
+
+    NC = ingreso, ND = egreso, SI = saldo inicial (se omite).
+    """
+
+    SECTION_NAME = "bdv_cc"
+
+    _X_REF = 80
+    _X_DESC = 316
+    _X_FECHA = 368
+    _X_MOV = 414
+    _X_DEB = 475
+    _X_CRED = 540
+    _DATE_FMT = "%d/%m/%Y"
+
+    def __init__(self, pdf_path: str, account_ref: str, dry_run: bool = False):
+        self._pdf_path = pdf_path
+        self._account_ref = account_ref
+        self._dry_run = dry_run
+
+    def _parse_amount(self, s: str) -> Decimal:
+        """Convierte '8.142,30' o '-7.932,08' → Decimal (formato VES: punto=miles, coma=decimal)."""
+        s = s.strip().lstrip("-").replace(".", "").replace(",", ".")
+        try:
+            return Decimal(s)
+        except InvalidOperation:
+            return Decimal("0")
+
+    def _parse_rows(self) -> list[dict]:
+        rows = []
+        with pdfplumber.open(self._pdf_path) as pdf:
+            for page in pdf.pages:
+                words = page.extract_words(x_tolerance=3, y_tolerance=3)
+                row_map: dict[int, list] = {}
+                for w in words:
+                    key = round(w["top"] / 3) * 3
+                    row_map.setdefault(key, []).append(w)
+                for top_key in sorted(row_map.keys()):
+                    ws = sorted(row_map[top_key], key=lambda w: w["x0"])
+                    ref_p, desc_p, fecha_p, mov_p, deb_p, cred_p = [], [], [], [], [], []
+                    for w in ws:
+                        x, t = w["x0"], w["text"]
+                        if x < self._X_REF:
+                            ref_p.append(t)
+                        elif x < self._X_DESC:
+                            desc_p.append(t)
+                        elif x < self._X_FECHA:
+                            fecha_p.append(t)
+                        elif x < self._X_MOV:
+                            mov_p.append(t)
+                        elif x < self._X_DEB:
+                            deb_p.append(t)
+                        elif x < self._X_CRED:
+                            cred_p.append(t)
+                    fecha_str = " ".join(fecha_p).strip()
+                    mov = " ".join(mov_p).strip()
+                    if not re.match(r"\d{2}/\d{2}/\d{4}", fecha_str):
+                        continue
+                    if mov not in ("SI", "NC", "ND"):
+                        continue
+                    if mov == "SI":
+                        continue
+                    try:
+                        txn_date = datetime.strptime(fecha_str, self._DATE_FMT).date()
+                    except ValueError:
+                        continue
+                    desc = " ".join(desc_p).strip()
+                    ref = " ".join(ref_p).strip()
+                    if mov == "NC":
+                        txn_type = "income"
+                        amount = self._parse_amount(" ".join(cred_p).strip())
+                    else:
+                        txn_type = "expense"
+                        amount = self._parse_amount(" ".join(deb_p).strip())
+                    if amount == 0:
+                        continue
+                    rows.append(
+                        {"date": txn_date, "type": txn_type, "amount": amount, "description": desc, "comprobante": ref}
+                    )
+        return rows
+
+    def _get_account_ids(self, cursor) -> tuple[int, int] | None:
+        cursor.execute(
+            "SELECT id, bank_id FROM fin_accounts WHERE account_ref = %s AND is_active = 1",
+            (self._account_ref,),
+        )
+        return cursor.fetchone()
+
+    def _file_hash(self) -> str:
+        h = hashlib.sha256()
+        with open(self._pdf_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    def _get_monthly_rates(self, cursor) -> dict:
+        """Tasa promedio ponderada VES/USDT por mes desde booktrading (categoria='VES')."""
+        cursor.execute("""SELECT DATE_FORMAT(fechahora,'%Y-%m'),
+                      SUM(ABS(producto)) / SUM(ABS(cantidad))
+               FROM booktrading WHERE simbolo='USDT' AND categoria='VES'
+               GROUP BY DATE_FORMAT(fechahora,'%Y-%m')""")
+        return {row[0]: Decimal(str(row[1])) for row in cursor.fetchall()}
+
+    def _build_transactions(self, rows: list[dict], account_id: int, import_id: int, cursor) -> list[dict]:
+        rates = self._get_monthly_rates(cursor)
+        txns = []
+        for r in rows:
+            mes = r["date"].strftime("%Y-%m")
+            tasa = rates.get(mes)
+            amount_usdt = round(r["amount"] / tasa, 6) if tasa else None
+            # NC (income) = ingreso desde Binance P2P — prefijo para distinguir de ND salidas
+            is_income = r["type"] == "income"
+            description = ("BINANCE P2P - " + r["description"]) if is_income else r["description"]
+            cat_id, classified_by = apply_rules(description, cursor)
+            txns.append(
+                {
+                    "date": r["date"],
+                    "type": r["type"],
+                    "amount": r["amount"],
+                    "currency": "VES",
+                    "amount_usdt": amount_usdt,
+                    "category_id": cat_id,
+                    "account_id": account_id,
+                    "description": description,
+                    "raw_description": r["description"],
+                    "raw_description_detail": None,
+                    "comprobante": r["comprobante"],
+                    "import_id": import_id,
+                    "classified_by": classified_by or "unclassified",
+                    "installment_current": None,
+                    "installment_total": None,
+                }
+            )
+        return txns
+
+    def preview(self) -> dict:
+        rows = self._parse_rows()
+        for r in rows:
+            print(f"  {r['date']}  {r['type']:<8}  {r['amount']:>12}  {r['description']}")
+        return {"rows_found": len(rows), "inserted": 0, "skipped": len(rows), "errors": 0}
+
+    def load(self, conn) -> dict:
+        stats = {"rows_found": 0, "inserted": 0, "skipped": 0, "errors": 0}
+        cursor = conn.cursor()
+        row = self._get_account_ids(cursor)
+        if not row:
+            raise ValueError(
+                f"Cuenta BDV no encontrada (account_ref={self._account_ref!r}) — creala en fin_accounts primero"
+            )
+        account_id, bank_id = row
+        file_hash = self._file_hash()
+        cursor.execute(
+            "SELECT id FROM fin_statement_imports WHERE file_hash = %s AND section = %s",
+            (file_hash, self.SECTION_NAME),
+        )
+        if cursor.fetchone():
+            _logger.info("  Archivo ya importado (hash duplicado) — omitido")
+            cursor.close()
+            return stats
+        cursor.execute(
+            "INSERT INTO fin_statement_imports (account_id, bank_id, filename, file_hash, section, status) "
+            "VALUES (%s,%s,%s,%s,%s,'pending')",
+            (account_id, bank_id, os.path.basename(self._pdf_path), file_hash, self.SECTION_NAME),
+        )
+        import_id = cursor.lastrowid
+        raw_rows = self._parse_rows()
+        stats["rows_found"] = len(raw_rows)
+        txns = _dedup_raw_descriptions(self._build_transactions(raw_rows, account_id, import_id, cursor))
+        for txn in txns:
+            try:
+                if _is_near_duplicate(cursor, txn):
+                    stats["skipped"] += 1
+                    continue
+                cursor.execute(_INSERT_TXN_SQL, txn)
+                if cursor.rowcount:
+                    stats["inserted"] += 1
+                else:
+                    stats["skipped"] += 1
+            except Exception as e:
+                _logger.error(f"  BdvVes insert error: {e}")
+                stats["errors"] += 1
+        cursor.execute(
+            "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,"
+            "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
+            "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
+            (stats["rows_found"], stats["inserted"], import_id, import_id, import_id),
+        )
+        conn.commit()
+        cursor.close()
+        return stats
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Adaptador Binance C2C — historial de órdenes P2P
+# ─────────────────────────────────────────────────────────────────────────────
+
+_RE_C2C_ROW = re.compile(
+    r"(\d{18,20})\s+"
+    r"(Buy|Sell)\s+USDT\s+"
+    r"([A-Z]{3})\s+"
+    r"([\d.]+)\s+"
+    r"([\d.]+)\s+"
+    r"([\d.]+)\s+"
+    r"([\d.]+)\s+"
+    r"(.+?)\s+Completed\s+"
+    r"(\d{2}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})"
+)
+
+
+class BinanceC2c:
+    """
+    Parsea el historial de órdenes C2C de Binance (PDF) y carga en fin_transactions.
+    Representa la cuenta USDT de Binance como cuenta financiera:
+      Buy  USDT ARS → income  (USDT entra) — contrapartida de Compra USDT en BBVA
+      Sell USDT VES → expense (USDT sale)  — contrapartida de BINANCE P2P en BDV
+      Sell USDT USD → expense (USDT sale)  — contrapartida de ingreso en Citi
+    """
+
+    SECTION_NAME = "binance_c2c"
+    ACCOUNT_REF = "BINANCE-USDT"
+
+    def __init__(self, pdf_path: str, dry_run: bool = False):
+        self.pdf_path = pdf_path
+        self.dry_run = dry_run
+        self.file_hash = sha256_file(pdf_path)
+
+    def _parse_rows(self) -> list[dict]:
+        rows = []
+        with pdfplumber.open(self.pdf_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text() or ""
+                for line in text.splitlines():
+                    m = _RE_C2C_ROW.search(line)
+                    if not m:
+                        continue
+                    order_id, tipo, fiat, precio_total, precio, cantidad, fee, contraparte, hora = m.groups()
+                    rows.append(
+                        {
+                            "order_id": order_id,
+                            "tipo": tipo,
+                            "fiat": fiat,
+                            "precio_total": float(precio_total),
+                            "precio": float(precio),
+                            "cantidad": float(cantidad),
+                            "fee": float(fee),
+                            "contraparte": contraparte.strip(),
+                            "hora": hora.strip(),
+                        }
+                    )
+        return rows
+
+    def _build_transactions(self, rows: list[dict], account_id: int, import_id: int, cursor) -> list[dict]:
+        txns = []
+        for r in rows:
+            try:
+                fecha = datetime.strptime(r["hora"], "%y-%m-%d %H:%M:%S").date()
+            except ValueError:
+                _logger.warning(f"  [BinanceC2c] Fecha inválida: {r['hora']} — omitida")
+                continue
+            fiat = r["fiat"]
+            if r["tipo"] == "Buy":
+                usdt_amount = round(r["cantidad"] - r["fee"], 8)
+                txn_type = "income"
+            else:
+                usdt_amount = round(r["cantidad"] + r["fee"], 8)
+                txn_type = "expense"
+            raw_desc = f"C2C {r['tipo'].upper()} {fiat}"
+            description = f"C2C {r['tipo']} USDT/{fiat} — {r['contraparte']}"
+            cat_id, classified_by = apply_rules(raw_desc, cursor)
+            txns.append(
+                {
+                    "date": fecha,
+                    "type": txn_type,
+                    "amount": Decimal(str(usdt_amount)),
+                    "currency": "USDT",
+                    "amount_usdt": Decimal(str(usdt_amount)),
+                    "category_id": cat_id,
+                    "account_id": account_id,
+                    "description": description,
+                    "raw_description": raw_desc,
+                    "raw_description_detail": f"@{r['precio']} {fiat}/{r['precio_total']:.0f}",
+                    "comprobante": r["order_id"],
+                    "import_id": import_id,
+                    "classified_by": classified_by,
+                    "installment_current": None,
+                    "installment_total": None,
+                }
+            )
+        return txns
+
+    def preview(self) -> dict:
+        stats = {"inserted": 0, "skipped": 0, "errors": 0, "rows_found": 0}
+        rows = self._parse_rows()
+        stats["rows_found"] = len(rows)
+        for r in rows:
+            try:
+                fecha = datetime.strptime(r["hora"], "%y-%m-%d %H:%M:%S").date()
+            except ValueError:
+                stats["errors"] += 1
+                continue
+            fiat = r["fiat"]
+            fee = r["fee"]
+            usdt = round(r["cantidad"] - fee if r["tipo"] == "Buy" else r["cantidad"] + fee, 8)
+            _logger.info(
+                f"  {fecha} | {r['tipo']:4s} USDT/{fiat} | {usdt:>9.4f} USDT | "
+                f"@{r['precio']:,.2f} | {r['contraparte'][:30]}"
+            )
+            stats["inserted"] += 1
+        return stats
+
+    def load(self, conn) -> dict:
+        stats = {"inserted": 0, "skipped": 0, "errors": 0, "rows_found": 0}
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, bank_id FROM fin_accounts WHERE account_ref=%s AND is_active=1",
+            (self.ACCOUNT_REF,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError(f"Cuenta no encontrada: account_ref='{self.ACCOUNT_REF}'")
+        account_id, bank_id = row
+        cursor.execute(
+            "SELECT id FROM fin_statement_imports WHERE file_hash=%s AND section=%s",
+            (self.file_hash, self.SECTION_NAME),
+        )
+        if cursor.fetchone():
+            _logger.warning("  PDF ya importado — omitido")
+            cursor.close()
+            return stats
+        cursor.execute(
+            "INSERT INTO fin_statement_imports (account_id,bank_id,filename,file_hash,section,status) "
+            "VALUES (%s,%s,%s,%s,%s,'pending')",
+            (account_id, bank_id, os.path.basename(self.pdf_path), self.file_hash, self.SECTION_NAME),
+        )
+        conn.commit()
+        import_id = cursor.lastrowid
+        raw_rows = self._parse_rows()
+        stats["rows_found"] = len(raw_rows)
+        txns = _dedup_raw_descriptions(self._build_transactions(raw_rows, account_id, import_id, cursor))
+        for txn in txns:
+            try:
+                cursor.execute(
+                    "SELECT id FROM fin_transactions WHERE comprobante=%s AND account_id=%s",
+                    (txn["comprobante"], account_id),
+                )
+                if cursor.fetchone():
+                    stats["skipped"] += 1
+                    continue
+                cursor.execute(_INSERT_TXN_SQL, txn)
+                stats["inserted"] += 1
+            except Exception as e:
+                _logger.error(f"  [BinanceC2c] Error txn {txn.get('comprobante')}: {e}")
+                stats["errors"] += 1
+        conn.commit()
+        cursor.execute(
+            "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s "
+            "WHERE id=%s",
+            (stats["rows_found"], stats["inserted"], stats["skipped"], import_id),
+        )
+        conn.commit()
+        cursor.close()
+        months = {(t["date"].year, t["date"].month) for t in txns}
+        for year, month in months:
+            FinanceScreen().sync_binance_investment(year, month)
+        return stats
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Adaptador Binance Pay — remesas vía Binance Pay API
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class BinancePay:
+    """
+    Carga transacciones salientes de Binance Pay (remesas) en fin_transactions.
+    Fuente: API /sapi/v1/pay/transactions via BinanceClient.fetch_pay_transactions().
+    Solo procesa pagos negativos (USDT que sale de la cuenta).
+    Dedup por comprobante = transactionId.
+
+    Uso (sin PDF, recibe rango de fechas):
+        adapter = BinancePay(date_from=date(2026,1,1), date_to=date(2026,3,31))
+        stats = adapter.load(conn)
+    """
+
+    SECTION_NAME = "binance_pay"
+    ACCOUNT_REF = "BINANCE-USDT"
+
+    def __init__(self, date_from: date, date_to: date, dry_run: bool = False):
+        self.date_from = date_from
+        self.date_to = date_to
+        self.dry_run = dry_run
+        self._client = BinanceClient(vehiculo="Crypto")
+
+    def _fetch_raw(self) -> list[dict]:
+        start_ms = int(datetime.combine(self.date_from, datetime.min.time()).timestamp() * 1000)
+        end_ms = int(datetime.combine(self.date_to, datetime.max.time()).timestamp() * 1000)
+        return self._client.fetch_pay_transactions(start_ms, end_ms)
+
+    def _build_transactions(self, raw: list[dict], account_id: int, import_id: int, cursor) -> list[dict]:
+        txns = []
+        for item in raw:
+            try:
+                amount = float(item.get("amount", "0"))
+            except (ValueError, TypeError):
+                continue
+            if amount >= 0:
+                continue  # solo salidas
+            usdt_amount = abs(amount)
+            ts = item.get("transactionTime", 0)
+            fecha = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).date()
+            transaction_id = item.get("transactionId", "")
+            recv = item.get("receiverInfo") or {}
+            email = recv.get("email", "")
+            phone = recv.get("phoneNumber", "")
+            contraparte = email or phone or recv.get("name", "?")
+            raw_desc = f"BINANCE PAY {contraparte}"
+            description = f"Binance Pay → {contraparte}"
+            cat_id, classified_by = apply_rules(raw_desc, cursor)
+            txns.append(
+                {
+                    "date": fecha,
+                    "type": "expense",
+                    "amount": Decimal(str(round(usdt_amount, 8))),
+                    "currency": "USDT",
+                    "amount_usdt": Decimal(str(round(usdt_amount, 8))),
+                    "category_id": cat_id,
+                    "account_id": account_id,
+                    "description": description,
+                    "raw_description": raw_desc,
+                    "raw_description_detail": "",
+                    "comprobante": transaction_id,
+                    "import_id": import_id,
+                    "classified_by": classified_by,
+                    "installment_current": None,
+                    "installment_total": None,
+                }
+            )
+        return txns
+
+    def preview(self) -> dict:
+        stats = {"inserted": 0, "skipped": 0, "errors": 0, "rows_found": 0}
+        raw = self._fetch_raw()
+        outgoing = [r for r in raw if float(r.get("amount", "0")) < 0]
+        stats["rows_found"] = len(outgoing)
+        for item in outgoing:
+            ts = item.get("transactionTime", 0)
+            fecha = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).date()
+            usdt = abs(float(item.get("amount", "0")))
+            recv = item.get("receiverInfo") or {}
+            contraparte = recv.get("email") or recv.get("phoneNumber") or recv.get("name", "?")
+            _logger.info(f"  {fecha} | PAY {usdt:>8.4f} USDT → {contraparte}")
+            stats["inserted"] += 1
+        return stats
+
+    def load(self, conn) -> dict:
+        stats = {"inserted": 0, "skipped": 0, "errors": 0, "rows_found": 0}
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, bank_id FROM fin_accounts WHERE account_ref=%s AND is_active=1",
+            (self.ACCOUNT_REF,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError(f"Cuenta no encontrada: account_ref='{self.ACCOUNT_REF}'")
+        account_id, bank_id = row
+        range_key = f"{self.date_from}_{self.date_to}"
+        cursor.execute(
+            "SELECT id FROM fin_statement_imports WHERE section=%s AND filename=%s",
+            (self.SECTION_NAME, range_key),
+        )
+        if cursor.fetchone():
+            _logger.warning("  Rango ya importado — omitido")
+            cursor.close()
+            return stats
+        cursor.execute(
+            "INSERT INTO fin_statement_imports (account_id,bank_id,filename,file_hash,section,status) "
+            "VALUES (%s,%s,%s,%s,%s,'pending')",
+            (account_id, bank_id, range_key, "", self.SECTION_NAME),
+        )
+        conn.commit()
+        import_id = cursor.lastrowid
+        raw = self._fetch_raw()
+        outgoing = [r for r in raw if float(r.get("amount", "0")) < 0]
+        stats["rows_found"] = len(outgoing)
+        txns = self._build_transactions(outgoing, account_id, import_id, cursor)
+        for txn in txns:
+            try:
+                cursor.execute(
+                    "SELECT id FROM fin_transactions WHERE comprobante=%s AND account_id=%s",
+                    (txn["comprobante"], account_id),
+                )
+                if cursor.fetchone():
+                    stats["skipped"] += 1
+                    continue
+                cursor.execute(_INSERT_TXN_SQL, txn)
+                stats["inserted"] += 1
+            except Exception as e:
+                _logger.error(f"  [BinancePay] Error txn {txn.get('comprobante')}: {e}")
+                stats["errors"] += 1
+        conn.commit()
+        cursor.execute(
+            "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s "
+            "WHERE id=%s",
+            (stats["rows_found"], stats["inserted"], stats["skipped"], import_id),
+        )
+        conn.commit()
+        cursor.close()
+        months = {(t["date"].year, t["date"].month) for t in txns}
+        for year, month in months:
+            FinanceScreen().sync_binance_investment(year, month)
+        return stats
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Mapa de adaptadores
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -2666,6 +3504,8 @@ ADAPTER_MAP = {
     "bbva_ahorro": BbvaArAhorro,
     "santander": SantanderAr,
     "citibank_us": CitibankUs,
+    "bdv_ves": BdvVes,
+    "binance_c2c": BinanceC2c,
 }
 
 
@@ -2708,9 +3548,10 @@ def process_pdf(pdf_path: str) -> bool:
         _logger.error(f"  Adaptador '{adapter_key}' no encontrado")
         return False
     try:
+        _multi_section = AdapterClass in (SantanderAr, CitibankUs)
         adapter = (
             AdapterClass(pdf_path=pdf_path)
-            if AdapterClass is SantanderAr
+            if _multi_section
             else AdapterClass(pdf_path=pdf_path, account_ref=account_ref)
         )
         conn = connect(**DB_CONFIG)
@@ -2730,8 +3571,11 @@ def process_pdf(pdf_path: str) -> bool:
 
 
 def scan_extractos() -> str:
-    """Escanea EXTRACTOS_DIR, procesa PDFs nuevos, mueve procesados/desconocidos.
-    Devuelve resumen en texto para el agente."""
+    """Escanea EXTRACTOS_DIR, procesa PDFs y los elimina.
+    - Reconocidos (importados o duplicado interno): se eliminan.
+    - No reconocidos: se mueven a desconocidos/ para revisión.
+    La validación de duplicados es interna vía SHA-256 en BD.
+    """
     if not os.path.isdir(EXTRACTOS_DIR):
         return f"Carpeta no encontrada: {EXTRACTOS_DIR}"
     pdfs = sorted(
@@ -2745,15 +3589,15 @@ def scan_extractos() -> str:
     fail_count = 0
     for pdf_path in pdfs:
         ok = process_pdf(pdf_path)
-        dest = PROCESADOS_DIR if ok else DESCONOCIDOS_DIR
-        os.makedirs(dest, exist_ok=True)
-        dest_file = os.path.join(dest, os.path.basename(pdf_path))
-        if os.path.exists(dest_file):
-            base, ext = os.path.splitext(os.path.basename(pdf_path))
-            dest_file = os.path.join(dest, f"{base}_{int(time.time())}{ext}")
-        shutil.move(pdf_path, dest_file)
         if ok:
+            os.remove(pdf_path)
             ok_count += 1
         else:
+            os.makedirs(DESCONOCIDOS_DIR, exist_ok=True)
+            dest_file = os.path.join(DESCONOCIDOS_DIR, os.path.basename(pdf_path))
+            if os.path.exists(dest_file):
+                base, ext = os.path.splitext(os.path.basename(pdf_path))
+                dest_file = os.path.join(DESCONOCIDOS_DIR, f"{base}_{int(time.time())}{ext}")
+            shutil.move(pdf_path, dest_file)
             fail_count += 1
-    return f"Procesados: {ok_count} OK, {fail_count} fallidos de {len(pdfs)} PDFs"
+    return f"Procesados: {ok_count} eliminados, {fail_count} no reconocidos de {len(pdfs)} PDFs"
