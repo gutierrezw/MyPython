@@ -1819,14 +1819,32 @@ class DatosVehivulo(TickerInfo, MyOrders):
             # invoca websocket y suscribe symbols
             def websocket_stream(limit, task):
                 nonlocal iteraStream
+                _log = logging.getLogger("IBroks_Client")
+
+                def _watchdog():
+                    # Cierra el WS si el counter no avanzó en 5 minutos — fuerza re-suscripción
+                    TIMEOUT = 300
+                    while True:
+                        time.sleep(60)
+                        if self.WsStock is None:
+                            continue
+                        prev = self.WsStock.counter
+                        time.sleep(TIMEOUT - 60)
+                        if self.WsStock is not None and self.WsStock.counter == prev:
+                            _log.warning("websocket_stream(Stock): watchdog — sin datos 5 min, reconectando")
+                            try:
+                                self.WsStock.ws.close()
+                            except Exception:
+                                pass
+
+                threading.Thread(target=_watchdog, name="WsStock_Watchdog", daemon=True).start()
+
                 try:
                     url = f"wss://localhost:{DataHub.ib_gateway_port}/v1/api/ws"
                     while True:
 
-                        # Si activos está vacío (race con api_vehiculo_iteractive) reintentar en 5s
                         if not self.activos:
-                            time.sleep(5)
-                            continue
+                            _log.warning("websocket_stream(Stock): self.activos vacío al reconectar")
 
                         self.WsStock = MyWebsocket(
                             url=url,
