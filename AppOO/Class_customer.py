@@ -792,7 +792,8 @@ class DataHub:
                             pkey = str(recd[ix.index("preciotrans")])
                             fkey = recd[ix.index("fechahora")].strftime("%Y-%m-%d")
 
-                    gyp = (last - prec) * x_stock
+                    # gyp consistente con lotesGain: incluye comisión en el costo base
+                    gyp = last * x_stock - x_costo
 
                     # acumula lotes con ganancias
                     if gyp >= 0:
@@ -802,7 +803,7 @@ class DataHub:
 
                         c_gain += x_costo
                         p_gain += gyp
-                        roi = (p_gain / c_gain) if c_gain > 0 else 0
+                        roi = (gyp / x_costo) if x_costo > 0 else 0  # roi individual del lote
 
                         a_gain.append(
                             {
@@ -820,10 +821,10 @@ class DataHub:
 
                     # acumula lotes con perdidas
                     elif gyp < 0:
-                        c_lost += prec * cant
+                        c_lost += x_costo  # corregido: usar x_costo acumulado del lote (incluye comisión)
                         p_lost += gyp
                         lotes_lost += 1
-                        roi = (p_lost / c_lost) if c_lost > 0 else 0
+                        roi = (gyp / x_costo) if x_costo > 0 else 0  # roi individual del lote
                         a_lost.append(
                             {
                                 "precio": prec,
@@ -3143,6 +3144,15 @@ class WidgetVehiculo(TickerInfo):
                 self.graph[-1][0].get_tk_widget().pack()
 
                 # command=lambda: chart_setup('W', gtipo, 'p'))
+                def _toggle_index(btn):
+                    data = read_json_tmp("perf_show_index")
+                    show = not data.get(self.vehiculo, True)
+                    data[self.vehiculo] = show
+                    write_json_tmp("perf_show_index", data)
+                    btn.config(fg=self.colors["bgcolor"] if show else "gray")
+                    self.setup_graph_performace(self._last_perf_periodo)
+
+                _idx_state = read_json_tmp("perf_show_index").get(self.vehiculo, True)
                 bt1 = tk.Button(
                     win,
                     text="1m",
@@ -3188,11 +3198,21 @@ class WidgetVehiculo(TickerInfo):
                     relief=tk.FLAT,
                     command=lambda: self.setup_graph_performace("5Y"),
                 )
-                bt1.place(y=15, x=725)
-                bt2.place(y=15, x=750)
-                bt3.place(y=15, x=775)
-                bt4.place(y=15, x=800)
-                bt5.place(y=15, x=825)
+                self._btn_index = tk.Button(
+                    win,
+                    text="Idx",
+                    width=3,
+                    bg=self.colors["cgcolor"],
+                    fg=self.colors["bgcolor"] if _idx_state else "gray",
+                    relief=tk.FLAT,
+                )
+                self._btn_index.config(command=lambda: _toggle_index(self._btn_index))
+                bt1.place(y=15, x=700)
+                bt2.place(y=15, x=725)
+                bt3.place(y=15, x=750)
+                bt4.place(y=15, x=775)
+                bt5.place(y=15, x=800)
+                self._btn_index.place(y=15, x=825)
 
         # información de sesión
         self.sesion = self.PlanInversion.get_sesion_by_vehiculo(self.vehiculo)
@@ -5227,7 +5247,10 @@ class WidgetVehiculo(TickerInfo):
             "5Y": pd.DateOffset(years=5),
         }
         hoy = pd.Timestamp.today()
+        self._last_perf_periodo = tipo or getattr(self, "_last_perf_periodo", "1Y")
+        tipo = self._last_perf_periodo
 
+        show_index = read_json_tmp("perf_show_index").get(self.vehiculo, True)
         symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=self.vehiculo)
         parm = {
             "BTC": index_ref,
@@ -5238,6 +5261,7 @@ class WidgetVehiculo(TickerInfo):
             "aspect": 0.21,
             "periodo": tipo,
             "titulo": f"Performance {self.vehiculo}: (in {tipo})",
+            "show_index": show_index,
         }
 
         # ajusta a tempralidad seleccionada
@@ -5450,7 +5474,7 @@ class WidgetVehiculo(TickerInfo):
             left_series = series_cols[:2] if len(series_cols) >= 2 else (series_cols + [None, None])[:2]
 
             # plot eje izquierdo (performance comparativa)
-            if left_series[0]:
+            if left_series[0] and parm.get("show_index", True):
                 ax.plot(
                     data.index,
                     data[left_series[0]],
@@ -5626,7 +5650,7 @@ class WidgetVehiculo(TickerInfo):
 
             # leyenda: construimos patches según las series dibujadas
             patches = []
-            if left_series[0]:
+            if left_series[0] and parm.get("show_index", True):
                 patches.append(mpatches.Patch(color=self.cchart["plot5"], label=left_series[0]))
             if left_series[1]:
                 patches.append(mpatches.Patch(color=self.cchart["plot2"], label=left_series[1]))
@@ -5641,9 +5665,12 @@ class WidgetVehiculo(TickerInfo):
 
             # ajustar límites Y de forma robusta (si es necesario)
             try:
+                show_index = parm.get("show_index", True)
                 left_vals = []
-                for s in left_series:
+                for i, s in enumerate(left_series):
                     if s and s in data.columns:
+                        if i == 0 and not show_index:
+                            continue  # excluir índice del cálculo de escala cuando está oculto
                         left_vals.append(data[s].dropna().values)
                 if left_vals:
                     all_left = np.concatenate(left_vals)
