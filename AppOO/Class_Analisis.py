@@ -1354,6 +1354,8 @@ class AnalisisCrypto(AnalisisBase):
 
     def _refresh_mrg_display(self):
         """Actualiza Beta y % Mrg/Risk en Analysis luego de que el thread de yfinance computa el beta real."""
+        from Class_customer import DataHub  # import diferido — evita ciclo: Class_Analisis→Class_customer
+
         if not hasattr(self, "_entry_beta") or not hasattr(self, "_entry_mrg") or not hasattr(self, "_mrg_data"):
             return
         try:
@@ -1361,7 +1363,6 @@ class AnalisisCrypto(AnalisisBase):
                 return
         except Exception:
             return
-        from Class_customer import DataHub  # import diferido — evita ciclo
 
         beta = DataHub.manager_GyP["Crypto"].get("BetaPortfolio", 1.5)
         total_deuda, capital_neto = self._mrg_data
@@ -1482,6 +1483,8 @@ class AnalisisCrypto(AnalisisBase):
 
     def _seccion_deuda(self, frame, row):
         """Sección de análisis de préstamos flexibles Binance con simulador loan_distribute."""
+        from Class_customer import DataHub  # import diferido — evita ciclo: Class_Analisis→Class_customer
+        from Class_ServiciosCrypto import ServiciosCrypto  # import diferido — evita ciclo con Modulos_python chain
 
         def _get_loan_data():
             from Class_ApiBinnace import BinanceClient  # import diferido — evita ciclo con Modulos_python chain
@@ -1720,8 +1723,6 @@ class AnalisisCrypto(AnalisisBase):
         # capital earn de los activos con LTV activo = capital real disponible
         # Binance puede bloquear todo ese earn como colateral en cualquier momento
         try:
-            from Class_ServiciosCrypto import ServiciosCrypto  # import diferido — evita ciclo con Modulos_python chain
-
             earn_balances = ServiciosCrypto().earn_spot_balances()
             earn_map = {b["asset"]: b.get("usdt_value", 0.0) for b in earn_balances}
         except Exception:
@@ -1733,8 +1734,6 @@ class AnalisisCrypto(AnalisisBase):
         capital_neto = capital_base - total_deuda
         apalancamiento = total_deuda / capital_base if capital_base > 0 else 0
         leverage_crypto = total_col / max(capital_neto, 1.0)
-
-        from Class_customer import DataHub  # import diferido — evita ciclo: Class_Analisis→Class_customer
 
         _beta_c = DataHub.manager_GyP["Crypto"].get("BetaPortfolio", 1.5)
         _equity_c = max(capital_neto, 1.0)
@@ -2560,6 +2559,7 @@ class AnalisisStock(AnalisisBase):
         """Calcula métricas de apalancamiento y semáforos de riesgo.
         Usa stockmarketvalue e interest del ledger IB cuando están disponibles.
         """
+        from Class_customer import DataHub  # import diferido — evita ciclo: Class_Analisis→Class_customer
 
         def _semaforo(valor, umbral_warn, umbral_alert):
             if valor >= umbral_alert:
@@ -2588,8 +2588,6 @@ class AnalisisStock(AnalisisBase):
         else:
             beta_port = 1.0
         beta_port = max(beta_port, 0.1)
-        from Class_customer import DataHub  # import diferido — evita ciclo Class_Analisis→Class_customer
-
         DataHub.manager_GyP["Stock"]["BetaPortfolio"] = round(beta_port, 3)
 
         risk_real = leverage * beta_port
