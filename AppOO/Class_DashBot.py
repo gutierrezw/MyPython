@@ -1706,6 +1706,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 "Agente_AuditPortfolio": 2592000,
                 "Agente_LtvControl": 300,
                 "Agente_StockBeta": 3600,
+                "Agente_ExtractosWatcher": 3600,
             }
 
             def _fmt_intervalo(seg):
@@ -1770,6 +1771,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
                     # Agente Beta Portfolio Stock — actualiza BetaPortfolio cada hora
                     self.Agente_StockBeta()
+
+                    # Agente Extractos Watcher — escanea tmp/extractos/ y carga PDFs bancarios
+                    self.Agente_ExtractosWatcher()
 
                     # Agente Beta Portfolio Crypto — descarga yfinance y calcula beta vs BTC cada 6h
                     self.Agente_CryptoBeta()

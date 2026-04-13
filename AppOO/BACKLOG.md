@@ -42,3 +42,13 @@ Historial de versiones al final del archivo.
 - ✅ Backfill VES 12 meses — 37 operaciones SELL en `booktrading` (`VES-0001`)
 - ✅ `trade_USDT_diario()` — carga diaria ARS (BUY) + VES (SELL) desde la app
 - ✅ `get_c2c_trade_history()` — acepta parámetro `fiat` para filtrar por moneda
+
+---
+
+## Flujo de trabajo — rama docs
+
+**`docs` es la fuente de verdad para todos los archivos `.md`.**
+
+- Editar `.md` → pararse en `docs`, editar, commitear
+- Llevar cambio a `Appoo` → `git checkout Appoo && git checkout docs -- <archivo>.md`
+- Al cerrar sesión → actualizar `BACKLOG.md` en `docs` con lo completado
