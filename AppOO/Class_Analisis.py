@@ -1594,17 +1594,16 @@ class AnalisisCrypto(AnalisisBase):
             ax1.spines["left"].set_linewidth(1.0)
             ax1.grid(True, alpha=0.12, color="gray", axis="y", linestyle=":", zorder=0)
 
-            # ── AX2: áreas apiladas — rojo deuda (base) + azul colateral ─────
+            # ── AX2: áreas — rojo deuda (0→deuda) + azul colateral (0→col) ──
             deudas_arr = np.array(deudas)
             cols_arr = np.array(cols_usd)
-            total_arr = deudas_arr + cols_arr
 
             ax2.fill_between(x, 0, deudas_arr, color="#e74c3c", alpha=0.40, zorder=3, label="Deuda USD")
             ax2.plot(x, deudas_arr, color="#e74c3c", linewidth=0.9, zorder=4)
-            ax2.fill_between(x, deudas_arr, total_arr, color="#2980b9", alpha=0.35, zorder=3, label="Col. USD")
-            ax2.plot(x, total_arr, color="#2980b9", linewidth=0.9, zorder=4)
+            ax2.fill_between(x, deudas_arr, cols_arr, color="#2980b9", alpha=0.35, zorder=3, label="Col. USD")
+            ax2.plot(x, cols_arr, color="#2980b9", linewidth=0.9, zorder=4)
 
-            max_usd = float(total_arr.max()) * 1.1 if len(total_arr) > 0 else 1
+            max_usd = float(cols_arr.max()) * 1.1 if len(cols_arr) > 0 else 1
             ax2.set_ylim(0, max_usd * 1.55)
             ax2.set_ylabel("Deuda / Colateral USD", color="white", fontsize=6)
             ax2.tick_params(axis="y", colors="white", labelsize=6)
