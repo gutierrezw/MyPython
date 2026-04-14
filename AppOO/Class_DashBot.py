@@ -53,11 +53,12 @@ from Modulos_python import (
     wraps,
     signal,
     traceback,
+    requests,
 )
 
 sys.path.insert(0, "..")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "AppValuations"))
-from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion, MarketScreen
+from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion, MarketScreen, EstrategiaInversion
 from Class_Finance import scan_extractos
 from Class_Screener import sync_market, audit_portfolio
 from Class_InstitucionalScore import (
@@ -441,6 +442,73 @@ class ClassAgenteIA:
             )
         except Exception as e:
             self.logger.error(f"Agente_AuditPortfolio(): {e}")
+
+    def _clasificar_etf_claude(self, yf_info, opciones):
+        """Llama Claude Haiku para clasificar un ETF en una estrategia del sistema. Retorna código (P01..P05) o None."""
+        sesion_claude = BDsystem.get_sesion_by_vehiculo("ClaudeAPI")
+        api_key = sesion_claude["userapi"].decode("utf-8")
+        if not api_key:
+            self.logger.error("_clasificar_etf_claude: userapi no configurada en sesion ClaudeAPI")
+            return None
+
+        opciones_str = " | ".join(f"{o['descripcion']}({o['estrategia']})" for o in opciones)
+        nombre = yf_info.get("longName") or yf_info.get("shortName", "")
+        descripcion = (yf_info.get("longBusinessSummary") or "N/A")[:400]
+        categoria = yf_info.get("category") or "N/A"
+
+        prompt = (
+            f"Clasificá este activo financiero en exactamente una de estas categorías:\n"
+            f"{opciones_str}\n\n"
+            f"Nombre: {nombre}\n"
+            f"Descripción: {descripcion}\n"
+            f"Categoría Morningstar: {categoria}\n\n"
+            f"Respondé solo el código de estrategia (ej: P01). Sin explicación."
+        )
+
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 10,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        codigo = resp.json()["content"][0]["text"].strip()
+        codigos_validos = {o["estrategia"] for o in opciones}
+        return codigo if codigo in codigos_validos else None
+
+    # agente clasificador ETF — corre semanalmente, asigna estrategia Balance (P01-P05)
+    # a ETFs detectados en market (categoriaActivo='X') usando DataHub + Claude Haiku.
+    # Write-once: no reclasifica ETFs que ya tienen estrategia Balance asignada.
+    @wait_rate(604800, persist=True)
+    def Agente_ClasificadorETF(self):
+        try:
+            estrategia_svc = EstrategiaInversion()
+            opciones = estrategia_svc.select(accion="vehiculo", ivehiculo="Balance")
+            etfs = estrategia_svc.get_etfs_pendientes(self.account)
+            clasificados, sin_info = 0, 0
+            for etf in etfs:
+                symbol = etf["symbol"]
+                yf_info = DataHub.info.get(symbol, {}).get("activos", {})
+                if not yf_info:
+                    sin_info += 1
+                    continue
+                codigo = self._clasificar_etf_claude(yf_info, opciones)
+                if codigo:
+                    estrategia_svc.update_estrategia_etf(symbol, self.account, codigo)
+                    clasificados += 1
+            self.logger.warning(
+                f"Agente_ClasificadorETF: pendientes={len(etfs)} clasificados={clasificados} sin_info={sin_info}"
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_ClasificadorETF(): {e}")
 
     # Agente LTV — mantiene el LTV en ~28% para evitar liquidaciones de colateral en Binance.
     # Corre cada 5 min. Si el precio del colateral baja (LTV sube) → agrega colateral automáticamente.
@@ -1707,6 +1775,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 "Agente_LtvControl": 300,
                 "Agente_StockBeta": 3600,
                 "Agente_ExtractosWatcher": 3600,
+                "Agente_ClasificadorETF": 604800,
             }
 
             def _fmt_intervalo(seg):
@@ -1819,6 +1888,11 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             DataHub.manager_events.register_thread(
                 name="Agente_AuditPortfolio",
                 target=self.Agente_AuditPortfolio,
+                loop_sleep=300,
+            )
+            DataHub.manager_events.register_thread(
+                name="Agente_ClasificadorETF",
+                target=self.Agente_ClasificadorETF,
                 loop_sleep=300,
             )
         except Exception as error:

@@ -1324,7 +1324,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 return dividendo, dividendYield, exDividendDate
 
             try:
-                self.activos, x_positions = [], []
+                # acumular en local para evitar race condition con schedule_operativo
+                x_activos, x_positions = [], []
+                _dbg_tickets = {pos["ticket"] for pos in self.positions}
                 for key in p_cartera:
 
                     symbol = key["contractDesc"]
@@ -1426,8 +1428,12 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             }
                         }
                     )
-                    self.activos.append(p["conid"])
+                    # solo suscribir símbolos activos — self.positions ya filtra position>0 y costobase>5
+                    if symbol in _dbg_tickets:
+                        x_activos.append(p["conid"])
                     x_positions.append(p)
+                # asignación atómica al final — evita corrupción por race condition con schedule_operativo
+                self.activos = x_activos
                 return x_positions
             except Exception as e:
                 print("update_inversion_stock(): {}".format(e))

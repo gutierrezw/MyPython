@@ -1109,6 +1109,49 @@ class EstrategiaInversion(BDsystem):  # ----------------------------------------
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: Estrategia.Select()]: {}".format(error))
 
+    def get_etfs_pendientes(self, account):
+        """ETFs en market (categoriaActivo='X') sin estrategia Balance asignada en inversion."""
+        try:
+            conn = self._conectar(tabla="select.etf_pendientes")
+            cursor = conn.cursor()
+            qry = """SELECT m.symbol, m.shortName
+                     FROM market m
+                     LEFT JOIN inversion i ON i.ticket = m.symbol AND i.useraccount = %s AND i.iactiva = 'Y'
+                     WHERE m.account = %s AND m.categoriaActivo = 'X'
+                       AND (i.estrategia IS NULL OR i.estrategia NOT IN ('P01','P02','P03','P04','P05'))"""
+            cursor.execute(qry, (account, account))
+            cols = [c[0] for c in cursor.description]
+            rows = cursor.fetchall()
+            return [dict(zip(cols, r)) for r in rows] if rows else []
+        except Exception as e:
+            print(f"[EstrategiaInversion.get_etfs_pendientes()]: {e}")
+            return []
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+
+    def update_estrategia_etf(self, ticket, account, estrategia):
+        """Actualiza estrategia en inversion para un ETF clasificado. Write-once."""
+        try:
+            conn = self._conectar(tabla="update.etf_estrategia")
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE inversion SET estrategia = %s WHERE ticket = %s AND useraccount = %s",
+                (estrategia, ticket, account),
+            )
+            conn.commit()
+        except Exception as e:
+            print(f"[EstrategiaInversion.update_estrategia_etf({ticket})]: {e}")
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+
 
 class MarketScreen(BDsystem):  # -------------------------------------------------------------------------------------
     """
