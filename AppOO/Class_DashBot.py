@@ -54,6 +54,7 @@ from Modulos_python import (
     signal,
     traceback,
     requests,
+    threading,
 )
 
 sys.path.insert(0, "..")
@@ -442,6 +443,38 @@ class ClassAgenteIA:
             )
         except Exception as e:
             self.logger.error(f"Agente_AuditPortfolio(): {e}")
+
+    def _consultar_claude(self, mensaje_usuario, contexto=""):
+        """Llamada general a Claude API para el chatbot. Retorna respuesta en texto."""
+        sesion_claude = BDsystem.get_sesion_by_vehiculo("ClaudeAPI")
+        api_key = sesion_claude["userapi"].decode("utf-8")
+
+        sistema = (
+            "Sos un asistente de inversión integrado en una app de trading. "
+            "Respondé en español, de forma concisa y directa. "
+            "Tenés acceso al estado actual de la cartera del usuario."
+        )
+        if contexto:
+            sistema += f"\n\nContexto actual:\n{contexto}"
+
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 512,
+                "system": sistema,
+                "messages": [{"role": "user", "content": mensaje_usuario}],
+            },
+            timeout=30,
+        )
+        if not resp.ok:
+            raise RuntimeError(f"{resp.status_code} — {resp.json()}")
+        return resp.json()["content"][0]["text"].strip()
 
     def _clasificar_etf_claude(self, yf_info, opciones):
         """Llama Claude Haiku para clasificar un ETF en una estrategia del sistema. Retorna código (P01..P05) o None."""
@@ -1360,25 +1393,27 @@ class Telegram:
 class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
     def __init__(self, master=None, on_minimizar=None):
         super().__init__(master)
-        ClassAgenteIA.__init__(self)  # Inicializa los atributos de AgenteIA
-        Telegram.__init__(self)  # Inicializa los atributos de Telegram
+        ClassAgenteIA.__init__(self)
+        Telegram.__init__(self)
 
-        self.bgcolor = "#252526"
-        self.fgcolor = "white"
-        self.title("Asistente de Inversión 💬")
-        self.geometry("600x700+1325+320")
-        self.configure(bg="#1e1e1e")
-        self.resizable(False, False)
+        # colores
+        self.bgcolor = "#1e1e2e"
+        self.usercolor = "#cba6f7"
+        self.botcolor = "#cdd6f4"
+        self.fgcolor = "#cdd6f4"
+
+        self.title("🤖 Asistente de Inversión")
+        self.geometry("600x780+1200+100")
+        self.configure(bg=self.bgcolor)
+        self.resizable(True, True)
         self.attributes("-topmost", True)
-        self.attributes("-alpha", 0.90)  # transparencia
-        self.overrideredirect(True)  # sin bordes ni título
-        self.ultimo_envio = {}  # para controlar envíos repetidos (Sell)
-        self.ultimo_envio_buy = {}  # para controlar envíos repetidos (Buy)
 
-        # Asigna Nombre Logging
+        self.ultimo_envio = {}
+        self.ultimo_envio_buy = {}
         self.logger = logging.getLogger("ClassChatbot")
+        self.on_minimizar = on_minimizar
 
-        # Accesos MySql ----------------------------------------------------------------------------------------------
+        # Accesos MySql
         self.RepositorioOportunidades = RepositorioOportunidadesBuySell()
         self.IAsell = ModeloOportunidadesSell()
         self.IAbuy = ModeloOportunidadesBuy()
@@ -1391,56 +1426,81 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self.sell_enviados = {}
         self.buy_enviados = {}
 
-        self.iconos = tk.Frame(self, bg=self.bgcolor)
-        self.chat = tk.Frame(self, bg=self.bgcolor)
-        self.iconos.pack(side=tk.LEFT, expand=True)
-        self.chat.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # ── BARRA ICONOS (top) ───────────────────────────────────────────────
+        barra = tk.Frame(self, bg="#181825", height=40)
+        barra.pack(fill=tk.X, side=tk.TOP)
+        barra.pack_propagate(False)
 
-        self.bind("<FocusOut>", self._al_perder_foco)
-        self.on_minimizar = on_minimizar
-
-        # Activa/desactiva News--------------------------------------------------------------------------------------
-        Imagen_tk = BDsystem.select_image(idd=333, size=(32, 32))
+        Imagen_tk = BDsystem.select_image(idd=333, size=(26, 26))
         self.BNews = tk.Button(
-            self.iconos,
+            barra,
             image=Imagen_tk,
-            bg=self.bgcolor,
+            bg="#181825",
             relief=tk.FLAT,
+            cursor="hand2",
             command=self.ver_noticias,
         )
         self.BNews.imagen = Imagen_tk
+        self.BNews.pack(side=tk.LEFT, padx=(10, 4), pady=6)
 
-        # Activa/desactiva IA---------------------------------------------------------------------------------------
-        Imagen_tk = BDsystem.select_image(idd=334, size=(32, 32))
-        self.IA = tk.Button(self.iconos, image=Imagen_tk, bg=self.bgcolor, relief=tk.FLAT)
+        Imagen_tk = BDsystem.select_image(idd=334, size=(26, 26))
+        self.IA = tk.Button(barra, image=Imagen_tk, bg="#181825", relief=tk.FLAT)
         self.IA.imagen = Imagen_tk
+        self.IA.pack(side=tk.LEFT, padx=4, pady=6)
 
-        # define area de Chat ---------------------------------------------------------------------------------------
+        # referencia para compatibilidad con código existente
+        self.iconos = barra
+        self.chat = self
+
+        # ── AREA CHAT ───────────────────────────────────────────────────────
         self.area_mensaje = scrolledtext.ScrolledText(
-            self.chat,
+            self,
             wrap=tk.WORD,
-            bg=self.bgcolor,
+            bg="#181825",
             fg=self.fgcolor,
-            font=("Segoe UI", 10),
+            font=("Segoe UI", 11),
+            relief=tk.FLAT,
+            padx=16,
+            pady=12,
+            selectbackground="#45475a",
         )
+        self.area_mensaje.pack(fill=tk.BOTH, expand=True, padx=10, pady=(4, 0))
 
-        self.area_mensaje.pack(expand=True, fill=tk.BOTH, padx=10, pady=10)
-        self.area_mensaje.insert(tk.END, "🤖 Asistente: ¿En qué puedo ayudarte hoy?\n")
+        self.area_mensaje.tag_configure("usuario", foreground=self.usercolor, font=("Segoe UI", 11, "bold"))
+        self.area_mensaje.tag_configure("asistente", foreground=self.botcolor, font=("Segoe UI", 11))
+        self.area_mensaje.tag_configure("thinking", foreground="#6c7086", font=("Segoe UI", 11, "italic"))
+
+        self.area_mensaje.insert(tk.END, "🤖  ¿En qué puedo ayudarte?\n\n", "asistente")
         self.area_mensaje.configure(state="disabled")
 
+        # ── INPUT ───────────────────────────────────────────────────────────
+        footer = tk.Frame(self, bg=self.bgcolor)
+        footer.pack(fill=tk.X, padx=10, pady=10)
+
         self.entrada = tk.Entry(
-            self.chat,
-            font=("Segoe UI", 10),
-            bg="#333",
+            footer,
+            font=("Segoe UI", 11),
+            bg="#313244",
             fg="white",
             insertbackground="white",
+            relief=tk.FLAT,
         )
-
-        self.entrada.pack(fill=tk.X, padx=10, pady=(0, 10))
+        self.entrada.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=8, padx=(0, 8))
         self.entrada.bind("<Return>", self._enviar)
 
-        self.BNews.pack(side=tk.TOP)
-        self.IA.pack(side=tk.TOP)
+        tk.Button(
+            footer,
+            text="▶",
+            bg="#cba6f7",
+            fg="#1e1e2e",
+            font=("Segoe UI", 11, "bold"),
+            relief=tk.FLAT,
+            cursor="hand2",
+            command=self._enviar,
+            padx=10,
+        ).pack(side=tk.LEFT)
+
+        self.protocol("WM_DELETE_WINDOW", self._al_perder_foco)
 
         # variables de trabajo
         self.estadoTelegram = False
@@ -1449,33 +1509,58 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self.threadCall = None
         self.activaIA = True
 
-        # variables Modelo sell
         modelo = BDsystem.get_modelo_ia(modelo="modelo_sellv01")
         modelo_config = json.loads(modelo["paramts"].decode("utf-8"))
         self.umbral = modelo_config.get("umbral_sell", 0.50)
         self.umbralObserv = modelo_config.get("umbral_observacion", 0.35)
 
-        # activa Telegram
         self._activar_telegram()
 
     def _enviar(self, event=None):
         texto = self.entrada.get().strip()
-        if texto:
-            self._agregar_mensaje(f"👤 Tú: {texto}")
-            respuesta = self._procesar_mensaje(texto)
-            self._agregar_mensaje(f"🤖 Asistente: {respuesta}")
-            self.entrada.delete(0, tk.END)
+        if not texto:
+            return
+        self._agregar_mensaje(f"👤  {texto}", tag="usuario")
+        self._agregar_mensaje("⏳  Analizando...", tag="thinking")
+        self.entrada.delete(0, tk.END)
+        self.entrada.config(state="disabled")
 
-    def _agregar_mensaje(self, mensaje):
+        def _worker():
+            try:
+                contexto = self._build_contexto()
+                respuesta = self._consultar_claude(texto, contexto)
+            except Exception as e:
+                respuesta = f"Error al consultar Claude: {e}"
+            self.after(0, lambda: self._reemplazar_ultimo(f"🤖  {respuesta}", tag="asistente"))
+            self.after(0, lambda: self.entrada.config(state="normal"))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _agregar_mensaje(self, mensaje, tag="asistente"):
         self.area_mensaje.configure(state="normal")
-        self.area_mensaje.insert(tk.END, mensaje + "\n")
+        self.area_mensaje.insert(tk.END, mensaje + "\n\n", tag)
         self.area_mensaje.configure(state="disabled")
         self.area_mensaje.yview(tk.END)
 
-    def _procesar_mensaje(self, texto):
-        if "ADA" in texto.upper():
-            return "📈 ADAUSDT está dando señal de entrada."
-        return "Estoy analizando..."
+    def _reemplazar_ultimo(self, nuevo, tag="asistente"):
+        self.area_mensaje.configure(state="normal")
+        self.area_mensaje.delete("end-3l linestart", "end-1l lineend+1c")
+        self.area_mensaje.insert(tk.END, nuevo + "\n\n", tag)
+        self.area_mensaje.configure(state="disabled")
+        self.area_mensaje.yview(tk.END)
+
+    def _build_contexto(self):
+        lineas = []
+        for symbol, data in DataHub.info.copy().items():
+            if not isinstance(data, dict):
+                continue
+            activos = data.get("activos", {})
+            if not activos or not isinstance(activos, dict):
+                continue
+            precio = activos.get("currentPrice") or activos.get("regularMarketPrice", 0)
+            nombre = activos.get("shortName", symbol)
+            lineas.append(f"{symbol} ({nombre}): ${precio:.2f}")
+        return "Posiciones en cartera:\n" + "\n".join(lineas[:20]) if lineas else ""
 
     def ver_noticias(self):
         mensaje = "📰 Últimas noticias relacionadas con tu cartera..."
