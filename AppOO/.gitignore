@@ -16,7 +16,6 @@ dist/
 *.spec
 *.exe
 
-
 # Archivos de caché de yfinance y otros temporales
 tmp/
 Dividends/
@@ -40,6 +39,20 @@ AppOliday/
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs (excluidos de Git - no se versionan)
 *.log
+logs/
 tmpclaude-*-cwd
+
+# Credenciales y datos sensibles (NO subir a Git)
+*.key
+*.pem
+secrets.py
+credentials.json
+api_keys.txt
+config_local.py
+
+# Datos financieros privados (si aplicable)
+portfolio_personal.csv
+trades_history.xlsx
+datos_personales/

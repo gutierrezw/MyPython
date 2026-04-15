@@ -1720,8 +1720,12 @@ class BotCryptoUI:
     # =========================================
     def _get_insert_fallidos(self, desde=None, display_log=False):
 
-        bnb_ticker = self.spot_client.ticker_price("BNBUSDT")
-        PRICE_BNB = float(bnb_ticker.get("price", 0))
+        try:
+            bnb_ticker = self.spot_client.ticker_price("BNBUSDT")
+            PRICE_BNB = float(bnb_ticker.get("price", 0))
+        except Exception as e:
+            self.logger.error(f"_get_insert_fallidos: ticker_price BNBUSDT error — {e}")
+            return
         CATEGORIA = "BotCrypto"
         DIVISA = "USD"
         book, ix = PlanInversion().select_otros_activos(account=self.ACCOUNT, symbol="all")

@@ -1,0 +1,18 @@
+# Cache y entornos virtuales
+__pycache__/        # ← Bytecode compilado de Python (innecesario)
+*.pyc               # ← Archivos compilados individuales
+.pytest_cache/      # ← Cache de tests
+.venv/              # ← Tu entorno virtual (miles de archivos)
+venv/               # ← Otro nombre común para venv
+
+# Data files grandes (accesibles si los pedís explícitamente)
+*.csv               # ← Archivos de datos (pueden ser muy grandes)
+*.xlsx              # ← Hojas de cálculo
+data/               # ← Carpeta con datasets
+datasets/           # ← Otra carpeta común de datos
+
+# NO excluimos logs/ - Claude los necesita
+# logs/             # ← Comentado = NO se excluye (Claude puede leerlos)
+
+# Git
+.git/               # ← Metadata interna de Git (binarios)
