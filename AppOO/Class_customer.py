@@ -80,7 +80,7 @@ from Class_Analisis import AnalisisFCI, AnalisisCrypto, AnalisisStock
 from AppValuations.rebalance_engine import RebalanceEngine
 from Class_ApiIBrks import IB
 from Class_ApiBinnace import BinanceClient, BinanceStreamClient, BinanceWSApiClient
-from Class_TradingView import abrir_tradingview
+from Class_BrowserBridge import abrir_tradingview
 
 
 # class Manager para procesa ordenes remotas

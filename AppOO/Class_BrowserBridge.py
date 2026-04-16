@@ -26,6 +26,7 @@ _tv_prices = {}  # {symbol: {"last": float, "ts": float}} — precios live actua
 _tv_current = {"symbol": ""}  # último símbolo enviado desde la app
 _tv_last_ping = {"t": 0.0, "ever": False}  # ever=True → Tampermonkey activo en esta sesión
 _tv_server = None  # referencia para shutdown limpio
+_tv_contexto = {}  # contexto de cartera para inyección en claude.ai
 
 
 def _tv_symbol(symbol, vehiculo):
@@ -40,18 +41,19 @@ class _TVRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         _logger.debug(f"TVServer: {self.address_string()} {format % args}")
 
-    def _send_json(self, data, status=200):
+    def _send_json(self, data, status=200, origin="https://www.tradingview.com"):
         body = json.dumps(data, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "https://www.tradingview.com")
+        self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def do_OPTIONS(self):
+        origin = self.headers.get("Origin", "https://www.tradingview.com")
         self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "https://www.tradingview.com")
+        self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.end_headers()
 
@@ -70,6 +72,9 @@ class _TVRequestHandler(BaseHTTPRequestHandler):
             _tv_last_ping["t"] = time.time()
             _tv_last_ping["ever"] = True
             self._send_json({"ok": True})
+        elif parsed.path == "/contexto":
+            origin = self.headers.get("Origin", "https://claude.ai")
+            self._send_json(_tv_contexto, origin=origin)
         else:
             self._send_json({"error": "not found"}, 404)
 
@@ -98,6 +103,12 @@ def stop_tv_server():
             pass
         _tv_server = None
         _logger.warning("TradingView server detenido")
+
+
+def set_claude_contexto(data):
+    """Actualiza el contexto de cartera servido en /contexto para inyección en claude.ai."""
+    global _tv_contexto
+    _tv_contexto = data
 
 
 def update_tv_price(symbol, last):
