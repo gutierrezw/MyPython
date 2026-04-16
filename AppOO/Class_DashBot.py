@@ -71,6 +71,7 @@ from edgar_13f import sync_fund_filings, sync_13f_holdings
 from valuation_edgar_downloader import BASE_DIR, download_filing
 from valuation_xbrl_api import get_zip_files
 from Class_customer import DataHub, TickerInfo
+from Class_BrowserBridge import set_claude_contexto
 from Class_ApiBinnace import BinanceClient
 from Class_ServiciosCrypto import ServiciosCrypto
 from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
@@ -1550,7 +1551,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self.area_mensaje.yview(tk.END)
 
     def _build_contexto(self):
-        lineas = []
+        posiciones = []
         for symbol, data in DataHub.info.copy().items():
             if not isinstance(data, dict):
                 continue
@@ -1559,8 +1560,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 continue
             precio = activos.get("currentPrice") or activos.get("regularMarketPrice", 0)
             nombre = activos.get("shortName", symbol)
-            lineas.append(f"{symbol} ({nombre}): ${precio:.2f}")
-        return "Posiciones en cartera:\n" + "\n".join(lineas[:20]) if lineas else ""
+            posiciones.append({"symbol": symbol, "nombre": nombre, "precio": precio})
+        set_claude_contexto({"posiciones": posiciones[:20]})
+        if not posiciones:
+            return ""
+        lineas = [f"{p['symbol']} ({p['nombre']}): ${p['precio']:.2f}" for p in posiciones[:20]]
+        return "Posiciones en cartera:\n" + "\n".join(lineas)
 
     def ver_noticias(self):
         mensaje = "📰 Últimas noticias relacionadas con tu cartera..."

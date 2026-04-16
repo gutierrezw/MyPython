@@ -71,7 +71,7 @@ from Class_DashBot import AsistenteChatbot
 from Class_IA_modelos import ModeloOportunidadesSell
 from Class_SystemStatus import system_status
 from Class_BotCryptoUI import BotCryptoUI
-from Class_TradingView import start_tv_server, stop_tv_server, start_price_sync
+from Class_BrowserBridge import start_tv_server, stop_tv_server, start_price_sync
 from Class_Finance import FinancePanel
 
 
