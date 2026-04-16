@@ -1849,6 +1849,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     url = f"wss://localhost:{DataHub.ib_gateway_port}/v1/api/ws"
                     while True:
 
+                        if iteraStream > 1:
+                            _log.error(f"websocket_stream(Stock): reconectando (iter={iteraStream})")
+
                         if not self.activos:
                             _log.warning("websocket_stream(Stock): self.activos vacío al reconectar")
 
@@ -1864,10 +1867,13 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         self.WsStock.my_message = self.on_message_IBrks_websocket
                         DataHub.update_self_procesos(proces="thread", tarea=task, itera=iteraStream)
                         self.WsStock.websocket_loop(limit=limit)
+                        _log.error(
+                            f"websocket_stream(Stock): websocket_loop() terminó, esperando 30s antes de reconectar"
+                        )
                         time.sleep(30)
 
                 except Exception as e:
-                    print(f"websocket_stream() error: {e}")
+                    _log.error(f"websocket_stream(Stock): excepción fatal — {e}")
 
             try:
                 self.ib_connection = self.IClient.create_session()
