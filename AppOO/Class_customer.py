@@ -6230,13 +6230,14 @@ class MyWebsocket:
         message = self.message_json
 
     def websocket_loop(self, limit=10):
+        _log = logging.getLogger("IBroks_Client")
         try:
             sslopt = {"cert_reqs": ssl.CERT_NONE}
             self.limit = limit
             self.ws.run_forever(sslopt=sslopt, ping_interval=30)
-
+            _log.error(f"MyWebsocket.websocket_loop({self.vehiculo}): run_forever() retornó — conexión caída")
         except Exception as e:
-            print("[MyWebsocket.run_({})]: {}".format(self.vehiculo, e))
+            _log.error(f"MyWebsocket.websocket_loop({self.vehiculo}): {e}")
 
 
 # Class para el manejo de mensajes

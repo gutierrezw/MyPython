@@ -509,7 +509,7 @@ class system_status(tk.Frame):
                 pass
 
             elif struct == "info()":
-                for key, value in DataHub.info.items():
+                for key, value in list(DataHub.info.items()):
 
                     if key == "TimeDataHub":
                         continue
