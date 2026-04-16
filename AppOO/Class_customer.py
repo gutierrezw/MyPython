@@ -6188,13 +6188,13 @@ class MyWebsocket:
                             + '+{"fields": ["31","55","70","71","76","82","84","86","7051","7292","7295","7296","7281","7286","7287","7288","7671","7672"]}'
                         )
 
-                    print("subscribe_stocks({})".format(len(self.idsymbol)))
+                    logging.getLogger("IBroks_Client").warning("subscribe_stocks({})".format(len(self.idsymbol)))
 
                 else:
                     raise ValueError("La lista  self.idsymbol está vacía. No se puede continuar.")
 
             except Exception as e:
-                print("[subscribe_stock()]: {}".format(e))
+                logging.getLogger("IBroks_Client").error("[subscribe_stock()]: {}".format(e))
 
         def update_subscribe(new_idsymbol):
             try:
@@ -6209,12 +6209,14 @@ class MyWebsocket:
                             }
                         )
                     )
-                    print("Unsubscribed from idsymbol:", self.idsymbol)
+                    logging.getLogger("IBroks_Client").warning("Unsubscribed from idsymbol: {}".format(self.idsymbol))
                     self.idsymbol = new_idsymbol
                     self.subscribe_to_idsymbol()
 
             except Exception as e:
-                print("[MyWebsocket.update_subscribe_{}()]: {}".format(self.vehiculo, e))
+                logging.getLogger("IBroks_Client").error(
+                    "[MyWebsocket.update_subscribe_{}()]: {}".format(self.vehiculo, e)
+                )
                 time.sleep(5)
 
         self.ws = websocket.WebSocketApp(
