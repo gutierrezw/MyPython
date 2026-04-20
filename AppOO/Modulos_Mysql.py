@@ -1585,7 +1585,9 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             pendientes = cursor.fetchone()[0] or 0
 
             cursor.execute(
-                "SELECT COUNT(*) FROM fund_filings " "WHERE filing_date <= DATE_SUB(CURDATE(), INTERVAL 70 DAY)"
+                "SELECT COUNT(*) FROM funds f "
+                "WHERE (SELECT MAX(ff.filing_date) FROM fund_filings ff WHERE ff.fund_id = f.id) "
+                "      <= DATE_SUB(CURDATE(), INTERVAL 70 DAY)"
             )
             por_renovar = cursor.fetchone()[0] or 0
 

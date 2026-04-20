@@ -147,6 +147,9 @@ def senal_consenso(votos_activos, suma):
     return etiqueta, suma, n
 
 
+_ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
+
+
 def _yahoo_session():
     """Obtiene cookie + crumb para autenticar requests a Yahoo Finance.
     Nuevo flujo: fc.yahoo.com primero (cambia de autenticación Yahoo ~2024).
@@ -1791,7 +1794,6 @@ def audit_portfolio(account):
     market = MarketScreen()
     cartera = market.load_cartera_symbols(account)
 
-    _ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
     delistados = 0
     nombres_upd = 0
     sin_precio = 0
