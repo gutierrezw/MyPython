@@ -190,46 +190,34 @@ class IBClient:  # -------------------------------------------------------------
         # Grab the Server accounts.
         server_account_content = self.server_accounts()
 
+        _log = logging.getLogger("IBroks_Client")
+
         # Try to do the quick way.
         if server_account_content and "accounts" in server_account_content:
             accounts = server_account_content["accounts"]
             if self.account in accounts:
-                # Log the response.
-                logging.debug(textwrap.dedent("""
-                =================
-                Set Server:
-                =================
-                Server Response: {serv_resp}
-                """).format(serv_resp=server_account_content))
-
-                print(success)
+                _log.warning(f"_set_server(): cuenta {self.account} verificada OK")
                 return True
+            else:
+                _log.error(
+                    f"_set_server(): cuenta {self.account} NO encontrada en IBKR accounts={accounts} — reconexión bloqueada"
+                )
+                return False
         else:
-
             # Update the Server.
             server_update_content = self.update_server_account(account_id=self.account, check=False)
-
-            # Grab the accounts.
             server_account_content = self.server_accounts()
 
-            # Log the response.
-            logging.debug(textwrap.dedent("""
-            =================
-            Set Server:
-            =================
-            Server Response: {serv_resp}
-            Server Update Response: {auth_resp}
-            """).format(auth_resp=server_update_content, serv_resp=server_account_content))
-
-            # TO DO: Add check market hours here and then check for a mutual fund.
             if (server_account_content and "accounts" in server_account_content) or (
                 server_update_content and "message" in server_update_content
             ):
-                print(success)
+                _log.warning(f"_set_server(): servidor actualizado OK")
                 return True
             else:
-                print(failure)
-                sys.exit()
+                _log.error(
+                    f"_set_server(): no se pudo verificar servidor — accounts={server_account_content} update={server_update_content}"
+                )
+                return False
 
     def _server_state(self, action: str = "save") -> Union[None, int]:
         """Determines the server state.
