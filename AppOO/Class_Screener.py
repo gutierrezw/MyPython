@@ -40,6 +40,113 @@ from Modulos_python import (
 _logger = logging.getLogger("Screener")
 
 
+def _build_net_percentiles(cartera_rows):
+    nets = sorted([float(r.get("fh_buy_ratio") or 0.0) - float(r.get("fh_sell_ratio") or 0.0) for r in cartera_rows])
+    if len(nets) < 3:
+        return 0.2, 0.5
+    n = len(nets)
+    return nets[n // 3], nets[(2 * n) // 3]
+
+
+def _build_flujo_percentiles(cartera_rows):
+    vals = sorted(
+        [
+            max(
+                -1.0,
+                min(1.0, ((r.get("new_entrants") or 0) - (r.get("full_exits") or 0)) / max(r.get("fh_count") or 1, 1)),
+            )
+            for r in cartera_rows
+            if r.get("fh_count")
+        ]
+    )
+    if len(vals) < 3:
+        return -0.1, 0.1
+    n = len(vals)
+    return vals[n // 3], vals[(2 * n) // 3]
+
+
+def voto_net_relativo(buy_r, sell_r, p33, p67):
+    net = (buy_r or 0.0) - (sell_r or 0.0)
+    if net >= p67:
+        return 1
+    if net >= p33:
+        return 0
+    return -1
+
+
+def voto_options(call_shares, put_shares):
+    total = (call_shares or 0) + (put_shares or 0)
+    if total == 0:
+        return None
+    ratio = (call_shares or 0) / total
+    if ratio >= 0.6:
+        return 1
+    if ratio >= 0.4:
+        return 0
+    return -1
+
+
+def voto_analistas(rec):
+    r = (rec or "").lower().replace(" ", "_")
+    if r in ("strong_buy", "buy"):
+        return 1
+    if r in ("sell", "strong_sell"):
+        return -1
+    if r == "hold":
+        return 0
+    return None
+
+
+def voto_valuacion(categ):
+    if categ == "I":
+        return 1
+    if categ == "S":
+        return -1
+    if categ == "N":
+        return 0
+    return None
+
+
+def voto_cobertura(fh_count):
+    c = fh_count or 0
+    if c >= 20:
+        return 1
+    if c >= 5:
+        return 0
+    return -1
+
+
+def voto_flujo(new_ent, exits, fh_count, p33, p67):
+    if not fh_count:
+        return None
+    fn = max(-1.0, min(1.0, ((new_ent or 0) - (exits or 0)) / fh_count))
+    if fn >= p67:
+        return 1
+    if fn >= p33:
+        return 0
+    return -1
+
+
+def senal_consenso(votos_activos, suma):
+    n = len(votos_activos)
+    if n == 0:
+        return "S/D", 0, 0
+    pct = suma / n
+    if suma == n:
+        etiqueta = "UNANIME"
+    elif pct >= 0.6:
+        etiqueta = "CONSENSO"
+    elif pct >= 0.2:
+        etiqueta = "TENDENCIA"
+    elif pct > -0.2:
+        etiqueta = "NEUTRO"
+    elif pct > -0.6:
+        etiqueta = "ALERTA"
+    else:
+        etiqueta = "SALIDA"
+    return etiqueta, suma, n
+
+
 def _yahoo_session():
     """Obtiene cookie + crumb para autenticar requests a Yahoo Finance.
     Nuevo flujo: fc.yahoo.com primero (cambia de autenticación Yahoo ~2024).
@@ -899,109 +1006,19 @@ class Screener(tk.Frame):
             }
             return mapa.get((rec or "").lower().replace(" ", "_"), "")
 
-        def _build_net_percentiles(cartera_rows):
-            nets = sorted(
-                [float(r.get("fh_buy_ratio") or 0.0) - float(r.get("fh_sell_ratio") or 0.0) for r in cartera_rows]
-            )
-            if len(nets) < 3:
-                return 0.2, 0.5
-            n = len(nets)
-            return nets[n // 3], nets[(2 * n) // 3]
+        _TAG_DISPLAY = {
+            "UNANIME": "★ UNÁNIME",
+            "CONSENSO": "▲ CONSENSO",
+            "TENDENCIA": "↗ TENDENCIA",
+            "NEUTRO": "→ NEUTRO",
+            "ALERTA": "↘ ALERTA",
+            "SALIDA": "▼ SALIDA",
+            "S/D": "— S/D",
+        }
 
-        def _build_flujo_percentiles(cartera_rows):
-            vals = sorted(
-                [
-                    max(
-                        -1.0,
-                        min(
-                            1.0,
-                            ((r.get("new_entrants") or 0) - (r.get("full_exits") or 0))
-                            / max(r.get("fh_count") or 1, 1),
-                        ),
-                    )
-                    for r in cartera_rows
-                    if r.get("fh_count")
-                ]
-            )
-            if len(vals) < 3:
-                return -0.1, 0.1
-            n = len(vals)
-            return vals[n // 3], vals[(2 * n) // 3]
-
-        def voto_net_relativo(buy_r, sell_r, p33, p67):
-            net = (buy_r or 0.0) - (sell_r or 0.0)
-            if net >= p67:
-                return 1
-            if net >= p33:
-                return 0
-            return -1
-
-        def voto_options(call_shares, put_shares):
-            total = (call_shares or 0) + (put_shares or 0)
-            if total == 0:
-                return None
-            ratio = (call_shares or 0) / total
-            if ratio >= 0.6:
-                return 1
-            if ratio >= 0.4:
-                return 0
-            return -1
-
-        def voto_analistas(rec):
-            r = (rec or "").lower().replace(" ", "_")
-            if r in ("strong_buy", "buy"):
-                return 1
-            if r in ("sell", "strong_sell"):
-                return -1
-            if r == "hold":
-                return 0
-            return None
-
-        def voto_valuacion(categ):
-            if categ == "I":
-                return 1
-            if categ == "S":
-                return -1
-            if categ == "N":
-                return 0
-            return None
-
-        def voto_cobertura(fh_count):
-            c = fh_count or 0
-            if c >= 20:
-                return 1
-            if c >= 5:
-                return 0
-            return -1
-
-        def voto_flujo(new_ent, exits, fh_count, p33, p67):
-            if not fh_count:
-                return None
-            fn = max(-1.0, min(1.0, ((new_ent or 0) - (exits or 0)) / fh_count))
-            if fn >= p67:
-                return 1
-            if fn >= p33:
-                return 0
-            return -1
-
-        def senal_consenso(votos_activos, suma):
-            n = len(votos_activos)
-            if n == 0:
-                return "— S/D", 0, 0
-            pct = suma / n
-            if suma == n:
-                etiqueta = "★ UNÁNIME"
-            elif pct >= 0.6:
-                etiqueta = "▲ CONSENSO"
-            elif pct >= 0.2:
-                etiqueta = "↗ TENDENCIA"
-            elif pct > -0.2:
-                etiqueta = "→ NEUTRO"
-            elif pct > -0.6:
-                etiqueta = "↘ ALERTA"
-            else:
-                etiqueta = "▼ SALIDA"
-            return etiqueta, suma, n
+        def senal_consenso_display(votos_activos, suma):
+            tag, s, n = senal_consenso(votos_activos, suma)
+            return _TAG_DISPLAY.get(tag, tag), s, n
 
         cartera = self.ScMarket.load_cartera_inst(self.account)
         syms_buy = _read_csv_signals("csv_datosIA_buy")
@@ -1047,21 +1064,9 @@ class Screener(tk.Frame):
             }
             activos = {k: v for k, v in votos.items() if v is not None}
             suma = sum(activos.values())
-            _etiq, _suma, _n = senal_consenso(list(activos.values()), suma)
+            tag, _suma, _n = senal_consenso(list(activos.values()), suma)
+            _etiq = _TAG_DISPLAY.get(tag, tag)
             consenso = f"{_etiq:<12}  {_suma:+d}/{_n}" if _n else _etiq
-
-            if "UNÁNIME" in consenso:
-                tag = "UNANIME"
-            elif "CONSENSO" in consenso:
-                tag = "CONSENSO"
-            elif "TENDENCIA" in consenso:
-                tag = "TENDENCIA"
-            elif "ALERTA" in consenso:
-                tag = "ALERTA"
-            elif "SALIDA" in consenso:
-                tag = "SALIDA"
-            else:
-                tag = "NEUTRO"
 
             _call_sh = row.get("fh_call_shares") or 0
             _put_sh = row.get("fh_put_shares") or 0
@@ -1850,6 +1855,49 @@ def audit_portfolio(account):
         "sin_precio": sin_precio,
         "errores": errores,
     }
+
+
+def refresh_consenso_tags(account):
+    """Recalcula consenso_tag y consenso_suma (sin voto Mod) para todos los símbolos
+    en cartera y los persiste en market. Llamado por Agente_ConsensoCache cada 5 min.
+
+    consenso_suma excluye el voto Mod (señal IA técnica) para que el gate Telegram
+    sea una confirmación independiente del modelo.
+    """
+    mkt = MarketScreen()
+    cartera = mkt.load_cartera_inst(account)
+    if not cartera:
+        return {"actualizados": 0, "total": 0}
+
+    p33_net, p67_net = _build_net_percentiles(cartera)
+    p33_flujo, p67_flujo = _build_flujo_percentiles(cartera)
+
+    actualizados = 0
+    for row in cartera:
+        sym = row["symbol"]
+        fh_buy_ratio = float(row.get("fh_buy_ratio") or 0.0)
+        fh_sell_ratio = float(row.get("fh_sell_ratio") or 0.0)
+        rec = (row.get("analyst_rec") or "").lower().replace(" ", "_")
+        categ = row.get("categoriaActivo") or ""
+
+        votos_sin_mod = {
+            "Net": voto_net_relativo(fh_buy_ratio, fh_sell_ratio, p33_net, p67_net),
+            "Opt": voto_options(row.get("fh_call_shares"), row.get("fh_put_shares")),
+            "Flujo": voto_flujo(
+                row.get("new_entrants"), row.get("full_exits"), row.get("fh_count"), p33_flujo, p67_flujo
+            ),
+            "Ana": voto_analistas(rec),
+            "Val": voto_valuacion(categ),
+            "Cob": voto_cobertura(row.get("fh_count")),
+        }
+        activos = {k: v for k, v in votos_sin_mod.items() if v is not None}
+        suma = sum(activos.values())
+        tag, _, _ = senal_consenso(list(activos.values()), suma)
+
+        mkt.update(upd=["consenso_tag", "consenso_suma"], val=[tag, int(suma)], symbol=sym, account=account)
+        actualizados += 1
+
+    return {"actualizados": actualizados, "total": len(cartera)}
 
 
 if __name__ == "__main__":

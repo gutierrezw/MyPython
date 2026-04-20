@@ -61,7 +61,7 @@ sys.path.insert(0, "..")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "AppValuations"))
 from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion, MarketScreen, EstrategiaInversion
 from Class_Finance import scan_extractos
-from Class_Screener import sync_market, audit_portfolio
+from Class_Screener import sync_market, audit_portfolio, refresh_consenso_tags
 from Class_InstitucionalScore import (
     sync_institutional,
     sync_edgar_funds,
@@ -157,6 +157,18 @@ class ClassAgenteIA:
 
         return decorator
 
+    _BUY_TAGS = {"UNANIME", "CONSENSO", "TENDENCIA"}
+    _SELL_TAGS = {"ALERTA", "SALIDA"}
+
+    def _consenso_tag(self, symbol):
+        rows, ix = MarketScreen().select(account=self.account, symbol=symbol)
+        if not rows or not ix:
+            return None
+        try:
+            return rows[0][ix.index("consenso_tag")]
+        except (ValueError, IndexError):
+            return None
+
     # Controla si el mensaje debe enviarse a Telegram según reglas:
     def Agente_message_Manager_sell(self, row):
         """
@@ -183,6 +195,11 @@ class ClassAgenteIA:
         # if len(self.sell_enviados) >= DataHub.max_mensajes:
         #    return False
 
+        # Gate Consenso: SELL solo pasa si los fundamentos institucionales confirman salida
+        tag = self._consenso_tag(symbol)
+        if tag and tag not in self._SELL_TAGS:
+            return False
+
         # si pasó todas las reglas → actualiza registro
         self.ultimo_envio[symbol] = {"roi": roi, "time": ahora}
         return True
@@ -197,6 +214,11 @@ class ClassAgenteIA:
         symbol = row.get("Symbol", "")
         score = row.get("score", 0)
         ahora = datetime.now()
+
+        # Gate Consenso: BUY solo pasa si los fundamentos institucionales (sin voto Mod) apoyan
+        tag = self._consenso_tag(symbol)
+        if tag and tag not in self._BUY_TAGS:
+            return False
 
         # Regla 1: mejora de score
         if symbol in self.ultimo_envio_buy:
@@ -375,6 +397,15 @@ class ClassAgenteIA:
             )
         except Exception as e:
             self.logger.error(f"Agente_InstitucionalScore(): {e}")
+
+    # agente Consenso Cache — materializa consenso_tag/suma (sin voto Mod) en market cada 5 min
+    @wait_rate(300, persist=True)
+    def Agente_ConsensoCache(self):
+        try:
+            result = refresh_consenso_tags(account=self.account)
+            self.logger.warning(f"ConsensoCache: actualizados={result['actualizados']}/{result['total']}")
+        except Exception as e:
+            self.logger.error(f"Agente_ConsensoCache(): {e}")
 
     # agente Edgar Funds — carga todos los filers 13F-HR de EDGAR en tabla funds, una vez por mes
     @wait_rate(2592000, persist=True)
@@ -1857,6 +1888,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             _AGENTES = {
                 "Agente_MarketScreener": 86400,
                 "Agente_InstitucionalScore": 86400,
+                "Agente_ConsensoCache": 300,
                 "Agente_EdgarFunds": 2592000,
                 "Agente_FundFilings": 604800,
                 "Agente_13FHoldings": 86400,
@@ -1960,6 +1992,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             )
             DataHub.manager_events.register_thread(
                 name="Agente_InstitucionalScore", target=self.Agente_InstitucionalScore, loop_sleep=300
+            )
+            DataHub.manager_events.register_thread(
+                name="Agente_ConsensoCache", target=self.Agente_ConsensoCache, loop_sleep=300
             )
             DataHub.manager_events.register_thread(
                 name="Agente_EdgarFunds", target=self.Agente_EdgarFunds, loop_sleep=300
