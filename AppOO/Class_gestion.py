@@ -1206,9 +1206,11 @@ class GestionInversion(tk.Frame):
         m_idatos.index = pd.to_datetime(m_idatos.index)
         m_idatos.index = m_idatos.index.strftime("%Y-%m")
 
-        # identificar en columnas compras y ventas
-        datos["depositos"] = datos.apply(lambda rows: rows["producto"] if rows["codigo"] == "O" else 0, axis=1)
-        datos["retiros"] = datos.apply(lambda rows: rows["producto"] if rows["codigo"] == "C" else 0, axis=1)
+        # identificar en columnas compras y ventas -- realmente no es nuevo capital solo itera sobre el mismo capital
+        # datos["depositos"] = datos.apply(lambda rows: rows["producto"] if rows["codigo"] == "O" else 0, axis=1)
+        # datos["retiros"] = datos.apply(lambda rows: rows["producto"] if rows["codigo"] == "C" else 0, axis=1)
+        datos["depositos"] = 0.0
+        datos["retiros"] = 0.0
         datos["perdidas"] = datos.apply(
             lambda rows: -rows["gprealizadas"] if rows["gprealizadas"] < 0 else 0,
             axis=1,
