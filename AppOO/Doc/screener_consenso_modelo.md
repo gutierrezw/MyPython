@@ -248,10 +248,17 @@ Cada señal emite: `+1` favorable | `0` neutral | `-1` desfavorable | `None` abs
                       hold            →  0            None si sin datos
                       sell/strong_sell→ -1
 
-  5. IA SIGNAL        CSV buy/sell (activa en mercado abierto)
+  5. IA SIGNAL (Mod)  CSV buy/sell (activa en mercado abierto)
                       buy   → +1                      +1 / 0 / -1
                       sell  → -1
                       none  →  0
+                      ──────────────────────────────────────────
+                      ⚠ SOLO DISPLAY — NO cuenta en gate Telegram
+                        ni en consenso_tag / consenso_suma.
+                        Aparece en popup Consenso para referencia
+                        visual, pero se excluye del cálculo para
+                        evitar que la señal técnica se confirme a
+                        sí misma (auto-confirmación).
 
   6. VALUACIÓN        categoriaActivo
                       I → +1 / N → 0 / S → -1         +1 / 0 / -1
