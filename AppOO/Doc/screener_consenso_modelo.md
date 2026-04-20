@@ -1,5 +1,5 @@
 # SCREENER & MODELO DE CONSENSO — CARTERA DE DIVIDENDOS
-**AppOO · Versión 2026-W13**
+**AppOO · Versión 2026-W17**
 
 ---
 
@@ -193,6 +193,7 @@ fund_holdings (13F) — STK positions
 > **Nota floatShares:** Yahoo `heldPercentInstitutions` puede superar 100% por short selling.
 > Usamos `floatShares` propio desde Yahoo `keyStatistics` en tabla `market` para reproducibilidad.
 > Cubre ~9K fondos EDGAR — conservador pero consistente entre activos.
+> **Cobertura 2026-W17:** 1299/1349 símbolos con `inst_ownership_pct` (96%) — batch Yahoo v7/finance/quote (250 símbolos/request).
 
 > **full_exits:** cuando un fondo vende completamente, no reporta el símbolo (no hay registro shares=0).
 > La salida se detecta por ausencia en Q4. Ventanas calculadas dinámicamente en `load_fund_holdings_stats`
@@ -301,6 +302,51 @@ Muestra alineación para activos en cartera cruzando tres fuentes:
 - **Consenso** → columna ordenable; filtrar ★/▲ para oportunidades
 - **Inst Señal** → filtrar ACOMPAÑAR para máxima convicción institucional
 - **categoría** → I=compra, N=seguimiento, X=referencia, T=nuevo
+
+---
+
+## GATE CONSENSO → TELEGRAM (implementado 2026-W17)
+
+El Consenso actúa como **capa de permiso** sobre la señal técnica IA antes de enviar
+alertas a Telegram. Evita que el modelo IA se confirme a sí mismo.
+
+### Cómo funciona
+
+```
+  Señal IA (técnica)          Consenso (6 votos sin Mod)      Acción Telegram
+  ─────────────────────────────────────────────────────────────────────────────
+  BUY  (score ≥ umbral)  +  UNANIME / CONSENSO / TENDENCIA  →  ✅ Enviar alerta
+  BUY                    +  NEUTRO / ALERTA / SALIDA         →  🔇 Silenciar
+  SELL (score ≥ umbral)  +  ALERTA / SALIDA                  →  ✅ Enviar alerta
+  SELL                   +  NEUTRO / TENDENCIA / CONSENSO    →  🔇 Silenciar
+```
+
+### Voto Mod excluido del gate
+
+El voto `Mod` (señal IA técnica, voto #5) **NO cuenta** en el cálculo del gate.
+Si se incluyera, la señal se confirmaría a sí misma: un BUY +1 ya empuja
+el Consenso hacia TENDENCIA con solo 1 voto más de apoyo → umbral demasiado fácil.
+
+El gate usa los **6 votos fundamentales/institucionales** (Net, Opt, Flujo, Ana, Val, Cob)
+para verificar si los fundamentos apoyan de forma **independiente** la señal técnica.
+
+### Implementación
+
+| Componente | Archivo | Detalle |
+|---|---|---|
+| `refresh_consenso_tags(account)` | `Class_Screener.py` | Calcula 6 votos sin Mod, escribe `consenso_tag` + `consenso_suma` en market |
+| `Agente_ConsensoCache` | `Class_DashBot.py` | `@wait_rate(300)` — refresca tags cada 5 min |
+| Gate BUY | `Agente_message_Manager_Buy` | Bloquea si tag ∉ {UNANIME, CONSENSO, TENDENCIA} |
+| Gate SELL | `Agente_message_Manager_sell` | Bloquea si tag ∉ {ALERTA, SALIDA} |
+
+### Columnas BD
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `market.consenso_tag` | VARCHAR(15) | Tag limpio: UNANIME/CONSENSO/TENDENCIA/NEUTRO/ALERTA/SALIDA |
+| `market.consenso_suma` | TINYINT | Suma de los 6 votos sin Mod (-6 a +6) |
+
+> `tag=None` → gate abierto (símbolo sin tag calculado aún — no bloquea)
 
 ---
 
