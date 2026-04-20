@@ -160,14 +160,20 @@ class ClassAgenteIA:
     _BUY_TAGS = {"UNANIME", "CONSENSO", "TENDENCIA"}
     _SELL_TAGS = {"ALERTA", "SALIDA"}
 
-    def _consenso_tag(self, symbol):
+    def _consenso_info(self, symbol):
         rows, ix = MarketScreen().select(account=self.account, symbol=symbol)
         if not rows or not ix:
-            return None
+            return None, None
         try:
-            return rows[0][ix.index("consenso_tag")]
+            tag = rows[0][ix.index("consenso_tag")]
+            suma = rows[0][ix.index("consenso_suma")]
+            return tag, suma
         except (ValueError, IndexError):
-            return None
+            return None, None
+
+    def _consenso_tag(self, symbol):
+        tag, _ = self._consenso_info(symbol)
+        return tag
 
     # Controla si el mensaje debe enviarse a Telegram según reglas:
     def Agente_message_Manager_sell(self, row):
@@ -2065,6 +2071,11 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 mensaje += f"{'-' * 45}\n"
                 mensaje += f"{'Confianza IA'   :<15} {confianza:>12.1%}\n"
 
+            tag, suma = self._consenso_info(symbol)
+            if tag:
+                mensaje += f"{'-' * 45}\n"
+                mensaje += f"{'Consenso':<15} {tag:>12} ({suma:+d}/6)\n"
+
             mensaje += "```"
 
             return mensaje
@@ -2311,6 +2322,11 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             if modo == "ia":
                 mensaje += f"{'-' * 45}\n"
                 mensaje += f"{'Confianza IA'     :<18} {confianza:>12.1%}\n"
+
+            tag, suma = self._consenso_info(symbol)
+            if tag:
+                mensaje += f"{'-' * 45}\n"
+                mensaje += f"{'Consenso':<18} {tag:>12} ({suma:+d}/6)\n"
 
             mensaje += "```"
             return mensaje
