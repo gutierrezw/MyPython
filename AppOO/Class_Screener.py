@@ -1433,11 +1433,14 @@ def sync_market(account):
                 market.update(upd=campos, val=valores, symbol=symbol)
                 data_ok += 1
 
+    sector_ok = market.sync_sector_to_inversion(account)
+
     return {
         "descargados": len(rows),
         "insertados": insertados,
         "omitidos": omitidos,
         "actualizados": data_ok,
+        "sector_sync": sector_ok,
     }
 
 

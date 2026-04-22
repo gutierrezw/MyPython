@@ -1270,6 +1270,27 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql::insert_market()]: {}".format(error))
 
+    def sync_sector_to_inversion(self, account: str) -> int:
+        """Propaga market.sector → inversion.sector para todos los símbolos en cartera."""
+        try:
+            conn = self._conectar(tabla="update.market")
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE inversion i "
+                "JOIN market m ON m.symbol = i.ticket AND m.account = %s "
+                "SET i.sector = m.sector "
+                "WHERE m.sector IS NOT NULL AND m.sector != '' AND i.tipoinv = 'Stock'",
+                (account,),
+            )
+            conn.commit()
+            return cursor.rowcount
+        except (Exception, connect.Error) as error:
+            _logger.error(f"sync_sector_to_inversion(): {error}")
+            return 0
+        finally:
+            cursor.close()
+            conn.close()
+
     def update(self, upd=None, val=None, symbol=None, account=None):
         """
         @param upd:     list() de campos para actualizar en market
