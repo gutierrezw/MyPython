@@ -2539,6 +2539,19 @@ class DashMain:
                             position["unrealizedpnl"] = last * qty - costo
                             position["retorno"] = (last * qty - costo) / costo if costo else 0
 
+                    # recalcula header desde positions (summary de IB queda congelado offline)
+                    nav, unpyl, unprofit, dividendos = 0.0, 0.0, 0.0, 0.0
+                    for p in self.stock.positions:
+                        nav += p.get("mktvalue", 0)
+                        unpyl += p.get("unrealizedpnl", 0)
+                        unprofit += p["unrealizedpnl"] if p.get("unrealizedpnl", 0) > 0 else 0
+                        dividendos += p.get("dividendo", 0)
+                    self.stock.resumen[" Valor liq. :"] = "{:>11.2f}".format(nav)
+                    self.stock.resumen[" UnProfit   :"] = "{:>11.2f}".format(unprofit)
+                    self.stock.resumen[" UnPyl      :"] = "{:>11.2f}".format(unpyl)
+                    self.stock.resumen[" Dividendos :"] = "{:>11.2f}".format(dividendos)
+                    self.stock.resumen[" Conexión   :"] = "IB OFFLINE (yf)"
+
                 self.stock.header_panel()
                 DataHub.update_self_procesos(proces="widget", tarea="update_widget(Stock)", itera=self.it_stock)
 
