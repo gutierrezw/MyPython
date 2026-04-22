@@ -14,13 +14,17 @@ USO COMO SCRIPT:
     python descargar_cnv_selenium.py 10-12-2025
 """
 
+import logging
+import os
+import re
+import sys
+import time
+from datetime import datetime
+
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
-import os
-import sys
-import re
-import time
+
+_logger = logging.getLogger("FondosInversion")
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -214,7 +218,7 @@ def descargar_excel_selenium(uuid, id_doc, fecha_str, directorio, display_log=Fa
             return False
 
     except Exception as e:
-        print(f"descargar_excel_selenium(): ❌ {str(e)[:40]}")
+        _logger.error(f"descargar_excel_selenium(): {str(e)[:80]}")
         try:
             driver.quit()
         except:

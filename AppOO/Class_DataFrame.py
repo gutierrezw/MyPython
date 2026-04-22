@@ -11,6 +11,8 @@ from Modulos_Utilitarios import (
     meses_list,
     is_null,
     calcular_atr,
+    read_json_tmp,
+    write_json_tmp,
 )
 from Modulos_python import (
     csv,
@@ -528,7 +530,7 @@ def get_klines_info(symbol=None, period="5y", interval="1d", desde=None, hasta=N
         return datos
 
     except (Exception, AttributeError, Exception) as e:
-        print(f"[Error:: get_klines_info({symbol})]: {e}")
+        _logger.error(f"get_klines_info({symbol}): {e}")
         return pd.DataFrame()
 
 
@@ -1269,6 +1271,12 @@ def setup_fear_greed(fg: object, parm=None):
         return x, y, colors
 
     def fear_vix(fear=None):
+        def _last_cached():
+            cached = read_json_tmp("fear_vix.json")
+            wfear = cached.get("fear", fear if not is_none(fear) else 50)
+            vix = cached.get("vix", 50)
+            return wfear, vix
+
         try:
             hoy = datetime.now().date()
             BASE_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata/"
@@ -1281,16 +1289,17 @@ def setup_fear_greed(fg: object, parm=None):
 
             r = requests.get(BASE_URL + START_DATE, headers=headers, timeout=10)
             if not r.ok or not r.text.strip():
-                print(f"[fear_vix()]: API no disponible — HTTP {r.status_code}, usando valores neutros")
-                return (fear if not is_none(fear) else 50), 50
+                _logger.error(f"fear_vix(): API no disponible — HTTP {r.status_code}, usando último valor guardado")
+                return _last_cached()
 
             data = r.json()
             wfear = data["fear_and_greed"]["score"] if is_none(fear) else fear
             ind_wix = data["market_volatility_vix"]["score"]
+            write_json_tmp("fear_vix.json", {"fear": wfear, "vix": ind_wix, "date": str(hoy)})
             return wfear, ind_wix
         except (requests.exceptions.RequestException, ValueError, KeyError) as e:
-            print(f"[fear_vix()]: {e} — usando valores neutros")
-            return (fear if not is_none(fear) else 50), 50
+            _logger.error(f"fear_vix(): {e} — usando último valor guardado")
+            return _last_cached()
 
     def char_plot(ax=None, x=None, y=None, score=None, color=None, titulo=None):
         face = (

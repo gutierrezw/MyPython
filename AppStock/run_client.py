@@ -1,20 +1,17 @@
+import sys
 import pathlib
 from pprint import pprint
-from API_vehiculos import IBClient
 
-# from Class_Ibrks import IBClient
-#from configparser import ConfigParser
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "AppOO"))
 
+from Class_ApiIBrks import IB
 
 # Create a new session of the IB Web API.
-ib_client = IBClient(
-    username="guti2004",
-    account="U4214563",
-    is_server_running=True)
+ib_client = IB(username="guti2004", account="U4214563", is_server_running=True)
 
 # create a new session
 # ib_client.create_session()
-print('autenticado -- en session')
+print("autenticado -- en session")
 print(ib_client.is_authenticated(False))
 
 # grab the account data.
@@ -23,8 +20,10 @@ print(ib_client.is_authenticated(False))
 # pprint(account_data)
 
 #  grab account portfolios
-pprint('account_positions')
-account_positions = ib_client.portfolio_account_positions(account_id="U4214563", page_id=0)
+pprint("account_positions")
+account_positions = ib_client.portfolio_account_positions(
+    account_id="U4214563", page_id=0
+)
 pprint(account_positions)
 
 

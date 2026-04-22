@@ -1586,7 +1586,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
 
             cursor.execute(
                 "SELECT COUNT(*) FROM funds f "
-                "WHERE (SELECT MAX(ff.filing_date) FROM fund_filings ff WHERE ff.fund_id = f.id) "
+                "WHERE (SELECT MAX(ff.filing_date) FROM fund_filings ff WHERE ff.cik = f.cik) "
                 "      <= DATE_SUB(CURDATE(), INTERVAL 70 DAY)"
             )
             por_renovar = cursor.fetchone()[0] or 0

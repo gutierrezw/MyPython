@@ -12,7 +12,10 @@ from Modulos_python import (
     datetime,
     timedelta,
     traceback,
+    logging,
 )
+
+_logger = logging.getLogger("FondosInversion")
 from Modulos_Mysql import RepositorioOportunidadesBuySell, DiariaCNV
 from Class_customer import WidgetVehiculo, TickerInfo, DataHub
 from Modulos_Utilitarios import delete_file, buscar_ticker, define_FileCache, is_numeric
@@ -712,7 +715,7 @@ class ArsFondosInversion(tk.Frame):
             if prox_process.date() < datetime.now().date():
                 descargar_cnv_hoy(fecha_str=prox_process.strftime("%Y-%m-%d"))
         except Exception as e:
-            print(f"downdload_CNV_diaria(): {e}")
+            _logger.error(f"downdload_CNV_diaria(): {e}")
 
     # vericica cada 90 segundos si hay nueva interfaz para cargar
     def run_loads(self):

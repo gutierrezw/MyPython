@@ -558,14 +558,7 @@ class IBClient:  # -------------------------------------------------------------
         ----
         {srt} -- A full URL path.
         """
-        # otherwise build the URL   https://localhost:5501/v1/portal/  >daga2004
-        # otherwise build the URL   https://localhost:5501/v1/api/
-        return urllib.parse.unquote(
-            urllib.parse.urljoin(self.ib_gateway_path, self.api_version)
-            + r"portal/"
-            + endpoint
-            # ) + r'api/' + endpoint
-        )
+        return urllib.parse.unquote(urllib.parse.urljoin(self.ib_gateway_path, self.api_version) + r"api/" + endpoint)
 
     # gwi001
     def _make_request(
