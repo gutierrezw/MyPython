@@ -1792,25 +1792,25 @@ class DatosVehivulo(TickerInfo, MyOrders):
             # planifica y ejecuta una vez actualización de precios Cryptos
             def websocket_stream(limit, task):
                 nonlocal iteraStream
-                try:
-                    while True:
+                while True:
+                    try:
                         DataHub.update_self_procesos(proces="thread", tarea=task, itera=iteraStream)
                         self.schedule_WebsocketBinanceStream(limit=limit)
                         iteraStream += 1
-
-                except Exception as e:
-                    print(f"websocket_stream() error: {e}")
+                    except Exception as e:
+                        self.logger.error(f"websocket_stream(): {e}")
+                        time.sleep(30)
 
             def websocket_client(limit, task):
                 nonlocal iteraClient
-                try:
-                    while True:
+                while True:
+                    try:
                         DataHub.update_self_procesos(proces="thread", tarea=task, itera=iteraClient)
                         self.schedule_WebsocketBinanceApiClient(limit=limit)
                         iteraClient += 1
-
-                except Exception as e:
-                    print(f"websocket_client() error: {e}")
+                    except Exception as e:
+                        self.logger.error(f"websocket_client(): {e}")
+                        time.sleep(30)
 
             try:
                 # Start de positions -------------------------------------------------------------------------------
