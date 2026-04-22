@@ -2224,6 +2224,46 @@ class TickerInfo(MyOrders):
                         }
                     )
 
+    def fallback_prices_yfinance(self):
+        """Actualiza mrkprice de self.positions vía yfinance batch cuando IB está offline."""
+        try:
+            if not self.positions:
+                return "sin posiciones"
+
+            symbols = [p["ticket"] for p in self.positions if p.get("ticket")]
+            if not symbols:
+                return "sin símbolos"
+
+            df = yf.download(symbols, period="1d", interval="5m", progress=False, auto_adjust=True)
+            if df.empty:
+                return "yfinance sin datos"
+
+            close = df["Close"]
+            actualizados = 0
+            for position in self.positions:
+                symbol = position.get("ticket")
+                if not symbol:
+                    continue
+                try:
+                    col = close[symbol] if hasattr(close, "columns") and symbol in close.columns else close
+                    last_price = float(col.dropna().iloc[-1])
+                    if last_price > 0:
+                        position["mrkprice"] = last_price
+                        position["mktvalue"] = last_price * position.get("position", 0)
+                        position["unrealizedpnl"] = position["mktvalue"] - position.get("costobase", 0)
+                        self.update_precio_DataHubInfo(
+                            symbol=symbol,
+                            conid=position.get("conid"),
+                            precio={symbol: {"last": last_price}},
+                        )
+                        actualizados += 1
+                except Exception:
+                    continue
+
+            return f"{actualizados}/{len(symbols)} precios actualizados (yfinance)"
+        except Exception as e:
+            return f"fallback_prices_yfinance: {e}"
+
     # define estrategia por dividendos
     def rendimiento_dividends(self, fg=None, activo=None, datos=None, symbol=None, plot="no", period="5y"):
         """
@@ -3794,8 +3834,9 @@ class WidgetVehiculo(TickerInfo):
                                 self.panel_label[k].config(text=key, font=("Courier", 9))
                                 self.panel_label[k + 1].config(text=value, fg=mrg_color, font=("Courier", 9))
                             elif " Conexión   :" == key:
+                                conn_color = "red" if "OFFLINE" in str(value) else "yellow"
                                 self.panel_label[k].config(text=key, font=("Courier", 9))
-                                self.panel_label[k + 1].config(text=value, fg="yellow", font=("Courier", 9))
+                                self.panel_label[k + 1].config(text=value, fg=conn_color, font=("Courier", 9))
                             else:
                                 self.panel_label[k].config(text=key, font=("Courier", 9))
                                 self.panel_label[k + 1].config(text=value, font=("Courier", 9))

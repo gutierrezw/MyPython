@@ -368,9 +368,7 @@ class IB(IBClient):
         ----
         {srt} -- A full URL path.
         """
-        return urllib.parse.unquote(
-            urllib.parse.urljoin(self.ib_gateway_path, self.api_version) + r"portal/" + endpoint
-        )
+        return urllib.parse.unquote(urllib.parse.urljoin(self.ib_gateway_path, self.api_version) + r"api/" + endpoint)
 
     def _get_conid(self, symbol: str, secType="STK") -> int:
         """

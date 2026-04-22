@@ -131,6 +131,23 @@ class DatosVehivulo(TickerInfo, MyOrders):
             func=self.schedule_order_remote,
         )
 
+        if vehiculo == "Stock":
+            DataHub.manager_events.register_job(
+                name=f"fallback_yf({vehiculo})",
+                interval_sec=300,
+                func=self.schedule_fallback_yfinance,
+            )
+
+    def schedule_fallback_yfinance(self):
+        try:
+            if not self.IClient.authenticated:
+                result = self.fallback_prices_yfinance()
+                self.logger.warning(f"IBFallback yfinance: {result}")
+                if " Conexión   :" in self.resumen:
+                    self.resumen[" Conexión   :"] = "IB OFFLINE (yf)"
+        except Exception as e:
+            self.logger.error(f"schedule_fallback_yfinance(): {e}")
+
     def on_message_binance_websocket(self, _, message):
         # captura de evento de precio
         def procesa_stream_crypto(x_message):
@@ -2424,11 +2441,16 @@ class DashMain:
 
             # para widget offline
             else:
-                self.stock.carga_inversion_en_positions()
+                self.stock_ts = DatosVehivulo(account=account, vehiculo=vehiculo)
+                self.stock_ts.carga_inversion_en_positions()
+                self.stock.positions = self.stock_ts.positions
+                self.stock.resumen = self.stock_ts.resumen
                 update_pane_stock()
 
+                self.procesos.append({"widget": {"update_widget(Stock)": self.it_stock}})
                 self.stock.inicio_widget_treeview(self.stock.positions)
                 self.stock.run_graficos()
+                self.update_widget(vehiculo=vehiculo)
 
             # Tickle siempre corre — detecta reconexión aunque arranque offline
             ib.start_tickle(interval=30, datahub=DataHub, on_reconnect=_ib_on_reconnect)
@@ -2496,11 +2518,26 @@ class DashMain:
                 self.crypto.update_panelVehiculo(orden=self.crypto.orden)
 
             # información para widgetStock
-            if vehiculo == "Stock":
+            if vehiculo == "Stock" and self.stock_ts is not None:
 
                 self.it_stock += 1
 
                 self.stock.summary = self.stock_ts.summary
+                self.stock.positions = self.stock_ts.positions
+
+                # re-aplica precios yfinance cuando IB está offline (schedule_operativo resetea desde BD)
+                if not self.stock_ts.IClient.authenticated:
+                    for position in self.stock.positions:
+                        symbol = position.get("ticket")
+                        ws = DataHub.info.get(symbol, {}).get("websocket", {})
+                        last = ws.get("last")
+                        if last:
+                            qty = position.get("position", 0)
+                            costo = position.get("costobase", 0)
+                            position["mrkprice"] = last
+                            position["mktvalue"] = last * qty
+                            position["unrealizedpnl"] = last * qty - costo
+                            position["retorno"] = (last * qty - costo) / costo if costo else 0
 
                 self.stock.header_panel()
                 DataHub.update_self_procesos(proces="widget", tarea="update_widget(Stock)", itera=self.it_stock)
@@ -2508,17 +2545,14 @@ class DashMain:
                 self.stock.update_panelVehiculo(orden=self.stock.orden)
                 # self.stock.schedule_order_remote()
 
-            # actualiza cada 1/2'' segundos
-            # Verificar si debemos continuar ejecutando
+        except Exception as e:
+            print("update_widget({}}): {}".format(vehiculo, e))
+
+        finally:
+            # siempre reprogramar — nunca detener el loop por una excepción interna
             if self.is_running:
                 after_id = self.root.after(500, lambda: self.update_widget(vehiculo=vehiculo))
                 self.after_ids.append(after_id)
-            # DataHub.manager_after._safe(
-            #    500, lambda: self.update_widget(vehiculo=vehiculo), name="update_widget"
-            # )
-
-        except Exception as e:
-            print("update_widget({}}): {}".format(vehiculo, e))
 
     def car_ordenes_activas(self):
         def eexit():

@@ -22,6 +22,8 @@ Software base:
 
 Excepciones:
 	clientportal.gw:  mover las carptas a resource ubicada en Mypython
+	Ejecutar eventualmente TSW para que se instalen nuevos certificados o prametros globales de las API
+	Copiar confg.yaml deszde backup a root -- configuracion personalziada para el puerto 5501	
 	
 
 

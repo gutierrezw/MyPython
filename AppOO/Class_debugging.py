@@ -345,6 +345,10 @@ class Debugging:
         self.logger["DataFrame"].setLevel(logging.WARNING)
 
         # manager logging
+        self.logger.update({"FondosInversion": logging.getLogger("FondosInversion")})
+        self.logger["FondosInversion"].setLevel(logging.WARNING)
+
+        # manager logging
         self.logger.update({"Screener": logging.getLogger("Screener")})
         self.logger["Screener"].setLevel(logging.WARNING)
         self.logger.update({"TradingView": logging.getLogger("TradingView")})
