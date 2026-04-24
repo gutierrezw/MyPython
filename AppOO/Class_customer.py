@@ -2224,8 +2224,17 @@ class TickerInfo(MyOrders):
                         }
                     )
 
-    def fallback_prices_yfinance(self):
-        """Actualiza mrkprice de self.positions vía yfinance batch cuando IB está offline."""
+    def ib_offline_sync(self):
+        # Reemplaza la actualización de precios e indicadores que normalmente provee el websocket IB.
+        # Cuando IB no está disponible, descarga en batch los precios de cierre más recientes vía
+        # yfinance (intervalo 5m, último día) y por cada símbolo:
+        #   1. Actualiza mrkprice / mktvalue / unrealizedpnl en self.positions
+        #   2. Persiste el precio en DataHub.info[symbol]["websocket"]["last"] vía
+        #      update_precio_DataHubInfo() — mismo destino que usa el websocket IB
+        #   3. Llama ts_yfinance_symbol() para poblar DataHub.info[symbol]["datos_tecnicos"]
+        #      (EMAs, RSI, MACD) — necesarios para predecir_modelo(); sin esto el modelo falla
+        #      con "EMA020_d not in index"
+        # El método es invocado por schedule_ib_offline_sync() cada 5 min mientras IClient.authenticated=False.
         try:
             if not self.positions:
                 return "sin posiciones"
@@ -2234,7 +2243,7 @@ class TickerInfo(MyOrders):
             if not symbols:
                 return "sin símbolos"
 
-            df = yf.download(symbols, period="1d", interval="5m", progress=False, auto_adjust=True)
+            df = yf.download(symbols, period="1d", interval="5m", progress=False, auto_adjust=True, prepost=True)
             if df.empty:
                 return "yfinance sin datos"
 
@@ -2248,21 +2257,26 @@ class TickerInfo(MyOrders):
                     col = close[symbol] if hasattr(close, "columns") and symbol in close.columns else close
                     last_price = float(col.dropna().iloc[-1])
                     if last_price > 0:
+                        qty = position.get("position", 0)
+                        xopen = position.get("open", 0)
                         position["mrkprice"] = last_price
-                        position["mktvalue"] = last_price * position.get("position", 0)
+                        position["mktvalue"] = last_price * qty
                         position["unrealizedpnl"] = position["mktvalue"] - position.get("costobase", 0)
+                        position["dgyp"] = (last_price - xopen) * qty if xopen > 0 else 0
                         self.update_precio_DataHubInfo(
                             symbol=symbol,
                             conid=position.get("conid"),
                             precio={symbol: {"last": last_price}},
                         )
+                        # puebla datos_tecnicos (EMAs/RSI/MACD) para que predecir_modelo() funcione offline
+                        self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
                         actualizados += 1
                 except Exception:
                     continue
 
-            return f"{actualizados}/{len(symbols)} precios actualizados (yfinance)"
+            return f"{actualizados}/{len(symbols)} símbolos sincronizados (ib_offline_sync)"
         except Exception as e:
-            return f"fallback_prices_yfinance: {e}"
+            return f"ib_offline_sync: {e}"
 
     # define estrategia por dividendos
     def rendimiento_dividends(self, fg=None, activo=None, datos=None, symbol=None, plot="no", period="5y"):
@@ -3794,6 +3808,8 @@ class WidgetVehiculo(TickerInfo):
             self.resumen[" %Mrg/Risk  :"] = f"{_mrs['emoji']} {float(Margen):>6.1%}"
             self.resumen[" Cash       :"] = "{:>11.2f}".format(float(Cash))
             if Sesion is None:
+                if " Conexión   :" in self.resumen:
+                    self.resumen.pop(" Conexión   :")
                 self.resumen[" Prc/profit :"] = "{:>11.2f}".format(float(Per))
             else:
                 if " Prc/profit :" in self.resumen.keys():
@@ -3834,7 +3850,7 @@ class WidgetVehiculo(TickerInfo):
                                 self.panel_label[k].config(text=key, font=("Courier", 9))
                                 self.panel_label[k + 1].config(text=value, fg=mrg_color, font=("Courier", 9))
                             elif " Conexión   :" == key:
-                                conn_color = "red" if "OFFLINE" in str(value) else "yellow"
+                                conn_color = "yellow" if "OFFLINE" in str(value) else "yellow"
                                 self.panel_label[k].config(text=key, font=("Courier", 9))
                                 self.panel_label[k + 1].config(text=value, fg=conn_color, font=("Courier", 9))
                             else:
@@ -3983,6 +3999,23 @@ class WidgetVehiculo(TickerInfo):
                         Dividends=dividendos,
                         Margen=margen,
                         Cash=cash,
+                    )
+                else:
+                    # IB offline sin summary — actualizar desde positions
+                    # Sesion: preservar label de conexión actual para no romper exclusión mutua en resumen
+                    # Dividends: preservar último valor IB (yfinance no provee pagos pendientes)
+                    per = costobase / unprofit if unprofit > 0 else 0
+                    sesion_actual = self.resumen.get(" Conexión   :", "IB OFFLINE")
+                    dividendos_ib = float(self.resumen.get(" Dividendos :", 0) or 0)
+                    self.set_header_panel(
+                        Dgyp=dgyp,
+                        Nav=mktvalue,
+                        Unpyl=gyp,
+                        Unprofit=unprofit,
+                        Per=per,
+                        Debit=debit,
+                        Dividends=dividendos_ib,
+                        Sesion=sesion_actual,
                     )
 
             # compartir posiciones vivas con agentes de beta

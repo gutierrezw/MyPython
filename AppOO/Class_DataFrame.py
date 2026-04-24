@@ -374,7 +374,7 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
             pdatos.columns = pdatos.columns.get_level_values(0)
 
             # elimina zona horaria si la tiene (algunos tickers la traen, otros no)
-            if dividends.index.tz is not None:
+            if hasattr(dividends.index, "tz") and dividends.index.tz is not None:
                 dividends = dividends.tz_localize(None)
 
             # Filtrar solo los días donde hubo dividendos
@@ -2020,7 +2020,7 @@ def sectores(busca=None, symbol=None):
         if symbol == "TLT":
             value = xsector["Treasury +20years"]
         else:
-            value = xsector["Consumer Cyclical"]
+            value = ""
 
         return value
 

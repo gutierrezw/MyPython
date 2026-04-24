@@ -133,20 +133,20 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
         if vehiculo == "Stock":
             DataHub.manager_events.register_job(
-                name=f"fallback_yf({vehiculo})",
+                name=f"ib_offline_sync({vehiculo})",
                 interval_sec=300,
-                func=self.schedule_fallback_yfinance,
+                func=self.schedule_ib_offline_sync,
             )
 
-    def schedule_fallback_yfinance(self):
+    def schedule_ib_offline_sync(self):
         try:
             if not self.IClient.authenticated:
-                result = self.fallback_prices_yfinance()
+                result = self.ib_offline_sync()
                 self.logger.warning(f"IBFallback yfinance: {result}")
                 if " Conexión   :" in self.resumen:
                     self.resumen[" Conexión   :"] = "IB OFFLINE (yf)"
         except Exception as e:
-            self.logger.error(f"schedule_fallback_yfinance(): {e}")
+            self.logger.error(f"schedule_ib_offline_sync(): {e}")
 
     def on_message_binance_websocket(self, _, message):
         # captura de evento de precio
@@ -1379,13 +1379,11 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     if objetivo == 0:
                         objetivo = yf_activo.get("fiftyTwoWeekHigh", 0)
 
-                    # asegura un sector, para los activos
-                    if "sector" in yf_activo:
-                        sector = yf_activo["sector"]
-                        if is_vacio(sector) or is_null(sector):
-                            sector = sectores(symbol=symbol)
-                    else:
-                        sector = sectores(symbol=symbol)
+                    # sector: yfinance es fuente de verdad; si no trae dato, preservar el de BD
+                    sector = yf_activo.get("sector", "")
+                    if is_vacio(sector) or is_null(sector):
+                        existing = next((pos["sector"] for pos in p_positions if pos["ticket"] == symbol), "")
+                        sector = existing if existing and not is_vacio(existing) and not is_null(existing) else ""
 
                     empresa = yf_activo.get("longName", "revisar ------")
 
@@ -2510,7 +2508,6 @@ class DashMain:
 
             # información para widgetCrypto
             if vehiculo == "Crypto":
-
                 self.it_crypto += 1
                 self.crypto.header_panel()
                 DataHub.update_self_procesos(proces="widget", tarea="update_widget(Crypto)", itera=self.it_crypto)
@@ -2525,7 +2522,6 @@ class DashMain:
                 self.stock.summary = self.stock_ts.summary
                 self.stock.positions = self.stock_ts.positions
 
-                # re-aplica precios yfinance cuando IB está offline (schedule_operativo resetea desde BD)
                 if not self.stock_ts.IClient.authenticated:
                     for position in self.stock.positions:
                         symbol = position.get("ticket")
@@ -2534,23 +2530,12 @@ class DashMain:
                         if last:
                             qty = position.get("position", 0)
                             costo = position.get("costobase", 0)
+                            xopen = position.get("open", 0)
                             position["mrkprice"] = last
                             position["mktvalue"] = last * qty
                             position["unrealizedpnl"] = last * qty - costo
                             position["retorno"] = (last * qty - costo) / costo if costo else 0
-
-                    # recalcula header desde positions (summary de IB queda congelado offline)
-                    nav, unpyl, unprofit, dividendos = 0.0, 0.0, 0.0, 0.0
-                    for p in self.stock.positions:
-                        nav += p.get("mktvalue", 0)
-                        unpyl += p.get("unrealizedpnl", 0)
-                        unprofit += p["unrealizedpnl"] if p.get("unrealizedpnl", 0) > 0 else 0
-                        dividendos += p.get("dividendo", 0)
-                    self.stock.resumen[" Valor liq. :"] = "{:>11.2f}".format(nav)
-                    self.stock.resumen[" UnProfit   :"] = "{:>11.2f}".format(unprofit)
-                    self.stock.resumen[" UnPyl      :"] = "{:>11.2f}".format(unpyl)
-                    self.stock.resumen[" Dividendos :"] = "{:>11.2f}".format(dividendos)
-                    self.stock.resumen[" Conexión   :"] = "IB OFFLINE (yf)"
+                            position["dgyp"] = (last - xopen) * qty if xopen > 0 else 0
 
                 self.stock.header_panel()
                 DataHub.update_self_procesos(proces="widget", tarea="update_widget(Stock)", itera=self.it_stock)
