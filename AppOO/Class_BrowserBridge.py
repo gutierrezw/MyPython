@@ -27,6 +27,7 @@ _tv_current = {"symbol": ""}  # último símbolo enviado desde la app
 _tv_last_ping = {"t": 0.0, "ever": False}  # ever=True → Tampermonkey activo en esta sesión
 _tv_server = None  # referencia para shutdown limpio
 _tv_contexto = {}  # contexto de cartera para inyección en claude.ai
+_order_callback = None  # fn(symbol, vehiculo, account, opt, qty, price, conid, razon) → (response, symbol)
 
 
 def _tv_symbol(symbol, vehiculo):
@@ -54,7 +55,8 @@ class _TVRequestHandler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin", "https://www.tradingview.com")
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", origin)
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
     def do_GET(self):
@@ -77,6 +79,43 @@ class _TVRequestHandler(BaseHTTPRequestHandler):
             self._send_json(_tv_contexto, origin=origin)
         else:
             self._send_json({"error": "not found"}, 404)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        origin = self.headers.get("Origin", "https://www.tradingview.com")
+        if parsed.path == "/order":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}")
+                if not _order_callback:
+                    self._send_json({"ok": False, "error": "order callback not registered"}, 503, origin)
+                    return
+                symbol = body.get("symbol", "")
+                vehiculo = body.get("vehiculo", "Stock")
+                account = body.get("account", "")
+                side = body.get("side", "BUY").upper()
+                qty = float(body.get("qty", 0))
+                price = float(body.get("price", 0))
+                conid = body.get("conid")
+                if not symbol or qty <= 0 or price <= 0:
+                    self._send_json({"ok": False, "error": "symbol, qty y price requeridos"}, 400, origin)
+                    return
+                response, _ = _order_callback(
+                    symbol=symbol,
+                    vehiculo=vehiculo,
+                    account=account,
+                    opt=side,
+                    qty=qty,
+                    price=price,
+                    conid=conid,
+                    razon="Orden desde TradingView",
+                )
+                self._send_json({"ok": True, "status": response.get("status", ""), "detail": response}, origin=origin)
+            except Exception as e:
+                _logger.error(f"do_POST /order: {e}")
+                self._send_json({"ok": False, "error": str(e)}, 500, origin)
+        else:
+            self._send_json({"error": "not found"}, 404, origin)
 
 
 def start_tv_server():
@@ -103,6 +142,12 @@ def stop_tv_server():
             pass
         _tv_server = None
         _logger.warning("TradingView server detenido")
+
+
+def set_order_callback(fn):
+    """Registra el callable que ejecuta órdenes. Firma: fn(symbol, vehiculo, account, opt, qty, price, conid, razon)."""
+    global _order_callback
+    _order_callback = fn
 
 
 def set_claude_contexto(data):

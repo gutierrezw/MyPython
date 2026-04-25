@@ -341,13 +341,22 @@
         </table>
         </div>
 
-        <div style="display:flex;gap:8px;margin-top:14px">
-          <button onclick="void(0)" style="flex:1;padding:8px;background:#26a69a;color:#fff;
-                  border:none;border-radius:4px;font-size:13px;font-weight:bold;cursor:not-allowed;
-                  opacity:0.7">BUY</button>
-          <button onclick="void(0)" style="flex:1;padding:8px;background:#ef5350;color:#fff;
-                  border:none;border-radius:4px;font-size:13px;font-weight:bold;cursor:not-allowed;
-                  opacity:0.7">SELL</button>
+        <div style="margin-top:14px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+            <span style="color:#787b86;font-size:11px;white-space:nowrap">Cantidad:</span>
+            <input id="tv-order-qty" type="number" min="0" step="1"
+              style="flex:1;padding:4px 6px;background:#2a2e39;color:#d1d4dc;border:1px solid #434651;
+                     border-radius:4px;font-size:12px;outline:none" placeholder="0" />
+            <span id="tv-order-status" style="font-size:10px;color:#787b86;min-width:60px;text-align:right"></span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button id="tv-btn-buy"
+              style="flex:1;padding:8px;background:#26a69a;color:#fff;border:none;border-radius:4px;
+                     font-size:13px;font-weight:bold;cursor:pointer">BUY</button>
+            <button id="tv-btn-sell"
+              style="flex:1;padding:8px;background:#ef5350;color:#fff;border:none;border-radius:4px;
+                     font-size:13px;font-weight:bold;cursor:pointer">SELL</button>
+          </div>
         </div>`;
     }
 
@@ -434,6 +443,42 @@
         document.body.appendChild(panelEl);
     }
 
+    // ── Enviar orden al servidor local ────────────────────────────────────
+    function postOrder(side) {
+        const qtyEl = document.getElementById("tv-order-qty");
+        const statusEl = document.getElementById("tv-order-status");
+        const qty = parseFloat(qtyEl ? qtyEl.value : 0);
+        if (!qty || qty <= 0) { if (statusEl) { statusEl.textContent = "qty requerida"; statusEl.style.color = "#ef5350"; } return; }
+        const pos = lastPosicion || {};
+        const price = pos.last || 0;
+        if (!price) { if (statusEl) { statusEl.textContent = "sin precio"; statusEl.style.color = "#ef5350"; } return; }
+        if (statusEl) { statusEl.textContent = "enviando…"; statusEl.style.color = "#787b86"; }
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: `http://localhost:${PORT}/order`,
+            headers: { "Content-Type": "application/json" },
+            data: JSON.stringify({
+                symbol: tvSymbol(),
+                vehiculo: pos.vehiculo || "Stock",
+                account: pos.account || "",
+                side: side,
+                qty: qty,
+                price: price,
+                conid: pos.conid || null,
+            }),
+            onload: (r) => {
+                try {
+                    const d = JSON.parse(r.responseText);
+                    if (statusEl) {
+                        statusEl.textContent = d.status || (d.ok ? "OK" : d.error || "error");
+                        statusEl.style.color = d.ok ? "#26a69a" : "#ef5350";
+                    }
+                } catch (_) { if (statusEl) { statusEl.textContent = "error"; statusEl.style.color = "#ef5350"; } }
+            },
+            onerror: () => { if (statusEl) { statusEl.textContent = "sin conexión"; statusEl.style.color = "#ef5350"; } },
+        });
+    }
+
     // ── Actualizar contenido ───────────────────────────────────────────────
     function upsertPanel(html, posicion, lotes, symbol) {
         if (!panelEl) crearPanel();
@@ -441,6 +486,10 @@
         panelEl.style.display = "block";
         if (titleEl && symbol) titleEl.textContent = `${symbol} — Análisis`;
         lastPosicion = posicion;
+        const btnBuy = document.getElementById("tv-btn-buy");
+        const btnSell = document.getElementById("tv-btn-sell");
+        if (btnBuy) btnBuy.onclick = () => postOrder("BUY");
+        if (btnSell) btnSell.onclick = () => postOrder("SELL");
         // Retry hasta que TV API esté lista (necesario tras navegación/recarga)
         let _attempts = 0;
         const _tryDraw = () => {
@@ -481,9 +530,11 @@
                                                 const pd = JSON.parse(rp.responseText);
                                                 if (pd.last) data.posicion.last = pd.last;
                                             } catch (_) {}
+                                            data.posicion.vehiculo = data.vehiculo;
                                             upsertPanel(buildPanel(data), data.posicion, data.lotes || [], sym);
                                         },
                                         onerror: () => {
+                                            data.posicion.vehiculo = data.vehiculo;
                                             upsertPanel(buildPanel(data), data.posicion, data.lotes || [], sym);
                                         },
                                     });
