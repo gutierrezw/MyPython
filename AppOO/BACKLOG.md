@@ -33,6 +33,7 @@ Historial de versiones al final del archivo.
 | ~~26~~ | ~~**Stock/IB**~~ | ~~Fallback yfinance cuando IB offline — precios + dGyP header no actualizaban~~ | ~~Media~~ |
 | ~~27~~ | ~~**Stock/Gráficos**~~ | ~~`grupo_sector()` infla "Consumer Cyclical" — sector preservation en `update_inversion_stock()` + fallback `sectores()` → `""`~~ | ~~Media~~ |
 | 28 | **Infraestructura** | Proceso de mantenimiento del sistema vía Claude scheduled: check NTP con `ntplib` (alerta si deriva >500ms), limpieza logs rotativos, verificación servicios críticos (IB, Binance, MySQL). Sin elevar la app a admin. | Media |
+| 29 | **TradingView** | Órdenes desde TV — handler `POST /order` en servidor TV conecta con broker: IB (`place_order` vía IBroks_Client) + Binance (`create_order` vía BinanceSpot); confirmación de ejecución devuelta al userscript TV | Alta |
 
 ---
 

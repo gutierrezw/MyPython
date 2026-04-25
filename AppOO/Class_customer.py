@@ -3608,6 +3608,8 @@ class WidgetVehiculo(TickerInfo):
                 "last": last,
                 "objetivo": position.get("objetivo") or 0,
                 "stop_loss": position.get("stop_loss") or position.get("sl") or 0,
+                "account": self.account,
+                "conid": position.get("conid"),
             }
             resultado = DataHub.get_lotesGainLost(opcion="ambos", account=self.account, symbol=symbol, last=last)
             if resultado and len(resultado) == 3:

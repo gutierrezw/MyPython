@@ -71,7 +71,7 @@ from Class_DashBot import AsistenteChatbot
 from Class_IA_modelos import ModeloOportunidadesSell
 from Class_SystemStatus import system_status
 from Class_BotCryptoUI import BotCryptoUI
-from Class_BrowserBridge import start_tv_server, stop_tv_server, start_price_sync
+from Class_BrowserBridge import start_tv_server, stop_tv_server, start_price_sync, set_order_callback
 from Class_Finance import FinancePanel
 
 
@@ -2480,6 +2480,7 @@ class DashMain:
             # Crear instancias
             self.chatbot = Chatbot(master=self.root, on_minimizar=mostrar_boton)
             self.boton_flotante = BotonFlotante(self.root, on_click=mostrar_asistente)
+            set_order_callback(self.chatbot.put_order)
 
             # Iniciar el chatbot
             self.chatbot.run()

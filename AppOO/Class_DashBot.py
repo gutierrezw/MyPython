@@ -1122,37 +1122,11 @@ class Telegram:
         except Exception as e:
             self.logger.warning(f"send_Telegram(): {e}")
 
-    def put_order_stockTelegram(self, op, ix):
+    def put_order(self, symbol, vehiculo, account, opt, qty, price, conid=None, hash_id=None, razon="Orden ejecutada"):
         try:
-            # extrae información de la oportunidad
-            detalle = json.loads(op[ix.index("json_detalle")])
-            symbol = op[ix.index("symbol")]
-            account = op[ix.index("account")]
-            vehiculo = op[ix.index("vehiculo")]
-            hash_id = op[ix.index("hash_id")]
-            idd = op[ix.index("conid")]
-            last = op[ix.index("mrkprice")] or 0.0
-            tipo_op = op[ix.index("tipo")]  # 'sell' o 'buy'
-            Stock = TickerInfo(account=account, vehiculo=vehiculo)
-
-            # crea instancia de MyOrders para colocar orden
-            qty, tip, tim = Stock.params_order(vehiculo=vehiculo, elementos=0)
-
-            # determina operación y cantidad según tipo
-            if tipo_op == "sell":
-                opt = "SELL"
-                qty = detalle.get("cantidad_sell", 0)
-            else:
-                opt = "BUY"
-                qty = detalle.get("cantidad_buy", 0)
-
-            # determina precio (maneja None)
-            PriceOportunidad = detalle.get("price_market") or 0.0
-            prc = PriceOportunidad if PriceOportunidad > last else last
-
-            # crea la orden en formato diccionario
-            order = Stock.format_orden(vehiculo, symbol, idd, tip, prc, opt, tim, qty)
-
+            Ticker = TickerInfo(account=account, vehiculo=vehiculo)
+            _, tip, tim = Ticker.params_order(vehiculo=vehiculo, elementos=0)
+            order = Ticker.format_orden(vehiculo, symbol, conid, tip, price, opt, tim, qty)
             trama = {
                 "account": account,
                 "vehiculo": vehiculo,
@@ -1160,95 +1134,78 @@ class Telegram:
                 "pedido": order,
                 "hash_id_Op": hash_id,
             }
-
-            # encola la orden para ser procesada por ManagerOrderQueue
             response = DataHub.QremoteOrder[vehiculo]._request(trama)
+            if hash_id and response.get("status") in ("Submitted", "PreSubmitted", "FILLED"):
+                self.RepositorioOportunidades.marcar_oportunidad(
+                    hash_id, recomendado=1, estado="ejecutada", razon=razon
+                )
             return response, symbol
         except Exception as e:
-            self.logger.error(f"put_order_stockTelegram(): {e}\n{traceback.format_exc()}")
+            self.logger.error(f"put_order(): {e}\n{traceback.format_exc()}")
             return {}, None
+
+    def put_order_stockTelegram(self, op, ix):
+        detalle = json.loads(op[ix.index("json_detalle")])
+        last = op[ix.index("mrkprice")] or 0.0
+        tipo_op = op[ix.index("tipo")]
+        opt = "SELL" if tipo_op == "sell" else "BUY"
+        qty = detalle.get("cantidad_sell", 0) if tipo_op == "sell" else detalle.get("cantidad_buy", 0)
+        price_op = detalle.get("price_market") or 0.0
+        prc = price_op if price_op > last else last
+        return self.put_order(
+            symbol=op[ix.index("symbol")],
+            vehiculo=op[ix.index("vehiculo")],
+            account=op[ix.index("account")],
+            opt=opt,
+            qty=qty,
+            price=prc,
+            conid=op[ix.index("conid")],
+            hash_id=op[ix.index("hash_id")],
+        )
 
     def put_order_cryptoTelegram(self, op, ix):
-        """Procesa orden de Crypto desde Telegram usando Binance API"""
-        try:
-            # extrae información de la oportunidad
-            detalle = json.loads(op[ix.index("json_detalle")])
-            symbol = op[ix.index("symbol")]
-            account = op[ix.index("account")]
-            vehiculo = op[ix.index("vehiculo")]
-            hash_id = op[ix.index("hash_id")]
-            last = op[ix.index("mrkprice")] or 0.0
-            tipo_op = op[ix.index("tipo")]  # 'sell' o 'buy'
-
-            # obtiene conid desde tabla otros_activos
-            crypto, found = self.RepositorioOportunidades.select_otros_activos(symbol=symbol)
-            conid = crypto[0]["idcrypto"] if found else None
-
-            # crea instancia de TickerInfo para Crypto
-            Crypto = TickerInfo(account=account, vehiculo=vehiculo)
-
-            # obtiene parámetros de orden
-            qty, tip, tim = Crypto.params_order(vehiculo=vehiculo, elementos=0)
-
-            # determina operación y cantidad según tipo
-            if tipo_op == "sell":
-                opt = "SELL"
-                qty = detalle.get("cantidad_sell", 0)
-            else:
-                opt = "BUY"
-                qty = detalle.get("cantidad_buy", 0)
-
-            # determina precio (maneja None)
-            PriceOportunidad = detalle.get("price_market") or 0.0
-            prc = PriceOportunidad if PriceOportunidad > last else last
-
-            # crea la orden en formato Crypto
-            order = Crypto.format_orden(vehiculo, symbol, conid, tip, prc, opt, tim, qty)
-
-            trama = {
-                "account": account,
-                "vehiculo": vehiculo,
-                "symbol": symbol,
-                "pedido": order,
-                "hash_id_Op": hash_id,
-            }
-
-            # encola la orden para ser procesada por ManagerOrderQueue
-            response = DataHub.QremoteOrder[vehiculo]._request(trama)
-            return response, symbol
-        except Exception as e:
-            self.logger.error(f"put_order_cryptoTelegram(): {e}\n{traceback.format_exc()}")
-            return {}, None
+        detalle = json.loads(op[ix.index("json_detalle")])
+        symbol = op[ix.index("symbol")]
+        last = op[ix.index("mrkprice")] or 0.0
+        tipo_op = op[ix.index("tipo")]
+        opt = "SELL" if tipo_op == "sell" else "BUY"
+        qty = detalle.get("cantidad_sell", 0) if tipo_op == "sell" else detalle.get("cantidad_buy", 0)
+        price_op = detalle.get("price_market") or 0.0
+        prc = price_op if price_op > last else last
+        crypto, found = self.RepositorioOportunidades.select_otros_activos(symbol=symbol)
+        conid = crypto[0]["idcrypto"] if found else None
+        return self.put_order(
+            symbol=symbol,
+            vehiculo=op[ix.index("vehiculo")],
+            account=op[ix.index("account")],
+            opt=opt,
+            qty=qty,
+            price=prc,
+            conid=conid,
+            hash_id=op[ix.index("hash_id")],
+        )
 
     # enlace con TickerInfo() para colocar orders
     def put_order_aprovate_telegram(self, hash_id):
         try:
-            values, symbol, vehiculo = {}, None, None
-
-            # recupera info() de Oportunidad sell
             oportunidad, ix = self.RepositorioOportunidades.obtener_id_por_hash(hash_id=hash_id)
-
             if not oportunidad:
                 return {}, None, None
 
             vehiculo = oportunidad[ix.index("vehiculo")]
-
-            if vehiculo == "Stock":
-                values, symbol = self.put_order_stockTelegram(oportunidad, ix)
-
-            elif vehiculo == "Crypto":
-                values, symbol = self.put_order_cryptoTelegram(oportunidad, ix)
-
-            # marca oportunidad como aprobada si la orden fue aceptada
             razon = "Aprobada desde Telegram"
             razon += "." if oportunidad[ix.index("origen")] == "system" else " (IA)"
 
+            if vehiculo == "Stock":
+                values, symbol = self.put_order_stockTelegram(oportunidad, ix)
+            elif vehiculo == "Crypto":
+                values, symbol = self.put_order_cryptoTelegram(oportunidad, ix)
+            else:
+                return {}, None, None
+
             if values.get("status") in ("Submitted", "PreSubmitted", "FILLED"):
                 self.RepositorioOportunidades.marcar_oportunidad(
-                    hash_id,
-                    recomendado=1,
-                    estado="ejecutada",
-                    razon=razon,
+                    hash_id, recomendado=1, estado="ejecutada", razon=razon
                 )
 
             return values, symbol, vehiculo
