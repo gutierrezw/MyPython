@@ -868,6 +868,43 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             conn.commit()
             cursor.close()
 
+    def purgar_desde(self, account, vehiculo, desde):
+        """Elimina registros de diaria_performance y performa_inversion a partir de una fecha.
+
+        Uso: reparación de datos corruptos — permite que schedule_diario reconstruya
+        ambas tablas desde 'desde' en el próximo ciclo.
+
+        Args:
+            account:  id de cuenta (ej: 'U4214563')
+            vehiculo: tipo de inversión (ej: 'Stock', 'Crypto')
+            desde:    date o str 'YYYY-MM-DD' — fecha de inicio de la purga (inclusive)
+
+        Returns:
+            dict con claves 'diaria' y 'performa' indicando filas eliminadas en cada tabla.
+        """
+        conn = self._conectar(tabla="purgar_desde")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM diaria_performance WHERE account = %s AND Date >= %s",
+                (account, str(desde)),
+            )
+            n_diaria = cursor.rowcount
+            cursor.execute(
+                "DELETE FROM performa_inversion WHERE idcuenta = %s AND vehiculo = %s AND fechaclose >= %s",
+                (account, vehiculo, str(desde)),
+            )
+            n_performa = cursor.rowcount
+            conn.commit()
+            return {"diaria": n_diaria, "performa": n_performa}
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql:: IPerformance.purgar_desde()]: {error}")
+            conn.rollback()
+            return {"diaria": 0, "performa": 0}
+        finally:
+            cursor.close()
+            conn.close()
+
 
 class DiariaCNV(BDsystem):  # --------------------------------------------------------------------------------------
     """
