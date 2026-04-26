@@ -2042,8 +2042,27 @@ class TickerInfo(MyOrders):
                         position["divisa"],
                         position["sectype"],
                     )
+            if not self.IClient.authenticated:
+                symbols_sin_info = [p["ticket"] for p in self.positions if p["ticket"] not in self.info]
+                if symbols_sin_info:
+                    threading.Thread(
+                        target=self._precargar_info,
+                        args=(symbols_sin_info,),
+                        name="PrecargarInfo",
+                        daemon=True,
+                    ).start()
         except Exception as e:
             print("[carga_inversion_en_positions()]: {}".format(e))
+
+    def _precargar_info(self, symbols):
+        for symbol in symbols:
+            try:
+                if self.IClient.authenticated:
+                    break
+                if symbol not in self.info:
+                    self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
+            except Exception as e:
+                print("[_precargar_info()]: {}".format(e), symbol)
 
     # construye y adiciona las posiciones del vehiculo
     def add_position(
@@ -3488,7 +3507,7 @@ class WidgetVehiculo(TickerInfo):
                     self.symbol = symbol
                     self._on_symbol_menu(symbol, event)
                 else:
-                    print("[aun no ha cargado self.info()]:", symbol)
+                    self.logger.warning(f"[aun no ha cargado self.info()]: {symbol}")
         except Exception as e:
             print("[on_treeview_select()]: {}".format(e))
 
