@@ -39,6 +39,22 @@ Historial de versiones al final del archivo.
 
 ## Historial
 
+### v1.9 — 2026-04-26
+**Incidencia resuelta — Corrupción en performa_inversion por precios yfinance:**
+- 🐛 Detectado: `nr_gyp` con valores absurdos en `performa_inversion` (ABEV +1.86M, PFE -1.63K)
+- 🔍 Diagnóstico: booktrading correcto; yfinance devolvió precios corruptos (ABEV 2489x arriba, PFE 0.009x abajo) — causa probable: glitch de red/caché en el momento del `schedule_diario`
+- ✅ Fix `write_csv()` en `Modulos_Comunes.py`: guardián `if basic > 0 and not (basic/20 <= close <= basic*20): return` — descarta precios yfinance que difieren >20x del costo promedio del activo
+- ✅ `IPerformance.purgar_desde(account, vehiculo, desde)` en `Modulos_Mysql.py`: elimina `diaria_performance` + `performa_inversion` desde una fecha y resetea el schedule JSON — permite reconstrucción limpia
+- ✅ `AppTest/run_purgar_performance_desde.py`: script interactivo de reparación con confirmación, estado antes/después y reset automático del schedule
+- 🔧 Purga ejecutada manualmente: borrados registros desde 2026-04-15, reconstrucción delegada al próximo `schedule_diario`
+- ✅ Pre-carga `DataHub.info` al arranque: `carga_inversion_en_positions()` lanza hilo `PrecargarInfo` solo si `IClient.authenticated=False`; se detiene si IB conecta durante el proceso
+- ✅ `on_treeview_select()`: mensaje "aun no ha cargado self.info()" migrado de `print` → `logger.warning`
+
+**Para reproducir / próxima vez:**
+1. Correr `AppTest/run_purgar_performance_desde.py` ajustando `FECHA_PURGA`
+2. El guardián en `write_csv()` previene reincidencia automáticamente
+3. Si el guardián bloquea un precio legítimo (stock apreciado >20x desde compra), ajustar umbral en `Modulos_Comunes.py` línea del guardian
+
 ### v1.8 — 2026-04-24
 **Cerrado:**
 - ✅ ítem 26 — IB offline: `ib_offline_sync()` calcula `dgyp` directo en positions; `header_total_positions()` rama `else` actualiza header desde positions cuando `summary=None`; `Sesion` preservado para no romper exclusión mutua en `resumen`; dividendos IB preservados (yfinance no provee pagos pendientes)
