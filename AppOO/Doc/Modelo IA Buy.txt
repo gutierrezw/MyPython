@@ -1,0 +1,52 @@
+Objetivo:  construi modelo IA y agente que permita seleccionar las compras de activos que cumplan lsa siguinetes restricciones:
+
+1.s) estar por debajo de la media del secto al cual corresponde el ticket
+2.s) descartar la compra si esta por encima de la media del sector
+3.s) la media y podenración de  estará dispobible en la estructura manager_buysell = {"data": datos, "summary": d_positions, "media": datos["Peso"].mean()}
+
+1.a) estar por debajo de la media de diversificación de activos al cual corresponde el ticket
+2.a) descartar la compra si esta por encima de la media de diversificación de activos
+3.a) la media y podenración de  estará dispobible en la estructura manager_buysell = {"data": data, "activos": keys, "media": mean}
+
+1.r) estar por debajo de la media de diversificación de región al cual corresponde el ticket
+2.r) descartar la compra si esta por encima de la media de diversificación de región
+3.r) la media y podenración de  estará dispobible en la estructura manager_buysell = {"data": data, "country": keys, "media": mean}
+
+1.d) estar entre la media de cobro y proyección de dividendos mensual para los meses donde el ticket reporta fecha Exdiv 
+3.d) la media y podenración de  estará dispobible en la estructura manager_buysell = {"datos": datos, "struct": struct, "media": mean}
+
+
+recorrer info() y completar información de los tiques con cada punto anterior
+
+def schedule_oportunidades(self):
+    try:
+        self.oportunidades_sell()
+        self.oportunidades_buy()
+        self.oportunidades_dividends()
+
+
+Diseño de self.info[symbol][buy]
+        datos = {
+            "buy": {
+                "ganancia precio": gypPrecio,
+                "ganancia inversión": gainInversion,
+                "cantidad buy": stock,
+                "last": position["mrkprice"],
+                "avgcost": avgCost,
+                "cantidad post": stockNew,
+                "avgCost post": precioNew,
+                "retorno post": gypProyect,
+                "objetivo": position["objetivo"],
+                "pre dividendos": position["dividendo"],
+                "post dividendos": dividendo * stockNew,
+                "pre costobase": position["costobase"],
+                "post costobase": precioNew * stockNew,
+                "country":
+                "sector":
+                "est. type Actuvo":
+                
+            }
+        }
+
+    # actualiza en diccionario self.info()
+    (d_buy, d_sell) = self.ts_oportunidades_symbol(symbol, datos)

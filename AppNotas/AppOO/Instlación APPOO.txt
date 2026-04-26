@@ -1,0 +1,21 @@
+Softare y Datos:
+	./MyPython
+	./dumps
+
+
+Software base:
+	java: https://www.java.com/es/download/ie_manual.jsp
+	mysql : https://dev.mysql.com/downloads/
+	python: https://www.python.org/downloads/
+	pccharm : https://www.jetbrains.com/es-es/pycharm/download/download-thanks.html?platform=windows&code=PCC
+	tsw: https://www.interactivebrokers.co.uk/es/trading/ib-api.php
+	git: https://git-scm.com/downloads/win
+	clientportal.gw:  https://www.interactivebrokers.com/es/trading/ib-api.php
+		
+
+Excepciones:
+	XAMPP : https://www.apachefriends.org.  : se instala solo cuando MySQL no es instalado full
+	clientportal.gw:  mover las carptas a resource ubicada en Mypython
+	
+	
+

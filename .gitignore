@@ -1,0 +1,50 @@
+# ------------------------------------
+# 1. IGNORAR CACHÉ Y ARCHIVOS TEMPORALES
+# ------------------------------------
+# Bytecode de Python (carpeta __pycache__)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Cache de librerías como vertx
+.vertx/
+*.jks
+
+# Archivos de compilación (PyInstaller, etc.)
+build/
+dist/
+*.spec
+
+# Archivos de logs y perfiles
+logs/
+.idea/
+*.log
+*.prof
+
+# Archivos de caché temporales de librerías (ej. yfinance)
+tmp/
+*.dat-journal
+*.sqlite3
+
+# ------------------------------------
+# 2. ENTORNO VIRTUAL
+# ------------------------------------
+# Ignorar carpetas comunes de entornos virtuales
+Treeline/
+IBGateway/
+.venv/
+venv/
+env/
+
+# ------------------------------------
+# 3. ARCHIVOS SENSIBLES Y DE CONFIGURACIÓN
+# ------------------------------------
+# ¡CRUCIAL! Excluir la carpeta de claves de seguridad
+keysSeguridad/
+
+# Archivos de configuración de VS Code (opcional, si no quieres compartirlos)
+.vscode/
+
+# Archivos de Workspace de VS Code (opcional, si usas uno global)
+*.code-workspace
