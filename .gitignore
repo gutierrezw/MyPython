@@ -48,3 +48,8 @@ keysSeguridad/
 
 # Archivos de Workspace de VS Code (opcional, si usas uno global)
 *.code-workspace
+
+# ------------------------------------
+# 4. ARTEFACTOS WINDOWS
+# ------------------------------------
+nul
