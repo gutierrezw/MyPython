@@ -58,3 +58,5 @@ nul
 # 5. CONFIGURACIÓN LOCAL (tokens)
 # ------------------------------------
 .mcp.json
+.claude/settings.json
+.claude/settings.local.json
