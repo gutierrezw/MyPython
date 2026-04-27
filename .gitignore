@@ -53,3 +53,8 @@ keysSeguridad/
 # 4. ARTEFACTOS WINDOWS
 # ------------------------------------
 nul
+
+# ------------------------------------
+# 5. CONFIGURACIÓN LOCAL (tokens)
+# ------------------------------------
+.mcp.json
