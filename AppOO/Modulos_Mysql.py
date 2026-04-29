@@ -3686,13 +3686,13 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.execute(qry % (account, idivisa, symbol))
                 sql = cursor.fetchall()
 
-            # opción para reconstruir performa de la cartera
+            # opción para reconstruir performa de la cartera — sin filtro divisa para incluir CAD, etc.
             elif accion == "cartera":
-                qry = """SELECT * FROM booktrading 
-                        WHERE cuenta = '%s' AND divisa = '%s' AND codigo in ('C', 'O')
+                qry = """SELECT * FROM booktrading
+                        WHERE cuenta = '%s' AND codigo in ('C', 'O')
                         ORDER BY simbolo, fechahora ASC;"""
 
-                cursor.execute(qry % (account, idivisa))
+                cursor.execute(qry % (account,))
                 sql = cursor.fetchall()
 
             # opción para obtener maxima ganancia en Trade de venta
