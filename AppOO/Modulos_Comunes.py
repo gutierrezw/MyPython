@@ -1,6 +1,6 @@
 from Class_DataFrame import get_yfinance
 from Modulos_Mysql import BDsystem, IPerformance, RepositorioOportunidadesBuySell
-from Modulos_Utilitarios import vehiculo_parm, convierte_ticket_crypto, define_FileCache
+from Modulos_Utilitarios import vehiculo_parm, convierte_ticket_crypto, convierte_ticket_stock, define_FileCache
 from Modulos_python import datetime, date, pd, timedelta, os, csv, traceback
 
 
@@ -308,15 +308,24 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                 bkey = read[ix.index("simbolo")]
                 f_desde = read[ix.index("fechahora")].date()
 
+                # saltar simbolos delisted en bloque (evita N llamadas a yfinance por sus filas históricas)
+                if "delisted" in ix and read[ix.index("delisted")] == 1:
+                    while eof_book is not None and read[ix.index("simbolo")] == bkey:
+                        eof_book, read = next(ebook, (None, None))
+                    continue
+
+                divisa = read[ix.index("divisa")] if "divisa" in ix else "USD"
+                yf_ticket = convierte_ticket_stock(bkey, divisa)
+
                 # cuando Stock hace Ticker para bajar los dividends
                 if read[ix.index("categoria")] == "Stock":
-                    activo, datos = get_yfinance(ticket=bkey, vehiculo="Dividends", desde=f_desde, hasta=f_hasta)
+                    activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="Dividends", desde=f_desde, hasta=f_hasta)
 
                 elif read[ix.index("categoria")] == "BBVA.ARS":
-                    activo, datos = get_yfinance(ticket=bkey, vehiculo="BBVA.ARS", desde=f_desde, hasta=f_hasta)
+                    activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="BBVA.ARS", desde=f_desde, hasta=f_hasta)
 
                 else:
-                    activo, datos = get_yfinance(ticket=bkey, vehiculo="download", desde=f_desde, hasta=f_hasta)
+                    activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="download", desde=f_desde, hasta=f_hasta)
 
                 if datos is None or datos.empty:
                     eof_book, read = next(ebook, (None, None))
@@ -404,6 +413,7 @@ def actualiza_performa_inversion(account=None, vehiculo=None):
                 "value Portafolio",
             ]
             pdatos = datos.groupby("Date")[columnas].sum()
+            pdatos.index = pdatos.index.date
 
             # Normalizar para crear índice
             pdatos["performa"] = pdatos["value Portafolio"] / pdatos["costo_base"]
@@ -420,7 +430,7 @@ def actualiza_performa_inversion(account=None, vehiculo=None):
                 df_previo = pd.merge(df_indice, pdatos, on="Date", how="inner")
 
                 # deja en df_update las filas Date > f_desde
-                f_limite = pd.to_datetime(f_desde)
+                f_limite = f_desde.date() if hasattr(f_desde, "date") else f_desde
                 df_update = df_previo[df_previo.index > f_limite]
 
                 inserta_index_performa(
@@ -451,10 +461,12 @@ def crea_dataframe_index(vehiculo=None, desde=None):
         if isinstance(datos["Close"], pd.DataFrame):
             datos["Close"] = datos["Close"].iloc[:, 0]
 
-        # limina zona horaria para aparear con la Df diaria
+        # elimina zona horaria, convierte a date object para consistencia con crea_dataframe_diaria
         datos.reset_index(inplace=True)
 
         datos["Date"] = pd.to_datetime(datos["Date"])
+        if datos["Date"].dt.tz is not None:
+            datos["Date"] = datos["Date"].dt.tz_convert(None)
         datos["Date"] = datos["Date"].dt.date
         datos.set_index("Date", inplace=True)
 

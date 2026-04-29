@@ -372,6 +372,8 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
 
             # extraer el primer nivel de las columnas sacando infor Ticker
             pdatos.columns = pdatos.columns.get_level_values(0)
+            # tickers renombrados (ej: FB→META) pueden traer columnas duplicadas; queda la primera
+            pdatos = pdatos.loc[:, ~pdatos.columns.duplicated()]
 
             # elimina zona horaria si la tiene (algunos tickers la traen, otros no)
             if hasattr(dividends.index, "tz") and dividends.index.tz is not None:
@@ -395,6 +397,7 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
 
                     # extraer el primer nivel de las columnas sacando infor Ticker
                     pdatos.columns = pdatos.columns.get_level_values(0)
+                    pdatos = pdatos.loc[:, ~pdatos.columns.duplicated()]
                     activo = {}
 
                 # download con fecha desde y hasta
@@ -404,6 +407,7 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
 
                     # extraer el primer nivel de las columnas sacando infor Ticker
                     pdatos.columns = pdatos.columns.get_level_values(0)
+                    pdatos = pdatos.loc[:, ~pdatos.columns.duplicated()]
                     activo = {}
 
                 return activo, pdatos
@@ -1646,7 +1650,7 @@ def grupo_region(fg: object, strategy=None, parm=None):
     ax.axhline(mean, linewidth=0.6, ls="--", color=cchart["texto"])
     media = f" μ = {mean:.0f}$"
 
-    ax.text(x[5], mean * 1.2, media, fontsize=6, ha="center", color=cchart["texto"])
+    ax.text(x[len(x) // 2], mean * 1.2, media, fontsize=6, ha="center", color=cchart["texto"])
 
     def abreviar_pais(nombre):
         partes = nombre.split()

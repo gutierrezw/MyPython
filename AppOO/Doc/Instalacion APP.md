@@ -32,7 +32,7 @@ Comandos upgrate python
 pip list
 pip install <paquete>
 pip uninstall <paquete>
-cuando cambie de versi�n
+cuando cambie de version
 Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Scope CurrentUser
 Get-ExecutionPolicy -List
 
@@ -44,22 +44,63 @@ pipreqs --force
 pip install -r requirements.txt
 
 
-Ejecución de API
+Ejecucion de API
 resources\bin\run.bat resources\root\conf.yaml
 ==================================================================================
-Instalación de API IBKRs  desde directorio
+Instalacion de API IBKRs  desde directorio
 
 cd  C:\Users\54911\Documents\MyPython\TWS-API\source\pythonclient
 pip install .
 ==================================================================================
 
 ==================================================================================
-API Key
-vxep6cM1R0KVPgY3J4mS2PvvgpPGzGaLVcIeMxeqHc82y6QuATBYlcBrRvBhivKs
-Secret Key
-yvXIfJGvdVJ8iSQN2qZKfUxUQfY9tcLMrlkJZeVmlUdH0CBVJ4igM7yg8CqH4N8J
+API Key y Secret Key: ver gestor de contrasenas (NO guardar aqui)
 ==================================================================================
 Binance-conector
 
 pip install binance-connector
+
+
+==================================================================================
+BACKUP DIARIO AUTOMATIZADO
+==================================================================================
+
+Ubicacion del script:
+	C:\Users\InversionesWildaga\Documents\backup_script\backup_diario.bat
+
+Destino:
+	Google Drive: G:\Mi unidad\Backup\
+		dumps\YYYYMMDD\       <- dump MySQL diario
+		ebook\YYYYMMDD\       <- libros electronicos
+		Inversiones\YYYYMMDD\ <- carpeta inversiones
+
+Retencion:
+	15 dias - rotacion automatica de carpetas antiguas
+
+Base de datos respaldada:
+	MySQL local - base: bdinv
+	Usuario: root
+	Dump completo: schema + data
+	Archivo generado: dumps\bdinv_YYYYMMDD.sql
+
+Programacion automatica (Task Scheduler):
+	Nombre tarea: Wildaga Backup
+	Frecuencia: Diaria
+	Hora: 07:00
+	Usuario: InversionesWildaga
+
+Comandos utiles:
+	-- Ver estado de la tarea
+	schtasks /query /tn "Wildaga Backup" /fo LIST /v
+
+	-- Forzar ejecucion manual
+	schtasks /run /tn "Wildaga Backup"
+
+	-- Ver log del dia
+	type C:\Users\InversionesWildaga\Documents\backup_YYYYMMDD.log
+
+Pendiente activar (cuando se configuren MCPs en VS Code):
+	Descomentar seccion MCP en backup_diario.bat
+	Ruta config MCP: %APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings
+	Destino: G:\Mi unidad\Backup\VSCode-MCP\YYYYMMDD\
 
