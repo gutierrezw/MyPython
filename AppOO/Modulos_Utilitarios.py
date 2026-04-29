@@ -271,6 +271,13 @@ def convierte_ticket_crypto(s: str) -> str:
     return ticket
 
 
+def convierte_ticket_stock(simbolo: str, divisa: str = "USD") -> str:
+    # IB registra tickers canadienses sin sufijo; yfinance necesita .TO para TSX
+    if divisa == "CAD" and not simbolo.endswith(".TO"):
+        return simbolo + ".TO"
+    return simbolo
+
+
 def currency(y=None, pos=None):
     """The two arguments are the value and tick position"""
     x = y if y >= 0 else -y

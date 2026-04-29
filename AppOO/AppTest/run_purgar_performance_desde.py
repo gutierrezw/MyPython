@@ -50,7 +50,7 @@ from Modulos_Utilitarios import read_json_tmp, write_json_tmp
 # ── CONFIGURACIÓN ─────────────────────────────────────────────────────────────
 ACCOUNT = "U4214563"
 VEHICULO = "Stock"
-FECHA_PURGA = date(2026, 4, 15)  # fecha inclusive desde donde se purga
+FECHA_PURGA = date(2025, 12, 20)  # fecha inclusive desde donde se purga
 SCHEDULE_FILE = "agents_schedule.json"
 SCHEDULE_KEY = f"diaria_{VEHICULO}"
 # ──────────────────────────────────────────────────────────────────────────────

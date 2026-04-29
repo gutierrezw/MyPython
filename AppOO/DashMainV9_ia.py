@@ -141,6 +141,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
     def schedule_ib_offline_sync(self):
         try:
             if not self.IClient.authenticated:
+                self.summary = {}
                 result = self.ib_offline_sync()
                 self.logger.warning(f"IBFallback yfinance: {result}")
                 if " Conexión   :" in self.resumen:
