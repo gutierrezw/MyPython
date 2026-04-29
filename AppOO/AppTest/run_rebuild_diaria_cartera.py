@@ -38,7 +38,6 @@ from Modulos_Utilitarios import read_json_tmp, write_json_tmp
 # ── CONFIGURACIÓN ──────────────────────────────────────────────────────────────
 ACCOUNT = "U4214563"
 VEHICULO = "Stock"
-DIVISA = "USD"
 FECHA_PURGA = date(2025, 12, 20)
 SCHEDULE_FILE = "agents_schedule.json"
 SCHEDULE_KEY = f"diaria_{VEHICULO}"
@@ -123,7 +122,7 @@ def main():
     ROp = RepositorioOportunidadesBuySell()
 
     print("\n  [1/4] Descargando booktrading completo (accion='cartera')...")
-    book, ix = ROp.select_booktrading(accion="cartera", account=ACCOUNT, idivisa=DIVISA)
+    book, ix = ROp.select_booktrading(accion="cartera", account=ACCOUNT)
     print(f"        {len(book)} entradas en booktrading")
 
     print(f"\n  [2/4] Generando CSV con yfinance (csv_datos_{VEHICULO}.csv)...")

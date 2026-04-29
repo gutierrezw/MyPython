@@ -186,8 +186,9 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
             basic = float(a_read[ix.index("basico")] / factor)
             close = float(row["Close"] / factor)
 
-            # guardian: precio yfinance no puede diferir más de 20x del costo promedio
-            if basic > 0 and not (basic / 20 <= close <= basic * 20):
+            # guardian: rechaza precios inflados por yfinance (no caídas legítimas)
+            # limite inferior removido — stocks caídos 98%+ son datos válidos (ej: WKHS reverse split)
+            if basic > 0 and close > basic * 20:
                 return
 
             value = close * stock
@@ -328,7 +329,8 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                     activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="download", desde=f_desde, hasta=f_hasta)
 
                 if datos is None or datos.empty:
-                    eof_book, read = next(ebook, (None, None))
+                    while eof_book is not None and read[ix.index("simbolo")] == bkey:
+                        eof_book, read = next(ebook, (None, None))
                 else:
 
                     # en caso hay datos yfinance
