@@ -1429,15 +1429,24 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         finally:
             conn.close()
 
-    def mark_booktrading_delisted(self, symbol, account) -> int:
-        """Marca delisted=1 en todos los registros de booktrading para symbol+account."""
+    def mark_booktrading_delisted(self, symbol, account, fecha_deliste=None) -> int:
+        """Marca delisted=1 en todos los registros de booktrading para symbol+account.
+        fecha_deliste: date en que dejó de cotizar; detalle_book procesa hasta esa fecha.
+        """
         try:
             conn = self._conectar(tabla="update.booktrading")
             cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE booktrading SET delisted = 1, updateStamp = %s " "WHERE simbolo = %s AND cuenta = %s",
-                (datetime.now(), symbol, account),
-            )
+            if fecha_deliste is not None:
+                cursor.execute(
+                    "UPDATE booktrading SET delisted = 1, fecha_deliste = %s, updateStamp = %s "
+                    "WHERE simbolo = %s AND cuenta = %s",
+                    (fecha_deliste, datetime.now(), symbol, account),
+                )
+            else:
+                cursor.execute(
+                    "UPDATE booktrading SET delisted = 1, updateStamp = %s " "WHERE simbolo = %s AND cuenta = %s",
+                    (datetime.now(), symbol, account),
+                )
             conn.commit()
             affected = cursor.rowcount
             cursor.close()

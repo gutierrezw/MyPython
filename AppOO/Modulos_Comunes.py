@@ -308,29 +308,65 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                 activo, a_read, datos = None, [], pd.DataFrame()
                 bkey = read[ix.index("simbolo")]
                 f_desde = read[ix.index("fechahora")].date()
+                sym_hasta = f_hasta
 
-                # saltar simbolos delisted en bloque (evita N llamadas a yfinance por sus filas históricas)
+                # delisted sin fecha_deliste → saltar completo
+                # delisted con fecha_deliste → procesar hasta esa fecha (aporta hasta cierre)
                 if "delisted" in ix and read[ix.index("delisted")] == 1:
-                    while eof_book is not None and read[ix.index("simbolo")] == bkey:
-                        eof_book, read = next(ebook, (None, None))
-                    continue
+                    fd = read[ix.index("fecha_deliste")] if "fecha_deliste" in ix else None
+                    if fd is not None:
+                        sym_hasta = fd
+                    else:
+                        while eof_book is not None and read[ix.index("simbolo")] == bkey:
+                            eof_book, read = next(ebook, (None, None))
+                        continue
 
                 divisa = read[ix.index("divisa")] if "divisa" in ix else "USD"
                 yf_ticket = convierte_ticket_stock(bkey, divisa)
 
                 # cuando Stock hace Ticker para bajar los dividends
                 if read[ix.index("categoria")] == "Stock":
-                    activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="Dividends", desde=f_desde, hasta=f_hasta)
+                    activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="Dividends", desde=f_desde, hasta=sym_hasta)
 
                 elif read[ix.index("categoria")] == "BBVA.ARS":
-                    activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="BBVA.ARS", desde=f_desde, hasta=f_hasta)
+                    activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="BBVA.ARS", desde=f_desde, hasta=sym_hasta)
 
                 else:
-                    activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="download", desde=f_desde, hasta=f_hasta)
+                    activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="download", desde=f_desde, hasta=sym_hasta)
 
                 if datos is None or datos.empty:
+                    last_read = read
                     while eof_book is not None and read[ix.index("simbolo")] == bkey:
+                        last_read = read
                         eof_book, read = next(ebook, (None, None))
+                    # delisted con fecha_deliste pero sin datos yfinance → registrar pérdida total
+                    if sym_hasta != f_hasta:
+                        try:
+                            stock_d = float(last_read[ix.index("stock")])
+                            basico_d = float(last_read[ix.index("basico")]) / float(
+                                last_read[ix.index("factor_cambio")]
+                            )
+                            if stock_d > 0:
+                                costo_d = basico_d * stock_d
+                                writer.writerow(
+                                    [
+                                        account,
+                                        sym_hasta,
+                                        bkey,
+                                        0.0,
+                                        0.0,
+                                        stock_d,
+                                        costo_d,
+                                        -1.0,
+                                        0.0,
+                                        -costo_d,
+                                        0.0,
+                                        0.0,
+                                        1.0,
+                                    ]
+                                )
+                        except Exception:
+                            pass
                 else:
 
                     # en caso hay datos yfinance
@@ -429,7 +465,7 @@ def actualiza_performa_inversion(account=None, vehiculo=None):
 
                 # busca desempeño del índice asociado al vehículo
                 df_indice, index_ref, rtn_index = crea_dataframe_index(vehiculo=vehiculo, desde=f_inicio)
-                df_previo = pd.merge(df_indice, pdatos, on="Date", how="inner")
+                df_previo = pd.merge(df_indice, pdatos, left_index=True, right_index=True, how="inner")
 
                 # deja en df_update las filas Date > f_desde
                 f_limite = f_desde.date() if hasattr(f_desde, "date") else f_desde
