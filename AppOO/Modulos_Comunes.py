@@ -316,6 +316,39 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                     fd = read[ix.index("fecha_deliste")] if "fecha_deliste" in ix else None
                     if fd is not None:
                         sym_hasta = fd
+                        # compra posterior al deliste → zero-row a partir de f_desde
+                        if f_desde > sym_hasta:
+                            last_read = read
+                            while eof_book is not None and read[ix.index("simbolo")] == bkey:
+                                last_read = read
+                                eof_book, read = next(ebook, (None, None))
+                            try:
+                                stock_d = float(last_read[ix.index("stock")])
+                                basico_d = float(last_read[ix.index("basico")]) / float(
+                                    last_read[ix.index("factor_cambio")]
+                                )
+                                if stock_d > 0:
+                                    costo_d = basico_d * stock_d
+                                    writer.writerow(
+                                        [
+                                            account,
+                                            f_desde,
+                                            bkey,
+                                            0.0,
+                                            0.0,
+                                            stock_d,
+                                            costo_d,
+                                            -1.0,
+                                            0.0,
+                                            -costo_d,
+                                            0.0,
+                                            0.0,
+                                            1.0,
+                                        ]
+                                    )
+                            except Exception:
+                                pass
+                            continue
                     else:
                         while eof_book is not None and read[ix.index("simbolo")] == bkey:
                             eof_book, read = next(ebook, (None, None))
