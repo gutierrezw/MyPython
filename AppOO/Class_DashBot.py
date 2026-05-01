@@ -1192,6 +1192,9 @@ class Telegram:
             if not oportunidad:
                 return {}, None, None
 
+            if oportunidad[ix.index("estado")] == "ejecutada":
+                return {"status": "ya_ejecutada"}, oportunidad[ix.index("simbolo")], oportunidad[ix.index("vehiculo")]
+
             vehiculo = oportunidad[ix.index("vehiculo")]
             razon = "Aprobada desde Telegram"
             razon += "." if oportunidad[ix.index("origen")] == "system" else " (IA)"
@@ -1225,19 +1228,22 @@ class Telegram:
 
             # solicita put Order & wait response de ManagerOrderQueue
             if accion == "aprobar":
+                await query.edit_message_reply_markup(reply_markup=None)
                 response, symbol, vehiculo = self.put_order_aprovate_telegram(hash_id=args[0])
 
-                if response and response.get("status"):
+                if response.get("status") == "ya_ejecutada":
+                    await query.edit_message_text(f"⚠️ {symbol}: orden ya ejecutada anteriormente.")
+                elif response and response.get("status"):
                     status = response.get("status", "Pendiente")
                     price = response.get("price", 0)
                     message = f"✅ Oportunidad procesada: {status}\n"
                     message += f"Symbol {symbol}: @price {round(price, 4) if price else 0}"
+                    await query.edit_message_text(message)
                 else:
                     broker = "IB Gateway" if vehiculo == "Stock" else "Binance API"
                     message = f"⚠️ Sin servicio de broker.\n"
                     message += f"Symbol: {symbol or 'N/A'}\nVerifique conexión {broker}."
-
-                await query.edit_message_text(message)
+                    await query.edit_message_text(message)
 
             elif accion == "rechazar":
                 self.RepositorioOportunidades.marcar_oportunidad(
@@ -1294,22 +1300,23 @@ class Telegram:
     async def _delete_message_hash(self, message):
 
         FileMessage = define_FileCache(name="telegram_message_ids.json")
-        with open(FileMessage, "r") as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    # Solo borra del chat el mensajes anterior
-                    if (
-                        data.get("chat_id") == message.get("chat_id")
-                        and data.get("hash_id") == message.get("hash_id")
-                        and data.get("message_id") != message.get("message_id")
-                    ):
-                        await self.bot.delete_message(
-                            chat_id=data.get("chat_id"),
-                            message_id=data.get("message_id"),
-                        )
-                except (json.JSONDecodeError, BadRequest):
-                    continue
+        async with Bot(token=self.TOKEN) as bot:
+            with open(FileMessage, "r") as f:
+                for line in f:
+                    try:
+                        data = json.loads(line)
+                        # Solo borra del chat el mensajes anterior
+                        if (
+                            data.get("chat_id") == message.get("chat_id")
+                            and data.get("hash_id") == message.get("hash_id")
+                            and data.get("message_id") != message.get("message_id")
+                        ):
+                            await bot.delete_message(
+                                chat_id=data.get("chat_id"),
+                                message_id=data.get("message_id"),
+                            )
+                    except (json.JSONDecodeError, BadRequest):
+                        continue
 
     # Path to JSON file for storing message IDs
     async def _save_message(self, sent_message, CHAT_ID, hash_id=None):
@@ -2014,7 +2021,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 mensaje += "```\n"
 
             mensaje += f"{'Métrica':<15} {'Valor':>12}\n"
-            mensaje += f"{'-' * 45}\n"
+            mensaje += f"{'-' * 37}\n"
             mensaje += f"{'Profit'         :<15} {row['Profit']:>12.2f}\n"
             mensaje += f"{'ROI (%)'        :<15} {row['%Roi'] * 100:>12.2f}\n"
             mensaje += f"{'for sell'       :<15} {row['CantidadSell']:>12.1f} de {row['Disponible']:>12.1f}\n"
@@ -2025,12 +2032,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             mensaje += f"{'Valoracion'         :<18} {""}\n"
 
             if modo == "ia":
-                mensaje += f"{'-' * 45}\n"
+                mensaje += f"{'-' * 37}\n"
                 mensaje += f"{'Confianza IA'   :<15} {confianza:>12.1%}\n"
 
             tag, suma = self._consenso_info(symbol)
             if tag:
-                mensaje += f"{'-' * 45}\n"
+                mensaje += f"{'-' * 37}\n"
                 mensaje += f"{'Consenso':<15} {tag:>12} ({suma:+d}/6)\n"
 
             mensaje += "```"
@@ -2265,7 +2272,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 mensaje += "```\n"
 
             mensaje += f"{'Métrica':<18} {'Valor':>12}\n"
-            mensaje += f"{'-' * 45}\n"
+            mensaje += f"{'-' * 37}\n"
             mensaje += f"{'Ganancia Precio'  :<18} {row.get('ganancia_precio', 0):>12.2%}\n"
             mensaje += f"{'Ganancia Inv.'    :<18} {row.get('ganancia_inversion', 0):>12.2f}\n"
             mensaje += f"{'Dividend Yield'   :<18} {row.get('dividend_yield', 0):>12.2%}\n"
@@ -2277,12 +2284,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             mensaje += f"{'Valoracion'       :<18} {""}\n"
 
             if modo == "ia":
-                mensaje += f"{'-' * 45}\n"
+                mensaje += f"{'-' * 37}\n"
                 mensaje += f"{'Confianza IA'     :<18} {confianza:>12.1%}\n"
 
             tag, suma = self._consenso_info(symbol)
             if tag:
-                mensaje += f"{'-' * 45}\n"
+                mensaje += f"{'-' * 37}\n"
                 mensaje += f"{'Consenso':<18} {tag:>12} ({suma:+d}/6)\n"
 
             mensaje += "```"
