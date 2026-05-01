@@ -12,8 +12,10 @@
     "use strict";
 
     const PORT = 5050;
-    let panelEl = null, bodyEl = null, titleEl = null;
+    let panelEl = null, bodyEl = null, titleEl = null, symbolsEl = null, btnCartera = null;
     let minimized = false;
+    let symbolsVisible = false;
+    let _symbols = [];
     let isDragging = false, startX = 0, startY = 0, origLeft = 0, origTop = 0;
     let lastPosicion = null;
 
@@ -370,7 +372,7 @@
             borderRadius: "6px", border: "1px solid #2a2e39",
             fontFamily: "Arial,sans-serif", fontSize: "12px",
             zIndex: "9999", boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
-            userSelect: "none",
+            userSelect: "none",  // header drag — input fields override esto automáticamente
         });
 
         // barra de título
@@ -409,10 +411,35 @@
             clearTvShapes();
         };
 
+        btnCartera = document.createElement("span");
+        btnCartera.textContent = "≡";
+        btnCartera.title = "Cartera";
+        btnCartera.style.cssText = "cursor:pointer;color:#787b86;font-size:16px;line-height:1;padding:0 3px";
+        btnCartera.onclick = (e) => {
+            e.stopPropagation();
+            symbolsVisible = !symbolsVisible;
+            symbolsEl.style.display = symbolsVisible ? "flex" : "none";
+            btnCartera.style.color = symbolsVisible ? "#4a72c8" : "#787b86";
+            if (symbolsVisible && !_symbols.length) fetchSymbols();
+        };
+
+        btnBar.appendChild(btnCartera);
         btnBar.appendChild(btnMin);
         btnBar.appendChild(btnClose);
         header.appendChild(titleEl);
         header.appendChild(btnBar);
+
+        symbolsEl = document.createElement("div");
+        Object.assign(symbolsEl.style, {
+            display: "none",
+            flexWrap: "wrap",
+            gap: "4px",
+            padding: "6px 10px",
+            borderBottom: "1px solid #2a2e39",
+            background: "#161a25",
+            maxHeight: "68px",
+            overflowY: "auto",
+        });
 
         bodyEl = document.createElement("div");
         Object.assign(bodyEl.style, {
@@ -420,6 +447,7 @@
         });
 
         panelEl.appendChild(header);
+        panelEl.appendChild(symbolsEl);
         panelEl.appendChild(bodyEl);
 
         // drag desde header
@@ -441,6 +469,87 @@
         document.addEventListener("mouseup", () => { isDragging = false; });
 
         document.body.appendChild(panelEl);
+
+        // Botón flotante siempre visible — reabre el panel si fue cerrado
+        const fab = document.createElement("div");
+        fab.id = "app-tv-fab";
+        fab.textContent = "📊";
+        Object.assign(fab.style, {
+            position: "fixed", bottom: "80px", right: "14px",
+            width: "36px", height: "36px",
+            background: "#1e2130", border: "1px solid #2a2e39",
+            borderRadius: "50%", display: "flex",
+            alignItems: "center", justifyContent: "center",
+            fontSize: "18px", cursor: "pointer",
+            zIndex: "10000", boxShadow: "0 2px 8px rgba(0,0,0,0.5)",
+            userSelect: "none",
+        });
+        fab.title = "App Panel";
+        fab.onclick = () => {
+            panelEl.style.display = "block";
+        };
+        document.body.appendChild(fab);
+    }
+
+    // ── Lista de símbolos en cartera ──────────────────────────────────────
+    function renderSymbols(symbols, currentSym) {
+        if (!symbolsEl) return;
+        symbolsEl.innerHTML = "";
+        if (!symbols.length) return;
+        symbols.forEach(sym => {
+            const isCurrent = sym === currentSym;
+            const chip = document.createElement("span");
+            chip.textContent = sym;
+            Object.assign(chip.style, {
+                padding: "2px 7px",
+                borderRadius: "3px",
+                fontSize: "11px",
+                cursor: "pointer",
+                fontWeight: isCurrent ? "bold" : "normal",
+                background: isCurrent ? "#2a5298" : "#2a2e39",
+                color: isCurrent ? "#fff" : "#9598a1",
+                border: isCurrent ? "1px solid #4a72c8" : "1px solid #363a45",
+                userSelect: "none",
+                flexShrink: "0",
+            });
+            chip.onclick = () => switchSymbol(sym);
+            symbolsEl.appendChild(chip);
+        });
+    }
+
+    function fetchSymbols() {
+        GM_xmlhttpRequest({
+            method: "GET",
+            url: `http://localhost:${PORT}/symbols`,
+            onload: (r) => {
+                try {
+                    const d = JSON.parse(r.responseText);
+                    _symbols = d.symbols || [];
+                    renderSymbols(_symbols, tvSymbol());
+                    if (btnCartera) btnCartera.title = `Cartera (${_symbols.length})`;
+                } catch (_) {}
+            },
+            onerror: () => {},
+        });
+    }
+
+    function switchSymbol(sym) {
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: `http://localhost:${PORT}/current`,
+            headers: { "Content-Type": "application/json" },
+            data: JSON.stringify({ symbol: sym }),
+            onload: (r) => {
+                try {
+                    const d = JSON.parse(r.responseText);
+                    if (d.ok) {
+                        navegarSi(sym);
+                        setTimeout(poll, 500);
+                    }
+                } catch (_) {}
+            },
+            onerror: () => {},
+        });
     }
 
     // ── Enviar orden al servidor local ────────────────────────────────────
@@ -469,10 +578,13 @@
             onload: (r) => {
                 try {
                     const d = JSON.parse(r.responseText);
+                    const ok = d.ok || d.status in { Submitted: 1, PreSubmitted: 1, FILLED: 1 };
                     if (statusEl) {
-                        statusEl.textContent = d.status || (d.ok ? "OK" : d.error || "error");
-                        statusEl.style.color = d.ok ? "#26a69a" : "#ef5350";
+                        statusEl.textContent = d.status || (ok ? "✔ enviado" : d.error || "error");
+                        statusEl.style.color = ok ? "#26a69a" : "#ef5350";
                     }
+                    if (ok && qtyEl) qtyEl.value = "";
+                    if (ok) setTimeout(poll, 800);
                 } catch (_) { if (statusEl) { statusEl.textContent = "error"; statusEl.style.color = "#ef5350"; } }
             },
             onerror: () => { if (statusEl) { statusEl.textContent = "sin conexión"; statusEl.style.color = "#ef5350"; } },
@@ -482,10 +594,25 @@
     // ── Actualizar contenido ───────────────────────────────────────────────
     function upsertPanel(html, posicion, lotes, symbol) {
         if (!panelEl) crearPanel();
+
+        // Preservar qty y foco antes de redibujar
+        const prevQty = document.getElementById("tv-order-qty")?.value || "";
+        const hadFocus = document.activeElement?.id === "tv-order-qty";
+
+        bodyEl.style.display = "block";
         bodyEl.innerHTML = html;
         panelEl.style.display = "block";
         if (titleEl && symbol) titleEl.textContent = `${symbol} — Análisis`;
         lastPosicion = posicion;
+        renderSymbols(_symbols, symbol);
+
+        // Restaurar qty y foco
+        const qtyEl = document.getElementById("tv-order-qty");
+        if (qtyEl) {
+            if (prevQty) qtyEl.value = prevQty;
+            if (hadFocus) qtyEl.focus();
+        }
+
         const btnBuy = document.getElementById("tv-btn-buy");
         const btnSell = document.getElementById("tv-btn-sell");
         if (btnBuy) btnBuy.onclick = () => postOrder("BUY");
@@ -539,9 +666,9 @@
                                         },
                                     });
                                 } else {
-                                    if (panelEl) panelEl.style.display = "none";
                                     clearTvShapes();
                                     lastPosicion = null;
+                                    if (bodyEl) bodyEl.style.display = "none";
                                 }
                             } catch (_) { }
                         },
@@ -582,7 +709,9 @@
         });
     }
 
+    crearPanel();
     setInterval(poll, 3000);
     setInterval(pollPrice, 2000);
+    setInterval(fetchSymbols, 30000);
     setTimeout(poll, 1500);
 })();

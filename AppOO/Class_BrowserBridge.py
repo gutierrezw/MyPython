@@ -28,6 +28,8 @@ _tv_last_ping = {"t": 0.0, "ever": False}  # ever=True → Tampermonkey activo e
 _tv_server = None  # referencia para shutdown limpio
 _tv_contexto = {}  # contexto de cartera para inyección en claude.ai
 _order_callback = None  # fn(symbol, vehiculo, account, opt, qty, price, conid, razon) → (response, symbol)
+_switch_callback = None  # fn(symbol) → None; carga datos del símbolo y llama abrir_tradingview()
+_symbols_fn = None  # fn() → list[str]; retorna lista de símbolos en cartera (live)
 
 
 def _tv_symbol(symbol, vehiculo):
@@ -77,6 +79,9 @@ class _TVRequestHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/contexto":
             origin = self.headers.get("Origin", "https://claude.ai")
             self._send_json(_tv_contexto, origin=origin)
+        elif parsed.path == "/symbols":
+            symbols = sorted(_symbols_fn()) if _symbols_fn else sorted(_tv_data.keys())
+            self._send_json({"symbols": symbols})
         else:
             self._send_json({"error": "not found"}, 404)
 
@@ -114,6 +119,22 @@ class _TVRequestHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 _logger.error(f"do_POST /order: {e}")
                 self._send_json({"ok": False, "error": str(e)}, 500, origin)
+        elif parsed.path == "/current":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}")
+                symbol = body.get("symbol", "").upper()
+                if not symbol:
+                    self._send_json({"ok": False, "error": "symbol requerido"}, 400, origin)
+                    return
+                if not _switch_callback:
+                    self._send_json({"ok": False, "error": "switch callback no registrado"}, 503, origin)
+                    return
+                _switch_callback(symbol)
+                self._send_json({"ok": True, **_tv_data.get(symbol, {})}, origin=origin)
+            except Exception as e:
+                _logger.error(f"do_POST /current: {e}")
+                self._send_json({"ok": False, "error": str(e)}, 500, origin)
         else:
             self._send_json({"error": "not found"}, 404, origin)
 
@@ -148,6 +169,18 @@ def set_order_callback(fn):
     """Registra el callable que ejecuta órdenes. Firma: fn(symbol, vehiculo, account, opt, qty, price, conid, razon)."""
     global _order_callback
     _order_callback = fn
+
+
+def set_switch_callback(fn):
+    """Registra el callable que carga datos de un símbolo y llama abrir_tradingview(). Firma: fn(symbol)."""
+    global _switch_callback
+    _switch_callback = fn
+
+
+def set_symbols_fn(fn):
+    """Registra la función que retorna la lista live de símbolos en cartera. Firma: fn() → list[str]."""
+    global _symbols_fn
+    _symbols_fn = fn
 
 
 def set_claude_contexto(data):
