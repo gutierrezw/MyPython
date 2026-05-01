@@ -71,7 +71,14 @@ from Class_DashBot import AsistenteChatbot
 from Class_IA_modelos import ModeloOportunidadesSell
 from Class_SystemStatus import system_status
 from Class_BotCryptoUI import BotCryptoUI
-from Class_BrowserBridge import start_tv_server, stop_tv_server, start_price_sync, set_order_callback
+from Class_BrowserBridge import (
+    start_tv_server,
+    stop_tv_server,
+    start_price_sync,
+    set_order_callback,
+    set_switch_callback,
+    set_symbols_fn,
+)
 from Class_Finance import FinancePanel
 
 
@@ -2453,6 +2460,23 @@ class DashMain:
 
             # Tickle siempre corre — detecta reconexión aunque arranque offline
             ib.start_tickle(interval=30, datahub=DataHub, on_reconnect=_ib_on_reconnect)
+
+            set_switch_callback(self.stock._abrir_tradingview)
+            set_symbols_fn(
+                lambda: (
+                    sorted(
+                        p.get("contractDesc") or p.get("ticket", "")
+                        for p in (
+                            self.stock.positions
+                            if isinstance(self.stock.positions, list)
+                            else self.stock.positions.values()
+                        )
+                        if (p.get("contractDesc") or p.get("ticket"))
+                    )
+                    if self.stock and self.stock.positions
+                    else []
+                )
+            )
 
         except Exception as e:
             logging.getLogger("IBroks_Client").error(f"start_stock(): {e}")
