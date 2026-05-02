@@ -3783,16 +3783,17 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                             row[ix.index("cantidad")] <= 0 and row[ix.index("fechahora")].date() > desde.date()
                         ):
 
+                            fecha_dia = row[ix.index("fechahora")].strftime("%Y-%m-%d")
                             if inicio_qry:
-                                concatena = """ AND ((simbolo, fechahora) = ('%s', '%s')""" % (
+                                concatena = """ AND ((simbolo, DATE(fechahora)) = ('%s', '%s')""" % (
                                     row[ix.index("simbolo")],
-                                    row[ix.index("fechahora")],
+                                    fecha_dia,
                                 )
                                 inicio_qry = False
                             else:
-                                concatena = """ OR (simbolo, fechahora) = ('%s', '%s')""" % (
+                                concatena = """ OR (simbolo, DATE(fechahora)) = ('%s', '%s')""" % (
                                     row[ix.index("simbolo")],
-                                    row[ix.index("fechahora")],
+                                    fecha_dia,
                                 )
                             qry += concatena
 
