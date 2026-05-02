@@ -186,9 +186,9 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
             basic = float(a_read[ix.index("basico")] / factor)
             close = float(row["Close"] / factor)
 
-            # guardian: rechaza precios inflados por yfinance (no caídas legítimas)
-            # limite inferior removido — stocks caídos 98%+ son datos válidos (ej: WKHS reverse split)
-            if basic > 0 and close > basic * 20:
+            # guardian: rechaza precios aberrantes por yfinance (inflación o colapso near-zero)
+            # limite inferior = basic/100: permite caídas reales hasta -99% (ej: penny stocks)
+            if basic > 0 and not (basic / 100 <= close <= basic * 20):
                 return
 
             value = close * stock
