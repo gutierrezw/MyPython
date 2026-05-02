@@ -732,6 +732,17 @@ class ClassAgenteIA:
         except Exception as e:
             self.logger.error(f"Agente_ExtractosWatcher(): {e}")
 
+    # agente splits — detecta y aplica splits de yfinance a booktrading diariamente
+    @wait_rate(86400, persist=True)
+    def Agente_SplitsControl(self):
+        try:
+            result = self.RepositorioOportunidades.sync_splits(account=self.account)
+            self.logger.warning(
+                f"Agente_SplitsControl: nuevos={result['nuevos']} aplicados={result['aplicados']} residuos={result['residuos']}"
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_SplitsControl(): {e}")
+
     # agente defensivo: protege ganancias con órdenes STOP dinámicas
     async def Agente_ManagerPreservation(self):
         """
@@ -1868,6 +1879,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 "Agente_StockBeta": 3600,
                 "Agente_ExtractosWatcher": 3600,
                 "Agente_ClasificadorETF": 604800,
+                "Agente_SplitsControl": 86400,
             }
 
             def _fmt_intervalo(seg):
@@ -1938,6 +1950,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
                     # Agente Beta Portfolio Crypto — descarga yfinance y calcula beta vs BTC cada 6h
                     self.Agente_CryptoBeta()
+
+                    # Agente Splits — detecta y aplica splits a booktrading diariamente
+                    self.Agente_SplitsControl()
 
                     # Agente for Preservation (defensivo estructural)  -- No activar esta en prueba
                     # self.exec_modulo_async(self.Agente_ManagerPreservation())
