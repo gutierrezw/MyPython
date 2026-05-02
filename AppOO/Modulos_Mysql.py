@@ -4380,6 +4380,109 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         except conn.ProgrammingError as error:
             print("[Mysql:: select_order_trader({})]: {}".format(vehiculo, error))
 
+    def sync_splits(self, account="U4214563"):
+        """Detecta splits via yfinance, registra en bdinv.split y aplica pendientes a booktrading.
+        Returns dict {nuevos, aplicados, residuos}."""
+        nuevos, aplicados, residuos = 0, 0, 0
+        try:
+            conn = self._conectar(tabla="sync_splits.symbols")
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT simbolo FROM booktrading WHERE cuenta=%s AND delisted=0", (account,))
+            symbols = [r[0] for r in cursor.fetchall()]
+            cursor.close()
+            conn.close()
+        except (Exception, connect.Error) as e:
+            _logger.error(f"sync_splits(): {e}")
+            return {"nuevos": 0, "aplicados": 0, "residuos": 0}
+
+        for symbol in symbols:
+            try:
+                splits = yf.Ticker(symbol).splits
+                if splits.empty:
+                    continue
+                for split_date, ratio in splits.items():
+                    if ratio <= 0 or ratio == 1.0:
+                        continue
+                    self.insert_split(
+                        symbol=symbol,
+                        values={"date": split_date, "split": float(ratio), "preciocantidad": "A", "aplicado": "N"},
+                    )
+                    nuevos += 1
+            except Exception as e:
+                _logger.error(f"sync_splits detect {symbol}: {e}")
+
+        try:
+            pending, ix = self.select_split(symbol="all")
+        except Exception as e:
+            _logger.error(f"sync_splits select_split(): {e}")
+            return {"nuevos": nuevos, "aplicados": 0, "residuos": 0}
+
+        for row in pending:
+            rec = dict(zip(ix, row))
+            symbol = rec["ticket"]
+            split_date = rec["date"]
+            ratio = float(rec["split"])
+            pc = rec.get("preciocantidad") or "A"
+            split_id = rec["id"]
+            if ratio <= 0 or ratio == 1.0:
+                continue
+            try:
+                conn = self._conectar(tabla="sync_splits.apply")
+                cursor = conn.cursor()
+                if pc in ("A", None):
+                    cursor.execute(
+                        """UPDATE booktrading
+                           SET cantidad=cantidad*%s, stock=stock*%s,
+                               basico=basico/%s, preciotrans=preciotrans/%s, preciocierre=preciocierre/%s,
+                               split=split*%s
+                           WHERE cuenta=%s AND simbolo=%s AND fechahora<%s""",
+                        (ratio, ratio, ratio, ratio, ratio, ratio, account, symbol, split_date),
+                    )
+                elif pc == "C":
+                    cursor.execute(
+                        """UPDATE booktrading
+                           SET cantidad=cantidad*%s, stock=stock*%s, split=split*%s
+                           WHERE cuenta=%s AND simbolo=%s AND fechahora<%s""",
+                        (ratio, ratio, ratio, account, symbol, split_date),
+                    )
+                elif pc == "P":
+                    cursor.execute(
+                        """UPDATE booktrading
+                           SET basico=basico/%s, preciotrans=preciotrans/%s, preciocierre=preciocierre/%s,
+                               split=split*%s
+                           WHERE cuenta=%s AND simbolo=%s AND fechahora<%s""",
+                        (ratio, ratio, ratio, ratio, account, symbol, split_date),
+                    )
+                aplicados += cursor.rowcount
+                cursor.execute("UPDATE split SET aplicado='Y' WHERE id=%s", (split_id,))
+                conn.commit()
+                cursor.close()
+                conn.close()
+            except (Exception, connect.Error) as e:
+                _logger.error(f"sync_splits apply {symbol} {split_date}: {e}")
+
+        try:
+            conn = self._conectar(tabla="sync_splits.residuos")
+            cursor = conn.cursor()
+            cursor.execute(
+                """UPDATE booktrading b
+                   JOIN (
+                       SELECT cuenta, simbolo, MAX(sec) AS max_sec
+                       FROM booktrading WHERE cuenta=%s GROUP BY cuenta, simbolo
+                   ) m ON b.cuenta=m.cuenta AND b.simbolo=m.simbolo AND b.sec=m.max_sec
+                   SET b.stock=0
+                   WHERE ABS(b.stock) < 0.01 AND b.stock != 0""",
+                (account,),
+            )
+            residuos = cursor.rowcount
+            conn.commit()
+            cursor.close()
+            conn.close()
+        except (Exception, connect.Error) as e:
+            _logger.error(f"sync_splits residuos: {e}")
+
+        return {"nuevos": nuevos, "aplicados": aplicados, "residuos": residuos}
+
 
 class FinanceScreen(BDsystem):  # -------------------------------------------------------------------------------------
     """
