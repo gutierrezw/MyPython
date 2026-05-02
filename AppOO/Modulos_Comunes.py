@@ -14,7 +14,10 @@ def diaria_book_performance(account=None, vehiculo=None, proces=None):
         #    f"diaria_book_performance() {vehiculo} {proces['diaria_book_performance'].date()} < {ahora.date()}"
         # )
         dbp = proces["diaria_book_performance"]
-        dbp_date = dbp if isinstance(dbp, date) else dbp.date()
+        if dbp is None:
+            dbp_date = ahora.date() - timedelta(days=1)
+        else:
+            dbp_date = dbp if isinstance(dbp, date) else dbp.date()
         if dbp_date < ahora.date():
 
             # itera para recorrer booktrading  e insertar performance dia(s) anteriores
