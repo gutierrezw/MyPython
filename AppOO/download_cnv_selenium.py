@@ -121,13 +121,15 @@ def descargar_excel_selenium(uuid, id_doc, fecha_str, directorio, display_log=Fa
     chrome_options.add_argument("--headless")  # Sin ventana visible
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--safebrowsing-disable-download-protection")
 
     # Configurar carpeta de descargas
     prefs = {
         "download.default_directory": os.path.abspath(directorio),
         "download.prompt_for_download": False,
         "download.directory_upgrade": True,
-        "safebrowsing.enabled": True,
+        "safebrowsing.enabled": False,
+        "safebrowsing.disable_download_protection_for_urls": ["https://aif2.cnv.gov.ar"],
     }
     chrome_options.add_experimental_option("prefs", prefs)
 
@@ -170,8 +172,17 @@ def descargar_excel_selenium(uuid, id_doc, fecha_str, directorio, display_log=Fa
         # Hacer clic en el botón
         boton_descarga.click()
 
-        # Esperar a que se complete la descarga
-        time.sleep(3)
+        # Esperar a que se complete la descarga (poll hasta 90s)
+        excels_previos = {f for f in os.listdir(directorio) if f.endswith((".xlsx", ".xls"))}
+        timeout = 90
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            en_dir = os.listdir(directorio)
+            nuevos_excel = [f for f in en_dir if f.endswith((".xlsx", ".xls")) and f not in excels_previos]
+            en_progreso = [f for f in en_dir if f.endswith(".crdownload")]
+            if nuevos_excel and not en_progreso:
+                break
+            time.sleep(1)
 
         # Limpiar archivos antiguos antes de renombrar
         archivos = os.listdir(directorio)
