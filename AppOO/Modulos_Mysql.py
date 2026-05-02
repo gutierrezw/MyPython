@@ -3576,7 +3576,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 # ultima diaria para un determinado symbol
                 if symbol is not None:
                     qry = """SELECT a.* FROM (SELECT sec, fechahora, stock, basico, gprealizadas, cantidad,
-                                                    tarifacomision, idtrans, position_inversion, factor_cambio
+                                                    tarifacomision, idtrans, factor_cambio
                                             FROM booktrading WHERE cuenta = '%s' AND divisa = '%s'
                                                                 AND simbolo = '%s' AND activa = 'Y'
                                                                 AND delisted = 0) AS a
@@ -3587,7 +3587,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 # ultima diaria registrada
                 if symbol is None:
                     qry = """SELECT a.* FROM (SELECT sec, fechahora, stock, basico, gprealizadas, cantidad,
-                                                    tarifacomision, idtrans, position_inversion FROM booktrading
+                                                    tarifacomision, idtrans FROM booktrading
                                             WHERE cuenta = '%s' AND divisa = '%s' AND activa = 'Y'
                                             AND delisted = 0) AS a
                             ORDER BY fechahora DESC, sec DESC;"""
@@ -3868,9 +3868,9 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             """Obtiene último registro activo de compra para calcular basico"""
             qry = """SELECT a.* FROM (
                         SELECT sec, fechahora, stock, basico, gprealizadas, cantidad,
-                               tarifacomision, idtrans, position_inversion, factor_cambio
+                               tarifacomision, idtrans, factor_cambio
                         FROM booktrading
-                        WHERE cuenta = %s AND divisa = %s AND simbolo = %s AND activa = 'Y' 
+                        WHERE cuenta = %s AND divisa = %s AND simbolo = %s AND activa = 'Y'
                      ) AS a ORDER BY fechahora DESC, sec DESC;"""
             cursor.execute(qry, (account, idivisa, symbol))
             sql = cursor.fetchone()
@@ -4005,7 +4005,6 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                     "basico": basico,
                     "codigo": codigo,
                     "gprealizadas": gpreal,
-                    "position_inversion": position,
                     "updateStamp": datetime.now(),
                     "hash_id": hashId,
                     "sec": int(usec) + 1,
@@ -4185,7 +4184,6 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 codigo = "O"
                 mtmgp = 0.00
                 values.update({"activa": "Y"})
-                stock = stock if stock > position else position
 
             # cuando es venta en corto
             elif values["cantidad"] < 0:
@@ -4209,7 +4207,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             values.update({"basico": basico})
             values.update({"codigo": codigo})
             values.update({"gprealizadas": gpreal})
-            values.update({"position_inversion": position})
+
             values.update({"updateStamp": datetime.now()})
             values.update({"hash_id": hashId})
             values.update({"sec": int(usec) + 1})
