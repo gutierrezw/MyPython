@@ -350,17 +350,12 @@ class DataHub:
 
     # Fechas y procesos batch
     now = datetime.now()
-    mrk_anterior = get_ultimo_dia_mercado(market="Stock")
-    dia_anterior = get_ultimo_dia_mercado(market="Crypto")
-    mrv_anterior = get_ultimo_dia_mercado(market="BBVA.ARS")
-    mrv_safeday = mrv_anterior - timedelta(days=2)  # BBVA.ARS cierra un dia después
-
     wait_3m = now + timedelta(minutes=3)
     last_process = {
-        "Stock": {"diaria_book_performance": mrk_anterior, "wait": wait_3m},
-        "Crypto": {"diaria_book_performance": dia_anterior, "wait": wait_3m},
-        "BBVA.ARS": {"diaria_book_performance": mrv_safeday, "wait": wait_3m},
-        "BotCrypto": {"diaria_book_performance": mrv_safeday, "wait": wait_3m},
+        "Stock": {"diaria_book_performance": None, "wait": wait_3m},
+        "Crypto": {"diaria_book_performance": None, "wait": wait_3m},
+        "BBVA.ARS": {"diaria_book_performance": None, "wait": wait_3m},
+        "BotCrypto": {"diaria_book_performance": None, "wait": wait_3m},
         "graph_performace_portafolio": False,
         "dividends_en_market_stock": now,
     }
@@ -2708,18 +2703,22 @@ class TickerInfo(MyOrders):
                 write_json_tmp(_FILE, data)
                 DataHub.last_process["graph_performace_portafolio"] = False
                 proceso_update_performance(account=self.account, vehiculo=self.vehiculo)
+                self.logger.warning(f"schedule_diario({self.vehiculo}): diaria {ultimo_cierre} procesada OK")
+            else:
+                self.logger.warning(
+                    f"schedule_diario({self.vehiculo}): diaria_book_performance devolvió False — JSON no actualizado"
+                )
 
             # contabiliza ejecución del schedule
             task = f"schedule_diario({self.vehiculo})"
 
             if self.schDiario_itera == 0:
-                # print(f"{task} :: {datetime.now()}")
                 self.procesos.append({"running": {task: 0}})
 
             self.schDiario_itera += 1
             DataHub.update_self_procesos(proces="running", tarea=task, itera=self.schDiario_itera)
         except Exception as e:
-            print("[schedule_diario()]: {}".format(e))
+            self.logger.error(f"schedule_diario({self.vehiculo}): {e}")
 
     # programa las actualizaciones de API's cada minuto
     def schedule_operativo(self):

@@ -598,6 +598,7 @@ def get_extractos_csv(account=None, ruta=None):
             spamreader = csv.reader(csvfile, delimiter=",")
             # spamreader = csv.reader(csvfile)
             depositos, retiros = 0.0, 0.0
+            extracto.update({"imargen": 0, "idevengo": 0})
 
             # for i, row in enumerate(spamreader):
             for row in spamreader:
@@ -691,11 +692,8 @@ def get_extractos_csv(account=None, ruta=None):
                         "Amount",
                     )
 
-                    extracto.update({"imargen": 0})
                     if "Debit" in row[ix.index("Description")]:
                         extracto.update({"imargen": abs(float(row[ix.index("Amount")]))})
-
-                    extracto.update({"idevengo": 0})
                     if "Managed Securities" in row[ix.index("Description")]:
                         extracto.update({"idevengo": row[ix.index("Amount")]})
 
