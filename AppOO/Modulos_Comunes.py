@@ -1,7 +1,9 @@
 from Class_DataFrame import get_yfinance
 from Modulos_Mysql import BDsystem, IPerformance, RepositorioOportunidadesBuySell
 from Modulos_Utilitarios import vehiculo_parm, convierte_ticket_crypto, convierte_ticket_stock, define_FileCache
-from Modulos_python import datetime, date, pd, timedelta, os, csv, traceback
+from Modulos_python import datetime, date, pd, timedelta, os, csv, traceback, logging
+
+_logger = logging.getLogger("ClassMyOrders")
 
 
 # construye e inserta diaria para los assets del vehiculo
@@ -32,7 +34,7 @@ def diaria_book_performance(account=None, vehiculo=None, proces=None):
 
         return update
     except Exception as error:
-        print(f"[diaria_book_performance({vehiculo}): {error})]")
+        _logger.error(f"diaria_book_performance({vehiculo}): {error}")
 
 
 # organiza como la solicitud de datos para armar de performance del vehículo

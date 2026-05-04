@@ -18,8 +18,17 @@ from Modulos_python import (
     datetime,
     timedelta,
     traceback,
+    calendar,
 )
 from Class_customer import MyMessageBox, CustomTreeview, DataHub
+
+
+def ultimo_dia_habil(fecha):
+    ultimo = calendar.monthrange(fecha.year, fecha.month)[1]
+    d = datetime(fecha.year, fecha.month, ultimo).date()
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
 
 
 class GestionInversion(tk.Frame):
@@ -1267,8 +1276,8 @@ class GestionInversion(tk.Frame):
 
         book, ix = self.RepositorioOportunidades.select_booktrading(accion="cartera", account=account, idivisa="ARS")
 
-        # Obtener desempeño del vehículo
-        performa, iy = self.Perfoma.select_performa_inversion(account="U4214563", vehiculo="Stock", accion="all")
+        # Obtener desempeño del vehículo FCI
+        performa, iy = self.Perfoma.select_performa_inversion(account=account, vehiculo="BBVA.ARS", accion="all")
 
         # dataframe(): para obtener ingresos, costos y comisiones ------------------------------------------------------------
         datos = pd.DataFrame(book, columns=ix)
@@ -1284,11 +1293,9 @@ class GestionInversion(tk.Frame):
                 "cuenta",
                 "sell",
                 "activa",
-                "cantidad",
                 "simbolo",
                 "preciocierre",
                 "preciotrans",
-                "basico",
                 "mtmgp",
                 "stock",
             ]
@@ -1305,16 +1312,16 @@ class GestionInversion(tk.Frame):
                 "p_referencia",
                 "p_vehiculo",
                 "timestamp",
-                "costo_base",
             ]
         )
 
         idatos["dividendos"] = idatos["dividends"]
         idatos["navcierre"] = idatos["value"]
+        idatos["costobase"] = idatos["costo_base"]
         idatos["Date"] = pd.to_datetime(idatos["fechaclose"])
 
         idatos.set_index("Date", inplace=True)
-        idatos = idatos.drop(columns=["fechaclose", "dividends", "value"])
+        idatos = idatos.drop(columns=["fechaclose", "dividends", "value", "costo_base"])
 
         # Seleccionar solo los fines de mes
         idatos.index = pd.to_datetime(idatos.index)
@@ -1330,7 +1337,7 @@ class GestionInversion(tk.Frame):
             axis=1,
         )
         datos["retiros"] = datos.apply(
-            lambda rows: (rows["producto"] / rows["factor_cambio"] if rows["codigo"] == "C" else 0),
+            lambda rows: (rows["basico"] * rows["cantidad"] / rows["factor_cambio"] if rows["codigo"] == "C" else 0),
             axis=1,
         )
         datos["perdidas"] = datos.apply(
@@ -1359,7 +1366,7 @@ class GestionInversion(tk.Frame):
         datos["fee"] = 0.0
 
         # agrupa por meses y suma los valores, cambia formato index para aparear y obtener costo_base mensual
-        datos = datos.drop(columns=["fechahora", "producto", "tarifacomision"])
+        datos = datos.drop(columns=["fechahora", "producto", "tarifacomision", "basico", "cantidad"])
         datos.set_index("Date", inplace=True)
         datos.index = pd.to_datetime(datos.index)
 
@@ -1372,14 +1379,12 @@ class GestionInversion(tk.Frame):
         resumen = resumen.infer_objects(copy=False).fillna(0)
         resumen.index = pd.to_datetime(resumen.index)
 
-        # se construye saldo al final de cada mes
-        resumen["navcierre"] = resumen["costo_base"] + resumen["beneficios"] - resumen["costos"]
-
         # deja como fin de mes las fechas Dataframe
         resumen.index = resumen.index + pd.offsets.MonthEnd(0)
         resumen.fillna(0, inplace=True)
 
         anterior = 0.0
+        resultado = []
         for row in resumen.itertuples():
             values = {
                 "extracto": row.Index.date(),
@@ -1392,19 +1397,23 @@ class GestionInversion(tk.Frame):
                 "fee": row.fee,
                 "comisiones": row.comisiones,
                 "tax": row.tax,
-                "navcierre": row.navcierre + anterior,
+                "navcierre": row.navcierre,
                 "cierreanterior": anterior,
-                "costobase": row.navcierre + anterior - row.crecimiento,
+                "costobase": row.costobase,
                 "idevengo": row.idevengo,
                 "imargen": row.imargen,
             }
 
             anterior = values["navcierre"]
+            resultado.append(values)
 
             # evalua si trabaja ne opción insert para agregar el mes en curso
             if insert and (hasta == row.Index.date().strftime("%Y-%m-%d")):
-                # inserta último mes calculado
-                self.PlaInversion.insert_extracto(account=account, values=values)
+                # solo inserta si performa tiene dato real para ese mes (navcierre > 0)
+                if values["navcierre"] > 0:
+                    self.PlaInversion.insert_extracto(account=account, values=values)
+
+        return resultado
 
     def update_plan(self, account=None, condicion=None):
         """
@@ -1638,8 +1647,10 @@ class GestionInversion(tk.Frame):
 
             if last_update:
                 f_hasta = last_update[ix.index("fechaclose")]
-                if extracto <= f_hasta:
-                    log = True
+                if hasattr(f_hasta, "date"):
+                    f_hasta = f_hasta.date()
+                ultimo_habil = ultimo_dia_habil(extracto)
+                log = f_hasta >= ultimo_habil
 
             return log
         except Exception as e:

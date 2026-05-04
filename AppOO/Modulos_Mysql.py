@@ -2416,21 +2416,28 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         try:
             conn = self._conectar(tabla="select.extracto")
             cursor = conn.cursor()
-            acierre, id_next = 0.0, 1
+            acierre, listvalues = 0.0, []
+
+            if is_none(account) or not bool(values):
+                return
+
+            # Eliminar registros existentes del mismo (idcuenta, mes/año) — permite re-cierre
+            extracto_mes = values["extracto"].strftime("%Y-%m")
+            cursor.execute(
+                "DELETE FROM extractos WHERE idcuenta=%s AND DATE_FORMAT(extracto, '%%Y-%%m') = %s",
+                (account, extracto_mes),
+            )
+            conn.commit()
+
+            # Obtener el último registro restante (mes anterior real)
             uextract = self.select_extracto(account=account, extract="last")
-            if len(uextract) == 1:
+            if uextract:
                 acierre = uextract[0]["navcierre"]
+                # Validar que el mes sea consecutivo al anterior
+                if not valida_meses_consecutivos(inicio=uextract[0]["extracto"], fin=values["extracto"]):
+                    return
 
-            listvalues = []
-
-            # valida que extracto a ingresar sea consecutivo al ultimo extracto
-            if uextract and bool(values):
-                if valida_meses_consecutivos(inicio=uextract[0]["extracto"], fin=values["extracto"]):
-                    insert_account_exists()
-            else:
-                # caso cuando la account no tenga extractos previos
-                if not is_none(account) and bool(values):
-                    insert_account_exists()
+            insert_account_exists()
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: insert_extracto()]: {}".format(error))
 
