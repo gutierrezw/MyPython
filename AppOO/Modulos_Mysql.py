@@ -4024,7 +4024,28 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             qry = f"INSERT INTO booktrading ({','.join(columns)}) VALUES ({placeholders});"
             cursor.execute(qry, tuple(list(values.values()) + [symbol]))
             conn.commit()
+            last_id = cursor.lastrowid
             cursor.close()
+
+            # Recalcula stock real desde BD para corregir desfase cuando se insertan
+            # múltiples transacciones del mismo símbolo en la misma fecha/hora
+            fix_cur = conn.cursor()
+            fix_cur.execute(
+                """
+                UPDATE booktrading b
+                JOIN (
+                    SELECT SUM(t.cantidad) AS stock_real
+                    FROM booktrading t
+                    WHERE t.cuenta = %s AND t.simbolo = %s
+                      AND (t.fechahora < %s OR (t.fechahora = %s AND t.sec <= %s))
+                ) calc ON 1=1
+                SET b.stock = calc.stock_real
+                WHERE b.id = %s
+                """,
+                (account, symbol, values["fechahora"], values["fechahora"], values["sec"], last_id),
+            )
+            conn.commit()
+            fix_cur.close()
 
             # Actualizar costo promedio en otros_activos
             time.sleep(0.4)
@@ -4229,7 +4250,28 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             qry += "simbolo) VALUES ({});".format(",".join("%s" for _ in range(len(valuesins))))
             cursor.execute(qry, tuple(valuesins))
             conn.commit()
+            last_id = cursor.lastrowid
             cursor.close()
+
+            # Recalcula stock real desde BD para corregir desfase cuando se insertan
+            # múltiples transacciones del mismo símbolo en la misma fecha/hora
+            fix_cur = conn.cursor()
+            fix_cur.execute(
+                """
+                UPDATE booktrading b
+                JOIN (
+                    SELECT SUM(t.cantidad) AS stock_real
+                    FROM booktrading t
+                    WHERE t.cuenta = %s AND t.simbolo = %s
+                      AND (t.fechahora < %s OR (t.fechahora = %s AND t.sec <= %s))
+                ) calc ON 1=1
+                SET b.stock = calc.stock_real
+                WHERE b.id = %s
+                """,
+                (account, symbol, values["fechahora"], values["fechahora"], values["sec"], last_id),
+            )
+            conn.commit()
+            fix_cur.close()
 
             time.sleep(0.4)
             # update basico "otros_activos" e indicador "activa", cuando sea una venta (cantidad <0)
