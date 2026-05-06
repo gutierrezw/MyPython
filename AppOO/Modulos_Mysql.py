@@ -20,6 +20,8 @@ from Modulos_Utilitarios import (
     is_none,
     valida_meses_consecutivos,
     sort_positions,
+    read_json_tmp,
+    write_json_tmp,
 )
 
 _logger = logging.getLogger("Mysql")
@@ -904,6 +906,67 @@ class IPerformance(BDsystem):  # -----------------------------------------------
         finally:
             cursor.close()
             conn.close()
+
+    def validate_performa(self, account, vehiculo="Stock", threshold=2.0):
+        """Detecta registros en diaria_performance con value_ratio > threshold vs día anterior.
+
+        Usa LAG sobre toda la historia del símbolo para calcular value_ratio en los últimos 7 días.
+        Un ratio > threshold indica precio yfinance corrupto (no split: splits conservan value ≈ 1.0x).
+        Para cada anomalía detectada, purga desde la fecha más temprana y resetea agents_schedule.json
+        para que schedule_diario regenere los datos en el próximo ciclo.
+
+        Returns:
+            dict con 'anomalias' (list of dicts) y 'purgados' (bool).
+        """
+        conn = self._conectar(tabla="validate_performa")
+        try:
+            cursor = conn.cursor()
+            qry = """
+                SELECT t.Date, t.symbol, t.value, t.value_ayer,
+                       t.value / t.value_ayer AS value_ratio
+                FROM (
+                    SELECT Date, symbol, value,
+                           LAG(value) OVER (PARTITION BY account, symbol ORDER BY Date) AS value_ayer
+                    FROM diaria_performance
+                    WHERE account = %s AND value > 0
+                ) t
+                WHERE t.value_ayer > 0
+                  AND t.Date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                  AND t.value / t.value_ayer > %s
+                ORDER BY t.Date ASC
+            """
+            cursor.execute(qry, (account, threshold))
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            if not rows:
+                return {"anomalias": [], "purgados": False}
+
+            anomalias = [
+                {
+                    "fecha": r[0],
+                    "symbol": r[1],
+                    "value": float(r[2]),
+                    "value_ayer": float(r[3]),
+                    "ratio": float(r[4]),
+                }
+                for r in rows
+            ]
+            fecha_min = min(a["fecha"] for a in anomalias)
+            self.purgar_desde(account=account, vehiculo=vehiculo, desde=fecha_min)
+
+            key = f"diaria_{vehiculo}"
+            desde_reset = (fecha_min - timedelta(days=1)).strftime("%Y-%m-%d")
+            data = read_json_tmp("agents_schedule.json")
+            data[key] = desde_reset
+            write_json_tmp("agents_schedule.json", data)
+
+            return {"anomalias": anomalias, "purgados": True}
+
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql:: IPerformance.validate_performa()]: {error}")
+            return {"anomalias": [], "purgados": False}
 
 
 class DiariaCNV(BDsystem):  # --------------------------------------------------------------------------------------

@@ -785,54 +785,6 @@ class AnalisisBase:
             traceback.print_exc()
             return row
 
-    def reconstruir_diaria_performance(self, btn=None, lbl=None):
-        """
-        Versión base: reconstruye diaria_performance + performa_inversion para self.vehiculo.
-        Corre en thread daemon para no bloquear la UI.
-        """
-
-        def _run():
-            try:
-                if btn:
-                    btn.after(0, lambda: btn.config(state="disabled", text="Procesando..."))
-                if lbl:
-                    lbl.after(0, lambda: lbl.config(text=""))
-
-                ROp = RepositorioOportunidadesBuySell()
-                errores = []
-
-                ses = BDsystem.get_sesion_by_vehiculo(vehiculo=self.vehiculo)
-                if not ses or not ses.get("idcuenta"):
-                    errores.append("sin sesión configurada")
-                else:
-                    account = ses["idcuenta"]
-                    divisa = ses.get("idmoneda", "USD")
-                    try:
-                        book, ix = ROp.select_booktrading(accion="cartera", account=account, idivisa=divisa)
-                        path = detalle_book(account=account, vehiculo=self.vehiculo, book=book, ix=ix)
-                        if path is None:
-                            errores.append("detalle_book sin path")
-                        else:
-                            read_csv_insert_diaria(path=path, insert=True)
-                            proceso_update_performance(account=account, vehiculo=self.vehiculo)
-                    except Exception as e:
-                        errores.append(str(e))
-                        _logger.error(f"[reconstruir_diaria_performance/{self.vehiculo}]: {e}")
-
-                msg = "✓ Reconstruido" if not errores else f"Errores: {'; '.join(errores)}"
-                color = "#2ecc71" if not errores else "#e74c3c"
-                if lbl:
-                    lbl.after(0, lambda: lbl.config(text=msg, fg=color))
-                if btn:
-                    btn.after(0, lambda: btn.config(state="normal", text="Reconstruir Performance"))
-
-            except Exception as e:
-                _logger.error(f"[reconstruir_diaria_performance]: {e}")
-                if btn:
-                    btn.after(0, lambda: btn.config(state="normal", text="Reconstruir Performance"))
-
-        threading.Thread(target=_run, daemon=True).start()
-
 
 class AnalisisFCI(AnalisisBase):
     """Análisis específico para Fondos Comunes de Inversión"""
@@ -848,66 +800,6 @@ class AnalisisFCI(AnalisisBase):
         self.df_historico = pd.DataFrame()
         self.df_ultimo = pd.DataFrame()
         self.metricas = pd.DataFrame()
-
-    def reconstruir_diaria_performance(self, btn=None, lbl=None):
-        """
-        Reconstruye diaria_performance y performa_inversion para todas las cuentas FCI.
-        Flujo por cuenta:
-          1) booktrading → detalle_book() → CSV
-          2) read_csv_insert_diaria(insert=True) → actualiza diaria_performance
-          3) proceso_update_performance()       → actualiza performa_inversion
-        Corre en thread para no bloquear la UI.
-        """
-
-        def _run():
-            try:
-                if btn:
-                    btn.config(state="disabled", text="Procesando...")
-                if lbl:
-                    lbl.config(text="")
-
-                ROp = RepositorioOportunidadesBuySell()
-                errores = []
-
-                for veh in (self.vehiculo, "SANT.ARS"):
-                    try:
-                        ses = BDsystem.get_sesion_by_vehiculo(vehiculo=veh)
-                        if not ses or not ses.get("idcuenta"):
-                            continue
-                        account = ses["idcuenta"]
-                        divisa = ses.get("idmoneda", "ARS")
-
-                        # 1. booktrading completo → CSV
-                        book, ix = ROp.select_booktrading(accion="cartera", account=account, idivisa=divisa)
-                        path = detalle_book(account=account, vehiculo=self.vehiculo, book=book, ix=ix)
-                        if path is None:
-                            errores.append(f"{veh}: detalle_book sin path")
-                            continue
-
-                        # 2. CSV → diaria_performance (solo inserta filas > last Date)
-                        read_csv_insert_diaria(path=path, insert=True)
-
-                        # 3. diaria_performance → performa_inversion
-                        proceso_update_performance(account=account, vehiculo=self.vehiculo)
-
-                    except Exception as e:
-                        errores.append(f"{veh}: {e}")
-                        _logger.error(f"[reconstruir_diaria_performance/{veh}]: {e}")
-
-                # Feedback en UI (desde thread → after)
-                msg = "✓ Reconstruido" if not errores else f"Errores: {'; '.join(errores)}"
-                color = "#2ecc71" if not errores else "#e74c3c"
-                if lbl:
-                    lbl.after(0, lambda: lbl.config(text=msg, fg=color))
-                if btn:
-                    btn.after(0, lambda: btn.config(state="normal", text="Reconstruir Performance"))
-
-            except Exception as e:
-                _logger.error(f"[reconstruir_diaria_performance]: {e}")
-                if btn:
-                    btn.after(0, lambda: btn.config(state="normal", text="Reconstruir Performance"))
-
-        threading.Thread(target=_run, daemon=True).start()
 
     def _poblar_contenido(self, frame):
         """Implementación específica para FCI"""
@@ -959,22 +851,6 @@ class AnalisisFCI(AnalisisBase):
 
         # ========== CARTERA VS ÍNDICE DE REFERENCIA ==========
         row = self.crear_seccion(frame, f"Cartera vs Índice:", row)
-
-        # Botón reconstruir diaria_performance + performa_inversion
-        frame_btn = tk.Frame(frame, bg=self.BG_COLOR)
-        frame_btn.grid(row=row, column=0, columnspan=2, sticky="w", padx=5, pady=(0, 4))
-        lbl_status = tk.Label(frame_btn, text="", bg=self.BG_COLOR, fg="#2ecc71", font=("Segoe UI", 8))
-        btn_rebuild = tk.Button(
-            frame_btn,
-            text="Reconstruir Performance",
-            bg="gray",
-            fg="white",
-            width=22,
-        )
-        btn_rebuild.config(command=lambda: self.reconstruir_diaria_performance(btn=btn_rebuild, lbl=lbl_status))
-        btn_rebuild.pack(side="left")
-        lbl_status.pack(side="left", padx=8)
-        row += 1
 
         row = self.crear_grafico_vs_indice(parent=frame, row=row)
 
@@ -1466,15 +1342,6 @@ class AnalisisCrypto(AnalisisBase):
 
         # ========== CARTERA VS ÍNDICE ==========
         row = self.crear_seccion(frame, "Cartera vs Índice:", row)
-
-        frame_btn = tk.Frame(frame, bg=self.BG_COLOR)
-        frame_btn.grid(row=row, column=0, columnspan=2, sticky="w", padx=5, pady=(0, 4))
-        lbl_status = tk.Label(frame_btn, text="", bg=self.BG_COLOR, fg="#2ecc71", font=("Segoe UI", 8))
-        btn_rebuild = tk.Button(frame_btn, text="Reconstruir Performance", bg="gray", fg="white", width=22)
-        btn_rebuild.config(command=lambda: self.reconstruir_diaria_performance(btn=btn_rebuild, lbl=lbl_status))
-        btn_rebuild.pack(side="left")
-        lbl_status.pack(side="left", padx=8)
-        row += 1
 
         row = self.crear_grafico_vs_indice(parent=frame, row=row)
 

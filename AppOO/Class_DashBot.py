@@ -59,7 +59,14 @@ from Modulos_python import (
 
 sys.path.insert(0, "..")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "AppValuations"))
-from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, PlanInversion, MarketScreen, EstrategiaInversion
+from Modulos_Mysql import (
+    RepositorioOportunidadesBuySell,
+    BDsystem,
+    PlanInversion,
+    MarketScreen,
+    EstrategiaInversion,
+    IPerformance,
+)
 from Class_Finance import scan_extractos
 from Class_Screener import sync_market, audit_portfolio, refresh_consenso_tags
 from Class_InstitucionalScore import (
@@ -89,6 +96,7 @@ class ClassAgenteIA:
         self.PlanInversion = PlanInversion()
         self.sesion = self.PlanInversion.get_sesion_by_vehiculo(self.vehiculo)
         self.account = self.sesion["idcuenta"]
+        self.Performa = IPerformance()
 
         # variables Modelo sell
         modelo = BDsystem.get_modelo_ia(modelo="modelo_sellv01")
@@ -742,6 +750,17 @@ class ClassAgenteIA:
             )
         except Exception as e:
             self.logger.error(f"Agente_SplitsControl(): {e}")
+
+    # agente validador de performa — detecta precios yfinance corruptos y purga para regeneración
+    @wait_rate(3600, persist=True)
+    def Agente_PerformaValidator(self):
+        try:
+            result = self.Performa.validate_performa(account=self.account, vehiculo=self.vehiculo)
+            if result["purgados"]:
+                detalle = ", ".join(f"{a['symbol']} {a['fecha']} ratio={a['ratio']:.2f}x" for a in result["anomalias"])
+                self.logger.warning(f"Agente_PerformaValidator: anomalías purgadas — {detalle}")
+        except Exception as e:
+            self.logger.error(f"Agente_PerformaValidator(): {e}")
 
     # agente defensivo: protege ganancias con órdenes STOP dinámicas
     async def Agente_ManagerPreservation(self):
@@ -1953,6 +1972,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
                     # Agente Splits — detecta y aplica splits a booktrading diariamente
                     self.Agente_SplitsControl()
+
+                    # Agente PerformaValidator — detecta precios yfinance corruptos y purga para regeneración
+                    self.Agente_PerformaValidator()
 
                     # Agente for Preservation (defensivo estructural)  -- No activar esta en prueba
                     # self.exec_modulo_async(self.Agente_ManagerPreservation())
