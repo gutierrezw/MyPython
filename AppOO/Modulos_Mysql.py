@@ -911,9 +911,11 @@ class IPerformance(BDsystem):  # -----------------------------------------------
         """Detecta registros en diaria_performance con value_ratio > threshold vs día anterior.
 
         Usa LAG sobre toda la historia del símbolo para calcular value_ratio en los últimos 7 días.
-        Un ratio > threshold indica precio yfinance corrupto (no split: splits conservan value ≈ 1.0x).
-        Para cada anomalía detectada, purga desde la fecha más temprana y resetea agents_schedule.json
-        para que schedule_diario regenere los datos en el próximo ciclo.
+        Un ratio > threshold indica precio yfinance corrupto (splits conservan value ≈ 1.0x).
+
+        Purga quirúrgica: solo elimina los registros del símbolo afectado (no todos los símbolos
+        de esa fecha). Performa_inversion se purga desde la fecha mínima afectada para forzar
+        reagregación. agents_schedule.json se resetea para que schedule_diario regenere.
 
         Returns:
             dict con 'anomalias' (list of dicts) y 'purgados' (bool).
@@ -937,10 +939,10 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             """
             cursor.execute(qry, (account, threshold))
             rows = cursor.fetchall()
-            cursor.close()
-            conn.close()
 
             if not rows:
+                cursor.close()
+                conn.close()
                 return {"anomalias": [], "purgados": False}
 
             anomalias = [
@@ -953,8 +955,31 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                 }
                 for r in rows
             ]
+
+            # purga quirúrgica: solo los registros del símbolo afectado
+            for a in anomalias:
+                cursor.execute(
+                    "DELETE FROM diaria_performance WHERE account = %s AND symbol = %s AND Date >= %s",
+                    (account, a["symbol"], str(a["fecha"])),
+                )
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            # purga performa_inversion desde la fecha mínima afectada (aggregate queda inválido)
             fecha_min = min(a["fecha"] for a in anomalias)
-            self.purgar_desde(account=account, vehiculo=vehiculo, desde=fecha_min)
+            conn2 = self._conectar(tabla="validate_performa.purga_pi")
+            try:
+                cur2 = conn2.cursor()
+                cur2.execute(
+                    "DELETE FROM performa_inversion WHERE idcuenta = %s AND vehiculo = %s AND fechaclose >= %s",
+                    (account, vehiculo, str(fecha_min)),
+                )
+                conn2.commit()
+            finally:
+                cur2.close()
+                conn2.close()
 
             key = f"diaria_{vehiculo}"
             desde_reset = (fecha_min - timedelta(days=1)).strftime("%Y-%m-%d")
