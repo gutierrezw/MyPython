@@ -82,7 +82,7 @@ from Class_BrowserBridge import set_claude_contexto
 from Class_ApiBinnace import BinanceClient
 from Class_ServiciosCrypto import ServiciosCrypto
 from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
-from Modulos_Utilitarios import define_FileCache, read_json_tmp, write_json_tmp
+from Modulos_Utilitarios import define_FileCache, read_json_tmp, write_json_tmp, AGENTES_SCHEDULE
 
 
 # Admistrador de Agentes IA
@@ -1885,21 +1885,6 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
     def run(self):
         def _log_schedule_status():
             """Loguea tabla de estado de agentes al arrancar agentesIA."""
-            _AGENTES = {
-                "Agente_MarketScreener": 86400,
-                "Agente_InstitucionalScore": 86400,
-                "Agente_ConsensoCache": 300,
-                "Agente_EdgarFunds": 2592000,
-                "Agente_FundFilings": 604800,
-                "Agente_13FHoldings": 86400,
-                "Agente_13FScores": 86400,
-                "Agente_AuditPortfolio": 2592000,
-                "Agente_LtvControl": 300,
-                "Agente_StockBeta": 3600,
-                "Agente_ExtractosWatcher": 3600,
-                "Agente_ClasificadorETF": 604800,
-                "Agente_SplitsControl": 86400,
-            }
 
             def _fmt_intervalo(seg):
                 if seg >= 86400:
@@ -1915,7 +1900,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             lineas = ["\nAgentesIA — schedule al arrancar:", sep, header, sep]
             ok, pendiente, vencido = 0, 0, 0
 
-            for nombre, intervalo in _AGENTES.items():
+            for nombre, cfg in AGENTES_SCHEDULE.items():
+                intervalo = cfg["intervalo"]
                 ts = sched.get(nombre, 0)
                 if not ts:
                     estado = "⚠  NUNCA"
