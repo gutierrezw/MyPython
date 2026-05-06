@@ -68,19 +68,25 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 # ============================================================
 class DataFrameCache:
     def __init__(self, maxsize=200, ttl=3600):
-        """
-        maxsize: cantidad máxima de elementos en caché
-        ttl: tiempo de vida (en segundos)
-        """
         self.cache = TTLCache(maxsize=maxsize, ttl=ttl)
-        self.GetCounter = 0
+        self._maxsize = maxsize
+        self._ttl = ttl
+        self.hits = 0
+        self.misses = 0
+        self.clears = 0
+        self._bypass = set()
 
-        # Asigna Nombre Logging
         self.logger = logging.getLogger("DataFrameCache")
         self.logger.warning("✅ Cache DataFrame inicializado correctamente.")
 
+    def _ticket_from_key(self, key):
+        for kv in key[2]:
+            if kv[0] == "ticket":
+                return kv[1].upper()
+        return None
+
     def get(self, key):
-        self.GetCounter += 1
+        self.hits += 1
         return self.cache.get(key)
 
     def set(self, key, value):
@@ -91,13 +97,44 @@ class DataFrameCache:
 
     def clear(self):
         self.cache.clear()
+        self.clears += 1
 
     def has(self, key):
+        ticket = self._ticket_from_key(key)
+        if ticket and ticket in self._bypass:
+            return False
         return key in self.cache
 
     def remove(self, key):
         if key in self.cache:
             del self.cache[key]
+
+    def add_bypass(self, symbol):
+        self._bypass.add(symbol.upper())
+
+    def remove_bypass(self, symbol):
+        self._bypass.discard(symbol.upper())
+
+    def stats(self):
+        ks = self.keys()
+        symbols = []
+        for k in ks:
+            # key = (fname, args, tuple(sorted(kwargs.items())))
+            # busca "ticket" en kwargs_tuple
+            for kv in k[2]:
+                if kv[0] == "ticket":
+                    symbols.append(kv[1])
+                    break
+        return {
+            "size": len(ks),
+            "maxsize": self._maxsize,
+            "ttl_seg": self._ttl,
+            "hits": self.hits,
+            "misses": self.misses,
+            "clears": self.clears,
+            "bypass": sorted(self._bypass),
+            "symbols": sorted(symbols),
+        }
 
 
 # ============================================================
@@ -121,10 +158,14 @@ def use_dataframe_cache(df_cache):
                 if use_cache and df_cache.has(key):
                     return df_cache.get(key)
 
+                df_cache.misses += 1
                 result = func(*args, **kwargs)
 
-                if use_cache:
-                    df_cache.set(key, result)
+                # no cachear resultados vacíos — permite reintento en próxima llamada
+                if use_cache and result is not None:
+                    _, datos = result if isinstance(result, tuple) else (None, result)
+                    if datos is not None and not (hasattr(datos, "empty") and datos.empty):
+                        df_cache.set(key, result)
             except Exception as e:
                 df_cache.logger.warning(textwrap.dedent(f"""
                         ===============================================
@@ -368,7 +409,7 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
 
             activo = yf.Ticker(ticket)
             dividends = activo.dividends
-            pdatos = yf.download(ticket, start=desde, end=hasta, auto_adjust=True, progress=False)
+            pdatos = yf.download(ticket, start=desde, end=hasta, auto_adjust=False, progress=False)
 
             # extraer el primer nivel de las columnas sacando infor Ticker
             pdatos.columns = pdatos.columns.get_level_values(0)
