@@ -83,6 +83,7 @@ from Class_ApiBinnace import BinanceClient
 from Class_ServiciosCrypto import ServiciosCrypto
 from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
 from Modulos_Utilitarios import define_FileCache, read_json_tmp, write_json_tmp, AGENTES_SCHEDULE
+from Class_DataFrame import CacheHut
 
 
 # Admistrador de Agentes IA
@@ -755,10 +756,26 @@ class ClassAgenteIA:
     @wait_rate(3600, persist=True)
     def Agente_PerformaValidator(self):
         try:
+            st = CacheHut.stats()
+            self.logger.warning(
+                f"Agente_PerformaValidator: cache size={st['size']}/{st['maxsize']} "
+                f"hits={st['hits']} misses={st['misses']} bypass={st['bypass']}"
+            )
             result = self.Performa.validate_performa(account=self.account, vehiculo=self.vehiculo)
             if result["purgados"]:
-                detalle = ", ".join(f"{a['symbol']} {a['fecha']} ratio={a['ratio']:.2f}x" for a in result["anomalias"])
-                self.logger.warning(f"Agente_PerformaValidator: anomalías purgadas — {detalle}")
+                for a in result["anomalias"]:
+                    sym, fecha, ratio = a["symbol"], a["fecha"], a["ratio"]
+                    if a.get("quarantined"):
+                        self.logger.critical(
+                            f"Agente_PerformaValidator: {sym} CUARENTENA — purgado 3+ veces en 6h, "
+                            f"datos yfinance persistentemente malos (ratio={ratio:.2f}x). "
+                            f"Saltea regeneración hasta que yfinance se corrija."
+                        )
+                    else:
+                        self.logger.warning(
+                            f"Agente_PerformaValidator: {sym} {fecha} ratio={ratio:.2f}x purgado — bypass cache"
+                        )
+                        CacheHut.add_bypass(sym)
         except Exception as e:
             self.logger.error(f"Agente_PerformaValidator(): {e}")
 

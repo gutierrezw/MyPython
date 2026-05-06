@@ -1,7 +1,13 @@
 from Class_DataFrame import get_yfinance
 from Modulos_Mysql import BDsystem, IPerformance, RepositorioOportunidadesBuySell
-from Modulos_Utilitarios import vehiculo_parm, convierte_ticket_crypto, convierte_ticket_stock, define_FileCache
-from Modulos_python import datetime, date, pd, timedelta, os, csv, traceback, logging
+from Modulos_Utilitarios import (
+    vehiculo_parm,
+    convierte_ticket_crypto,
+    convierte_ticket_stock,
+    define_FileCache,
+    read_json_tmp,
+)
+from Modulos_python import datetime, date, pd, timedelta, os, csv, traceback, logging, time
 
 _logger = logging.getLogger("ClassMyOrders")
 
@@ -191,12 +197,6 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
             basic = float(a_read[ix.index("basico")] / factor)
             close = float(row["Close"] / factor)
 
-            # bloquea precios aberrantes extremos de yfinance antes de insertar
-            # umbral 200x el costo: atrapa colapsos yfinance (ej: $3→$2.7M) sin falsos positivos
-            # casos moderados (2-20x) los detecta y purga el Agente_PerformaValidator post-inserción
-            if basic > 0 and close > basic * 200:
-                return
-
             value = close * stock
             div = row["Dividends"] / factor * stock if "Dividends" in row else 0
 
@@ -362,6 +362,14 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
 
                 divisa = read[ix.index("divisa")] if "divisa" in ix else "USD"
                 yf_ticket = convierte_ticket_stock(bkey, divisa)
+
+                # cuarentena: símbolo con datos corruptos recurrentes — saltear hasta que expire (24h)
+                _quarantine = read_json_tmp("quarantine_symbols.json")
+                _q_ts = _quarantine.get(bkey, 0)
+                if _q_ts and (time.time() - _q_ts) < 86400:
+                    while eof_book is not None and read[ix.index("simbolo")] == bkey:
+                        eof_book, read = next(ebook, (None, None))
+                    continue
 
                 # cuando Stock hace Ticker para bajar los dividends
                 if read[ix.index("categoria")] == "Stock":

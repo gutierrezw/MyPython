@@ -981,11 +981,38 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                 cur2.close()
                 conn2.close()
 
-            key = f"diaria_{vehiculo}"
-            desde_reset = (fecha_min - timedelta(days=1)).strftime("%Y-%m-%d")
-            data = read_json_tmp("agents_schedule.json")
-            data[key] = desde_reset
-            write_json_tmp("agents_schedule.json", data)
+            # cuarentena: si el mismo símbolo se purga 3+ veces en 6 horas, entra en cuarentena 24h
+            _QUARANTINE_LIMIT = 3
+            _QUARANTINE_WINDOW = 6 * 3600
+            _QUARANTINE_TTL = 24 * 3600
+            now = time.time()
+
+            purge_hist = read_json_tmp("purge_history.json")
+            quarantine = read_json_tmp("quarantine_symbols.json")
+
+            symbols_ok = []
+            for a in anomalias:
+                sym = a["symbol"]
+                recientes = [t for t in purge_hist.get(sym, []) if now - t < _QUARANTINE_WINDOW]
+                recientes.append(now)
+                purge_hist[sym] = recientes
+                if len(recientes) >= _QUARANTINE_LIMIT:
+                    quarantine[sym] = now
+                    a["quarantined"] = True
+                else:
+                    a["quarantined"] = False
+                    symbols_ok.append(sym)
+
+            write_json_tmp("purge_history.json", purge_hist)
+            write_json_tmp("quarantine_symbols.json", quarantine)
+
+            # solo resetea el schedule si hay símbolos no cuarentenados con anomalías
+            if symbols_ok:
+                key = f"diaria_{vehiculo}"
+                desde_reset = (fecha_min - timedelta(days=1)).strftime("%Y-%m-%d")
+                data = read_json_tmp("agents_schedule.json")
+                data[key] = desde_reset
+                write_json_tmp("agents_schedule.json", data)
 
             return {"anomalias": anomalias, "purgados": True}
 
