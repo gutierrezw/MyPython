@@ -191,6 +191,12 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
             basic = float(a_read[ix.index("basico")] / factor)
             close = float(row["Close"] / factor)
 
+            # bloquea precios aberrantes extremos de yfinance antes de insertar
+            # umbral 200x el costo: atrapa colapsos yfinance (ej: $3→$2.7M) sin falsos positivos
+            # casos moderados (2-20x) los detecta y purga el Agente_PerformaValidator post-inserción
+            if basic > 0 and close > basic * 200:
+                return
+
             value = close * stock
             div = row["Dividends"] / factor * stock if "Dividends" in row else 0
 
