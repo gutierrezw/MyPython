@@ -4575,7 +4575,10 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 splits = yf.Ticker(symbol).splits
                 if splits.empty:
                     continue
-                relevantes = splits[splits.index >= pd.Timestamp(primera_compra)]
+                ts = pd.Timestamp(primera_compra)
+                if splits.index.tz is not None and ts.tzinfo is None:
+                    ts = ts.tz_localize(splits.index.tz)
+                relevantes = splits[splits.index >= ts]
                 for split_date, ratio in relevantes.items():
                     if ratio <= 0 or ratio == 1.0:
                         continue
