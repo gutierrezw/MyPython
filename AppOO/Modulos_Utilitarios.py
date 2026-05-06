@@ -21,6 +21,23 @@ from Modulos_python import (
     messagebox,
 )
 
+AGENTES_SCHEDULE = {
+    "Agente_MarketScreener": {"intervalo": 86400, "desc": "Discovery + Yahoo (diario)"},
+    "Agente_InstitucionalScore": {"intervalo": 86400, "desc": "Ownership institucional (diario)"},
+    "Agente_ConsensoCache": {"intervalo": 300, "desc": "Materializa consenso_tag en market (5 min)"},
+    "Agente_EdgarFunds": {"intervalo": 2592000, "desc": "Fondos EDGAR company.idx (mensual)"},
+    "Agente_FundFilings": {"intervalo": 604800, "desc": "Descarga XMLs 13F-HR (semanal)"},
+    "Agente_13FHoldings": {"intervalo": 86400, "desc": "Parsea XMLs → fund_holdings (diario)"},
+    "Agente_13FScores": {"intervalo": 86400, "desc": "Recalcula inst_score (diario)"},
+    "Agente_AuditPortfolio": {"intervalo": 2592000, "desc": "Auditoría cartera delistados (mensual)"},
+    "Agente_ClasificadorETF": {"intervalo": 604800, "desc": "Clasifica ETFs con estrategia Balance (semanal)"},
+    "Agente_LtvControl": {"intervalo": 300, "desc": "LTV colateral Binance (5 min)"},
+    "Agente_StockBeta": {"intervalo": 3600, "desc": "Beta portfolio Stock (1 hora)"},
+    "Agente_ExtractosWatcher": {"intervalo": 3600, "desc": "Escanea tmp/extractos/ y carga PDFs (1 hora)"},
+    "Agente_SplitsControl": {"intervalo": 86400, "desc": "Detecta y aplica splits a booktrading (diario)"},
+    "Agente_PerformaValidator": {"intervalo": 3600, "desc": "Detecta precios yfinance corruptos y purga (1 hora)"},
+}
+
 
 def format_financiero(width=0, importe=0, divisa="USD"):
     # Mapa de Versalitas

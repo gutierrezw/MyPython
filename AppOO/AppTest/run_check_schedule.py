@@ -11,26 +11,9 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from Modulos_Utilitarios import read_json_tmp
+from Modulos_Utilitarios import read_json_tmp, AGENTES_SCHEDULE
 from datetime import datetime
 import time
-
-AGENTES = {
-    "Agente_MarketScreener": {"intervalo": 86400, "desc": "Discovery + Yahoo (diario)"},
-    "Agente_InstitucionalScore": {"intervalo": 86400, "desc": "Ownership institucional (diario)"},
-    "Agente_ConsensoCache": {"intervalo": 300, "desc": "Materializa consenso_tag en market (5 min)"},
-    "Agente_EdgarFunds": {"intervalo": 2592000, "desc": "Fondos EDGAR company.idx (mensual)"},
-    "Agente_FundFilings": {"intervalo": 604800, "desc": "Descarga XMLs 13F-HR (semanal)"},
-    "Agente_13FHoldings": {"intervalo": 86400, "desc": "Parsea XMLs → fund_holdings (diario)"},
-    "Agente_13FScores": {"intervalo": 86400, "desc": "Recalcula inst_score (diario)"},
-    "Agente_AuditPortfolio": {"intervalo": 2592000, "desc": "Auditoría cartera delistados (mensual)"},
-    "Agente_ClasificadorETF": {"intervalo": 604800, "desc": "Clasifica ETFs con estrategia Balance (semanal)"},
-    "Agente_LtvControl": {"intervalo": 300, "desc": "LTV colateral Binance (5 min)"},
-    "Agente_StockBeta": {"intervalo": 3600, "desc": "Beta portfolio Stock (1 hora)"},
-    "Agente_ExtractosWatcher": {"intervalo": 3600, "desc": "Escanea tmp/extractos/ y carga PDFs (1 hora)"},
-    "Agente_SplitsControl": {"intervalo": 86400, "desc": "Detecta y aplica splits a booktrading (diario)"},
-    "Agente_PerformaValidator": {"intervalo": 3600, "desc": "Detecta precios yfinance corruptos y purga (1 hora)"},
-}
 
 ALERTA_FACTOR = 1.5  # vencido si lleva > 1.5x el intervalo sin correr
 
@@ -52,7 +35,7 @@ def main():
     print(f"\n{'Agente':<28} {'Intervalo':<10} {'Último run':<22} {'Próximo run':<22} {'Estado'}")
     print("─" * 100)
 
-    for nombre, cfg in AGENTES.items():
+    for nombre, cfg in AGENTES_SCHEDULE.items():
         intervalo = cfg["intervalo"]
         ts = sched.get(nombre, 0)
 
@@ -86,7 +69,7 @@ def main():
     if vencido:
         print("⚠  Agentes VENCIDOS (llevan >1.5x su intervalo sin correr):")
         for a in vencido:
-            print(f"   - {a}  ({AGENTES[a]['desc']})")
+            print(f"   - {a}  ({AGENTES_SCHEDULE[a]['desc']})")
         print()
 
 
