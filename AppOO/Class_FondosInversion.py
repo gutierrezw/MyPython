@@ -266,19 +266,25 @@ class ArsFondosInversion(tk.Frame):
                 if not df_fci.empty:
                     for keys in df_fci.itertuples():
                         try:
-                            # valida existencia del fondo en cartera
+                            # valida existencia del fondo — primero por CAFCI, fallback por nombre
                             activo, found = self.RepositorioOportunidades.select_otros_activos(
                                 idSymbol=keys.Código_CAFCI
                             )
                             if not found:
-                                self.CNVDiaria.append(
-                                    {
-                                        "idcrypto": keys.Código_CAFCI,
-                                        "descripcion": keys.fondo,
-                                        "base_asset": "ARS",
-                                        "quote_asset": "USD",
-                                    }
+                                activo, found = self.RepositorioOportunidades.select_otros_activos(
+                                    descripcion=keys.fondo
                                 )
+                            if not found:
+                                cuenta_ins = (
+                                    self.account_sant if "Santander" in keys.Soc_Depositaria else self.account_bbva
+                                )
+                                activo, found = self.RepositorioOportunidades.insert_otros_activos(
+                                    symbol=keys.fondo,
+                                    cuenta=cuenta_ins,
+                                    avgcost_override=keys.V_actual / 1000,
+                                    base_asset="ARS",
+                                )
+                            if not found:
                                 continue
 
                             values = {}
@@ -324,28 +330,34 @@ class ArsFondosInversion(tk.Frame):
             # obtiene costo promedio
             activo, found = self.RepositorioOportunidades.select_otros_activos(account=account, symbol=ticket)
 
-            # obtiene precio de mercado
+            # obtiene precio de mercado — fallback a preciocierre de booktrading si no está en CNV
             conid = activo[0]["idcrypto"]
-            cnv, ix, found = self.ClassCNV.select_CNV(symbol=conid)
+            cnv, ix, cnv_found = self.ClassCNV.select_CNV(symbol=conid)
+            factor = last[0]["factor_cambio"] if last[0]["factor_cambio"] > 0 else 1
+
+            if cnv_found:
+                fecha_cnv = cnv[ix.index("fecha")]
+                valor_actual = cnv[ix.index("valorActual")] / 1000 / factor
+                valor_anterior = cnv[ix.index("valorAnterior")] / 1000 / factor
+            else:
+                fecha_cnv = (
+                    last[0]["fechahora"].date() if hasattr(last[0]["fechahora"], "date") else last[0]["fechahora"]
+                )
+                valor_actual = last[0]["preciocierre"] / factor if last[0]["preciocierre"] else 0
+                valor_anterior = valor_actual
 
             # obtiene valor anterior de la posición
             found, position = buscar_ticker(positions, ticket)
 
-            p["exDividendDate"] = cnv[ix.index("fecha")]
+            p["exDividendDate"] = fecha_cnv
             p["factor_cambio"] = last[0]["factor_cambio"]
             p["dividendYield"] = 0
             p["estrategia"] = "P05"
             p["dividendo"] = 0
-            p["costobase"] = (
-                (activo[0]["avgcost"] * last[0]["stock"] / last[0]["factor_cambio"])
-                if last[0]["factor_cambio"] > 0
-                else 0
-            )
+            p["costobase"] = (activo[0]["avgcost"] * last[0]["stock"] / factor) if factor > 0 else 0
             p["objetivo"] = 0
             p["position"] = last[0]["stock"]
-            p["mrkprice"] = (
-                (cnv[ix.index("valorActual")] / 1000 / last[0]["factor_cambio"]) if last[0]["factor_cambio"] > 0 else 0
-            )
+            p["mrkprice"] = valor_actual
 
             p["mktvalue"] = p["mrkprice"] * last[0]["stock"]
             p["retorno"] = (p["mktvalue"] - p["costobase"]) / p["costobase"] if p["costobase"] > 0 else 0
@@ -361,11 +373,7 @@ class ArsFondosInversion(tk.Frame):
             p["deuda"] = 0
             p["conid"] = str(activo[0]["idcrypto"])
             p["peso"] = 0
-            p["open"] = (
-                (cnv[ix.index("valorAnterior")] / 1000 / last[0]["factor_cambio"])
-                if last[0]["factor_cambio"] > 0
-                else 0
-            )
+            p["open"] = valor_anterior
 
             p["unrealizedpnl"] = p["mktvalue"] - p["costobase"]
             p["dgyp"] = p["mrkprice"] - p["open"]
@@ -486,6 +494,14 @@ class ArsFondosInversion(tk.Frame):
                         activo, found = self.RepositorioOportunidades.select_otros_activos(
                             account=self.account_bbva, symbol=rows["Descripción de Especie"]
                         )
+                        if not found:
+                            precio = self.string_float(s=rows["Precio"])
+                            activo, found = self.RepositorioOportunidades.insert_otros_activos(
+                                symbol=rows["Descripción de Especie"],
+                                cuenta=self.account_bbva,
+                                avgcost_override=precio if precio > 0 else 1,
+                                base_asset="ARS",
+                            )
                         if found:
                             cantidad = self.string_float(s=rows["Cantidad (VN)"]) * (1 if codigo == "O" else -1)
                             fecha = datetime.strptime(rows["Fecha"], "%d/%m/%Y")
@@ -566,7 +582,12 @@ class ArsFondosInversion(tk.Frame):
                         )
 
                         if not found:
-                            activo, found = self.RepositorioOportunidades.insert_otros_activos(symbol=rows["Fondo"])
+                            activo, found = self.RepositorioOportunidades.insert_otros_activos(
+                                symbol=rows["Fondo"],
+                                cuenta=self.account_sant,
+                                avgcost_override=ValorCuotaParte,
+                                base_asset="ARS",
+                            )
                         if found:
                             cantidad = CuotaParte * (1 if codigo == "O" else -1)
                             fecha = datetime.strptime(rows["Fecha_liquidación"], "%d/%m/%Y")

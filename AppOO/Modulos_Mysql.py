@@ -907,11 +907,12 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
-    def validate_performa(self, account, vehiculo="Stock", threshold=2.0):
-        """Detecta registros en diaria_performance con value_ratio > threshold vs día anterior.
+    def validate_performa(self, account, vehiculo="Stock", threshold=2.0, low_threshold=0.1):
+        """Detecta registros en diaria_performance con value_ratio fuera de rango vs día anterior.
 
         Usa LAG sobre toda la historia del símbolo para calcular value_ratio en los últimos 7 días.
-        Un ratio > threshold indica precio yfinance corrupto (splits conservan value ≈ 1.0x).
+        ratio > threshold  → precio corrupto al alza (ej: ABEV $7230)
+        ratio < low_threshold → precio corrupto a la baja (ej: BIL $1.32 en vez de $91)
 
         Purga quirúrgica: solo elimina los registros del símbolo afectado (no todos los símbolos
         de esa fecha). Performa_inversion se purga desde la fecha mínima afectada para forzar
@@ -934,10 +935,10 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                 ) t
                 WHERE t.value_ayer > 0
                   AND t.Date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-                  AND t.value / t.value_ayer > %s
+                  AND (t.value / t.value_ayer > %s OR t.value / t.value_ayer < %s)
                 ORDER BY t.Date ASC
             """
-            cursor.execute(qry, (account, threshold))
+            cursor.execute(qry, (account, threshold, low_threshold))
             rows = cursor.fetchall()
 
             if not rows:
@@ -2916,6 +2917,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         symbol=None,
         idSymbol=None,
         account=None,
+        descripcion=None,
     ):
         """
         @param symbol:
@@ -2941,6 +2943,11 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 cursor.execute(qry, idSymbol)
                 sql = cursor.fetchone()
 
+            elif descripcion is not None:
+                qry = "SELECT * FROM otros_activos WHERE descripcion LIKE %s LIMIT 1;"
+                cursor.execute(qry, (f"%{descripcion}%",))
+                sql = cursor.fetchone()
+
             else:
                 qry = "SELECT * FROM otros_activos WHERE symbol = %s;"
                 cursor.execute(qry, symbol)
@@ -2950,7 +2957,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 found = True
                 ix = [columna[0] for columna in cursor.description]
 
-                if idSymbol is not None:
+                if idSymbol is not None or descripcion is not None:
                     xlis.append(dict(zip(ix, sql)))
 
                 elif symbol != "all":
@@ -3109,10 +3116,12 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             print(f"get_yf_CNV(): {e}")
             return pd.DataFrame()  # Devolver DataFrame vacío en caso de error
 
-    def insert_otros_activos(self, symbol=None, values=None, cuenta="B0000001"):
+    def insert_otros_activos(self, symbol=None, values=None, cuenta="B0000001", avgcost_override=0, base_asset=None):
         """
-        @param symbol: ticket a consultar en crypto
-        @param cuenta: cuenta destino (default B0000001, BotCrypto usa B0000002)
+        @param symbol: ticket (crypto) o nombre del fondo (FCI)
+        @param cuenta: cuenta destino
+        @param avgcost_override: si >0 usa este valor directo y saltea yfinance (FCI/ARS)
+        @param base_asset: asset base override (ej: 'ARS' para fondos FCI)
         @return: agrega symbol en tabla otros_activos."""
         try:
             conn = self._conectar(tabla="insert.otros_activos")
@@ -3136,10 +3145,15 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
 
             if not found:
 
-                ticket = yf.Ticker(symbol.replace("USDT", "-USD"))
-                name = ticket.info["name"] if "name" in ticket.info else " "
-                avg = ticket.info["previousClose"] if "previousClose" in ticket.info else 0
-                h52w = ticket.info["fiftyTwoWeekHigh"] if "fiftyTwoWeekHigh" in ticket.info else 0
+                if avgcost_override > 0:
+                    name = symbol
+                    avg = avgcost_override
+                    h52w = 0
+                else:
+                    ticket = yf.Ticker(symbol.replace("USDT", "-USD"))
+                    name = ticket.info["name"] if "name" in ticket.info else " "
+                    avg = ticket.info["previousClose"] if "previousClose" in ticket.info else 0
+                    h52w = ticket.info["fiftyTwoWeekHigh"] if "fiftyTwoWeekHigh" in ticket.info else 0
 
                 qry = "INSERT INTO otros_activos ("
 
@@ -3150,8 +3164,8 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 values.update({"cuenta": cuenta})
                 values.update({"idcrypto": conid})
                 values.update({"descripcion": name})
-                values.update({"base_asset": symbol.replace("USDT", "")})
-                values.update({"quote_asset": "USDT"})
+                values.update({"base_asset": base_asset if base_asset else symbol.replace("USDT", "")})
+                values.update({"quote_asset": "ARS" if avgcost_override > 0 else "USDT"})
                 values.update({"avgcost": avg})
                 values.update({"objetivo": h52w})
                 values.update({"fecupdate": datetime.now()})
@@ -3163,10 +3177,12 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 valuesins.append(symbol)
                 qry += "symbol) VALUES ({});".format(",".join("%s" for _ in range(len(valuesins))))
                 cursor.execute(qry, tuple(valuesins))
+                values.update({"symbol": symbol})
                 xlis.append(values)
+                found = True
 
             else:
-                xlis.append(dict(zip(ix, row))["cuenta"])
+                xlis = row
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql::  insert_otros_activos()]: {}".format(error))
 
