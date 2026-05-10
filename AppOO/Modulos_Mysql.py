@@ -1056,6 +1056,7 @@ class DiariaCNV(BDsystem):  # --------------------------------------------------
                 return sql, columns, found
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: select_diaria_CNV(): {}]".format(error))
+            return None, [], False
 
     def last_insert_CNV(self, symbol=None, date=None):
         """@param symbol:  activo a consultar
@@ -1080,11 +1081,45 @@ class DiariaCNV(BDsystem):  # --------------------------------------------------
             last = cursor.fetchone()
             u_fecha = "0001-01-01"
 
-            if last:
+            if last and last[0] is not None:
                 u_fecha = last[0].strftime("%Y-%m-%d")
             return u_fecha
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: last_insert_CNV(): {}]".format(error))
+            return "0001-01-01"
+
+    def select_CNV_by_precio(self, precio, fecha=None):
+        """Busca en diaria_cnv el fondo cuyo valorActual/1000 sea más cercano a precio.
+        @param precio: valor cuota parte en ARS (ej: 613.34)
+        @param fecha: date — si None usa la fecha más reciente disponible
+        @return: (codCAFCI, found)"""
+        try:
+            conn = self._conectar(tabla="select.diaria_CNV.by_precio")
+            cursor = conn.cursor()
+            if fecha is not None:
+                cursor.execute(
+                    """SELECT codCAFCI, valorActual/1000 AS precio_cnv
+                       FROM diaria_cnv WHERE DATE(fecha) = %s
+                       ORDER BY ABS(valorActual/1000 - %s) LIMIT 1""",
+                    (fecha, precio),
+                )
+            else:
+                cursor.execute(
+                    """SELECT codCAFCI, valorActual/1000 AS precio_cnv
+                       FROM diaria_cnv WHERE fecha = (SELECT MAX(fecha) FROM diaria_cnv)
+                       ORDER BY ABS(valorActual/1000 - %s) LIMIT 1""",
+                    (precio,),
+                )
+            row = cursor.fetchone()
+            if row:
+                return row[0], True
+            return None, False
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql:: select_CNV_by_precio(): {error}]")
+            return None, False
+        finally:
+            cursor.close()
+            conn.close()
 
     def insert_CNV(self, values=None, symbol=None):
         """
@@ -3116,7 +3151,16 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             print(f"get_yf_CNV(): {e}")
             return pd.DataFrame()  # Devolver DataFrame vacío en caso de error
 
-    def insert_otros_activos(self, symbol=None, values=None, cuenta="B0000001", avgcost_override=0, base_asset=None):
+    def insert_otros_activos(
+        self,
+        symbol=None,
+        values=None,
+        cuenta="B0000001",
+        avgcost_override=0,
+        base_asset=None,
+        idcrypto_override=None,
+        descripcion=None,
+    ):
         """
         @param symbol: ticket (crypto) o nombre del fondo (FCI)
         @param cuenta: cuenta destino
@@ -3146,7 +3190,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             if not found:
 
                 if avgcost_override > 0:
-                    name = symbol
+                    name = descripcion if descripcion else symbol
                     avg = avgcost_override
                     h52w = 0
                 else:
@@ -3157,9 +3201,11 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
 
                 qry = "INSERT INTO otros_activos ("
 
-                # equivalente CONV(substr(SHA2(ticket, 256),1,15), 16, 10) mysql
-                conidHex = hashlib.sha256(symbol.encode("utf-8")).hexdigest()
-                conid = int(conidHex[:15], 16)
+                if idcrypto_override is not None:
+                    conid = idcrypto_override
+                else:
+                    conidHex = hashlib.sha256(symbol.encode("utf-8")).hexdigest()
+                    conid = int(conidHex[:15], 16)
 
                 values.update({"cuenta": cuenta})
                 values.update({"idcrypto": conid})
@@ -3714,7 +3760,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 # ultima diaria para un determinado symbol
                 if symbol is not None:
                     qry = """SELECT a.* FROM (SELECT sec, fechahora, stock, basico, gprealizadas, cantidad,
-                                                    tarifacomision, idtrans, factor_cambio
+                                                    tarifacomision, idtrans, factor_cambio, preciocierre
                                             FROM booktrading WHERE cuenta = '%s' AND divisa = '%s'
                                                                 AND simbolo = '%s' AND activa = 'Y'
                                                                 AND delisted = 0) AS a

@@ -5207,18 +5207,37 @@ class DashMain:
     def _tab_enabled(self, name):
         return self._profile_tabs.get(name, True)
 
-    def _splash_step(self, splash, text, pct):
-        splash["label"].config(text=text)
-        splash["bar"]["value"] = pct
+    def _splash_open(self):
+        win = tk.Toplevel(self.root)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        win.configure(bg="#1a1a1a")
+        w, h = 340, 90
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+        tk.Label(win, text="DashMain version 9.ia", bg="#1a1a1a", fg="#00bcd4", font=("Segoe UI", 16, "bold")).pack(
+            pady=(14, 2)
+        )
+        status = tk.Label(win, text="Iniciando...", bg="#1a1a1a", fg="#aaaaaa", font=("Segoe UI", 9))
+        status.pack()
+        self.root.update()
+        return {"win": win, "status": status}
+
+    def _splash_step(self, splash, text):
+        splash["status"].config(text=text)
         self.root.update()
 
     def run(self):
         """Inicia el dashboard"""
+        splash = self._splash_open()
 
         # Cargar variables de entorno desde base de datos (sesión DataHub) ------------------------------------------
+        self._splash_step(splash, "Conectando base de datos...")
         DataHub.load_from_database()
 
         # inicializa logging y excepciones globales ------------------------------------------------------------------
+        self._splash_step(splash, "Inicializando logging...")
         debug = Debugging(DisplayConsole=False, GlobalHub=DataHub)
 
         # monitorea CPU/RAM cada 5s
@@ -5237,6 +5256,7 @@ class DashMain:
 
         # define widget principales Crypto ---------------------------------------------------------------
         if self._tab_enabled("Crypto"):
+            self._splash_step(splash, "Cargando Crypto...")
             self.sesion_crypto = self.PlanInversion.get_sesion_by_vehiculo("Crypto")
             if self.sesion_crypto:
                 self.start_crypto(account=self.sesion_crypto["idcuenta"], vehiculo="Crypto")
@@ -5244,23 +5264,27 @@ class DashMain:
 
         # define widget principales Stock-----------------------------------------------------------------
         if self._tab_enabled("Stock"):
+            self._splash_step(splash, "Cargando Stock...")
             self.sesion_stock = self.PlanInversion.get_sesion_by_vehiculo("Stock")
             if self.sesion_stock:
                 self.start_stock(account=self.sesion_stock["idcuenta"], vehiculo="Stock")
 
         # inicia otros modulos ---------------------------------------------------------------------------
         if self._tab_enabled("Gestion"):
+            self._splash_step(splash, "Cargando Gestión...")
             self.gestion = GestionInversion(parent=self.root, master=self.win3, colores=self.colors)
             self.gestion.pack()
 
         # define widget principales FCI-------------------------------------------------------------------
         if self._tab_enabled("Ars"):
+            self._splash_step(splash, "Cargando ARS / FCI...")
             self.sesion_FCI = self.PlanInversion.get_sesion_by_vehiculo("SANT.ARS")
             self.fci = ArsFondosInversion(parent=self.root, master=self.win4, colores=self.colors)
             self.fci.pack()
 
         # Inicializar UI del Bot Crypto ------------------------------------------------------------------
         if self._tab_enabled("BotCrypto"):
+            self._splash_step(splash, "Cargando BotCrypto...")
             self.bot_crypto_ui = BotCryptoUI(
                 parent=self.win6,
                 colors=self.colors,
@@ -5269,23 +5293,30 @@ class DashMain:
             self.bot_crypto_ui.inicializar()
 
         if self._tab_enabled("Finance"):
+            self._splash_step(splash, "Cargando Finance...")
             self.finance = FinancePanel(master=self.win9, colores=self.colors)
             self.finance.pack(fill=tk.BOTH, expand=True)
             self.finance.inicializar()
 
         if self._tab_enabled("System"):
+            self._splash_step(splash, "Cargando System...")
             self.system = system_status(master=self.win5, colores=self.colors)
 
         if self._tab_enabled("Screener") and self.sesion_stock:
+            self._splash_step(splash, "Cargando Screener...")
             self.screener = Screener(master=self.win2, account=self.sesion_stock["idcuenta"], colors=self.colors)
             self.screener.pack()
 
         # Inicia servidor HTTP para datos TradingView (Tampermonkey) ------------------------------------
+        self._splash_step(splash, "Iniciando servicios...")
         start_tv_server()
         start_price_sync(lambda: DataHub.info)
 
         # Start ayudante y agentes del sistema------------------------------------------------------------
+        self._splash_step(splash, "Iniciando agentes IA...")
         self.start_chatbot()
+
+        splash["win"].destroy()
 
         # Iniciar actualización de totales de inversionescls
         self.actualizar_totales_inversiones()
