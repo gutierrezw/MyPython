@@ -3047,7 +3047,7 @@ class TickerInfo(MyOrders):
                     if self.vehiculo == "Stock":
                         tasa_nominal = position["dividendYield"] / 100
                     else:
-                        tasa_nominal = position["dividendo"] / position["costobase"]
+                        tasa_nominal = position["dividendo"] / position["costobase"] if position["costobase"] else 0
 
                     ex_dividends = (
                         position["exDividendDate"].strftime("%d-%b'%y") if position["exDividendDate"] else "N/A"

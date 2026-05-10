@@ -274,16 +274,14 @@ class ArsFondosInversion(tk.Frame):
                                 activo, found = self.RepositorioOportunidades.select_otros_activos(
                                     descripcion=keys.fondo
                                 )
-                            if not found:
-                                cuenta_ins = (
-                                    self.account_sant if "Santander" in keys.Soc_Depositaria else self.account_bbva
-                                )
-                                activo, found = self.RepositorioOportunidades.insert_otros_activos(
-                                    symbol=keys.fondo,
-                                    cuenta=cuenta_ins,
-                                    avgcost_override=keys.V_actual / 1000,
-                                    base_asset="ARS",
-                                )
+                                if found and activo and activo[0].get("idcrypto") != keys.Código_CAFCI:
+                                    cuenta_upd = activo[0].get("cuenta")
+                                    self.RepositorioOportunidades.update_otros_activos(
+                                        account=cuenta_upd,
+                                        symbol=keys.fondo,
+                                        values={"idcrypto": keys.Código_CAFCI},
+                                    )
+                                    activo[0]["idcrypto"] = keys.Código_CAFCI
                             if not found:
                                 continue
 
@@ -322,6 +320,130 @@ class ArsFondosInversion(tk.Frame):
         except Exception as e:
             print("load_EXCEL_TBdiaria_CNV_(): {}".format(e))
 
+    def _parse_cnv_row(self, keys):
+        """Extrae el dict de valores para insert_CNV a partir de una fila del Excel CNV."""
+        fecha = datetime.strptime(keys.Fecha, "%d/%m/%y")
+        values = {
+            "fecha": fecha.date(),
+            "fondo": keys.fondo,
+            "moneda": keys.Moneda,
+            "region": keys.Region,
+            "horizonte": keys.Horizonte,
+            "valorActual": keys.V_actual,
+            "valorAnterior": keys.V_anterior,
+            "variacion": keys.variation,
+            "valorPesos": keys.Reexp_Pesos,
+            "variacion30dias": keys.var_30d,
+            "variacion60dias": keys.var_60d,
+            "variacion90dias": keys.var_90d,
+            "patrimonioActual": keys.Patrimonio_actual,
+            "patrimonioAnterior": keys.Patrimonio_anterior,
+            "marketShare": keys.Market_Share,
+            "sociedadDepositaria": keys.Soc_Depositaria,
+            "codigoCNV": keys.Codigo_CNV,
+            "codSociedadDep": keys.Código_SocDep,
+            "monedaFondo": keys.Código_Moneda,
+        }
+        return values, keys.Código_CAFCI
+
+    def backfill_historico_cnv(self, codCAFCI, meses=6):
+        """Descarga histórico de 6 meses de diaria_cnv para un nuevo fondo.
+        Se ejecuta en thread separado — no bloquea la UI."""
+
+        def _run():
+            try:
+                from download_cnv_selenium import (
+                    obtener_documentos,
+                )  # import diferido — evita ciclo con módulo de descarga
+
+                names_list = [
+                    "fondo",
+                    "Moneda",
+                    "Region",
+                    "Horizonte",
+                    "Fecha",
+                    "V_actual",
+                    "V_anterior",
+                    "variation",
+                    "Reexp_Pesos",
+                    "var_30d",
+                    "var_60d",
+                    "var_90d",
+                    "cuota_p_actual",
+                    "cuota_p_anterior",
+                    "Patrimonio_actual",
+                    "Patrimonio_anterior",
+                    "Market_Share",
+                    "Soc_Depositaria",
+                    "Codigo_CNV",
+                    "Calificación",
+                    "Código_CAFCI",
+                    "Código_SocGte",
+                    "Código_SocDep",
+                    "Sociedad_Gerente",
+                    "Cód_Clasificación",
+                    "Código_Moneda",
+                    "Cód_Región",
+                    "Cód_Horizonte",
+                    "Indice_MM",
+                    "Comision_Ingreso",
+                    "Hon_Adm.SG",
+                    "Hon_AdmSD",
+                    "Gastos_Gestion",
+                    "Comision_Rescate",
+                    "Com_Transf",
+                    "Hon_Éxito",
+                    "Moneda_Fondo",
+                    "Plazo_Liq",
+                    "Decreto_596",
+                    "F_CAFCI_padre",
+                    "F CNV_padre",
+                    "Tipo_escisión",
+                    "Repatriación",
+                    "Mín_Inversión",
+                    "RegLey_27.743",
+                    "Tipo_dinero",
+                    "Calificado",
+                ]
+                desde = (datetime.now() - timedelta(days=meses * 30)).date()
+                docs = obtener_documentos()
+                docs = [d for d in docs if d["fecha_dt"].date() >= desde]
+                docs.sort(key=lambda x: x["fecha_dt"])
+
+                insertados = 0
+                for doc in docs:
+                    fecha_doc = doc["fecha_dt"].date()
+                    existente = self.ClassCNV.last_insert_CNV(symbol=codCAFCI, date=str(fecha_doc))
+                    if existente != "0001-01-01":
+                        continue
+
+                    fecha_str = doc["fecha_dt"].strftime("%d-%m-%Y")
+                    from download_cnv_selenium import descargar_cnv_hoy  # import diferido
+
+                    resultado = descargar_cnv_hoy(fecha_str)
+                    if not resultado["success"] or not resultado.get("archivo"):
+                        continue
+
+                    try:
+                        df = pd.read_excel(resultado["archivo"], skiprows=11, header=None, names=names_list)
+                        df.fillna(0, inplace=True)
+                        fila = df[df["Código_CAFCI"] == codCAFCI]
+                        if not fila.empty:
+                            keys = next(fila.itertuples())
+                            values, symbol = self._parse_cnv_row(keys)
+                            self.ClassCNV.insert_CNV(values=values, symbol=symbol)
+                            insertados += 1
+                    except Exception as e:
+                        _logger.error(f"backfill_historico_cnv parse {fecha_str}: {e}")
+                    finally:
+                        delete_file(ruta=Path(resultado["archivo"]), display=False)
+
+                _logger.warning(f"backfill_historico_cnv({codCAFCI}): {insertados} dias insertados")
+            except Exception as e:
+                _logger.error(f"backfill_historico_cnv({codCAFCI}): {e}")
+
+        threading.Thread(target=_run, daemon=True).start()
+
     # define position en moneda base USD
     def struct_positions_fci(self, account=None, ticket=None, positions=None, last=None):
         try:
@@ -343,7 +465,8 @@ class ArsFondosInversion(tk.Frame):
                 fecha_cnv = (
                     last[0]["fechahora"].date() if hasattr(last[0]["fechahora"], "date") else last[0]["fechahora"]
                 )
-                valor_actual = last[0]["preciocierre"] / factor if last[0]["preciocierre"] else 0
+                precio_cierre = last[0].get("preciocierre") or 0
+                valor_actual = precio_cierre / factor if precio_cierre else 0
                 valor_anterior = valor_actual
 
             # obtiene valor anterior de la posición
@@ -366,7 +489,7 @@ class ArsFondosInversion(tk.Frame):
             p["country"] = "Argentina"
             p["sectype"] = "FCI"
             p["region"] = "AS"
-            p["divisa"] = activo[0]["base_asset"]
+            p["divisa"] = (activo[0].get("base_asset") or "ARS")[:3]
 
             p["sector"] = "Fondo Inversión"
             p["ticket"] = ticket
@@ -496,12 +619,19 @@ class ArsFondosInversion(tk.Frame):
                         )
                         if not found:
                             precio = self.string_float(s=rows["Precio"])
-                            activo, found = self.RepositorioOportunidades.insert_otros_activos(
-                                symbol=rows["Descripción de Especie"],
-                                cuenta=self.account_bbva,
-                                avgcost_override=precio if precio > 0 else 1,
-                                base_asset="ARS",
-                            )
+                            fecha_mv = datetime.strptime(rows["Fecha"], "%d/%m/%Y").date()
+                            cafci, cafci_found = self.ClassCNV.select_CNV_by_precio(precio=precio, fecha=fecha_mv)
+                            if cafci_found:
+                                activo, found = self.RepositorioOportunidades.insert_otros_activos(
+                                    symbol=rows["Descripción de Especie"],
+                                    cuenta=self.account_bbva,
+                                    avgcost_override=precio if precio > 0 else 1,
+                                    base_asset="ARS",
+                                    idcrypto_override=cafci,
+                                    descripcion=rows["Descripción de Especie"],
+                                )
+                                if found:
+                                    self.backfill_historico_cnv(cafci)
                         if found:
                             cantidad = self.string_float(s=rows["Cantidad (VN)"]) * (1 if codigo == "O" else -1)
                             fecha = datetime.strptime(rows["Fecha"], "%d/%m/%Y")
@@ -580,14 +710,23 @@ class ArsFondosInversion(tk.Frame):
                         activo, found = self.RepositorioOportunidades.select_otros_activos(
                             account=self.account_sant, symbol=rows["Fondo"]
                         )
-
                         if not found:
-                            activo, found = self.RepositorioOportunidades.insert_otros_activos(
-                                symbol=rows["Fondo"],
-                                cuenta=self.account_sant,
-                                avgcost_override=ValorCuotaParte,
-                                base_asset="ARS",
+                            fecha_mv = datetime.strptime(rows["Fecha_liquidación"], "%d/%m/%Y").date()
+                            cafci, cafci_found = self.ClassCNV.select_CNV_by_precio(
+                                precio=ValorCuotaParte, fecha=fecha_mv
                             )
+                            if cafci_found:
+                                activo, found = self.RepositorioOportunidades.insert_otros_activos(
+                                    symbol=rows["Fondo"],
+                                    cuenta=self.account_sant,
+                                    avgcost_override=ValorCuotaParte,
+                                    base_asset="ARS",
+                                    idcrypto_override=cafci,
+                                    descripcion=rows["Fondo"],
+                                )
+                                if found:
+                                    self.backfill_historico_cnv(cafci)
+
                         if found:
                             cantidad = CuotaParte * (1 if codigo == "O" else -1)
                             fecha = datetime.strptime(rows["Fecha_liquidación"], "%d/%m/%Y")
