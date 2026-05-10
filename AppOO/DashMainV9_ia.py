@@ -47,6 +47,7 @@ from Modulos_python import (
     tk,
     ttk,
     sys,
+    os,
     datetime,
     threading,
     Figure,
@@ -1947,6 +1948,7 @@ class DashMain:
         self.crypto_ts = None
         self.crypto = None
         self.ars = None
+        self._profile_tabs = self._load_profile()
         self.ars_ts = None
 
         self.root = tk.Tk()
@@ -2012,28 +2014,26 @@ class DashMain:
         self.win8 = ttk.Frame(self.nb, style="C.TFrame", width=self.dw, height=self.dh)
         self.win9 = ttk.Frame(self.nb, style="C.TFrame", width=self.dw, height=self.dh)
 
-        # Añadir padding a los frames
-        self.win0.pack(fill=tk.BOTH, expand=True)
-        self.win1.pack(fill=tk.BOTH, expand=True)
-        self.win2.pack(fill=tk.BOTH, expand=True)
-        self.win3.pack(fill=tk.BOTH, expand=True)
-        self.win4.pack(fill=tk.BOTH, expand=True)
-        self.win5.pack(fill=tk.BOTH, expand=True)
-        self.win6.pack(fill=tk.BOTH, expand=True)
-        self.win7.pack(fill=tk.BOTH, expand=True)
-        self.win8.pack(fill=tk.BOTH, expand=True)
-        self.win9.pack(fill=tk.BOTH, expand=True)
-
-        self.nb.add(self.win1, text="Crypto         ")
-        self.nb.add(self.win0, text="Stock          ")
-        self.nb.add(self.win4, text="Ars            ")
-        self.nb.add(self.win6, text="BotCrypto      ")
-        self.nb.add(self.win7, text="Ves            ", state="disabled")
-        self.nb.add(self.win8, text="Crowfonding    ", state="disabled")
-        self.nb.add(self.win2, text="Screener       ")
-        self.nb.add(self.win3, text="Gestión        ")
-        self.nb.add(self.win9, text="Finance        ")
-        self.nb.add(self.win5, text="System         ")
+        if self._tab_enabled("Crypto"):
+            self.nb.add(self.win1, text="Crypto         ")
+        if self._tab_enabled("Stock"):
+            self.nb.add(self.win0, text="Stock          ")
+        if self._tab_enabled("Ars"):
+            self.nb.add(self.win4, text="Ars            ")
+        if self._tab_enabled("BotCrypto"):
+            self.nb.add(self.win6, text="BotCrypto      ")
+        if self._tab_enabled("Ves"):
+            self.nb.add(self.win7, text="Ves            ", state="disabled")
+        if self._tab_enabled("Crowfonding"):
+            self.nb.add(self.win8, text="Crowfonding    ", state="disabled")
+        if self._tab_enabled("Screener"):
+            self.nb.add(self.win2, text="Screener       ")
+        if self._tab_enabled("Gestion"):
+            self.nb.add(self.win3, text="Gestión        ")
+        if self._tab_enabled("Finance"):
+            self.nb.add(self.win9, text="Finance        ")
+        if self._tab_enabled("System"):
+            self.nb.add(self.win5, text="System         ")
 
         # frames de Gráficos y figuras principales
         pn0 = ttk.Frame(self.root, padding=(1, 1, 1, 1), style="C.TFrame")
@@ -5106,6 +5106,8 @@ class DashMain:
 
     def get_limite_inversion(self):
         """toma limites de barraProgress"""
+        if not self.sesion_stock:
+            return 0, 0
         traz = self.PlanInversion.select_trazaplan(idcuenta=self.sesion_stock["idcuenta"])
         if traz:
             for tkey in traz:
@@ -5142,7 +5144,9 @@ class DashMain:
             elif ganancias_dia <= 0:
                 _inf = -1
 
-            if abs(ganancias_dia) < limit_gyp:
+            if limit_gyp == 0:
+                _mul = 1
+            elif abs(ganancias_dia) < limit_gyp:
                 _mul = 1
             elif abs(ganancias_dia) > limit_gyp:
                 _mul = round(abs(ganancias_dia / limit_gyp), 1)
@@ -5174,6 +5178,40 @@ class DashMain:
                 after_id = self.root.after(30000, self.actualizar_totales_inversiones)
                 self.after_ids.append(after_id)
 
+    def _load_profile(self):
+        profile = "main"
+        for i, arg in enumerate(sys.argv[1:], 1):
+            if arg == "--profile" and i < len(sys.argv):
+                profile = sys.argv[i + 1]
+                break
+        # PyInstaller onedir: busca en el dir del exe; fallback a _MEIPASS (_internal/)
+        if getattr(sys, "frozen", False):
+            base = os.path.dirname(sys.executable)
+            if not os.path.exists(os.path.join(base, "profiles")):
+                base = sys._MEIPASS
+        else:
+            base = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base, "profiles", f"{profile}.json")
+        if not os.path.exists(path):
+            path = os.path.join(base, "profiles", "main.json")
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f)
+        tabs = cfg.get("tabs", {})
+        tmp_path = cfg.get("tmp_path", "")
+        if not tmp_path:
+            tmp_path = os.path.join(base, "tmp")
+        os.makedirs(tmp_path, exist_ok=True)
+        os.environ["APPOO_TMP"] = tmp_path
+        return tabs
+
+    def _tab_enabled(self, name):
+        return self._profile_tabs.get(name, True)
+
+    def _splash_step(self, splash, text, pct):
+        splash["label"].config(text=text)
+        splash["bar"]["value"] = pct
+        self.root.update()
+
     def run(self):
         """Inicia el dashboard"""
 
@@ -5198,41 +5236,49 @@ class DashMain:
         DataHub.max_points = debug.max_points
 
         # define widget principales Crypto ---------------------------------------------------------------
-        self.sesion_crypto = self.PlanInversion.get_sesion_by_vehiculo("Crypto")
-        if self.sesion_crypto:
-            self.start_crypto(account=self.sesion_crypto["idcuenta"], vehiculo="Crypto")
-            self.graficos_main()
+        if self._tab_enabled("Crypto"):
+            self.sesion_crypto = self.PlanInversion.get_sesion_by_vehiculo("Crypto")
+            if self.sesion_crypto:
+                self.start_crypto(account=self.sesion_crypto["idcuenta"], vehiculo="Crypto")
+                self.graficos_main()
 
         # define widget principales Stock-----------------------------------------------------------------
-        self.sesion_stock = self.PlanInversion.get_sesion_by_vehiculo("Stock")
-        if self.sesion_stock:
-            self.start_stock(account=self.sesion_stock["idcuenta"], vehiculo="Stock")
+        if self._tab_enabled("Stock"):
+            self.sesion_stock = self.PlanInversion.get_sesion_by_vehiculo("Stock")
+            if self.sesion_stock:
+                self.start_stock(account=self.sesion_stock["idcuenta"], vehiculo="Stock")
 
         # inicia otros modulos ---------------------------------------------------------------------------
-        self.gestion = GestionInversion(parent=self.root, master=self.win3, colores=self.colors)
-        self.gestion.pack()
+        if self._tab_enabled("Gestion"):
+            self.gestion = GestionInversion(parent=self.root, master=self.win3, colores=self.colors)
+            self.gestion.pack()
 
         # define widget principales FCI-------------------------------------------------------------------
-        self.sesion_FCI = self.PlanInversion.get_sesion_by_vehiculo("SANT.ARS")
-        self.fci = ArsFondosInversion(parent=self.root, master=self.win4, colores=self.colors)
-        self.fci.pack()
+        if self._tab_enabled("Ars"):
+            self.sesion_FCI = self.PlanInversion.get_sesion_by_vehiculo("SANT.ARS")
+            self.fci = ArsFondosInversion(parent=self.root, master=self.win4, colores=self.colors)
+            self.fci.pack()
 
         # Inicializar UI del Bot Crypto ------------------------------------------------------------------
-        self.bot_crypto_ui = BotCryptoUI(
-            parent=self.win6,
-            colors=self.colors,
-            repositorio=self.RepositorioOportunidades,
-        )
-        self.bot_crypto_ui.inicializar()
+        if self._tab_enabled("BotCrypto"):
+            self.bot_crypto_ui = BotCryptoUI(
+                parent=self.win6,
+                colors=self.colors,
+                repositorio=self.RepositorioOportunidades,
+            )
+            self.bot_crypto_ui.inicializar()
 
-        self.finance = FinancePanel(master=self.win9, colores=self.colors)
-        self.finance.pack(fill=tk.BOTH, expand=True)
-        self.finance.inicializar()
+        if self._tab_enabled("Finance"):
+            self.finance = FinancePanel(master=self.win9, colores=self.colors)
+            self.finance.pack(fill=tk.BOTH, expand=True)
+            self.finance.inicializar()
 
-        self.system = system_status(master=self.win5, colores=self.colors)
+        if self._tab_enabled("System"):
+            self.system = system_status(master=self.win5, colores=self.colors)
 
-        self.screener = Screener(master=self.win2, account=self.sesion_stock["idcuenta"], colors=self.colors)
-        self.screener.pack()
+        if self._tab_enabled("Screener") and self.sesion_stock:
+            self.screener = Screener(master=self.win2, account=self.sesion_stock["idcuenta"], colors=self.colors)
+            self.screener.pack()
 
         # Inicia servidor HTTP para datos TradingView (Tampermonkey) ------------------------------------
         start_tv_server()

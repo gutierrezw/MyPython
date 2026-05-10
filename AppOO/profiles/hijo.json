@@ -1,0 +1,16 @@
+{
+    "profile": "hijo",
+    "tmp_path": "",
+    "tabs": {
+        "Crypto": true,
+        "Stock": false,
+        "Ars": true,
+        "BotCrypto": true,
+        "Screener": false,
+        "Gestion": false,
+        "Finance": true,
+        "System": false,
+        "Ves": false,
+        "Crowfonding": false
+    }
+}

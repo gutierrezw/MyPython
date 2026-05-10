@@ -5,6 +5,7 @@ from Modulos_python import (
     tk,
     ttk,
     os,
+    sys,
     json,
     E,
     W,
@@ -967,12 +968,13 @@ def delete_file(ruta=None, patron=None, display=True):
 
 # establece cache -- para yfinance
 def define_FileCache(name=None):
-    ipath = os.getcwd()
+    tmp_dir = os.environ.get("APPOO_TMP") or os.path.join(os.getcwd(), "tmp")
+    os.makedirs(tmp_dir, exist_ok=True)
     if name is not None:
-        cache = ipath + f"\\tmp\\{name}"
-    elif name is None:
+        cache = os.path.join(tmp_dir, name)
+    else:
         temp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        cache = ipath + "\\tmp\\cache_{temp}"
+        cache = os.path.join(tmp_dir, f"cache_{temp}")
     return cache
 
 
