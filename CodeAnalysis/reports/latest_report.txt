@@ -1,49 +1,49 @@
 ========================================================================
-  REPORTE SEMANAL — AppOO   2026-W13   generado: 2026-03-29 18:01
+  REPORTE SEMANAL — AppOO   2026-W19   generado: 2026-05-06 20:05
 ========================================================================
 
 TOTALES
 ────────────────────────────────────────────────────────────────────────
-  Archivos  :     45  (-3)
-  Líneas    : 51,633  (+1,354)
-  Clases    :     59  (+1)
-  Métodos   :  1,351  (+57)
+  Archivos  :     48  (+3)
+  Líneas    : 57,549  (+5,916)
+  Clases    :     79  (+20)
+  Métodos   :  1,586  (+235)
 
 TOP 10 ARCHIVOS POR LÍNEAS
 ────────────────────────────────────────────────────────────────────────
-  Class_customer.py                                    6,680 líneas  10 cls   165 mét
-  Class_BotCryptoUI.py                                 5,869 líneas   7 cls   181 mét
-  DashMainV9_ia.py                                     5,109 líneas   2 cls   101 mét
-  Modulos_Mysql.py                                     4,224 líneas   7 cls   129 mét
-  Class_SystemStatus.py                                3,555 líneas   1 cls    71 mét
-  Class_DataFrame.py                                   2,903 líneas   2 cls    55 mét
-  Class_DashBot.py                                     2,625 líneas   4 cls    78 mét
-  Class_Analisis.py                                    2,333 líneas   4 cls    68 mét
-  Class_gestion.py                                     2,029 líneas   1 cls    26 mét
-  Class_Screener.py                                    1,928 líneas   1 cls    59 mét
+  Class_customer.py                                    6,923 líneas  10 cls   176 mét
+  Class_BotCryptoUI.py                                 5,891 líneas   7 cls   181 mét
+  DashMainV9_ia.py                                     5,252 líneas   2 cls   103 mét
+  Modulos_Mysql.py                                     5,238 líneas   8 cls   159 mét
+  Class_Finance.py                                     3,603 líneas  18 cls   147 mét
+  Class_SystemStatus.py                                3,554 líneas   1 cls    71 mét
+  Class_DataFrame.py                                   2,954 líneas   2 cls    60 mét
+  Class_DashBot.py                                     2,730 líneas   4 cls    90 mét
+  Class_Analisis.py                                    2,491 líneas   4 cls    65 mét
+  Class_Screener.py                                    1,916 líneas   1 cls    61 mét
 
 ACTIVIDAD GIT (últimos 7 días)
 ────────────────────────────────────────────────────────────────────────
-  Commits   : 28
-  Resumen   :  68 files changed, 5585 insertions(+), 4406 deletions(-)
-    · b65ef9c Fix categoriaActivo ETF — chequear quoteType antes de asignar 'N'
-    · 3726c19 Doc — diagrama pipeline actualizado a 7 votos
-    · 82216d6 Consenso — columna Flujo visible (+0.38 formato)
-    · a7d8561 Doc screener_consenso_modelo — 7 votos Consenso
-    · fde42c3 Consenso — 7mo voto Flujo (new_entrants vs full_exits)
-    · cd269a3 Doc screener_consenso_modelo v2026-W13 — mapa columnas + inst_score v2
-    · e786aa2 inst_score v2 — flujo_neto incorporado al scoring
-    · 4bbbbc9 full_exits — cálculo real Q_ant→Q_act con ventanas dinámicas
-    · 30218ed Señales flujo institucional — nuevas columnas + UI Screener/Consenso
-    · 2e8ad10 Agentes pipeline 13F — correcciones arquitectura, cadencia y monitoreo
+  Commits   : 18
+  Resumen   :  24 files changed, 1924 insertions(+), 349 deletions(-)
+    · 9f3df34 fix: defensa multicapa contra precios corruptos de yfinance
+    · bfd2ef0 fix: purga quirúrgica en validate_performa + guardian extremo en write_csv
+    · e759a9d refactor: unifica AGENTES_SCHEDULE en Modulos_Utilitarios — única fuente de verdad
+    · af9010f feat: Agente_PerformaValidator — detecta y purga precios yfinance corruptos
+    · 7e723f5 fix: insert_booktrading — recalcula stock post-commit para evitar desfase en inserts misma fecha/símbolo
+    · a63c424 docs: backlog ítem 39 — unificar insert_booktrading duplicado
+    · fa152f6 fix: extractos FCI — navcierre/costobase desde performa, retiros solo capital, guard último día hábil
+    · 75bb792 fix: diaria_book_performance — guard None en proces['diaria_book_performance']
+    · 11d8435 fix: guardian write_csv — re-agrega limite inferior basic/100
+    · e48e4a2 feat: run_init_splits_history — inicializa bdinv.split con historial marcado aplicado=Y
 
 CÓDIGO MUERTO — vulture (≥80% confianza)
 ────────────────────────────────────────────────────────────────────────
-  Imports no usados :   51
+  Imports no usados :   50
   Variables muertas :   11
   Código inalcanzable:    2
   Métodos/funciones :    0
-  TOTAL hallazgos   :   64
+  TOTAL hallazgos   :   63
 
   Imports sin uso (primeros 20):
     · AppValuations\valuation_arelle_parser.py:9: unused import 'FileSource' (90% confidence)
@@ -53,25 +53,25 @@ CÓDIGO MUERTO — vulture (≥80% confianza)
     · DashMainV9_ia.py:1: unused import 'MangerAfterEvents' (90% confidence)
     · DashMainV9_ia.py:2: unused import 'InfoYfinance' (90% confidence)
     · Modulos_python.py:11: unused import 'hmac' (90% confidence)
-    · Modulos_python.py:22: unused import 'syncio' (90% confidence)
-    · Modulos_python.py:24: unused import 'calendar' (90% confidence)
-    · Modulos_python.py:32: unused import 'multiprocessing' (90% confidence)
-    · Modulos_python.py:53: unused import 'Cache' (90% confidence)
-    · Modulos_python.py:58: unused import 'create_engine' (90% confidence)
-    · Modulos_python.py:59: unused import 'parser' (90% confidence)
-    · Modulos_python.py:64: unused import 'YFRateLimitError' (90% confidence)
-    · Modulos_python.py:67: unused import 'Updater' (90% confidence)
-    · Modulos_python.py:76: unused import 'angle_helper' (90% confidence)
-    · Modulos_python.py:83: unused import 'Process' (90% confidence)
-    · Modulos_python.py:85: unused import 'HTTPAdapter' (90% confidence)
-    · Modulos_python.py:88: unused import 'Cache' (90% confidence)
-    · Modulos_python.py:90: unused import 'Retry' (90% confidence)
+    · Modulos_python.py:24: unused import 'syncio' (90% confidence)
+    · Modulos_python.py:36: unused import 'multiprocessing' (90% confidence)
+    · Modulos_python.py:57: unused import 'Cache' (90% confidence)
+    · Modulos_python.py:63: unused import 'create_engine' (90% confidence)
+    · Modulos_python.py:64: unused import 'parser' (90% confidence)
+    · Modulos_python.py:69: unused import 'YFRateLimitError' (90% confidence)
+    · Modulos_python.py:72: unused import 'Updater' (90% confidence)
+    · Modulos_python.py:81: unused import 'angle_helper' (90% confidence)
+    · Modulos_python.py:88: unused import 'Process' (90% confidence)
+    · Modulos_python.py:90: unused import 'HTTPAdapter' (90% confidence)
+    · Modulos_python.py:93: unused import 'Cache' (90% confidence)
+    · Modulos_python.py:95: unused import 'Retry' (90% confidence)
+    · Modulos_python.py:99: unused import 'dtime' (90% confidence)
 
-COMPARACIÓN VS SEMANA ANTERIOR (2026-W12)
+COMPARACIÓN VS SEMANA ANTERIOR (2026-W13)
 ────────────────────────────────────────────────────────────────────────
-  Líneas      : 50,279 → 51,633  (+1,354)
-  Métodos     :  1,294 →  1,351  (+57)
-  Clases      :     58 →     59  (+1)
-  Cod.muerto  :     63 →     64  (+1)
+  Líneas      : 51,633 → 57,549  (+5,916)
+  Métodos     :  1,351 →  1,586  (+235)
+  Clases      :     59 →     79  (+20)
+  Cod.muerto  :     64 →     63  (-1)
 
 ========================================================================
