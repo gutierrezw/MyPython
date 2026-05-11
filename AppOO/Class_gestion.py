@@ -1272,12 +1272,12 @@ class GestionInversion(tk.Frame):
         self.PlaInversion.insert_extracto(account=account, values=values)
 
     # construye extracto de FCI en ARS
-    def construir_extracto_fci(self, account=None, desde=None, hasta=None, insert=True):
+    def construir_extracto_fci(self, account=None, vehiculo=None, desde=None, hasta=None, insert=True):
 
         book, ix = self.RepositorioOportunidades.select_booktrading(accion="cartera", account=account, idivisa="ARS")
 
         # Obtener desempeño del vehículo FCI
-        performa, iy = self.Perfoma.select_performa_inversion(account=account, vehiculo="BBVA.ARS", accion="all")
+        performa, iy = self.Perfoma.select_performa_inversion(account=account, vehiculo=vehiculo, accion="all")
 
         # dataframe(): para obtener ingresos, costos y comisiones ------------------------------------------------------------
         datos = pd.DataFrame(book, columns=ix)
@@ -1745,11 +1745,13 @@ class GestionInversion(tk.Frame):
                 # extracto BBVA y santander-------------------------------------------------------------------------
                 self.construir_extracto_fci(
                     account=self.sesion["BBVA.ARS"]["idcuenta"],
+                    vehiculo="BBVA.ARS",
                     desde=f_desde,
                     hasta=f_hasta,
                 )
                 self.construir_extracto_fci(
                     account=self.sesion["SANT.ARS"]["idcuenta"],
+                    vehiculo="BBVA.ARS",
                     desde=f_desde,
                     hasta=f_hasta,
                 )
