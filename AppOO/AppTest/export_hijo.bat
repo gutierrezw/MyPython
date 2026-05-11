@@ -7,9 +7,10 @@ set USER=root
 set HOST=localhost
 set DB=bdinv
 set OUT_DIR=%~dp0
+set MYSQL_BIN=C:\Program Files\MySQL\MySQL Server 8.0\bin
 
 echo Exportando estructura (tablas vacias)...
-mysqldump -u %USER% -p --no-data --skip-triggers %DB% ^
+"%MYSQL_BIN%\mysqldump" -u %USER% -p --no-data --skip-triggers %DB% ^
     booktrading ^
     inversion ^
     oportunidadesbuysell ^
@@ -24,10 +25,14 @@ mysqldump -u %USER% -p --no-data --skip-triggers %DB% ^
     fin_exchange_rates ^
     fin_statement_imports ^
     fin_transactions ^
+    market ^
+    funds ^
+    fund_filings ^
+    fund_holdings ^
     > "%OUT_DIR%hijo_estructura.sql"
 
 echo Exportando datos de referencia...
-mysqldump -u %USER% -p --no-create-info --skip-triggers %DB% ^
+"%MYSQL_BIN%\mysqldump" -u %USER% -p --no-create-info --skip-triggers %DB% ^
     sys_objeto ^
     split ^
     diaria_cnv ^
