@@ -3131,10 +3131,10 @@ class WidgetVehiculo(TickerInfo):
         win3 = ttk.Frame(master, padding=(0, 0, 0, 0))  # graficos verticales
         win4 = ttk.Frame(master, padding=(0, 0, 0, 0))  # graficos inferiores
 
-        win0.grid(row=0, column=0)
-        win2.grid(row=1, column=0)
-        win3.grid(row=0, column=1, rowspan=3, pady=2)
-        win4.grid(row=3, column=0, columnspan=2, pady=2)
+        win0.grid(row=0, column=0, sticky="w")
+        win2.grid(row=1, column=0, sticky="w")
+        win3.grid(row=0, column=1, rowspan=3, pady=2, sticky="w")
+        win4.grid(row=3, column=0, columnspan=2, pady=2, sticky="w")
 
         wi00 = ttk.Frame(win0, padding=(1, 1, 1, 1), style="C.TFrame")
         wi01 = ttk.Frame(win0, padding=(1, 1, 1, 1), style="C.TFrame")
