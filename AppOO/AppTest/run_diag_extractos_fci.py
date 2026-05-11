@@ -47,7 +47,7 @@ def construir_nuevo(account, repo, perf):
     idatos = idatos.drop(columns=["fechaclose", "dividends", "value", "costo_base"])
 
     idatos.index = pd.to_datetime(idatos.index)
-    m_idatos = idatos[idatos.index.is_month_end]
+    m_idatos = idatos.groupby(idatos.index.to_period("M")).last()
     m_idatos.index = m_idatos.index.strftime("%Y-%m")
 
     datos["depositos"] = datos.apply(
