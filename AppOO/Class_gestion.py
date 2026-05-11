@@ -1071,12 +1071,11 @@ class GestionInversion(tk.Frame):
         idatos.set_index("Date", inplace=True)
         idatos = idatos.drop(columns=["fechaclose", "dividends", "value"])
 
-        # Seleccionar solo los fines de mes
+        # Ultimo registro disponible por mes (ultimo dia de mercado, no necesariamente fin de mes calendario)
         idatos.index = pd.to_datetime(idatos.index)
-        m_idatos = idatos[idatos.index.is_month_end]
+        m_idatos = idatos.groupby(idatos.index.to_period("M")).last()
 
         # cambia formato de index para aparear con los beneficios
-        m_idatos.index = pd.to_datetime(m_idatos.index)
         m_idatos.index = m_idatos.index.strftime("%Y-%m")
 
         # identificar en columnas compras y ventas --------------------------------------------------------------------------
@@ -1323,12 +1322,11 @@ class GestionInversion(tk.Frame):
         idatos.set_index("Date", inplace=True)
         idatos = idatos.drop(columns=["fechaclose", "dividends", "value", "costo_base"])
 
-        # Seleccionar solo los fines de mes
+        # Ultimo registro disponible por mes (ultimo dia de mercado, no necesariamente fin de mes calendario)
         idatos.index = pd.to_datetime(idatos.index)
-        m_idatos = idatos[idatos.index.is_month_end]
+        m_idatos = idatos.groupby(idatos.index.to_period("M")).last()
 
         # cambia formato de index para aparear con los beneficios
-        m_idatos.index = pd.to_datetime(m_idatos.index)
         m_idatos.index = m_idatos.index.strftime("%Y-%m")
 
         # identificar en columnas compras y ventas ---------------------------------------------------------------------
