@@ -119,6 +119,17 @@ class ClassAgenteIA:
         self.preservation_config = {}  # {vehiculo: sub-dict "preservation"} — extraído de _params_cache
         self.preservation_last_run = {}  # {vehiculo: datetime} — última evaluación por vehículo
         self._params_cache = {}  # {vehiculo: full parsed parameters dict} — compartido entre agentes
+        self._preservation_dry_run = True  # True = solo log, no enviar órdenes al broker
+
+        # Logger dedicado a preservation — escribe a tmp/preservation_diag.log
+        self._preservation_logger = logging.getLogger("Preservation")
+        if not self._preservation_logger.handlers:
+            _tmp = DataHub.tmp_path if hasattr(DataHub, "tmp_path") and DataHub.tmp_path else "tmp"
+            _fh = logging.FileHandler(os.path.join(_tmp, "preservation_diag.log"), encoding="utf-8")
+            _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+            self._preservation_logger.addHandler(_fh)
+            self._preservation_logger.setLevel(logging.DEBUG)
+            self._preservation_logger.propagate = False
 
     # decorador para limitar ejecuciones
     def wait_rate(intervalo_segundos: int, persist: bool = False):
@@ -940,33 +951,35 @@ class ClassAgenteIA:
             order_id_prev = state.get("order_id")
 
             # Activa Order STOP para el symbol
-            if stop_final > stop_anterior and symbol == "PBR":
-
-                self.logger.warning(
-                    f"Preservation({vehiculo}/{symbol}): base_limit {base_limit}, Order: {trama},  Previo: {order_id_prev}"
-                )
-                if order_id_prev:
-                    DataHub.preservation_cancel_order(vehiculo, account, order_id_prev, symbol)
-
-                response = DataHub.preservation_send_order(vehiculo, trama)
-                order_id = DataHub.preservation_extract_order_id(response)
-
-                order_id = order_id_prev
-
+            if stop_final > stop_anterior and symbol == "PLUG":
                 accion = "NUEVA" if not order_id_prev else "MODIFICADA (cancel+new)"
-                self.logger.warning(
+                msg = (
                     f"Preservation({vehiculo}/{symbol}): "
                     f"ROI={roi:.1%} | last={last:.2f} | max={max_price:.2f} | "
                     f"ATR={atr:.2f} | stop_prev={stop_anterior:.2f} → stop_new={stop_final:.2f} | "
-                    f"qty={qty} | {accion} [DRY-RUN]"
+                    f"qty={qty} | base_limit={base_limit:.2f} | trama={trama} | {accion}"
                 )
+                if self._preservation_dry_run:
+                    order_id = order_id_prev
+                    self._preservation_logger.info(f"[DRY-RUN] {msg}")
+                    self.logger.warning(f"[DRY-RUN] {msg}")
+                else:
+                    if order_id_prev:
+                        DataHub.preservation_cancel_order(vehiculo, account, order_id_prev, symbol)
+                    response = DataHub.preservation_send_order(vehiculo, trama)
+                    order_id = DataHub.preservation_extract_order_id(response)
+                    self._preservation_logger.info(f"[ENVIADA] {msg} | order_id={order_id}")
+                    self.logger.warning(f"[ENVIADA] {msg} | order_id={order_id}")
             else:
                 order_id = order_id_prev
-                self.logger.warning(
+                msg = (
                     f"Preservation({vehiculo}/{symbol}): "
                     f"ROI={roi:.1%} | last={last:.2f} | max={max_price:.2f} | "
                     f"stop={stop_final:.2f} (sin cambio)"
                 )
+                if symbol == "PLUG":
+                    self._preservation_logger.info(msg)
+                self.logger.warning(msg)
 
             # 11. Persistir estado
             self.preservation_state[symbol] = {
@@ -1979,8 +1992,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     # Agente PerformaValidator — detecta precios yfinance corruptos y purga para regeneración
                     self.Agente_PerformaValidator()
 
-                    # Agente for Preservation (defensivo estructural)  -- No activar esta en prueba
-                    # self.exec_modulo_async(self.Agente_ManagerPreservation())
+                    # Agente for Preservation (defensivo estructural) — dry-run activo, solo PLUG
+                    self.exec_modulo_async(self.Agente_ManagerPreservation())
 
                     time.sleep(15)
                     self.counter += 1
