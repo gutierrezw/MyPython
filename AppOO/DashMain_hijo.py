@@ -10,7 +10,7 @@ os.makedirs("tmp", exist_ok=True)
 
 sys.argv = [sys.argv[0], "--profile", "hijo"]
 
-from DashMainV9_ia import DashMain
+from DashMain import DashMain
 
 if __name__ == "__main__":
     app = DashMain()

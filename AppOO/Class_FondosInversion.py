@@ -31,8 +31,9 @@ class ArsFondosInversion(tk.Frame):
         self.bgcolor = self.colors["bgcolor"]
         self.cgcolor = self.colors["cgcolor"]
 
-        self.path = os.getcwd()
-        self.path += "\\tmp\\"
+        self.path = os.environ.get("APPOO_TMP") or os.path.join(os.getcwd(), "tmp")
+        self.path = self.path.rstrip("\\/") + os.sep
+        os.makedirs(self.path, exist_ok=True)
 
         self.CNVDiaria = None
         self.archivo = None
