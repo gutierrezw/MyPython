@@ -1663,12 +1663,6 @@ class MyOrders:
             except (Exception, ValueError) as e:
                 print("on_select_tip({}): {}".format(self.vehiculo, e))
 
-        # Cierra la entrada de texto y asigna el valor seleccionado Qty
-        def on_select_qty(event):
-            selected_item = lbq.get(lbx.curselection())
-            self.entry_qty.set(selected_item)
-            lbq.grid_forget()
-
         # Muestra el Listbox tipo de orden.
         def on_click_tip(event):
             try:
@@ -1676,9 +1670,61 @@ class MyOrders:
             except (Exception, ValueError) as e:
                 print("on_click_tip({}): {}".format(self.vehiculo, e))
 
-        # Muestra el Listbox cuando se hace clic en el Entry.
-        def on_click_qty(event):
-            lbx.grid(row=2, column=2, pady=1)
+        # Muestra el Listbox de modo entrada (QTY / USD).
+        def on_click_modo(event):
+            lbm.grid(row=2, column=0, padx=20, sticky="w")
+
+        # Selecciona modo QTY o USD y actualiza UI.
+        def on_select_modo(event):
+            try:
+                modo = lbm.get(lbm.curselection())
+                modo_entrada.set(modo)
+                lbm.grid_forget()
+                if modo == "USD":
+                    self.entry_qty.set("")
+                    lbl_calc.config(text="")
+                else:
+                    self.entry_qty.set(str(cantidad_ordenada(symbol, option, parm["mkPrice"])))
+                    lbl_calc.config(text="")
+            except (Exception, ValueError) as e:
+                print("on_select_modo({}): {}".format(self.vehiculo, e))
+
+        # Recalcula qty cuando se escribe el importe en USD.
+        def on_importe_change(*_):
+            try:
+                if modo_entrada.get() != "USD":
+                    return
+                val = self.entry_qty.get().strip()
+                if not val:
+                    lbl_calc.config(text="")
+                    return
+                importe = float(val)
+                precio = float(self.entry_prc.get())
+                if precio <= 0:
+                    return
+                qty_calc = _calc_qty_from_importe(importe, precio)
+                lbl_calc.config(text=f"≈ {qty_calc}")
+            except (ValueError, Exception):
+                lbl_calc.config(text="")
+
+        def _calc_qty_from_importe(importe, precio):
+            if self.vehiculo == "Stock":
+                return math.floor(importe / precio)
+            # Crypto — respeta decimales del lotSize
+            raw = importe / precio
+            lot_exp = self._get_lot_exp(symbol)
+            return math.trunc(raw * 10**lot_exp) / (10**lot_exp)
+
+        def _get_qty_final():
+            """Devuelve qty a enviar según modo activo."""
+            if modo_entrada.get() == "USD":
+                try:
+                    importe = float(self.entry_qty.get())
+                    precio = float(self.entry_prc.get())
+                    return _calc_qty_from_importe(importe, precio)
+                except (ValueError, Exception):
+                    return 0.0
+            return float(self.entry_qty.get())
 
         # valida que este disponible en Spot la cantidad de
         def valida_wallet_spot():
@@ -1705,7 +1751,7 @@ class MyOrders:
             try:
                 win3.grid_forget()
 
-                qty = self.entry_qty.get()
+                qty = str(_get_qty_final())
                 if float(qty) > 0.0:
 
                     # antes de ceder el control verifica y carga wallet spot
@@ -1791,14 +1837,17 @@ class MyOrders:
             qty = cantidad_ordenada(symbol, option, parm["mkPrice"])
 
             self.entry_qty = tk.StringVar(value=str(qty))
-            bt2 = tk.Label(win1, text="QTY", bg="gray", fg="white")
+            modo_entrada = tk.StringVar(value="QTY")
+            bt2 = tk.Entry(win1, width=8, textvariable=modo_entrada, state="readonly")
+            bt2.bind("<Button-1>", on_click_modo)
             bt3 = tk.Entry(win1, width=17, textvariable=self.entry_qty)
-            # bt3.bind("<Button-1>", on_click_qty)
+            lbl_calc = tk.Label(win1, text="", bg=color, fg="white", width=10)
 
-            lbq = tk.Listbox(win1, width=4, height=3)
-            for item in list_qty:
-                lbq.insert(tk.END, item)
-            # lbx.bind("<<ListboxSelect>>", on_select_qty)
+            lbm = tk.Listbox(win1, width=8, height=2)
+            lbm.insert(tk.END, "QTY")
+            lbm.insert(tk.END, "USD")
+            lbm.bind("<<ListboxSelect>>", on_select_modo)
+            self.entry_qty.trace_add("write", on_importe_change)
 
             position = "Position :{:>10.5f}".format(parm["stock"])
             available = "Disponible :{:>10.5f}".format(0)
@@ -1837,6 +1886,7 @@ class MyOrders:
 
             bt2.grid(row=2, column=0, sticky=W, padx=20, pady=20)
             bt3.grid(row=2, column=1, padx=0)
+            lbl_calc.grid(row=2, column=2, sticky=W, padx=4)
 
             # BID, ASK y precio de trader --------------------------------------------------
             def calcular_precio_medio():
@@ -2934,6 +2984,13 @@ class TickerInfo(MyOrders):
             return d_buy, d_sell
         except Exception as e:
             print("[ts_oportunidades_symbol()]: {}".format(e))
+
+    def _get_lot_exp(self, symbol):
+        try:
+            step_size = self.info[symbol]["lotSize"]["stepSize"]
+            return calculate_decimal_places(step_size)
+        except (KeyError, Exception):
+            return 5
 
     def _get_estrategia_descripcion(self, codigo_estrategia):
         """Convierte código de estrategia (P01, P02, P03, C01, etc.) a su descripción para el rebalanceo."""

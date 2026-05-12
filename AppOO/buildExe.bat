@@ -47,7 +47,7 @@ echo Ejecutando PyInstaller...
     --hidden-import "Modulos_Utilitarios" ^
     --hidden-import "Modulos_python" ^
     --collect-all "binance" ^
-    DashMainV9_ia.py
+    DashMain.py
 
 xcopy /s /e /i /y profiles "dist\AppOO\profiles" >nul
 
