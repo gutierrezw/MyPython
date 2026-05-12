@@ -1,3 +1,4 @@
+from version import APP_NAME, VERSION
 from Class_debugging import ManagerEvents, MangerAfterEvents, Debugging
 from Class_DataFrame import (
     grupo_activos,
@@ -1987,7 +1988,7 @@ class DashMain:
         self.Estrategia = EstrategiaInversion()
         self.RepositorioOportunidades = RepositorioOportunidadesBuySell()
 
-        self.program = "Dashmain(v9.ia)"
+        self.program = f"{APP_NAME} v{VERSION}"
         self.dimension = "%dx%d+0+0" % (self.max_dw, self.max_dh)
         self.root.geometry(self.dimension)
         self.root.config(bg=self.colors["bgcolor"])
@@ -5217,7 +5218,7 @@ class DashMain:
         sw = win.winfo_screenwidth()
         sh = win.winfo_screenheight()
         win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
-        tk.Label(win, text="DashMain version 9.ia", bg="#1a1a1a", fg="#00bcd4", font=("Segoe UI", 16, "bold")).pack(
+        tk.Label(win, text=f"{APP_NAME}  v{VERSION}", bg="#1a1a1a", fg="#00bcd4", font=("Segoe UI", 16, "bold")).pack(
             pady=(14, 2)
         )
         status = tk.Label(win, text="Iniciando...", bg="#1a1a1a", fg="#aaaaaa", font=("Segoe UI", 9))
