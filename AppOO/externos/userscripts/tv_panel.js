@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TradingView — App Panel
 // @namespace    http://tampermonkey.net/
-// @version      1.9
+// @version      2.0
 // @match        https://www.tradingview.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -344,20 +344,26 @@
         </div>
 
         <div style="margin-top:14px">
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
-            <span style="color:#787b86;font-size:11px;white-space:nowrap">Cantidad:</span>
-            <input id="tv-order-qty" type="number" min="0" step="1"
-              style="flex:1;padding:4px 6px;background:#2a2e39;color:#d1d4dc;border:1px solid #434651;
-                     border-radius:4px;font-size:12px;outline:none" placeholder="0" />
-            <span id="tv-order-status" style="font-size:10px;color:#787b86;min-width:60px;text-align:right"></span>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <button id="tv-modo-toggle"
+              style="padding:10px 16px;background:#2a2e39;color:#d1d4dc;border:1px solid #434651;
+                     border-radius:4px;font-size:15px;font-weight:bold;cursor:pointer;white-space:nowrap;min-width:70px">QTY</button>
+            <input id="tv-order-qty" type="number" min="0" step="any"
+              style="flex:1;padding:10px 14px;background:#1a1e2e;color:#fff;border:2px solid #434651;
+                     border-radius:4px;font-size:22px;font-weight:bold;outline:none" placeholder="0" />
+          </div>
+          <div id="tv-qty-calc"
+            style="text-align:right;font-size:13px;color:#9598a1;min-height:20px;margin-bottom:8px;padding-right:2px"></div>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+            <span id="tv-order-status" style="font-size:10px;color:#787b86;flex:1;text-align:right"></span>
           </div>
           <div style="display:flex;gap:8px">
             <button id="tv-btn-buy"
-              style="flex:1;padding:8px;background:#26a69a;color:#fff;border:none;border-radius:4px;
-                     font-size:13px;font-weight:bold;cursor:pointer">BUY</button>
+              style="flex:1;padding:10px;background:#26a69a;color:#fff;border:none;border-radius:4px;
+                     font-size:14px;font-weight:bold;cursor:pointer">BUY</button>
             <button id="tv-btn-sell"
-              style="flex:1;padding:8px;background:#ef5350;color:#fff;border:none;border-radius:4px;
-                     font-size:13px;font-weight:bold;cursor:pointer">SELL</button>
+              style="flex:1;padding:10px;background:#ef5350;color:#fff;border:none;border-radius:4px;
+                     font-size:14px;font-weight:bold;cursor:pointer">SELL</button>
           </div>
         </div>`;
     }
@@ -380,20 +386,20 @@
         Object.assign(header.style, {
             display: "flex", justifyContent: "space-between", alignItems: "center",
             padding: "6px 10px", cursor: "move",
-            borderBottom: "1px solid #2a2e39", background: "#161a25",
+            borderBottom: "1px solid #2a2e39", background: "#FFD700",
             borderRadius: "6px 6px 0 0",
         });
 
         titleEl = document.createElement("span");
         titleEl.textContent = "Análisis";
-        titleEl.style.cssText = "color:#787b86;font-size:11px;text-transform:uppercase;letter-spacing:1px";
+        titleEl.style.cssText = "color:#1a1a1a;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:bold";
 
         const btnBar = document.createElement("div");
         btnBar.style.cssText = "display:flex;gap:8px;align-items:center";
 
         const btnMin = document.createElement("span");
         btnMin.textContent = "−";
-        btnMin.style.cssText = "cursor:pointer;color:#787b86;font-size:16px;line-height:1;padding:0 3px";
+        btnMin.style.cssText = "cursor:pointer;color:#1a1a1a;font-size:16px;line-height:1;padding:0 3px";
         btnMin.onclick = (e) => {
             e.stopPropagation();
             minimized = !minimized;
@@ -404,7 +410,7 @@
         const btnClose = document.createElement("span");
         btnClose.id = "app-tv-close";
         btnClose.textContent = "✕";
-        btnClose.style.cssText = "cursor:pointer;color:#787b86;font-size:13px;padding:0 3px";
+        btnClose.style.cssText = "cursor:pointer;color:#1a1a1a;font-size:13px;padding:0 3px";
         btnClose.onclick = (e) => {
             e.stopPropagation();
             panelEl.style.display = "none";
@@ -414,7 +420,7 @@
         btnCartera = document.createElement("span");
         btnCartera.textContent = "≡";
         btnCartera.title = "Cartera";
-        btnCartera.style.cssText = "cursor:pointer;color:#787b86;font-size:16px;line-height:1;padding:0 3px";
+        btnCartera.style.cssText = "cursor:pointer;color:#1a1a1a;font-size:16px;line-height:1;padding:0 3px";
         btnCartera.onclick = (e) => {
             e.stopPropagation();
             symbolsVisible = !symbolsVisible;
@@ -552,29 +558,74 @@
         });
     }
 
+    // ── Modo QTY / USD ────────────────────────────────────────────────────
+    let _tvModo = "QTY"; // "QTY" | "USD"
+
+    function _calcEquiv() {
+        const inp = document.getElementById("tv-order-qty");
+        const calc = document.getElementById("tv-qty-calc");
+        if (!inp || !calc) return;
+        const v = parseFloat(inp.value);
+        const price = (lastPosicion || {}).last || 0;
+        const sym = tvSymbol();
+        const isCrypto = _dec === 4;
+        if (v > 0 && price > 0) {
+            if (_tvModo === "USD") {
+                const qty = isCrypto ? (v / price).toFixed(4) : Math.floor(v / price);
+                calc.textContent = `≈ ${qty} ${sym}`;
+            } else {
+                calc.textContent = `≈ $${(v * price).toFixed(2)} USD`;
+            }
+        } else {
+            calc.textContent = "";
+        }
+    }
+
+    function _bindModoToggle() {
+        const btn = document.getElementById("tv-modo-toggle");
+        const inp = document.getElementById("tv-order-qty");
+        if (!btn) return;
+        // Restaurar estado visual desde _tvModo (necesario en cada redraw)
+        btn.textContent = _tvModo;
+        btn.style.color = _tvModo === "USD" ? "#26a69a" : "#d1d4dc";
+        btn.style.borderColor = _tvModo === "USD" ? "#26a69a" : "#434651";
+        btn.onclick = () => {
+            _tvModo = _tvModo === "QTY" ? "USD" : "QTY";
+            btn.textContent = _tvModo;
+            btn.style.color = _tvModo === "USD" ? "#26a69a" : "#d1d4dc";
+            btn.style.borderColor = _tvModo === "USD" ? "#26a69a" : "#434651";
+            if (inp) inp.value = "";
+            const calc = document.getElementById("tv-qty-calc");
+            if (calc) calc.textContent = "";
+        };
+        if (inp) inp.oninput = () => _calcEquiv();
+    }
+
     // ── Enviar orden al servidor local ────────────────────────────────────
     function postOrder(side) {
         const qtyEl = document.getElementById("tv-order-qty");
         const statusEl = document.getElementById("tv-order-status");
-        const qty = parseFloat(qtyEl ? qtyEl.value : 0);
-        if (!qty || qty <= 0) { if (statusEl) { statusEl.textContent = "qty requerida"; statusEl.style.color = "#ef5350"; } return; }
+        const val = parseFloat(qtyEl ? qtyEl.value : 0);
+        if (!val || val <= 0) { if (statusEl) { statusEl.textContent = "valor requerido"; statusEl.style.color = "#ef5350"; } return; }
         const pos = lastPosicion || {};
         const price = pos.last || 0;
         if (!price) { if (statusEl) { statusEl.textContent = "sin precio"; statusEl.style.color = "#ef5350"; } return; }
         if (statusEl) { statusEl.textContent = "enviando…"; statusEl.style.color = "#787b86"; }
+        const body = {
+            symbol: tvSymbol(),
+            vehiculo: pos.vehiculo || "Stock",
+            account: pos.account || "",
+            side: side,
+            price: price,
+            conid: pos.conid || null,
+        };
+        if (_tvModo === "USD") body.importe = val;
+        else body.qty = val;
         GM_xmlhttpRequest({
             method: "POST",
             url: `http://localhost:${PORT}/order`,
             headers: { "Content-Type": "application/json" },
-            data: JSON.stringify({
-                symbol: tvSymbol(),
-                vehiculo: pos.vehiculo || "Stock",
-                account: pos.account || "",
-                side: side,
-                qty: qty,
-                price: price,
-                conid: pos.conid || null,
-            }),
+            data: JSON.stringify(body),
             onload: (r) => {
                 try {
                     const d = JSON.parse(r.responseText);
@@ -599,7 +650,7 @@
         const prevQty = document.getElementById("tv-order-qty")?.value || "";
         const hadFocus = document.activeElement?.id === "tv-order-qty";
 
-        bodyEl.style.display = "block";
+        if (!minimized) bodyEl.style.display = "block";
         bodyEl.innerHTML = html;
         panelEl.style.display = "block";
         if (titleEl && symbol) titleEl.textContent = `${symbol} — Análisis`;
@@ -613,6 +664,8 @@
             if (hadFocus) qtyEl.focus();
         }
 
+        _bindModoToggle();
+        if (prevQty) _calcEquiv();
         const btnBuy = document.getElementById("tv-btn-buy");
         const btnSell = document.getElementById("tv-btn-sell");
         if (btnBuy) btnBuy.onclick = () => postOrder("BUY");
