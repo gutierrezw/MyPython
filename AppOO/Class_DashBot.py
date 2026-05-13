@@ -2092,7 +2092,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             tag, suma = self._consenso_info(symbol)
             if tag:
                 mensaje += f"{'-' * 37}\n"
-                mensaje += f"{'Consenso':<15} {tag:>12} ({suma:+d}/6)\n"
+                mensaje += f"{'Consenso':<15} {tag:>12} ({suma:+d}/7)\n"
 
             mensaje += "```"
 
@@ -2344,7 +2344,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             tag, suma = self._consenso_info(symbol)
             if tag:
                 mensaje += f"{'-' * 37}\n"
-                mensaje += f"{'Consenso':<18} {tag:>12} ({suma:+d}/6)\n"
+                mensaje += f"{'Consenso':<18} {tag:>12} ({suma:+d}/7)\n"
 
             mensaje += "```"
             return mensaje

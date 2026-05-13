@@ -181,6 +181,7 @@ def stop_tv_server():
     global _tv_server
     if _tv_server:
         try:
+            _tv_server.shutdown()
             _tv_server.server_close()
         except Exception:
             pass
