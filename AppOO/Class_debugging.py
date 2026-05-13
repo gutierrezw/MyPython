@@ -407,12 +407,16 @@ class Debugging:
             log_create = self.log_file + "log_even"
             log_delete = self.log_file + "log_old"
 
-        # Ruta absoluta basada en ubicación del archivo, no del directorio de trabajo
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        lpath = os.path.join(script_dir, "..", "logs")
+        tmp_env = os.environ.get("APPOO_TMP")
+        if tmp_env:
+            # APPOO_TMP = .../AppOO/tmp → logs = .../MyPython/logs
+            lpath = os.path.normpath(os.path.join(tmp_env, "..", "..", "logs"))
+        else:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            lpath = os.path.join(script_dir, "..", "logs")
         os.makedirs(lpath, exist_ok=True)
         self.loggerName = os.path.join(lpath, log_create)
-        self.spath = os.path.join(script_dir, "tmp")
+        self.spath = os.environ.get("APPOO_TMP") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp")
         delete_rpath = os.path.join(lpath, log_delete)
 
         # Elimina log anterior
