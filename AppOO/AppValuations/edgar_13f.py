@@ -11,7 +11,11 @@ _EDGAR_HEADERS = {"User-Agent": "InversionesWildaga Research Bot (gutierrez.madr
 _EDGAR_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 _EDGAR_ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dashes}/{filename}"
 _OPENFIGI_URL = "https://api.openfigi.com/v3/mapping"
-_13F_SAVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "EDGAR", "13F")
+_13F_SAVE_DIR = os.path.join(
+    os.environ.get("APPOO_TMP") or os.path.join(os.getcwd(), "tmp"),
+    "EDGAR",
+    "13F",
+)
 _13F_NS = {"tf": "http://www.sec.gov/edgar/document/thirteenf/informationtable"}
 _FILING_REFRESH_DAYS = 80  # umbral para re-chequear EDGAR (< 1 trimestre)
 
