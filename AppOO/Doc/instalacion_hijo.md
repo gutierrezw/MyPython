@@ -13,7 +13,7 @@
 Antes de buildear el exe, verificar que los tabs cargan bien:
 
 ```
-python DashMainV9_ia.py --profile hijo
+python DashMain.py --profile hijo
 ```
 
 Debe mostrar solo 4 tabs: Crypto, Ars, BotCrypto, Finance.

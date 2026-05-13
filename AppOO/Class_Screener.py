@@ -1862,13 +1862,24 @@ def audit_portfolio(account):
     }
 
 
-def refresh_consenso_tags(account):
-    """Recalcula consenso_tag y consenso_suma (sin voto Mod) para todos los símbolos
-    en cartera y los persiste en market. Llamado por Agente_ConsensoCache cada 5 min.
+def _load_csv_signals():
+    def _read(filename):
+        try:
+            path = define_FileCache(name=f"{filename}.CSV")
+            df = pd.read_csv(path, header=0, sep=",", encoding="utf-8", index_col=False)
+            df.columns = df.columns.str.strip()
+            return set(df["Symbol"].dropna().str.strip().tolist()) if "Symbol" in df.columns else set()
+        except (EmptyDataError, FileNotFoundError):
+            return set()
+        except Exception:
+            return set()
 
-    consenso_suma excluye el voto Mod (señal IA técnica) para que el gate Telegram
-    sea una confirmación independiente del modelo.
-    """
+    return _read("csv_datosIA_buy"), _read("csv_datosIA_sell")
+
+
+def refresh_consenso_tags(account):
+    """Recalcula consenso_tag y consenso_suma (7 votos) para todos los símbolos
+    en cartera y los persiste en market. Llamado por Agente_ConsensoCache cada 5 min."""
     mkt = MarketScreen()
     cartera = mkt.load_cartera_inst(account)
     if not cartera:
@@ -1876,6 +1887,7 @@ def refresh_consenso_tags(account):
 
     p33_net, p67_net = _build_net_percentiles(cartera)
     p33_flujo, p67_flujo = _build_flujo_percentiles(cartera)
+    syms_buy, syms_sell = _load_csv_signals()
 
     actualizados = 0
     for row in cartera:
@@ -1885,17 +1897,18 @@ def refresh_consenso_tags(account):
         rec = (row.get("analyst_rec") or "").lower().replace(" ", "_")
         categ = row.get("categoriaActivo") or ""
 
-        votos_sin_mod = {
+        votos = {
             "Net": voto_net_relativo(fh_buy_ratio, fh_sell_ratio, p33_net, p67_net),
             "Opt": voto_options(row.get("fh_call_shares"), row.get("fh_put_shares")),
             "Flujo": voto_flujo(
                 row.get("new_entrants"), row.get("full_exits"), row.get("fh_count"), p33_flujo, p67_flujo
             ),
             "Ana": voto_analistas(rec),
+            "Mod": (1 if sym in syms_buy else (-1 if sym in syms_sell else 0)),
             "Val": voto_valuacion(categ),
             "Cob": voto_cobertura(row.get("fh_count")),
         }
-        activos = {k: v for k, v in votos_sin_mod.items() if v is not None}
+        activos = {k: v for k, v in votos.items() if v is not None}
         suma = sum(activos.values())
         tag, _, _ = senal_consenso(list(activos.values()), suma)
 

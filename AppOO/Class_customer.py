@@ -4039,7 +4039,7 @@ class WidgetVehiculo(TickerInfo):
                 margen = debit / equity_crypto * beta_crypto
                 _log_dfc = logging.getLogger("DataFrameCache")
                 if neto_api <= 0:
-                    _log_dfc.warning(
+                    _log_dfc.debug(
                         f"Panel Crypto mrg (FALLBACK equity): debit={debit:.2f} col_val={colateral_value:.2f} "
                         f"beta={beta_crypto:.3f} → {margen:.2%}  [neto_api=0 — LtvControl aún no corrió]"
                     )
