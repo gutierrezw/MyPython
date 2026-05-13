@@ -19,6 +19,7 @@ dist/
 # Archivos de caché de yfinance y otros temporales
 tmp/
 tmp_old/
+tmp_build_bak/
 Dividends/
 EDGAR/
 *.dat-journal
