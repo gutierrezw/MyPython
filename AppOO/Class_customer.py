@@ -1460,37 +1460,56 @@ class MyOrders:
         def submit_stock():
             try:
                 submit = self.IClient.place_order_scenario(account_id=self.account, order=orden)
-                if submit:
+            except Exception:
+                submit = None
 
-                    win1, win2, win3 = ventana(cambio=submit["position"]["change"])
+            try:
+                if not submit:
+                    # fallback local cuando IB está offline
+                    qty = orden.get("quantity", 0)
+                    prc = orden.get("price", 0)
+                    tip = orden.get("orderType", "")
+                    producto = qty * prc
+                    s_cambio = "{:>8.4f} {} {} {:>8.4f}".format(qty, symbol, tip, prc)
+                    submit = {
+                        "amount": {
+                            "amount": "{:>8.2f} USD ({} acc)".format(producto, qty),
+                            "comisión": "-- (IB offline)",
+                            "total": "{:>8.2f} USD".format(producto),
+                        },
+                        "equity": {"amount": "--", "comisión": "--", "total": "--"},
+                        "initial": {"amount": "--", "comisión": "--", "total": "--"},
+                        "maintenance": {"amount": "--", "comisión": "--", "total": "--"},
+                        "position": {"change": s_cambio, "amount": "--", "comisión": "--", "total": "--"},
+                    }
 
-                    # pack() columna cantidad(win1)
-                    display(win=win1, submit=submit, attribute="amount", locate="vertical")
+                win1, win2, win3 = ventana(cambio=submit["position"]["change"])
 
-                    # pack() position cantidad(win2)
-                    a_list = ["equity", "initial", "maintenance", "position"]
-                    display(win=win2, submit=submit, attribute=a_list, locate="horizontal")
+                display(win=win1, submit=submit, attribute="amount", locate="vertical")
 
-                    bt3 = tk.Button(
-                        win3,
-                        text="CONFIRM",
-                        width=8,
-                        bg="gray",
-                        fg="white",
-                        command=lambda: completa_orden(symbol, orden, submit),
-                    )
+                a_list = ["equity", "initial", "maintenance", "position"]
+                display(win=win2, submit=submit, attribute=a_list, locate="horizontal")
 
-                    bt4 = tk.Button(
-                        win3,
-                        text="Cancel",
-                        width=8,
-                        bg="gray",
-                        fg="white",
-                        command=lambda: eexit(),
-                    )
+                bt3 = tk.Button(
+                    win3,
+                    text="CONFIRM",
+                    width=8,
+                    bg="gray",
+                    fg="white",
+                    command=lambda: completa_orden(symbol, orden, submit),
+                )
 
-                    bt3.grid(row=0, column=0, sticky=W, padx=3, pady=10)
-                    bt4.grid(row=0, column=1, sticky=W, padx=3, pady=10)
+                bt4 = tk.Button(
+                    win3,
+                    text="Cancel",
+                    width=8,
+                    bg="gray",
+                    fg="white",
+                    command=lambda: eexit(),
+                )
+
+                bt3.grid(row=0, column=0, sticky=W, padx=3, pady=10)
+                bt4.grid(row=0, column=1, sticky=W, padx=3, pady=10)
             except Exception as e:
                 print(f"submit_stock(): {e}")
 
@@ -1752,6 +1771,7 @@ class MyOrders:
                 win3.grid_forget()
 
                 qty = str(_get_qty_final())
+                self.entry_qty.set(qty)
                 if float(qty) > 0.0:
 
                     # antes de ceder el control verifica y carga wallet spot

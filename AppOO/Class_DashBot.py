@@ -1455,6 +1455,7 @@ class Telegram:
 class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
     def __init__(self, master=None, on_minimizar=None):
         super().__init__(master)
+        self.withdraw()
         ClassAgenteIA.__init__(self)
         Telegram.__init__(self)
 

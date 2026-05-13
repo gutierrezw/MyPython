@@ -1953,6 +1953,7 @@ class DashMain:
 
         self.root = tk.Tk()
         self.root.withdraw()
+        self.root.update()
         self.modules = []
         self.cartera = []
         self.it_crypto = 0
