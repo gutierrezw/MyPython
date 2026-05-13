@@ -7,6 +7,10 @@ echo ======================================================
 set PYENV=C:\Users\InversionesWildaga\Documents\MyPython\.venv\Scripts
 
 echo.
+echo Preservando directorio tmp...
+if exist tmp (xcopy /s /e /i /y tmp tmp_build_bak >nul 2>nul)
+
+echo.
 echo Limpiando entorno anterior...
 rmdir /s /q build 2>nul
 rmdir /s /q dist 2>nul
@@ -51,6 +55,14 @@ echo Ejecutando PyInstaller...
     DashMain.py
 
 xcopy /s /e /i /y profiles "dist\AppOO\profiles" >nul
+
+echo.
+echo Restaurando directorio tmp...
+if exist tmp_build_bak (
+    if not exist tmp mkdir tmp
+    xcopy /s /e /i /y tmp_build_bak tmp >nul 2>nul
+    rmdir /s /q tmp_build_bak 2>nul
+)
 
 echo.
 echo ======================================================
