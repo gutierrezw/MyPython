@@ -80,6 +80,7 @@ from Class_BrowserBridge import (
     set_order_callback,
     set_switch_callback,
     set_symbols_fn,
+    set_info_fn,
 )
 from Class_Finance import FinancePanel
 
@@ -2355,6 +2356,30 @@ class DashMain:
 
                 self.crypto.inicio_widget_treeview(self.crypto.positions)
                 self.crypto.run_graficos()
+            set_symbols_fn(
+                lambda: sorted(
+                    set(
+                        (
+                            [
+                                p.get("contractDesc") or p.get("ticket", "")
+                                for p in (
+                                    self.stock.positions
+                                    if isinstance(self.stock.positions, list)
+                                    else self.stock.positions.values()
+                                )
+                                if (p.get("contractDesc") or p.get("ticket"))
+                            ]
+                            if self.stock and self.stock.positions
+                            else []
+                        )
+                        + (
+                            [p.get("ticket", "") for p in self.crypto.positions if p.get("ticket")]
+                            if self.crypto and self.crypto.positions
+                            else []
+                        )
+                    )
+                )
+            )
         except Exception as e:
             print(f"start_cryptos({e})")
 
@@ -2465,18 +2490,27 @@ class DashMain:
 
             set_switch_callback(self.stock._abrir_tradingview)
             set_symbols_fn(
-                lambda: (
-                    sorted(
-                        p.get("contractDesc") or p.get("ticket", "")
-                        for p in (
-                            self.stock.positions
-                            if isinstance(self.stock.positions, list)
-                            else self.stock.positions.values()
+                lambda: sorted(
+                    set(
+                        (
+                            [
+                                p.get("contractDesc") or p.get("ticket", "")
+                                for p in (
+                                    self.stock.positions
+                                    if isinstance(self.stock.positions, list)
+                                    else self.stock.positions.values()
+                                )
+                                if (p.get("contractDesc") or p.get("ticket"))
+                            ]
+                            if self.stock and self.stock.positions
+                            else []
                         )
-                        if (p.get("contractDesc") or p.get("ticket"))
+                        + (
+                            [p.get("ticket", "") for p in self.crypto.positions if p.get("ticket")]
+                            if self.crypto and self.crypto.positions
+                            else []
+                        )
                     )
-                    if self.stock and self.stock.positions
-                    else []
                 )
             )
 
@@ -2508,6 +2542,7 @@ class DashMain:
             self.chatbot = Chatbot(master=self.root, on_minimizar=mostrar_boton)
             self.boton_flotante = BotonFlotante(self.root, on_click=mostrar_asistente)
             set_order_callback(self.chatbot.put_order)
+            set_info_fn(lambda: DataHub.info)
 
             # Iniciar el chatbot
             self.chatbot.run()

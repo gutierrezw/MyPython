@@ -1,3 +1,5 @@
+import math
+
 from Modulos_python import (
     webbrowser,
     logging,
@@ -9,6 +11,7 @@ from Modulos_python import (
     urlparse,
     parse_qs,
 )
+from Modulos_Utilitarios import calculate_decimal_places
 
 _logger = logging.getLogger("TradingView")
 _TV_PORT = 5050
@@ -28,6 +31,23 @@ _tv_last_ping = {"t": 0.0, "ever": False}  # ever=True → Tampermonkey activo e
 _tv_server = None  # referencia para shutdown limpio
 _tv_contexto = {}  # contexto de cartera para inyección en claude.ai
 _order_callback = None  # fn(symbol, vehiculo, account, opt, qty, price, conid, razon) → (response, symbol)
+_info_fn = None  # fn() → DataHub.info dict
+
+
+def _calc_qty_from_importe(importe, price, vehiculo, symbol):
+    if price <= 0:
+        return 0.0
+    if vehiculo == "Stock":
+        return float(math.floor(importe / price))
+    raw = importe / price
+    try:
+        step_size = _info_fn()[symbol]["lotSize"]["stepSize"]
+        exp = calculate_decimal_places(step_size)
+    except Exception:
+        exp = 5
+    return math.trunc(raw * 10**exp) / (10**exp)
+
+
 _switch_callback = None  # fn(symbol) → None; carga datos del símbolo y llama abrir_tradingview()
 _symbols_fn = None  # fn() → list[str]; retorna lista de símbolos en cartera (live)
 
@@ -99,11 +119,14 @@ class _TVRequestHandler(BaseHTTPRequestHandler):
                 vehiculo = body.get("vehiculo", "Stock")
                 account = body.get("account", "")
                 side = body.get("side", "BUY").upper()
-                qty = float(body.get("qty", 0))
                 price = float(body.get("price", 0))
                 conid = body.get("conid")
+                importe = body.get("importe")
+                qty = float(body.get("qty", 0))
+                if importe is not None and price > 0:
+                    qty = _calc_qty_from_importe(float(importe), price, vehiculo, symbol)
                 if not symbol or qty <= 0 or price <= 0:
-                    self._send_json({"ok": False, "error": "symbol, qty y price requeridos"}, 400, origin)
+                    self._send_json({"ok": False, "error": "symbol, qty/importe y price requeridos"}, 400, origin)
                     return
                 response, _ = _order_callback(
                     symbol=symbol,
@@ -181,6 +204,12 @@ def set_symbols_fn(fn):
     """Registra la función que retorna la lista live de símbolos en cartera. Firma: fn() → list[str]."""
     global _symbols_fn
     _symbols_fn = fn
+
+
+def set_info_fn(fn):
+    """Registra fn() → DataHub.info para calcular qty desde importe en /order."""
+    global _info_fn
+    _info_fn = fn
 
 
 def set_claude_contexto(data):
