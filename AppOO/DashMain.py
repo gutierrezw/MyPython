@@ -1926,7 +1926,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     self.procesos.append({"widget": {socket: 0}})
 
                 else:
-                    logging.getLogger("IBroks_Client").warning("run_stock(): No hay conexión con IBKR")
+                    logging.getLogger("IBroks_Client").warning("run_stock(): IB offline — cargando posiciones desde BD")
+                    self.carga_inversion_en_positions()
             except Exception as error:
                 logging.getLogger("IBroks_Client").error(f"run_stock(): {error}")
 

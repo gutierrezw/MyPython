@@ -1,6 +1,4 @@
-from clientportal import ClientPortal
 from Modulos_python import (
-    sys,
     urllib,
     requests,
     json,
@@ -10,16 +8,16 @@ from Modulos_python import (
     traceback,
     datetime,
     textwrap,
-    Path,
     Dict,
     List,
     logging,
 )
 from Modulos_Mysql import BDsystem
+from Class_Ibrks import IBClient
 
 
 # --- Interactive Brokers -----------------------------------------------------------------------------------------
-class IB:
+class IB(IBClient):
     def __init__(
         self,
         username: str = None,
@@ -45,26 +43,16 @@ class IB:
         """
 
         sesion = BDsystem.get_sesion_by_vehiculo("Stock")
-        self.account = sesion["idcuenta"]
-        self.username = sesion["iduser"]
-        self.client_portal_client = ClientPortal()
+        IBClient.__init__(
+            self, username=sesion["iduser"], account=sesion["idcuenta"], is_server_running=is_server_running
+        )
 
-        self.api_version = "v1/"
-        self._operating_system = sys.platform
-        self.session_state_path: Path = Path(__file__).parent.joinpath("server_session.json").resolve()
-        self.authenticated = False
-        self._is_server_running = is_server_running
-        self.task = "IBKR-Tickle(On)"
-
-        # Define URL Components
-        self.ib_gateway_host = r"https://localhost"
+        # Sobreescribe puerto (IBClient usa 5000, IB usa 5501)
         self.ib_gateway_port = r"5501"
-
-        self.ib_gateway_path = f"{self.ib_gateway_host}:{self.ib_gateway_port}"
-        self.backup_gateway_path = r"https://cdcdyn.interactivebrokers.com/portal.proxy"
+        self.ib_gateway_path = r"https://localhost" + ":" + self.ib_gateway_port
         self.login_gateway_path = self.ib_gateway_path + "/sso/Login?forwardTo=22&RL=1&ip2loc=on"
 
-        # Asigna Nombre Logging
+        self.task = "IBKR-Tickle(On)"
         self.logger = logging.getLogger("IBroks_Client")
         self._network_error_logged = False  # guard: loguea NETWORK EXCEPTION solo una vez por período de caída
 
