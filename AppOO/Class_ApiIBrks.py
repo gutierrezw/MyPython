@@ -696,14 +696,45 @@ class IB(IBClient):
         execute orders as they happen, see status field."""
 
         try:
-            # define request components
             endpoint = r"iserver/account/orders"
             req_type = "GET"
             content = self._make_request(endpoint=endpoint, req_type=req_type)
-
             return content
         except Exception as e:
             print("[get_live_orders()]: {}".format(e))
+
+    def get_preservation_stops(self):
+        """Retorna las órdenes STP LMT SELL GTC activas — usadas por Agente_ManagerPreservation
+        para reconstruir preservation_state al arrancar.
+        Retorna lista de dicts: {symbol, order_id, stop_price, status}."""
+        try:
+            response = self.get_live_orders()
+            if not response:
+                return []
+            result = []
+            for o in response.get("orders", []):
+                order_type = (o.get("orderType") or "").upper()
+                side = (o.get("side") or o.get("orderDesc") or "").upper()
+                tif = (o.get("timeInForce") or "").upper()
+                status = o.get("status", "")
+                if (
+                    order_type in ("STP", "STP LMT")
+                    and "SELL" in side
+                    and tif == "GTC"
+                    and status in ("Submitted", "PreSubmitted")
+                ):
+                    result.append(
+                        {
+                            "symbol": o.get("ticker", ""),
+                            "order_id": o.get("orderId"),
+                            "stop_price": o.get("auxPrice"),
+                            "status": status,
+                        }
+                    )
+            return result
+        except Exception as e:
+            print(f"[get_preservation_stops()]: {e}")
+            return []
 
     def place_order(self, account_id: str, order: dict) -> Dict:
         """
