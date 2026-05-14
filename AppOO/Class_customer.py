@@ -1102,14 +1102,20 @@ class DataHub:
                 "hash_id_Op": hash_id,
             }
 
+    preservation_live_enabled = False  # SAFETY: debe ser True explícitamente para enviar órdenes reales
+
     @staticmethod
     def preservation_send_order(vehiculo, trama):
         """Envía orden STOP via QremoteOrder. Retorna response."""
+        if not DataHub.preservation_live_enabled:
+            raise RuntimeError("preservation_send_order bloqueado: DataHub.preservation_live_enabled=False")
         return DataHub.QremoteOrder[vehiculo]._request(trama)
 
     @staticmethod
     def preservation_cancel_order(vehiculo, account, order_id, symbol):
         """Cancela una orden PRESERVATION_STOP existente."""
+        if not DataHub.preservation_live_enabled:
+            raise RuntimeError("preservation_cancel_order bloqueado: DataHub.preservation_live_enabled=False")
         trama = {
             "account": account,
             "vehiculo": vehiculo,
