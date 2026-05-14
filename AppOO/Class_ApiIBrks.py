@@ -1,8 +1,4 @@
-# Interactive Brokers
-from Class_Ibrks import *
-from clientportal import *
-
-# modulos propios DashMain
+from clientportal import ClientPortal
 from Modulos_python import (
     sys,
     urllib,
@@ -13,17 +9,17 @@ from Modulos_python import (
     threading,
     traceback,
     datetime,
+    textwrap,
+    Path,
+    Dict,
+    List,
+    logging,
 )
 from Modulos_Mysql import BDsystem
 
-# from Class_customer import DataHub
-
-# BB, MySpot, WebsocketBinanceStreams, WebsocketBinanceApiClient migrados a Class_vehiculo.py
-# → BinanceClient, BinanceSpot, BinanceStreamClient, BinanceWSApiClient
-
 
 # --- Interactive Brokers -----------------------------------------------------------------------------------------
-class IB(IBClient):
+class IB:
     def __init__(
         self,
         username: str = None,
@@ -31,7 +27,6 @@ class IB(IBClient):
         client_gateway_path: str = None,
         is_server_running: bool = True,
     ) -> None:
-        IBClient.__init__(self, username, account, is_server_running)
         """Initialize a new instance of the IBClient Object.
 
         Usage:
@@ -56,7 +51,7 @@ class IB(IBClient):
 
         self.api_version = "v1/"
         self._operating_system = sys.platform
-        self.session_state_path: pathlib.Path = pathlib.Path(__file__).parent.joinpath("server_session.json").resolve()
+        self.session_state_path: Path = Path(__file__).parent.joinpath("server_session.json").resolve()
         self.authenticated = False
         self._is_server_running = is_server_running
         self.task = "IBKR-Tickle(On)"
