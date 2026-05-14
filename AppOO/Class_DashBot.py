@@ -115,11 +115,25 @@ class ClassAgenteIA:
         self.logger = logging.getLogger("ClassAgenteIA")
 
         # Estado del agente de preservación
-        self.preservation_state = {}  # {symbol: {max_price, stop_actual, last_check}}
         self.preservation_config = {}  # {vehiculo: sub-dict "preservation"} — extraído de _params_cache
         self.preservation_last_run = {}  # {vehiculo: datetime} — última evaluación por vehículo
         self._params_cache = {}  # {vehiculo: full parsed parameters dict} — compartido entre agentes
-        self._preservation_dry_run = True  # True = solo log, no enviar órdenes al broker
+        self._preservation_dry_run = (
+            True  # True = solo log, no enviar órdenes al broker — NO cambiar sin validación en prod
+        )
+        # Cargar estado persistido (sobrevive reinicios — stop_prev correcto sin depender de IB)
+        _saved = read_json_tmp("preservation_state.json")
+        self.preservation_state = {
+            k: {
+                **v,
+                "last_check": (
+                    datetime.fromisoformat(v["last_check"])
+                    if isinstance(v.get("last_check"), str)
+                    else v.get("last_check")
+                ),
+            }
+            for k, v in _saved.items()
+        }
 
         # Logger dedicado a preservation — escribe a tmp/preservation_diag.log
         self._preservation_logger = logging.getLogger("Preservation")
@@ -981,15 +995,16 @@ class ClassAgenteIA:
                     self._preservation_logger.info(msg)
                 self.logger.warning(msg)
 
-            # 11. Persistir estado
+            # 11. Persistir estado en memoria y en JSON (sobrevive reinicios)
             self.preservation_state[symbol] = {
                 "max_price": max_price,
                 "stop_actual": stop_final,
-                "last_check": datetime.now(),
+                "last_check": datetime.now().isoformat(),
                 "order_id": order_id,
                 "vehiculo": vehiculo,
                 "trama": trama,
             }
+            write_json_tmp("preservation_state.json", self.preservation_state)
 
 
 # Admistrador de mensajeria Telegram
