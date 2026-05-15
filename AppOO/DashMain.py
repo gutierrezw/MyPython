@@ -2551,6 +2551,7 @@ class DashMain:
             # Ocultar chat al inicio. Solo se activa desde el botón flotante
             self.chatbot._al_perder_foco()
         except Exception as e:
+            logging.getLogger("ClassChatbot").error(f"start_chatbot(): {e}", exc_info=True)
             self.chatbot = None
 
         # Inicializar monitores de modelos IA después de que chatbot esté disponible

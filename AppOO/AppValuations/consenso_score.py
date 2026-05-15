@@ -81,16 +81,22 @@ def build_net_percentiles(fh_cartera: dict) -> tuple:
     """Calcula percentiles p33 y p67 del flujo neto (buy_ratio - sell_ratio)
     sobre los activos de cartera con datos 13F.
     Retorna (p33, p67) para clasificar cada activo relativamente al universo."""
-    nets = sorted((v.get("fh_buy_ratio") or 0.0) - (v.get("fh_sell_ratio") or 0.0) for v in fh_cartera.values())
+    nets = sorted(
+        (v.get("fh_buy_ratio") or 0.0) - (v.get("fh_sell_ratio") or 0.0)
+        for v in fh_cartera.values()
+        if v.get("fh_count")
+    )
     if len(nets) < 3:
         return 0.2, 0.5
     n = len(nets)
     return nets[n // 3], nets[(2 * n) // 3]
 
 
-def voto_net_relativo(buy_r: float, sell_r: float, p33: float, p67: float) -> int:
+def voto_net_relativo(buy_r: float, sell_r: float, p33: float, p67: float, fh_count=None) -> int:
     """Voto Net: ranking relativo del flujo neto institucional 13F.
     Top 33% de cartera → +1 | Medio → 0 | Bottom 33% → -1."""
+    if not fh_count:
+        return 0
     net = (buy_r or 0.0) - (sell_r or 0.0)
     if net >= p67:
         return 1

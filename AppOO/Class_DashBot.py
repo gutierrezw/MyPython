@@ -965,7 +965,7 @@ class ClassAgenteIA:
             order_id_prev = state.get("order_id")
 
             # Activa Order STOP para el symbol
-            if stop_final > stop_anterior and symbol == "PLUG":
+            if stop_final > stop_anterior:
                 accion = "NUEVA" if not order_id_prev else "MODIFICADA (cancel+new)"
                 msg = (
                     f"Preservation({vehiculo}/{symbol}): "
@@ -991,18 +991,17 @@ class ClassAgenteIA:
                     f"ROI={roi:.1%} | last={last:.2f} | max={max_price:.2f} | "
                     f"stop={stop_final:.2f} (sin cambio)"
                 )
-                if symbol == "PLUG":
-                    self._preservation_logger.info(msg)
+                self._preservation_logger.info(msg)
                 self.logger.warning(msg)
 
             # 11. Persistir estado en memoria y en JSON (sobrevive reinicios)
+            # float() convierte np.float64 → JSON serializable; trama se reconstruye cada ciclo
             self.preservation_state[symbol] = {
-                "max_price": max_price,
-                "stop_actual": stop_final,
+                "max_price": float(max_price),
+                "stop_actual": float(stop_final),
                 "last_check": datetime.now().isoformat(),
                 "order_id": order_id,
                 "vehiculo": vehiculo,
-                "trama": trama,
             }
             write_json_tmp("preservation_state.json", self.preservation_state)
 
