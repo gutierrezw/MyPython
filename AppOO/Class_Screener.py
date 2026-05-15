@@ -41,7 +41,13 @@ _logger = logging.getLogger("Screener")
 
 
 def _build_net_percentiles(cartera_rows):
-    nets = sorted([float(r.get("fh_buy_ratio") or 0.0) - float(r.get("fh_sell_ratio") or 0.0) for r in cartera_rows])
+    nets = sorted(
+        [
+            float(r.get("fh_buy_ratio") or 0.0) - float(r.get("fh_sell_ratio") or 0.0)
+            for r in cartera_rows
+            if r.get("fh_count")
+        ]
+    )
     if len(nets) < 3:
         return 0.2, 0.5
     n = len(nets)
@@ -65,7 +71,9 @@ def _build_flujo_percentiles(cartera_rows):
     return vals[n // 3], vals[(2 * n) // 3]
 
 
-def voto_net_relativo(buy_r, sell_r, p33, p67):
+def voto_net_relativo(buy_r, sell_r, p33, p67, fh_count=None):
+    if not fh_count:
+        return 0
     net = (buy_r or 0.0) - (sell_r or 0.0)
     if net >= p67:
         return 1
@@ -77,7 +85,7 @@ def voto_net_relativo(buy_r, sell_r, p33, p67):
 def voto_options(call_shares, put_shares):
     total = (call_shares or 0) + (put_shares or 0)
     if total == 0:
-        return None
+        return 0
     ratio = (call_shares or 0) / total
     if ratio >= 0.6:
         return 1
@@ -94,7 +102,7 @@ def voto_analistas(rec):
         return -1
     if r == "hold":
         return 0
-    return None
+    return 0
 
 
 def voto_valuacion(categ):
@@ -104,7 +112,7 @@ def voto_valuacion(categ):
         return -1
     if categ == "N":
         return 0
-    return None
+    return 0
 
 
 def voto_cobertura(fh_count):
@@ -118,7 +126,7 @@ def voto_cobertura(fh_count):
 
 def voto_flujo(new_ent, exits, fh_count, p33, p67):
     if not fh_count:
-        return None
+        return 0
     fn = max(-1.0, min(1.0, ((new_ent or 0) - (exits or 0)) / fh_count))
     if fn >= p67:
         return 1
@@ -1055,7 +1063,7 @@ class Screener(tk.Frame):
             nombre = (row.get("shortName") or "")[:35]
 
             votos = {
-                "Net": voto_net_relativo(fh_buy_ratio, fh_sell_ratio, p33_net, p67_net),
+                "Net": voto_net_relativo(fh_buy_ratio, fh_sell_ratio, p33_net, p67_net, row.get("fh_count")),
                 "Opt": voto_options(row.get("fh_call_shares"), row.get("fh_put_shares")),
                 "Flujo": voto_flujo(
                     row.get("new_entrants"), row.get("full_exits"), row.get("fh_count"), p33_flujo, p67_flujo
@@ -1898,7 +1906,7 @@ def refresh_consenso_tags(account):
         categ = row.get("categoriaActivo") or ""
 
         votos = {
-            "Net": voto_net_relativo(fh_buy_ratio, fh_sell_ratio, p33_net, p67_net),
+            "Net": voto_net_relativo(fh_buy_ratio, fh_sell_ratio, p33_net, p67_net, row.get("fh_count")),
             "Opt": voto_options(row.get("fh_call_shares"), row.get("fh_put_shares")),
             "Flujo": voto_flujo(
                 row.get("new_entrants"), row.get("full_exits"), row.get("fh_count"), p33_flujo, p67_flujo

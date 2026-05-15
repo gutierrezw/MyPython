@@ -267,10 +267,9 @@ def descargar_cnv_hoy(fecha_str):
             "archivo": None,
         }
 
-    # Crear directorio tmp
-    directorio = "tmp"
-    if not os.path.exists(directorio):
-        os.makedirs(directorio)
+    # Crear directorio tmp — usa APPOO_TMP si está definido (consistente con define_FileCache)
+    directorio = os.environ.get("APPOO_TMP") or os.path.join(os.getcwd(), "tmp")
+    os.makedirs(directorio, exist_ok=True)
 
     # Obtener documentos
     documentos = obtener_documentos()
