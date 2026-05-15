@@ -48,8 +48,9 @@ class IB(IBClient):
         )
 
         # Sobreescribe puerto (IBClient usa 5000, IB usa 5501)
+        self.ib_gateway_host = r"https://localhost"
         self.ib_gateway_port = r"5501"
-        self.ib_gateway_path = r"https://localhost" + ":" + self.ib_gateway_port
+        self.ib_gateway_path = self.ib_gateway_host + ":" + self.ib_gateway_port
         self.login_gateway_path = self.ib_gateway_path + "/sso/Login?forwardTo=22&RL=1&ip2loc=on"
 
         self.task = "IBKR-Tickle(On)"
