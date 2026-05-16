@@ -4,7 +4,7 @@ echo ======================================================
 echo == EXPORTAR PAQUETE HIJO                            ==
 echo ======================================================
 
-set DEPLOY=%~dp0..\..\deploy
+set DEPLOY=%~dp0..\deploy
 set DEST=%DEPLOY%\AppOO_hijo
 
 :: ── 1. Empaquetar ejecutable ──────────────────────────────────────────────────
