@@ -5073,20 +5073,51 @@ class DashMain:
     def eexit(self):
         """Cierra la aplicación de forma ordenada"""
 
-        # Marcar como no ejecutando para detener nuevos callbacks
+        def _step(lbl, texto):
+            lbl.config(text=f"✓  {texto}")
+            win.update()
+
+        pasos = [
+            "Cancelando callbacks...",
+            "Cerrando gráficos...",
+            "Deteniendo BotCrypto...",
+            "Deteniendo servidor TV...",
+            "Cerrando hilos y agentes...",
+        ]
+
+        win = tk.Toplevel(self.root)
+        win.title("Cerrando...")
+        win.configure(bg="black")
+        win.resizable(False, False)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        w, h = 320, 40 + len(pasos) * 28
+        x = self.root.winfo_x() + (self.root.winfo_width() - w) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - h) // 2
+        win.geometry(f"{w}x{h}+{x}+{y}")
+
+        tk.Label(win, text="Cerrando aplicación...", bg="black", fg="cyan", font=("Segoe UI", 10, "bold")).pack(
+            pady=(10, 4)
+        )
+
+        labels = []
+        for paso in pasos:
+            lbl = tk.Label(win, text=f"◌  {paso}", bg="black", fg="#888888", font=("Segoe UI", 9), anchor="w", width=38)
+            lbl.pack(padx=16, pady=1, anchor="w")
+            labels.append(lbl)
+
+        win.update()
+
+        # Marcar como no ejecutando
         self.is_running = False
 
-        # Cancelar todos los after() callbacks pendientes
+        # Cancelar after() callbacks
         for after_id in self.after_ids:
             try:
                 self.root.after_cancel(after_id)
             except:
                 pass
-
-        # Limpiar lista
         self.after_ids.clear()
-
-        # Cancelar TODOS los callbacks pendientes de Tkinter (incluso los no rastreados)
         try:
             for after_info in self.root.tk.call("after", "info"):
                 try:
@@ -5095,52 +5126,46 @@ class DashMain:
                     pass
         except:
             pass
+        _step(labels[0], "Callbacks cancelados")
 
-        # Cerrar figuras de matplotlib si existen
+        # Cerrar figuras de matplotlib
         try:
             plt.close("all")
         except:
             pass
+        _step(labels[1], "Gráficos cerrados")
 
-        # Detener BotCrypto (flag _closing + WS + timers)
+        # Detener BotCrypto
         try:
             if hasattr(self, "bot_crypto_ui") and self.bot_crypto_ui:
                 self.bot_crypto_ui.detener()
         except:
             pass
+        _step(labels[2], "BotCrypto detenido")
 
+        # Detener servidor TV
         try:
             stop_tv_server()
         except:
             pass
+        _step(labels[3], "Servidor TV detenido")
 
-        print("✅ DashMain: Recursos liberados correctamente")
-
-        # cierra todos los threads & Job's pendientes
+        # Cerrar hilos y agentes
         try:
             DataHub.manager_events.stop_all()
         except:
             pass
+        _step(labels[4], "Hilos y agentes cerrados")
 
-        # DataHub.manager_after.after_cancel_all()
-        # Destruir ventana de forma segura sin crear nuevos callbacks
+        # Destruir ventana principal
         try:
-            # Deshabilitar el protocolo de cierre para evitar loops
             self.root.protocol("WM_DELETE_WINDOW", lambda: None)
-
-            # Ocultar ventana inmediatamente
             self.root.withdraw()
-
-            # Update para procesar eventos pendientes
             self.root.update_idletasks()
-
-            # Terminar mainloop
             self.root.quit()
-
         except Exception as e:
             print(f"[eexit error]: {e}")
 
-        # Forzar salida limpia del programa
         sys.exit(0)
 
     def get_limite_inversion(self):
