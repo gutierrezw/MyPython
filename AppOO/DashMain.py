@@ -5236,6 +5236,9 @@ class DashMain:
         with open(path, encoding="utf-8") as f:
             cfg = json.load(f)
         tabs = cfg.get("tabs", {})
+        db_cfg = cfg.get("db", {})
+        if db_cfg:
+            BDsystem.configure(db_cfg)
         tmp_path = cfg.get("tmp_path", "")
         if not tmp_path:
             tmp_path = os.path.join(base, "tmp")
