@@ -8,11 +8,13 @@ set PYENV=C:\Users\InversionesWildaga\Documents\MyPython\.venv\Scripts
 set DEPLOY=%~dp0..\..\deploy
 
 echo.
-echo Preservando directorio tmp...
-if exist tmp (xcopy /s /e /i /y tmp tmp_build_bak >nul 2>nul)
+echo Creando estructura deploy si no existe...
+if not exist "%DEPLOY%" mkdir "%DEPLOY%"
+if not exist "%DEPLOY%\tmp" mkdir "%DEPLOY%\tmp"
+if not exist "%DEPLOY%\logs" mkdir "%DEPLOY%\logs"
 
 echo.
-echo Limpiando entorno anterior...
+echo Limpiando AppOO anterior...
 rmdir /s /q build 2>nul
 rmdir /s /q "%DEPLOY%\AppOO" 2>nul
 
@@ -58,14 +60,6 @@ echo Ejecutando PyInstaller...
 echo.
 echo Copiando profiles al deploy...
 xcopy /s /e /i /y profiles "%DEPLOY%\AppOO\profiles" >nul
-
-echo.
-echo Restaurando directorio tmp...
-if exist tmp_build_bak (
-    if not exist tmp mkdir tmp
-    xcopy /s /e /i /y tmp_build_bak tmp >nul 2>nul
-    rmdir /s /q tmp_build_bak 2>nul
-)
 
 echo.
 echo ======================================================
