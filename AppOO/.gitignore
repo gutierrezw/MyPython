@@ -13,6 +13,7 @@ nul
 # Archivos de compilación (PyInstaller u otros)
 build/
 dist/
+deploy/
 *.spec
 *.exe
 
