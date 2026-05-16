@@ -5073,10 +5073,6 @@ class DashMain:
     def eexit(self):
         """Cierra la aplicación de forma ordenada"""
 
-        def _step(lbl, texto):
-            lbl.config(text=f"✓  {texto}")
-            win.update()
-
         pasos = [
             "Cancelando callbacks...",
             "Cerrando gráficos...",
@@ -5084,29 +5080,30 @@ class DashMain:
             "Deteniendo servidor TV...",
             "Cerrando hilos y agentes...",
         ]
+        total = len(pasos)
 
         win = tk.Toplevel(self.root)
-        win.title("Cerrando...")
-        win.configure(bg="black")
-        win.resizable(False, False)
         win.overrideredirect(True)
         win.attributes("-topmost", True)
-        w, h = 320, 40 + len(pasos) * 28
-        x = self.root.winfo_x() + (self.root.winfo_width() - w) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - h) // 2
-        win.geometry(f"{w}x{h}+{x}+{y}")
+        win.configure(bg="#1a1a1a")
+        w, h = 360, 120
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
 
-        tk.Label(win, text="Cerrando aplicación...", bg="black", fg="cyan", font=("Segoe UI", 10, "bold")).pack(
-            pady=(10, 4)
+        tk.Label(win, text=f"{APP_NAME}  v{VERSION}", bg="#1a1a1a", fg="#00bcd4", font=("Segoe UI", 16, "bold")).pack(
+            pady=(14, 2)
         )
-
-        labels = []
-        for paso in pasos:
-            lbl = tk.Label(win, text=f"◌  {paso}", bg="black", fg="#888888", font=("Segoe UI", 9), anchor="w", width=38)
-            lbl.pack(padx=16, pady=1, anchor="w")
-            labels.append(lbl)
-
+        status = tk.Label(win, text="Cerrando...", bg="#1a1a1a", fg="#aaaaaa", font=("Segoe UI", 9))
+        status.pack()
+        bar = ttk.Progressbar(win, orient="horizontal", length=320, mode="determinate", maximum=total)
+        bar.pack(pady=(6, 0))
         win.update()
+
+        def _step(texto):
+            status.config(text=texto)
+            bar["value"] += 1
+            win.update()
 
         # Marcar como no ejecutando
         self.is_running = False
@@ -5126,14 +5123,14 @@ class DashMain:
                     pass
         except:
             pass
-        _step(labels[0], "Callbacks cancelados")
+        _step("Callbacks cancelados")
 
         # Cerrar figuras de matplotlib
         try:
             plt.close("all")
         except:
             pass
-        _step(labels[1], "Gráficos cerrados")
+        _step("Gráficos cerrados")
 
         # Detener BotCrypto
         try:
@@ -5141,21 +5138,21 @@ class DashMain:
                 self.bot_crypto_ui.detener()
         except:
             pass
-        _step(labels[2], "BotCrypto detenido")
+        _step("BotCrypto detenido")
 
         # Detener servidor TV
         try:
             stop_tv_server()
         except:
             pass
-        _step(labels[3], "Servidor TV detenido")
+        _step("Servidor TV detenido")
 
         # Cerrar hilos y agentes
         try:
             DataHub.manager_events.stop_all()
         except:
             pass
-        _step(labels[4], "Hilos y agentes cerrados")
+        _step("Hilos y agentes cerrados")
 
         # Destruir ventana principal
         try:
