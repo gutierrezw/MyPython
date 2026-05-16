@@ -5239,6 +5239,8 @@ class DashMain:
         tmp_path = cfg.get("tmp_path", "")
         if not tmp_path:
             tmp_path = os.path.join(base, "tmp")
+        elif not os.path.isabs(tmp_path):
+            tmp_path = os.path.normpath(os.path.join(base, tmp_path))
         os.makedirs(tmp_path, exist_ok=True)
         os.environ["APPOO_TMP"] = tmp_path
         return tabs

@@ -409,8 +409,8 @@ class Debugging:
 
         tmp_env = os.environ.get("APPOO_TMP")
         if tmp_env:
-            # APPOO_TMP = .../AppOO/tmp → logs = .../MyPython/logs
-            lpath = os.path.normpath(os.path.join(tmp_env, "..", "..", "logs"))
+            # APPOO_TMP = .../deploy/tmp → logs = .../deploy/logs
+            lpath = os.path.normpath(os.path.join(tmp_env, "..", "logs"))
         else:
             script_dir = os.path.dirname(os.path.abspath(__file__))
             lpath = os.path.join(script_dir, "..", "logs")
