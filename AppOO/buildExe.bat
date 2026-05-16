@@ -5,6 +5,7 @@ echo == INICIANDO CONSTRUCCION DE EJECUTABLE (PYINSTALLER) ==
 echo ======================================================
 
 set PYENV=C:\Users\InversionesWildaga\Documents\MyPython\.venv\Scripts
+set DEPLOY=%~dp0..\..\deploy
 
 echo.
 echo Preservando directorio tmp...
@@ -13,7 +14,7 @@ if exist tmp (xcopy /s /e /i /y tmp tmp_build_bak >nul 2>nul)
 echo.
 echo Limpiando entorno anterior...
 rmdir /s /q build 2>nul
-rmdir /s /q dist 2>nul
+rmdir /s /q "%DEPLOY%\AppOO" 2>nul
 
 echo.
 echo Ejecutando PyInstaller...
@@ -25,7 +26,7 @@ echo Ejecutando PyInstaller...
     --paths "." ^
     --paths "AppValuations" ^
     --name "AppOO" ^
-    --distpath "dist" ^
+    --distpath "%DEPLOY%" ^
     --add-data "profiles;profiles" ^
     --hidden-import "pymysql" ^
     --hidden-import "schedule" ^
@@ -55,15 +56,15 @@ echo Ejecutando PyInstaller...
     DashMain.py
 
 echo.
-echo Copiando profiles al dist...
-xcopy /s /e /i /y profiles "dist\AppOO\profiles" >nul
+echo Copiando profiles al deploy...
+xcopy /s /e /i /y profiles "%DEPLOY%\AppOO\profiles" >nul
 
 echo.
 echo Generando launcher para perfil hijo...
 (
     echo @echo off
     echo start "" AppOO.exe --profile hijo
-) > "dist\AppOO\AppOO_hijo.bat"
+) > "%DEPLOY%\AppOO\AppOO_hijo.bat"
 
 echo.
 echo Restaurando directorio tmp...
@@ -76,8 +77,8 @@ if exist tmp_build_bak (
 echo.
 echo ======================================================
 echo == PROCESO TERMINADO                                 ==
-echo == Ejecutable:      dist\AppOO\AppOO.exe             ==
-echo == Launcher hijo:   dist\AppOO\AppOO_hijo.bat        ==
+echo == Ejecutable:    %DEPLOY%\AppOO\AppOO.exe
+echo == Launcher hijo: %DEPLOY%\AppOO\AppOO_hijo.bat
 echo ======================================================
 
 pause
