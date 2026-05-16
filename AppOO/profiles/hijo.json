@@ -1,6 +1,6 @@
 {
     "profile": "hijo",
-    "tmp_path": "",
+    "tmp_path": "..\\tmp",
     "tabs": {
         "Crypto": true,
         "Stock": false,
