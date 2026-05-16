@@ -60,13 +60,6 @@ echo Copiando profiles al deploy...
 xcopy /s /e /i /y profiles "%DEPLOY%\AppOO\profiles" >nul
 
 echo.
-echo Generando launcher para perfil hijo...
-(
-    echo @echo off
-    echo start "" AppOO.exe --profile hijo
-) > "%DEPLOY%\AppOO\AppOO_hijo.bat"
-
-echo.
 echo Restaurando directorio tmp...
 if exist tmp_build_bak (
     if not exist tmp mkdir tmp
@@ -77,8 +70,8 @@ if exist tmp_build_bak (
 echo.
 echo ======================================================
 echo == PROCESO TERMINADO                                 ==
-echo == Ejecutable:    %DEPLOY%\AppOO\AppOO.exe
-echo == Launcher hijo: %DEPLOY%\AppOO\AppOO_hijo.bat
+echo == Ejecutable: %DEPLOY%\AppOO\AppOO.exe
+echo == Para distribuir al hijo: AppTest\export_hijo.bat
 echo ======================================================
 
 pause
