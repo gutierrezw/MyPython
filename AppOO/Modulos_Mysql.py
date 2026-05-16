@@ -33,10 +33,14 @@ class BDsystem:  # -------------------------------------------------------------
 
     DB_CONFIG = {
         "user": "root",
-        "password": "Daga2004",
+        "password": "",
         "host": "localhost",
         "database": "bdinv",
     }
+
+    @staticmethod
+    def configure(db_config: dict):
+        BDsystem.DB_CONFIG.update(db_config)
 
     @staticmethod
     def get_sesion_by_vehiculo(vehiculo=None, principal=False) -> dict:

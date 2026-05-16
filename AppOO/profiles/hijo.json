@@ -1,5 +1,11 @@
 {
     "profile": "hijo",
+    "db": {
+        "host": "localhost",
+        "user": "root",
+        "password": "",
+        "database": "bdinv"
+    },
     "tmp_path": "..\\tmp",
     "tabs": {
         "Crypto": true,
