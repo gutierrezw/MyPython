@@ -1,15 +1,30 @@
 @echo off
-:: Exporta schema de bdinv para perfil hijo
-:: Uso: export_hijo.bat
-:: Resultado: hijo_schema.sql (tablas vacias) + hijo_data.sql (tablas de referencia)
+cd /d "%~dp0.."
+echo ======================================================
+echo == EXPORTAR PAQUETE HIJO                            ==
+echo ======================================================
 
+set DEPLOY=%~dp0..\..\deploy
+set DEST=%DEPLOY%\AppOO_hijo
+
+:: ── 1. Empaquetar ejecutable ──────────────────────────────────────────────────
+echo.
+echo [1/3] Copiando ejecutable a AppOO_hijo...
+rmdir /s /q "%DEST%" 2>nul
+xcopy /s /e /i /y "%DEPLOY%\AppOO" "%DEST%" >nul
+
+echo Configurando perfil hijo como main...
+copy /y "%DEST%\profiles\hijo.json" "%DEST%\profiles\main.json" >nul
+del /f /q "%DEST%\profiles\hijo.json" 2>nul
+
+:: ── 2. Exportar schema BD ────────────────────────────────────────────────────
 set USER=root
 set HOST=localhost
 set DB=bdinv
-set OUT_DIR=%~dp0
 set MYSQL_BIN=C:\Program Files\MySQL\MySQL Server 8.0\bin
 
-echo Exportando estructura (tablas vacias)...
+echo.
+echo [2/3] Exportando estructura BD (tablas vacias)...
 "%MYSQL_BIN%\mysqldump" -u %USER% -p --no-data --skip-triggers %DB% ^
     booktrading ^
     inversion ^
@@ -29,9 +44,10 @@ echo Exportando estructura (tablas vacias)...
     funds ^
     fund_filings ^
     fund_holdings ^
-    > "%OUT_DIR%hijo_estructura.sql"
+    > "%~dp0hijo_estructura.sql"
 
-echo Exportando datos de referencia...
+echo.
+echo [3/3] Exportando datos de referencia...
 "%MYSQL_BIN%\mysqldump" -u %USER% -p --no-create-info --skip-triggers %DB% ^
     sys_objeto ^
     split ^
@@ -43,16 +59,19 @@ echo Exportando datos de referencia...
     fin_banks ^
     fin_categories ^
     fin_import_rules ^
-    > "%OUT_DIR%hijo_datos.sql"
+    > "%~dp0hijo_datos.sql"
 
 echo.
-echo Listo. Archivos generados:
-echo   %OUT_DIR%hijo_estructura.sql
-echo   %OUT_DIR%hijo_datos.sql
+echo ======================================================
+echo == LISTO                                            ==
+echo == Ejecutable: %DEST%\AppOO.exe
+echo == BD:         %~dp0hijo_estructura.sql
+echo ==             %~dp0hijo_datos.sql
 echo.
 echo En la maquina del hijo ejecutar en orden:
-echo   1. mysql -u root -p -e "CREATE DATABASE bdinv CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-echo   2. mysql -u root -p bdinv < hijo_estructura.sql
-echo   3. mysql -u root -p bdinv < hijo_datos.sql
-echo.
+echo   1. mysql -u root -p -e "CREATE DATABASE bdinv CHARACTER SET utf8mb4;"
+echo   2. mysql -u root -p bdinv ^< hijo_estructura.sql
+echo   3. mysql -u root -p bdinv ^< hijo_datos.sql
+echo ======================================================
+
 pause
