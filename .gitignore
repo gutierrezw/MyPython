@@ -14,6 +14,7 @@ __pycache__/
 # Archivos de compilación (PyInstaller, etc.)
 build/
 dist/
+deploy/
 *.spec
 
 # Archivos de logs y perfiles
