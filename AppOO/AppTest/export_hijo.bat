@@ -6,10 +6,11 @@ echo ======================================================
 
 set DEPLOY=%~dp0..\deploy
 set DEST=%DEPLOY%\AppOO_hijo
+set SETUP=%DEPLOY%\setup_hijo
 
 :: ── 1. Empaquetar ejecutable ──────────────────────────────────────────────────
 echo.
-echo [1/3] Copiando ejecutable a AppOO_hijo...
+echo [1/4] Copiando ejecutable a AppOO_hijo...
 rmdir /s /q "%DEST%" 2>nul
 xcopy /s /e /i /y "%DEPLOY%\AppOO" "%DEST%" >nul
 
@@ -17,14 +18,24 @@ echo Configurando perfil hijo como main...
 copy /y "%DEST%\profiles\hijo.json" "%DEST%\profiles\main.json" >nul
 del /f /q "%DEST%\profiles\hijo.json" 2>nul
 
-:: ── 2. Exportar schema BD ────────────────────────────────────────────────────
+:: ── 2. Preparar carpeta setup ─────────────────────────────────────────────────
+echo.
+echo [2/4] Preparando carpeta setup_hijo...
+if exist "%SETUP%" rmdir /s /q "%SETUP%"
+mkdir "%SETUP%"
+
+copy /y "%~dp0README.txt"                  "%SETUP%\" >nul
+copy /y "%~dp0config_import.json.template" "%SETUP%\" >nul
+copy /y "%~dp0run_binance_import.py"       "%SETUP%\" >nul
+
+:: ── 3. Exportar schema BD ────────────────────────────────────────────────────
 set USER=root
 set HOST=localhost
 set DB=bdinv
 set MYSQL_BIN=C:\Program Files\MySQL\MySQL Server 8.0\bin
 
 echo.
-echo [2/3] Exportando estructura BD (tablas vacias)...
+echo [3/4] Exportando estructura BD (tablas vacias)...
 "%MYSQL_BIN%\mysqldump" -u %USER% -p --no-data --skip-triggers %DB% ^
     booktrading ^
     inversion ^
@@ -44,10 +55,10 @@ echo [2/3] Exportando estructura BD (tablas vacias)...
     funds ^
     fund_filings ^
     fund_holdings ^
-    > "%~dp0hijo_estructura.sql"
+    > "%SETUP%\hijo_estructura.sql"
 
 echo.
-echo [3/3] Exportando datos de referencia...
+echo [4/4] Exportando datos de referencia...
 "%MYSQL_BIN%\mysqldump" -u %USER% -p --no-create-info --skip-triggers %DB% ^
     sys_objeto ^
     split ^
@@ -59,19 +70,22 @@ echo [3/3] Exportando datos de referencia...
     fin_banks ^
     fin_categories ^
     fin_import_rules ^
-    > "%~dp0hijo_datos.sql"
+    > "%SETUP%\hijo_datos.sql"
 
 echo.
 echo ======================================================
 echo == LISTO                                            ==
-echo == Ejecutable: %DEST%\AppOO.exe
-echo == BD:         %~dp0hijo_estructura.sql
-echo ==             %~dp0hijo_datos.sql
-echo.
-echo En la maquina del hijo ejecutar en orden:
-echo   1. mysql -u root -p -e "CREATE DATABASE bdinv CHARACTER SET utf8mb4;"
-echo   2. mysql -u root -p bdinv ^< hijo_estructura.sql
-echo   3. mysql -u root -p bdinv ^< hijo_datos.sql
+echo ==                                                  ==
+echo == App:   %DEST%\AppOO.exe
+echo == Setup: %SETUP%\
+echo ==        - README.txt
+echo ==        - config_import.json.template
+echo ==        - run_binance_import.py
+echo ==        - hijo_estructura.sql
+echo ==        - hijo_datos.sql
+echo ==                                                  ==
+echo == Pasar al hijo las dos carpetas:                  ==
+echo ==   AppOO_hijo\  +  setup_hijo\                   ==
 echo ======================================================
 
 pause
