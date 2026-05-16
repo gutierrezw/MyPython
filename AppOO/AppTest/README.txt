@@ -1,5 +1,5 @@
 ================================================================================
-  SETUP COMPLETO — AppOO + Importacion Binance
+  SETUP COMPLETO — AppOO + Binance + TradingView
 ================================================================================
 
 
@@ -22,15 +22,15 @@ Abrir "MySQL Command Line Client" (se instala con MySQL) y ejecutar:
 
   CREATE DATABASE bdinv CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-Luego importar los archivos que te paso (desde cmd):
+Luego importar los archivos de esta carpeta (desde cmd):
 
-  mysql -u root -p bdinv < schema_bdinv.sql
-  mysql -u root -p bdinv < datos_referencia.sql
+  mysql -u root -p bdinv < hijo_estructura.sql
+  mysql -u root -p bdinv < hijo_datos.sql
 
 
 3. CONFIGURAR LA APP (AppOO.exe)
 ----------------------------------
-Abrir el archivo:  profiles\main.json
+Abrir el archivo:  AppOO_hijo\profiles\main.json
 
 Completar el campo "password" con la contrasena elegida en el paso 1:
 
@@ -45,9 +45,11 @@ Completar el campo "password" con la contrasena elegida en el paso 1:
 
 Si dejaste la contrasena vacia en MySQL, dejar "password": ""
 
+Ejecutar la app: AppOO_hijo\AppOO.exe
 
-4. INSTALAR PYTHON
--------------------
+
+4. INSTALAR PYTHON (para importar operaciones Binance)
+-------------------------------------------------------
 Descargar Python 3.11 o superior:
   https://www.python.org/downloads/
 
@@ -96,6 +98,45 @@ Opciones disponibles:
   --simbolos  Simbolos especificos, ej: --simbolos BTC ETH BNB
               (si no se indica, se detectan automaticamente desde el balance)
   --dry-run   Muestra las operaciones sin insertar en la base de datos
+
+
+7. SETUP TRADINGVIEW
+---------------------
+Crear cuenta gratuita en: https://www.tradingview.com
+
+
+7.1 Agregar los indicadores
+  En TradingView abrir un grafico -> click en "Indicators" (arriba).
+  Buscar por autor: GutierrezW
+
+  Agregar los dos indicadores:
+    - EMA/MACD cross {dual 4 EMA (V2.0)}   <- medias moviles en el grafico
+    - RSI Cross + VIX + Volume (v5.1)       <- panel debajo del grafico
+
+  Hacer click en la estrella para agregarlos a Favoritos.
+
+
+7.2 Instalar el panel de la app (tv_panel.js)
+  El panel conecta TradingView con AppOO para ver datos de cartera
+  directamente en el grafico. Requiere que AppOO este corriendo.
+
+  Paso 1 - Instalar Tampermonkey (extension del browser):
+    Chrome:  https://chrome.google.com/webstore/detail/tampermonkey
+    Firefox: https://addons.mozilla.org/firefox/addon/tampermonkey
+    Instalar y activar la extension.
+
+  Paso 2 - Instalar el script:
+    - Abrir Tampermonkey -> Dashboard
+    - Click en el icono "+" (nuevo script)
+    - Borrar todo el contenido que aparece por defecto
+    - Pegar el contenido del archivo tv_panel.js (de esta carpeta)
+    - Guardar (Ctrl+S)
+
+  Paso 3 - Verificar:
+    - Abrir TradingView en el browser
+    - Debe aparecer un panel flotante con datos de la cartera
+    - Si no aparece: verificar que Tampermonkey este activado
+    - La app AppOO debe estar abierta (se comunica por puerto 5050)
 
 
 ================================================================================

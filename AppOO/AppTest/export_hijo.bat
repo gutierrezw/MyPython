@@ -15,6 +15,7 @@ if not exist "%SETUP%" mkdir "%SETUP%"
 copy /y "%~dp0README.txt" "%SETUP%\" >nul
 copy /y "%~dp0config_import.json.template" "%SETUP%\" >nul
 copy /y "%~dp0run_binance_import.py" "%SETUP%\" >nul
+copy /y "%~dp0..\externos\userscripts\tv_panel.js" "%SETUP%\" >nul
 echo.
 set DBUSER=root
 set DB=bdinv
