@@ -8,6 +8,11 @@ set PYENV=C:\Users\InversionesWildaga\Documents\MyPython\.venv\Scripts
 set DEPLOY=C:\Users\InversionesWildaga\Documents\deploy
 
 echo.
+echo IMPORTANTE: Cerrar el Explorador de Windows apuntando a deploy\AppOO\
+echo            y cerrar AppOO.exe si esta corriendo.
+echo.
+pause
+
 echo Creando estructura deploy si no existe...
 if not exist "%DEPLOY%" mkdir "%DEPLOY%"
 if not exist "%DEPLOY%\tmp" mkdir "%DEPLOY%\tmp"
@@ -68,4 +73,5 @@ echo == Ejecutable: %DEPLOY%\AppOO\AppOO.exe
 echo == Para distribuir al hijo: AppTest\export_hijo.bat
 echo ======================================================
 
+start explorer "%DEPLOY%\AppOO"
 pause
