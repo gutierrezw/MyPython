@@ -2,7 +2,7 @@
 cd /d "%~dp0.."
 echo.
 echo [1/4] Copiando ejecutable a AppOO_hijo...
-set DEPLOY=%~dp0..\..\deploy
+set DEPLOY=C:\Users\InversionesWildaga\Documents\deploy
 set DEST=%DEPLOY%\AppOO_hijo
 set SETUP=%DEPLOY%\setup_hijo
 xcopy /e /i /y "%DEPLOY%\AppOO" "%DEST%" >nul
