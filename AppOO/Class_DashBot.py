@@ -138,7 +138,7 @@ class ClassAgenteIA:
         # Logger dedicado a preservation — escribe a tmp/preservation_diag.log
         self._preservation_logger = logging.getLogger("Preservation")
         if not self._preservation_logger.handlers:
-            _tmp = DataHub.tmp_path if hasattr(DataHub, "tmp_path") and DataHub.tmp_path else "tmp"
+            _tmp = os.environ.get("APPOO_TMP") or os.path.join(os.getcwd(), "tmp")
             os.makedirs(_tmp, exist_ok=True)
             _fh = logging.FileHandler(os.path.join(_tmp, "preservation_diag.log"), encoding="utf-8")
             _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
