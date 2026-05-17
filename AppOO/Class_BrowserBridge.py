@@ -113,6 +113,7 @@ class _TVRequestHandler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(length) or b"{}")
                 if not _order_callback:
+                    _logger.error("do_POST /order: order callback not registered — chatbot no iniciado")
                     self._send_json({"ok": False, "error": "order callback not registered"}, 503, origin)
                     return
                 symbol = body.get("symbol", "")
