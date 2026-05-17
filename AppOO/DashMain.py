@@ -1,3 +1,44 @@
+import json
+import os
+import sys
+
+from Modulos_Mysql import (
+    BDsystem,
+)  # import diferido — debe configurar BD antes de Class_customer (DataHub accede a BD al importarse)
+
+
+def _early_configure_db():
+    profile = "main"
+    for i, arg in enumerate(sys.argv[1:], 1):
+        if arg == "--profile" and i < len(sys.argv):
+            profile = sys.argv[i + 1]
+            break
+    if getattr(sys, "frozen", False):
+        base = os.path.dirname(sys.executable)
+        if not os.path.exists(os.path.join(base, "profiles")):
+            base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(base, "profiles", f"{profile}.json")
+    if not os.path.exists(path):
+        path = os.path.join(base, "profiles", "main.json")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f)
+        db_cfg = cfg.get("db", {})
+        if db_cfg:
+            BDsystem.configure(db_cfg)
+        tmp_path = cfg.get("tmp_path", "")
+        if not tmp_path:
+            tmp_path = os.path.join(base, "tmp")
+        elif not os.path.isabs(tmp_path):
+            tmp_path = os.path.normpath(os.path.join(base, tmp_path))
+        os.makedirs(tmp_path, exist_ok=True)
+        os.environ["APPOO_TMP"] = tmp_path
+
+
+_early_configure_db()
+
 from version import APP_NAME, VERSION
 from Class_debugging import ManagerEvents, MangerAfterEvents, Debugging
 from Class_DataFrame import (
@@ -5245,7 +5286,6 @@ class DashMain:
             if arg == "--profile" and i < len(sys.argv):
                 profile = sys.argv[i + 1]
                 break
-        # PyInstaller onedir: busca en el dir del exe; fallback a _MEIPASS (_internal/)
         if getattr(sys, "frozen", False):
             base = os.path.dirname(sys.executable)
             if not os.path.exists(os.path.join(base, "profiles")):
@@ -5257,18 +5297,7 @@ class DashMain:
             path = os.path.join(base, "profiles", "main.json")
         with open(path, encoding="utf-8") as f:
             cfg = json.load(f)
-        tabs = cfg.get("tabs", {})
-        db_cfg = cfg.get("db", {})
-        if db_cfg:
-            BDsystem.configure(db_cfg)
-        tmp_path = cfg.get("tmp_path", "")
-        if not tmp_path:
-            tmp_path = os.path.join(base, "tmp")
-        elif not os.path.isabs(tmp_path):
-            tmp_path = os.path.normpath(os.path.join(base, tmp_path))
-        os.makedirs(tmp_path, exist_ok=True)
-        os.environ["APPOO_TMP"] = tmp_path
-        return tabs
+        return cfg.get("tabs", {})
 
     def _tab_enabled(self, name):
         return self._profile_tabs.get(name, True)
