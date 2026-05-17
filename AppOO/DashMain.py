@@ -1842,6 +1842,25 @@ class DatosVehivulo(TickerInfo, MyOrders):
             # planifica y ejecuta una vez actualización de precios Cryptos
             def websocket_stream(limit, task):
                 nonlocal iteraStream
+
+                def _watchdog():
+                    # Cierra el WS si el counter no avanzó en 5 minutos — fuerza re-suscripción
+                    TIMEOUT = 300
+                    while True:
+                        time.sleep(60)
+                        if self.WStreams is None:
+                            continue
+                        prev = self.WStreams.counter
+                        time.sleep(TIMEOUT - 60)
+                        if self.WStreams is not None and self.WStreams.counter == prev:
+                            self.logger.warning("websocket_stream(Crypto): watchdog — sin datos 5 min, reconectando")
+                            try:
+                                self.WStreams.stop()
+                            except Exception:
+                                pass
+
+                threading.Thread(target=_watchdog, name="WsCrypto_Watchdog", daemon=True).start()
+
                 while True:
                     try:
                         DataHub.update_self_procesos(proces="thread", tarea=task, itera=iteraStream)
