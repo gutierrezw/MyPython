@@ -109,6 +109,26 @@ Cada lunes 8am → reporte HTML por Gmail (configurado en Claude Scheduled).
 
 ---
 
+## Procedimiento de release
+
+Antes de taggear un release, siempre actualizar `version.py`:
+
+```python
+VERSION = "10.x.x"
+RELEASE_DATE = "YYYY-MM-DD"
+```
+
+Luego el flujo completo:
+1. Actualizar `version.py` → commit
+2. `git tag -a vX.X.X -m "vX.X.X — descripción"`
+3. `git push && git push --tags`
+4. `gh release create vX.X.X --title "AppOO vX.X.X" --notes "..." --repo gutierrezw/MyPython`
+5. `buildExe.bat` → genera el binario
+6. `AppTest\export_hijo.bat` → empaqueta versión hijo
+7. `gh release upload vX.X.X <archivos> --repo gutierrezw/MyPython --clobber`
+
+---
+
 ## Checklist antes de cerrar sesión
 
 Antes de hacer commit, preguntar explícitamente:
