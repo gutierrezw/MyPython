@@ -1460,7 +1460,9 @@ DB_CONFIG = {
     "database": "bdinv",
 }
 
-EXTRACTOS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp", "extractos")
+EXTRACTOS_DIR = os.path.join(
+    os.environ.get("APPOO_TMP") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp"), "extractos"
+)
 PROCESADOS_DIR = os.path.join(EXTRACTOS_DIR, "procesados")
 DESCONOCIDOS_DIR = os.path.join(EXTRACTOS_DIR, "desconocidos")
 
