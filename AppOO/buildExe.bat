@@ -5,7 +5,7 @@ echo == INICIANDO CONSTRUCCION DE EJECUTABLE (PYINSTALLER) ==
 echo ======================================================
 
 set PYENV=C:\Users\InversionesWildaga\Documents\MyPython\.venv\Scripts
-set DEPLOY=%~dp0..\deploy
+set DEPLOY=C:\Users\InversionesWildaga\Documents\deploy
 
 echo.
 echo Creando estructura deploy si no existe...
