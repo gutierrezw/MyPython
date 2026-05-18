@@ -30,6 +30,7 @@ echo Ejecutando PyInstaller...
     --noconfirm ^
     --onedir ^
     --windowed ^
+    --icon "C:\Users\InversionesWildaga\Documents\MyPython\Iconos\WGM_icon.ico" ^
     --paths "." ^
     --paths "AppValuations" ^
     --name "AppOO" ^
@@ -73,5 +74,5 @@ echo == Ejecutable: %DEPLOY%\AppOO\AppOO.exe
 echo == Para distribuir al hijo: AppTest\export_hijo.bat
 echo ======================================================
 
-start explorer "%DEPLOY%\AppOO"
+cd /d "%DEPLOY%\AppOO"
 pause
