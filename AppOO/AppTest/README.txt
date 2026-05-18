@@ -3,6 +3,19 @@
 ================================================================================
 
 
+0. DESCARGAR LA APLICACION
+---------------------------
+Ir al release en GitHub:
+  https://github.com/gutierrezw/MyPython/releases/tag/v10.1.0
+
+Descargar:
+  - AppOO_hijo.zip  -> descomprimir en cualquier carpeta (ej: C:\AppOO)
+  - README.txt, hijo_estructura.sql, hijo_datos.sql, config_import.json.template,
+    run_binance_import.py, tv_panel.js  -> guardarlos en una carpeta aparte (ej: C:\AppOO\setup)
+
+La app se ejecuta desde:  AppOO_hijo\AppOO.exe  (no requiere instalar nada)
+
+
 1. INSTALAR MYSQL
 -----------------
 Descargar MySQL Community Server:
