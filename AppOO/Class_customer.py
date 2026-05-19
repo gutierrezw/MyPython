@@ -2132,6 +2132,7 @@ class TickerInfo(MyOrders):
                     break
                 if symbol not in self.info:
                     self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
+                    time.sleep(2)
             except Exception as e:
                 print("[_precargar_info()]: {}".format(e), symbol)
 

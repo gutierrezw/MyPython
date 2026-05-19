@@ -76,17 +76,19 @@ def _find_holdings_xml(cik: str, accession: str) -> str | None:
     return None
 
 
-def sync_fund_filings() -> dict:
-    """Descarga el último 13F-HR XML para todos los fondos con CIK en tabla funds.
+def sync_fund_filings(account: str = None) -> dict:
+    """Descarga el último 13F-HR XML para fondos con CIK en tabla funds.
 
-    Lógica de skip (Opción B — refresh trimestral por filing_date):
+    Lógica de skip (refresh trimestral por filing_date):
     - Sin filing previo en BD       → descarga siempre.
     - filing_date < 80 días         → skip sin llamar a EDGAR (filing fresco).
     - filing_date ≥ 80 días         → consulta EDGAR; descarga solo si la accession cambió.
     Guarda en tabla fund_filings (persistente) en vez de JSON temporal.
+
+    account: si se pasa, filtra solo fondos con holdings en símbolos de esa cuenta (~7.7K vs 98K).
     """
     market = MarketScreen()
-    funds = market.load_all_funds_with_cik()
+    funds = market.load_all_funds_with_cik(account=account)
     os.makedirs(_13F_SAVE_DIR, exist_ok=True)
     cik_meta = market.load_fund_filings_cik_meta()
     total = len(funds)

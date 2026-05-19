@@ -344,7 +344,12 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
             CacheHut.logger.warning(f"safe_get_info({key}) :: timeout — bloqueado 30 min")
             return {}
         except Exception as e:
-            CacheHut.logger.error(f"safe_get_info({key}) :: {e}")
+            msg = str(e)
+            if "Too Many Requests" in msg or "Rate limited" in msg or "429" in msg:
+                _info_timeout_cache[key] = True
+                CacheHut.logger.warning(f"safe_get_info({key}) :: rate-limited — bloqueado 30 min")
+            else:
+                CacheHut.logger.error(f"safe_get_info({key}) :: {e}")
             return {}
 
     activo, pdatos = {}, pd.DataFrame()

@@ -413,7 +413,7 @@ class Debugging:
             lpath = os.path.normpath(os.path.join(tmp_env, "..", "logs"))
         else:
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            lpath = os.path.join(script_dir, "..", "logs")
+            lpath = os.path.join(script_dir, "logs")
         os.makedirs(lpath, exist_ok=True)
         self.loggerName = os.path.join(lpath, log_create)
         self.spath = os.environ.get("APPOO_TMP") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp")

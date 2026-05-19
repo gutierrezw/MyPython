@@ -1073,7 +1073,7 @@ class Screener(tk.Frame):
                 "Val": voto_valuacion(categ),
                 "Cob": voto_cobertura(row.get("fh_count")),
             }
-            activos = {k: v for k, v in votos.items() if v is not None}
+            activos = {k: v for k, v in votos.items() if k != "Mod" and v is not None}
             suma = sum(activos.values())
             tag, _suma, _n = senal_consenso(list(activos.values()), suma)
             _etiq = _TAG_DISPLAY.get(tag, tag)
@@ -1916,7 +1916,7 @@ def refresh_consenso_tags(account):
             "Val": voto_valuacion(categ),
             "Cob": voto_cobertura(row.get("fh_count")),
         }
-        activos = {k: v for k, v in votos.items() if v is not None}
+        activos = {k: v for k, v in votos.items() if k != "Mod" and v is not None}
         suma = sum(activos.values())
         tag, _, _ = senal_consenso(list(activos.values()), suma)
 
