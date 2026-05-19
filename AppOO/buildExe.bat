@@ -30,7 +30,7 @@ echo Ejecutando PyInstaller...
     --noconfirm ^
     --onedir ^
     --windowed ^
-    --icon "C:\Users\InversionesWildaga\Documents\MyPython\Iconos\WGM_icon.ico" ^
+    --icon "C:\Users\InversionesWildaga\Documents\MyPython\Iconos\Systems\WGM_icon.ico" ^
     --paths "." ^
     --paths "AppValuations" ^
     --name "AppOO" ^

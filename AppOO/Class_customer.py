@@ -1074,11 +1074,11 @@ class DataHub:
                         {
                             "conid": int(conid),
                             "orderType": "STP LMT",
-                            "auxPrice": round(stop_price, 2),
-                            "price": round(max_price, 2),
+                            "auxPrice": float(round(stop_price, 2)),
+                            "price": float(round(max_price, 2)),
                             "side": "SELL",
                             "tif": "GTC",
-                            "quantity": qty,
+                            "quantity": float(qty),
                         }
                     ]
                 },
@@ -1094,15 +1094,15 @@ class DataHub:
                     "symbol": symbol,
                     "side": "SELL",
                     "type": "STOP_LOSS_LIMIT",
-                    "price": round(stop_price, 2),
-                    "stopPrice": round(stop_price, 2),
-                    "quantity": qty,
+                    "price": float(round(stop_price, 2)),
+                    "stopPrice": float(round(stop_price, 2)),
+                    "quantity": float(qty),
                     "timeInForce": "GTC",
                 },
                 "hash_id_Op": hash_id,
             }
 
-    preservation_live_enabled = False  # SAFETY: debe ser True explícitamente para enviar órdenes reales
+    preservation_live_enabled = True  # True = live activo para símbolos en _preservation_live_symbols
 
     @staticmethod
     def preservation_send_order(vehiculo, trama):
