@@ -2057,6 +2057,11 @@ class DashMain:
         self.root.config(bg=self.colors["bgcolor"])
         self.root.protocol("WM_DELETE_WINDOW", self.eexit)
         self.root.title(self.program)
+        try:
+            self._root_ico = BDsystem.select_image(22, (32, 32))
+            self.root.iconphoto(True, self._root_ico)
+        except Exception:
+            pass
 
         # frame principal
         self.style = style_app(main=self.root)
@@ -5146,17 +5151,25 @@ class DashMain:
         win.overrideredirect(True)
         win.attributes("-topmost", True)
         win.configure(bg="#1a1a1a")
-        w, h = 360, 120
+        w, h = 400, 140
         sw = win.winfo_screenwidth()
         sh = win.winfo_screenheight()
         win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
 
-        tk.Label(win, text=f"{APP_NAME}  v{VERSION}", bg="#1a1a1a", fg="#00bcd4", font=("Segoe UI", 16, "bold")).pack(
-            pady=(14, 2)
-        )
+        header = tk.Frame(win, bg="#1a1a1a")
+        header.pack(pady=(12, 0))
+        try:
+            win._ico_img = BDsystem.select_image(22, (32, 32))
+            tk.Label(header, image=win._ico_img, bg="#1a1a1a").pack(side="left", padx=(0, 8))
+        except Exception:
+            pass
+        tk.Label(
+            header, text=f"{APP_NAME}  v{VERSION}", bg="#1a1a1a", fg="#00bcd4", font=("Segoe UI", 16, "bold")
+        ).pack(side="left")
+
         status = tk.Label(win, text="Cerrando...", bg="#1a1a1a", fg="#aaaaaa", font=("Segoe UI", 9))
         status.pack()
-        bar = ttk.Progressbar(win, orient="horizontal", length=320, mode="determinate", maximum=total)
+        bar = ttk.Progressbar(win, orient="horizontal", length=360, mode="determinate", maximum=total)
         bar.pack(pady=(6, 0))
         win.update()
 
@@ -5327,16 +5340,25 @@ class DashMain:
         win.overrideredirect(True)
         win.attributes("-topmost", True)
         win.configure(bg="#1a1a1a")
-        w, h = 360, 120
+        w, h = 400, 140
         sw = win.winfo_screenwidth()
         sh = win.winfo_screenheight()
         win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
-        tk.Label(win, text=f"{APP_NAME}  v{VERSION}", bg="#1a1a1a", fg="#00bcd4", font=("Segoe UI", 16, "bold")).pack(
-            pady=(14, 2)
-        )
+
+        header = tk.Frame(win, bg="#1a1a1a")
+        header.pack(pady=(12, 0))
+        try:
+            win._ico_img = BDsystem.select_image(22, (32, 32))
+            tk.Label(header, image=win._ico_img, bg="#1a1a1a").pack(side="left", padx=(0, 8))
+        except Exception:
+            pass
+        tk.Label(
+            header, text=f"{APP_NAME}  v{VERSION}", bg="#1a1a1a", fg="#00bcd4", font=("Segoe UI", 16, "bold")
+        ).pack(side="left")
+
         status = tk.Label(win, text="Iniciando...", bg="#1a1a1a", fg="#aaaaaa", font=("Segoe UI", 9))
         status.pack()
-        bar = ttk.Progressbar(win, orient="horizontal", length=320, mode="determinate", maximum=total)
+        bar = ttk.Progressbar(win, orient="horizontal", length=360, mode="determinate", maximum=total)
         bar.pack(pady=(6, 0))
         win.update()
         return {"win": win, "status": status, "bar": bar, "step": 0, "total": total}

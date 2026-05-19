@@ -21,6 +21,7 @@ deploy/
 tmp/
 tmp_old/
 tmp_build_bak/
+tmp_*.png
 Dividends/
 EDGAR/
 *.dat-journal

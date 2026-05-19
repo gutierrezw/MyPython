@@ -118,9 +118,8 @@ class ClassAgenteIA:
         self.preservation_config = {}  # {vehiculo: sub-dict "preservation"} — extraído de _params_cache
         self.preservation_last_run = {}  # {vehiculo: datetime} — última evaluación por vehículo
         self._params_cache = {}  # {vehiculo: full parsed parameters dict} — compartido entre agentes
-        self._preservation_dry_run = (
-            True  # True = solo log, no enviar órdenes al broker — NO cambiar sin validación en prod
-        )
+        self._preservation_dry_run = False  # False = envía órdenes reales al broker
+        self._preservation_live_symbols = {"PLUG"}  # símbolos con live activo cuando dry_run=False
         # Cargar estado persistido (sobrevive reinicios — stop_prev correcto sin depender de IB)
         _saved = read_json_tmp("preservation_state.json")
         self.preservation_state = {
@@ -961,12 +960,14 @@ class ClassAgenteIA:
                 continue
 
             # 10. Construir trama de orden STOP (DataHub)
-            trama = DataHub.preservation_build_trama(vehiculo, account, symbol, conid, stop_final, max_price, 10)
+            trama = DataHub.preservation_build_trama(vehiculo, account, symbol, conid, stop_final, max_price, qty)
 
             order_id_prev = state.get("order_id")
 
-            # Activa Order STOP para el symbol
-            if stop_final > stop_anterior:
+            is_live = (not self._preservation_dry_run) and (symbol in self._preservation_live_symbols)
+
+            # Activa Order STOP para el symbol — también cuando no hay order_id (primera vez en live)
+            if stop_final > stop_anterior or not order_id_prev:
                 accion = "NUEVA" if not order_id_prev else "MODIFICADA (cancel+new)"
                 msg = (
                     f"Preservation({vehiculo}/{symbol}): "
@@ -974,7 +975,7 @@ class ClassAgenteIA:
                     f"ATR={atr:.2f} | stop_prev={stop_anterior:.2f} → stop_new={stop_final:.2f} | "
                     f"qty={qty} | base_limit={base_limit:.2f} | trama={trama} | {accion}"
                 )
-                if self._preservation_dry_run:
+                if not is_live:
                     order_id = order_id_prev
                     self._preservation_logger.info(f"[DRY-RUN] {msg}")
                     self.logger.warning(f"[DRY-RUN] {msg}")
