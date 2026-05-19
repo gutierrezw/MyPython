@@ -464,7 +464,7 @@ class ClassAgenteIA:
         if not (0 <= datetime.now().hour < 6) and not type(self).Agente_FundFilings._overdue:
             return
         try:
-            result = sync_fund_filings()
+            result = sync_fund_filings(account=self.account)
             self.logger.warning(
                 f"FundFilings: fondos={result['funds']} descargados={result['downloaded']} "
                 f"skipped={result['skipped']} fallidos={result['failed']}"

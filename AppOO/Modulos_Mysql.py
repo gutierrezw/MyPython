@@ -855,6 +855,9 @@ class IPerformance(BDsystem):  # -----------------------------------------------
         @param symbol: ticket a consultar en booktrading
         @return:
         """
+        adj = values.get("AdjClose") if values else None
+        if adj is None or str(adj).lower() == "nan":
+            return
         conn = self._conectar(tabla="insert.diaria_performance")
         try:
             cursor = conn.cursor()
@@ -1765,12 +1768,25 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             _logger.error(f"[Mysql::load_top_funds_with_cik()]: {error}")
             return []
 
-    def load_all_funds_with_cik(self) -> list:
-        """Retorna lista completa de (fund_name, cik) con CIK asignado."""
+    def load_all_funds_with_cik(self, account: str = None) -> list:
+        """Retorna lista de (fund_name, cik) con CIK asignado, ordenada por cik.
+
+        Si se pasa account, filtra solo fondos que tienen holdings en símbolos
+        de la tabla market para esa cuenta (Opción B — ~7.7K vs 98K total).
+        """
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT fund_name, cik FROM funds WHERE cik IS NOT NULL")
+            if account:
+                cursor.execute(
+                    "SELECT DISTINCT f.fund_name, f.cik FROM funds f "
+                    "INNER JOIN fund_holdings fh ON fh.fund_id = f.id "
+                    "INNER JOIN market m ON m.symbol = fh.symbol AND m.account = %s "
+                    "WHERE f.cik IS NOT NULL ORDER BY f.cik",
+                    (account,),
+                )
+            else:
+                cursor.execute("SELECT fund_name, cik FROM funds WHERE cik IS NOT NULL ORDER BY cik")
             return cursor.fetchall()
         except (Exception, connect.Error) as error:
             _logger.error(f"[Mysql::load_all_funds_with_cik()]: {error}")
@@ -1808,7 +1824,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
 
             cursor.execute(
                 "SELECT COUNT(*) FROM funds f "
-                "WHERE (SELECT MAX(ff.filing_date) FROM fund_filings ff WHERE ff.cik = f.cik) "
+                "WHERE EXISTS (SELECT 1 FROM fund_filings ff WHERE ff.cik = f.cik) "
+                "  AND (SELECT MAX(ff.filing_date) FROM fund_filings ff WHERE ff.cik = f.cik) "
                 "      <= DATE_SUB(CURDATE(), INTERVAL 70 DAY)"
             )
             por_renovar = cursor.fetchone()[0] or 0
