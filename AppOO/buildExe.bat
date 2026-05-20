@@ -65,7 +65,7 @@ echo Ejecutando PyInstaller...
     --hidden-import "feedparser" ^
     --hidden-import "anthropic" ^
     --collect-all "binance" ^
-    --collect-data "tkinter" ^
+    --collect-all "tkinter" ^
     DashMain.py
 
 echo.
