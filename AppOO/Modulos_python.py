@@ -19,6 +19,7 @@ from urllib.parse import urlparse, parse_qs
 import hashlib
 import textwrap
 import random
+import shutil
 import string
 import psutil
 import syncio
@@ -52,6 +53,8 @@ import schedule as schedule
 import threading as threading
 
 
+from decimal import Decimal, InvalidOperation
+import pdfplumber
 from diskcache import Cache
 from operator import itemgetter
 from pathlib import Path
