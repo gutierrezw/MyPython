@@ -171,6 +171,14 @@ class ModeloOportunidadesSell:
                     plano[f"{smax}_{sufijo}"] = fuente.get(smax, 0)
                     plano[f"{smin}_{sufijo}"] = fuente.get(smin, 0)
 
+                    # Rango porcentual: posición del precio dentro del rango max-min
+                    vmax = plano.get(f"{smax}_{sufijo}", 0)
+                    vmin = plano.get(f"{smin}_{sufijo}", 0)
+                    close = plano.get(f"Close{sufijo}", 0)
+                    rango = vmax - vmin
+                    clave = {"diaria": "rango_13w_pct", "semanal": "rango_26w_pct", "mensual": "rango_52w_pct"}[tf]
+                    plano[clave] = round((close - vmin) / rango, 4) if rango > 0 else None
+
                 registros.append(plano)
 
             df_tecnico = pd.DataFrame(registros)
@@ -212,6 +220,9 @@ class ModeloOportunidadesSell:
             "26_semanas_min_w",
             "52_semanas_max_m",
             "52_semanas_min_m",
+            "rango_13w_pct",
+            "rango_26w_pct",
+            "rango_52w_pct",
         ]
 
         # 1. Generar lista de columnas técnicas como antes (basado en usar_timeframes)
@@ -577,6 +588,14 @@ class ModeloOportunidadesBuy:
                     plano[f"{smax}_{sufijo}"] = fuente.get(smax, 0)
                     plano[f"{smin}_{sufijo}"] = fuente.get(smin, 0)
 
+                    # Rango porcentual: posición del precio dentro del rango max-min
+                    vmax = plano.get(f"{smax}_{sufijo}", 0)
+                    vmin = plano.get(f"{smin}_{sufijo}", 0)
+                    close = plano.get(f"Close{sufijo}", 0)
+                    rango = vmax - vmin
+                    clave = {"diaria": "rango_13w_pct", "semanal": "rango_26w_pct", "mensual": "rango_52w_pct"}[tf]
+                    plano[clave] = round((close - vmin) / rango, 4) if rango > 0 else None
+
                 registros.append(plano)
 
             df_tecnico = pd.DataFrame(registros)
@@ -615,6 +634,9 @@ class ModeloOportunidadesBuy:
             "26_semanas_min_w",
             "52_semanas_max_m",
             "52_semanas_min_m",
+            "rango_13w_pct",
+            "rango_26w_pct",
+            "rango_52w_pct",
         ]
 
         # Generar columnas
