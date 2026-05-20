@@ -33,6 +33,7 @@ echo Ejecutando PyInstaller...
     --icon "C:\Users\InversionesWildaga\Documents\MyPython\Iconos\Systems\WGM_icon.ico" ^
     --paths "." ^
     --paths "AppValuations" ^
+    --paths "ConvergIA" ^
     --name "AppOO" ^
     --distpath "%DEPLOY%" ^
     --add-data "profiles;profiles" ^
@@ -60,6 +61,9 @@ echo Ejecutando PyInstaller...
     --hidden-import "Modulos_Mysql" ^
     --hidden-import "Modulos_Utilitarios" ^
     --hidden-import "Modulos_python" ^
+    --hidden-import "ConvergIA.ThemeMapper" ^
+    --hidden-import "feedparser" ^
+    --hidden-import "anthropic" ^
     --collect-all "binance" ^
     DashMain.py
 

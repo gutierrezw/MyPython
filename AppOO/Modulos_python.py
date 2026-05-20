@@ -24,8 +24,6 @@ import psutil
 import syncio
 import asyncio
 import calendar
-import shutil
-from decimal import Decimal, InvalidOperation
 import requests
 import websocket
 import functools
@@ -59,7 +57,6 @@ from operator import itemgetter
 from pathlib import Path
 from zipfile import ZipFile
 from pymysql import connect, Error
-import pdfplumber
 from sqlalchemy import create_engine
 from dateutil import parser
 from dataclasses import dataclass
@@ -141,6 +138,9 @@ from matplotlib.dates import (
 from finvizfinance.quote import finvizfinance
 from finvizfinance.group.overview import Overview
 from finvizfinance.group.performance import Performance
+
+import feedparser
+import anthropic
 
 # modulos IA
 from sklearn.exceptions import UndefinedMetricWarning
