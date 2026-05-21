@@ -42,10 +42,17 @@ class ManagerEvents:
         self.running_flags[name] = True
         self.thread_params[name] = (target, args, kwargs)  # Guarda parámetros
 
+        task_name = name if "(" in name else f"{name}()"
+        counter = 0
+        self.DataHub.procesos.append({"thread": {task_name: counter}})
+
         def wrapper():
+            nonlocal counter
             while self.running_flags[name]:
                 try:
                     target(*args, **kwargs)
+                    counter += 1
+                    self.DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=counter)
                     if loop_sleep > 0:
                         time.sleep(loop_sleep)
                 except Exception as e:
@@ -55,7 +62,6 @@ class ManagerEvents:
         t = threading.Thread(target=wrapper, name=name, daemon=True)
         t.start()
 
-        task_name = name if "(" in name else f"{name}()"
         print(f"Start:({task_name})")
         self.threads[name] = t
         self.logger.warning(f"✅ Thread {name} iniciado.")

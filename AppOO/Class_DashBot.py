@@ -464,7 +464,12 @@ class ClassAgenteIA:
         if not (0 <= datetime.now().hour < 6) and not type(self).Agente_FundFilings._overdue:
             return
         try:
-            result = sync_fund_filings(account=self.account)
+            task_name = "Agente_FundFilings()"
+
+            def _progress(i, total):
+                DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=i)
+
+            result = sync_fund_filings(account=self.account, progress_cb=_progress)
             self.logger.warning(
                 f"FundFilings: fondos={result['funds']} descargados={result['downloaded']} "
                 f"skipped={result['skipped']} fallidos={result['failed']}"

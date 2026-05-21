@@ -76,7 +76,7 @@ def _find_holdings_xml(cik: str, accession: str) -> str | None:
     return None
 
 
-def sync_fund_filings(account: str = None) -> dict:
+def sync_fund_filings(account: str = None, progress_cb=None) -> dict:
     """Descarga el último 13F-HR XML para fondos con CIK en tabla funds.
 
     Lógica de skip (refresh trimestral por filing_date):
@@ -102,6 +102,8 @@ def sync_fund_filings(account: str = None) -> dict:
             _logger.warning(
                 f"sync_fund_filings: [{i}/{total}] descargados={downloaded} " f"skipped={skipped} fallidos={failed}"
             )
+            if progress_cb:
+                progress_cb(i, total)
 
         stored = cik_meta.get(cik)
 
