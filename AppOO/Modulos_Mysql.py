@@ -1819,14 +1819,31 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT COUNT(*) FROM fund_filings WHERE processed = 0")
+            # Solo fondos con holdings en símbolos de esta cuenta
+            cursor.execute(
+                "SELECT COUNT(*) FROM fund_filings ff "
+                "JOIN funds f ON f.cik = ff.cik "
+                "WHERE ff.processed = 0 "
+                "  AND EXISTS ("
+                "    SELECT 1 FROM fund_holdings fh "
+                "    JOIN market m ON m.symbol = fh.symbol AND m.account = %s "
+                "    WHERE fh.fund_id = f.id"
+                "  )",
+                (account,),
+            )
             pendientes = cursor.fetchone()[0] or 0
 
             cursor.execute(
                 "SELECT COUNT(*) FROM funds f "
                 "WHERE EXISTS (SELECT 1 FROM fund_filings ff WHERE ff.cik = f.cik) "
                 "  AND (SELECT MAX(ff.filing_date) FROM fund_filings ff WHERE ff.cik = f.cik) "
-                "      <= DATE_SUB(CURDATE(), INTERVAL 70 DAY)"
+                "      <= DATE_SUB(CURDATE(), INTERVAL 70 DAY) "
+                "  AND EXISTS ("
+                "    SELECT 1 FROM fund_holdings fh "
+                "    JOIN market m ON m.symbol = fh.symbol AND m.account = %s "
+                "    WHERE fh.fund_id = f.id"
+                "  )",
+                (account,),
             )
             por_renovar = cursor.fetchone()[0] or 0
 
