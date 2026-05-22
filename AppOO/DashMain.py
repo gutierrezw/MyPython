@@ -2478,8 +2478,14 @@ class DashMain:
             """Callback: IB Gateway reconectó tras pérdida de sesión."""
             _log = logging.getLogger("IBroks_Client")
             try:
-                if hasattr(self, "stock_ts") and self.stock_ts:
-                    # Ya existía conexión previa — refrescar datos
+                ws_thread_name = f"run_websocket_stream({vehiculo})"
+                ws_vivo = (
+                    ws_thread_name in DataHub.manager_events.threads
+                    and DataHub.manager_events.threads[ws_thread_name].is_alive()
+                )
+
+                if hasattr(self, "stock_ts") and self.stock_ts and ws_vivo:
+                    # Conexión previa activa — solo refrescar datos
                     self.stock_ts.ib_connection = self.stock_ts.IClient.create_session()
                     self.stock_ts.carga_inversion_en_positions()
                     self.stock_ts.conector_api_vehiclo()
@@ -2487,15 +2493,15 @@ class DashMain:
                     self.stock.resumen = self.stock_ts.resumen
                     _log.warning("✅ IB reconnect: posiciones y datos actualizados")
                 else:
-                    # Arrancó Offline — crear DatosVehivulo y levantar todo
-                    self.stock_ts = DatosVehivulo(account=account, vehiculo=vehiculo)
-                    self.stock_ts.run()
+                    # Arrancó offline (ws nunca iniciado) o ws caído — levantar todo
+                    if not hasattr(self, "stock_ts") or not self.stock_ts:
+                        self.stock_ts = DatosVehivulo(account=account, vehiculo=vehiculo)
+                        self.procesos.append({"widget": {"update_widget(Stock)": self.it_stock}})
 
-                    self.procesos.append({"widget": {"update_widget(Stock)": self.it_stock}})
+                    self.stock_ts.run()
                     self.stock.positions = self.stock_ts.positions
                     self.stock.resumen = self.stock_ts.resumen
 
-                    # UI updates deben correr en el hilo principal de Tkinter
                     def _refresh_treeview():
                         for tree in self.stock.m_heard + self.stock.m_tree:
                             tree.delete(*tree.get_children())
@@ -2504,9 +2510,9 @@ class DashMain:
                     self.root.after(0, _refresh_treeview)
                     self.root.after(100, lambda: self.stock.run_graficos())
                     self.root.after(200, lambda: self.update_widget(vehiculo=vehiculo))
-                    _log.warning("✅ IB reconnect: DatosVehivulo creado + WebSocket + posiciones levantados")
+                    _log.warning("✅ IB reconnect: WebSocket + posiciones levantados desde offline")
 
-                # en ambos casos (refresh o arranque diferido) la sesión ya está activa
+                # en ambos casos la sesión ya está activa
                 DataHub.manager_sesion.update({"Stock": True})
             except Exception as e:
                 _log.error(f"_ib_on_reconnect error: {e}")
