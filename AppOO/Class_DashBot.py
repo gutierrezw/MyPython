@@ -480,22 +480,22 @@ class ClassAgenteIA:
             self.logger.error(f"Agente_FundFilings(): {e}")
 
     @wait_rate(3600, persist=True)
-    def Agente_TechAlignment(self):
+    def Agente_Sentimiento(self):
         try:
-            sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPI")
+            sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIS")
             api_key = sesion["userapi"].decode("utf-8") if sesion else ""
             result = scan_sentimiento(account=self.account, api_key=api_key)
             self.logger.warning(
-                f"TechAlignment: símbolos={result['symbols']} con_noticias={result['with_news']} "
+                f"Sentimiento: símbolos={result['symbols']} con_noticias={result['with_news']} "
                 f"clasificados={result['classified']}"
             )
         except Exception as e:
-            self.logger.error(f"Agente_TechAlignment(): {e}")
+            self.logger.error(f"Agente_Sentimiento(): {e}")
 
     @wait_rate(86400, persist=True)
     def Agente_InterpreteSentimiento(self):
         try:
-            sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPI")
+            sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIS")
             api_key = sesion["userapi"].decode("utf-8") if sesion else ""
             result = interpretar_sentimiento(account=self.account, api_key=api_key)
             self.logger.warning(f"InterpreteSentimiento: {len(result)} símbolos interpretados")
@@ -548,7 +548,7 @@ class ClassAgenteIA:
 
     def _consultar_claude(self, mensaje_usuario, contexto=""):
         """Llamada general a Claude API para el chatbot. Retorna respuesta en texto."""
-        sesion_claude = BDsystem.get_sesion_by_vehiculo("ClaudeAPI")
+        sesion_claude = BDsystem.get_sesion_by_vehiculo("ClaudeAPIC")
         api_key = sesion_claude["userapi"].decode("utf-8")
 
         sistema = (
@@ -580,10 +580,10 @@ class ClassAgenteIA:
 
     def _clasificar_etf_claude(self, yf_info, opciones):
         """Llama Claude Haiku para clasificar un ETF en una estrategia del sistema. Retorna código (P01..P05) o None."""
-        sesion_claude = BDsystem.get_sesion_by_vehiculo("ClaudeAPI")
+        sesion_claude = BDsystem.get_sesion_by_vehiculo("ClaudeAPIE")
         api_key = sesion_claude["userapi"].decode("utf-8")
         if not api_key:
-            self.logger.error("_clasificar_etf_claude: userapi no configurada en sesion ClaudeAPI")
+            self.logger.error("_clasificar_etf_claude: userapi no configurada en sesion ClaudeAPIE")
             return None
 
         opciones_str = " | ".join(f"{o['descripcion']}({o['estrategia']})" for o in opciones)
@@ -2080,12 +2080,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             DataHub.manager_events.register_thread(
                 name="Agente_13FScores", target=self.Agente_13FScores, loop_sleep=300
             )
-            # DataHub.manager_events.register_thread(  # BLOQUEADO — activar próxima sesión
-            #     name="Agente_TechAlignment", target=self.Agente_TechAlignment, loop_sleep=300
-            # )
-            # DataHub.manager_events.register_thread(  # BLOQUEADO — activar próxima sesión
-            #     name="Agente_InterpreteSentimiento", target=self.Agente_InterpreteSentimiento, loop_sleep=300
-            # )
+            DataHub.manager_events.register_thread(
+                name="Agente_Sentimiento", target=self.Agente_Sentimiento, loop_sleep=300
+            )
+            DataHub.manager_events.register_thread(
+                name="Agente_InterpreteSentimiento", target=self.Agente_InterpreteSentimiento, loop_sleep=300
+            )
             DataHub.manager_events.register_thread(
                 name="Agente_AuditPortfolio",
                 target=self.Agente_AuditPortfolio,

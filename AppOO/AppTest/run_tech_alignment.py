@@ -1,9 +1,20 @@
+import json
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from Modulos_Mysql import BDsystem
+
+_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+_PROFILE = os.path.join(_BASE, "profiles", "main.json")
+if os.path.exists(_PROFILE):
+    with open(_PROFILE, encoding="utf-8") as _f:
+        _cfg = json.load(_f)
+    if _cfg.get("db"):
+        BDsystem.configure(_cfg["db"])
+    if _cfg.get("tmp_path"):
+        os.environ["APPOO_TMP"] = _cfg["tmp_path"]
 from ConvergIA.Scanner_Sentimiento import scan_sentimiento
 from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
 from ConvergIA.ThemeMapper import load_sentiment, load_analysis, voto_tech_alignment
