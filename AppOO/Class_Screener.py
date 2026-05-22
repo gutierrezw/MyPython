@@ -1040,10 +1040,8 @@ class Screener(tk.Frame):
         p33_flujo, p67_flujo = _build_flujo_percentiles(cartera)
 
         # Construir filas y ordenar por prioridad de consenso
-        # sentiment = load_sentiment(self.account)   # BLOQUEADO — activar próxima sesión
-        # analysis  = load_analysis(self.account)    # BLOQUEADO — activar próxima sesión
-        sentiment = {}
-        analysis = {}
+        sentiment = load_sentiment(self.account)
+        analysis = load_analysis(self.account)
         filas = []
         for row in cartera:
             sym = row["symbol"]
@@ -1077,7 +1075,7 @@ class Screener(tk.Frame):
                 "Mod": (1 if en_buy else (-1 if en_sell else 0)),
                 "Val": voto_valuacion(categ),
                 "Cob": voto_cobertura(row.get("fh_count")),
-                # "Tech": voto_tech_alignment(sym, sentiment, analysis),  # BLOQUEADO — activar próxima sesión
+                "Sent": voto_tech_alignment(sym, sentiment, analysis),
             }
             activos = {k: v for k, v in votos.items() if k != "Mod" and v is not None}
             suma = sum(activos.values())

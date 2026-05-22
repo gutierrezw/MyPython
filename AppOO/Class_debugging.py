@@ -385,8 +385,8 @@ class Debugging:
         # manager logging
         self.logger.update({"Analisis": logging.getLogger("Analisis")})
         self.logger["Analisis"].setLevel(logging.WARNING)
-        self.logger.update({"TechScanner": logging.getLogger("TechScanner")})
-        self.logger["TechScanner"].setLevel(logging.WARNING)
+        self.logger.update({"Sentimiento": logging.getLogger("Sentimiento")})
+        self.logger["Sentimiento"].setLevel(logging.WARNING)
 
         # restaurar niveles guardados por el usuario desde el panel Debugging
         self._apply_saved_levels()

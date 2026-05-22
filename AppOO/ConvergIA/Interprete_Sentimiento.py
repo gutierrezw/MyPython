@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from Modulos_python import anthropic, logging, json, date
 from Modulos_Mysql import MarketScreen
 
-_logger = logging.getLogger("TechScanner")
+_logger = logging.getLogger("Sentimiento")
 _MODEL = "claude-haiku-4-5-20251001"
 _DIAS_HISTORIAL = 7
 _PATRONES_VALIDOS = {"acumulacion", "distribucion", "neutro", "inflexion"}

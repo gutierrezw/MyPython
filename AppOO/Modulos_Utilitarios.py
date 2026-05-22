@@ -37,6 +37,11 @@ AGENTES_SCHEDULE = {
     "Agente_ExtractosWatcher": {"intervalo": 3600, "desc": "Escanea tmp/extractos/ y carga PDFs (1 hora)"},
     "Agente_SplitsControl": {"intervalo": 86400, "desc": "Detecta y aplica splits a booktrading (diario)"},
     "Agente_PerformaValidator": {"intervalo": 3600, "desc": "Detecta precios yfinance corruptos y purga (1 hora)"},
+    "Agente_Sentimiento": {
+        "intervalo": 3600,
+        "desc": "Sentimiento noticias por símbolo vía yfinance + Claude (1 hora)",
+    },
+    "Agente_InterpreteSentimiento": {"intervalo": 86400, "desc": "Patrón histórico sentimiento vía Claude (diario)"},
 }
 
 
