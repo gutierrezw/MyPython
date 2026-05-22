@@ -32,7 +32,7 @@ def _build_prompt(symbol: str, historial: list) -> str:
 def interpretar_sentimiento(account: str, api_key: str = None) -> dict:
     """Lee historial de sentimiento de cartera y genera interpretación diaria con Claude Haiku.
     Persiste en market_sentiment_analysis. Retorna {symbol: patron}."""
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+    key = api_key or ""
     if not key:
         return {}
 
