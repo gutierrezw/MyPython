@@ -28,7 +28,7 @@ echo Ejecutando PyInstaller...
 
 %PYENV%\pyinstaller ^
     --noconfirm ^
-    --onedir ^
+    --onefile ^
     --windowed ^
     --icon "C:\Users\InversionesWildaga\Documents\MyPython\Iconos\Systems\WGM_icon.ico" ^
     --paths "." ^

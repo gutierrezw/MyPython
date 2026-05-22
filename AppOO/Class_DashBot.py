@@ -75,6 +75,8 @@ from Class_InstitucionalScore import (
     sync_13f_scores,
 )
 from edgar_13f import sync_fund_filings, sync_13f_holdings
+from ConvergIA.Scanner_Sentimiento import scan_sentimiento
+from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
 from valuation_edgar_downloader import BASE_DIR, download_filing
 from valuation_xbrl_api import get_zip_files
 from Class_customer import DataHub, TickerInfo
@@ -476,6 +478,25 @@ class ClassAgenteIA:
             )
         except Exception as e:
             self.logger.error(f"Agente_FundFilings(): {e}")
+
+    @wait_rate(3600, persist=True)
+    def Agente_TechAlignment(self):
+        try:
+            result = scan_sentimiento(account=self.account)
+            self.logger.warning(
+                f"TechAlignment: símbolos={result['symbols']} con_noticias={result['with_news']} "
+                f"clasificados={result['classified']}"
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_TechAlignment(): {e}")
+
+    @wait_rate(86400, persist=True)
+    def Agente_InterpreteSentimiento(self):
+        try:
+            result = interpretar_sentimiento(account=self.account)
+            self.logger.warning(f"InterpreteSentimiento: {len(result)} símbolos interpretados")
+        except Exception as e:
+            self.logger.error(f"Agente_InterpreteSentimiento(): {e}")
 
     # agente 13F Scores — recalcula inst_score con señales 13F, una vez al día
     @wait_rate(86400, persist=True)
@@ -2055,6 +2076,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             DataHub.manager_events.register_thread(
                 name="Agente_13FScores", target=self.Agente_13FScores, loop_sleep=300
             )
+            # DataHub.manager_events.register_thread(  # BLOQUEADO — activar próxima sesión
+            #     name="Agente_TechAlignment", target=self.Agente_TechAlignment, loop_sleep=300
+            # )
+            # DataHub.manager_events.register_thread(  # BLOQUEADO — activar próxima sesión
+            #     name="Agente_InterpreteSentimiento", target=self.Agente_InterpreteSentimiento, loop_sleep=300
+            # )
             DataHub.manager_events.register_thread(
                 name="Agente_AuditPortfolio",
                 target=self.Agente_AuditPortfolio,
@@ -2113,7 +2140,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             tag, suma = self._consenso_info(symbol)
             if tag:
                 mensaje += f"{'-' * 37}\n"
-                mensaje += f"{'Consenso':<15} {tag:>12} ({suma:+d}/7)\n"
+                mensaje += f"{'Consenso':<12} {tag} ({suma:+d})\n"
 
             mensaje += "```"
 
@@ -2365,7 +2392,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             tag, suma = self._consenso_info(symbol)
             if tag:
                 mensaje += f"{'-' * 37}\n"
-                mensaje += f"{'Consenso':<18} {tag:>12} ({suma:+d}/7)\n"
+                mensaje += f"{'Consenso':<12} {tag} ({suma:+d})\n"
 
             mensaje += "```"
             return mensaje

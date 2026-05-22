@@ -2351,6 +2351,165 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+    def bulk_save_sentiment(self, records: list) -> int:
+        """INSERT IGNORE de lecturas de sentimiento.
+        records: lista de (symbol, fecha_hora, sentimiento, headlines_count, fuente)."""
+        if not records:
+            return 0
+        conn = self._conectar(tabla="update.market")
+        cursor = conn.cursor()
+        try:
+            cursor.executemany(
+                "INSERT IGNORE INTO market_sentiment "
+                "(symbol, fecha_hora, sentimiento, headlines_count, fuente) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                records,
+            )
+            conn.commit()
+            return cursor.rowcount
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::bulk_save_sentiment]: {error}")
+            return 0
+        finally:
+            cursor.close()
+            conn.close()
+
+    def load_latest_sentiment(self, account: str) -> dict:
+        """Retorna {symbol: sentimiento} con la lectura más reciente por símbolo de cartera."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT ms.symbol, ms.sentimiento "
+                "FROM market_sentiment ms "
+                "INNER JOIN ( "
+                "    SELECT symbol, MAX(fecha_hora) AS max_fh "
+                "    FROM market_sentiment "
+                "    GROUP BY symbol "
+                ") latest ON ms.symbol = latest.symbol AND ms.fecha_hora = latest.max_fh "
+                "WHERE EXISTS ( "
+                "    SELECT 1 FROM market m "
+                "    WHERE m.symbol = ms.symbol AND m.account = %s AND m.encartera = 'Y' "
+                ")",
+                (account,),
+            )
+            return {row[0]: row[1] for row in cursor.fetchall()}
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_latest_sentiment]: {error}")
+            return {}
+        finally:
+            cursor.close()
+            conn.close()
+
+    def sentiment_already_run_today(self, account: str) -> bool:
+        """True si ya existe al menos una lectura de hoy para símbolos de cartera."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) FROM market_sentiment ms "
+                "WHERE DATE(ms.fecha_hora) = CURDATE() "
+                "AND EXISTS ( "
+                "    SELECT 1 FROM market m "
+                "    WHERE m.symbol = ms.symbol AND m.account = %s AND m.encartera = 'Y' "
+                ")",
+                (account,),
+            )
+            return (cursor.fetchone()[0] or 0) > 0
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::sentiment_already_run_today]: {error}")
+            return False
+        finally:
+            cursor.close()
+            conn.close()
+
+    def load_sentiment_history(self, symbol: str, days: int = 7) -> list:
+        """Retorna lecturas de sentimiento de los últimos N días para un símbolo.
+        Resultado: lista de dicts {fecha_hora, sentimiento, headlines_count, fuente}."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT fecha_hora, sentimiento, headlines_count, fuente "
+                "FROM market_sentiment "
+                "WHERE symbol = %s AND fecha_hora >= DATE_SUB(NOW(), INTERVAL %s DAY) "
+                "ORDER BY fecha_hora ASC",
+                (symbol, days),
+            )
+            cols = ["fecha_hora", "sentimiento", "headlines_count", "fuente"]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_sentiment_history]: {error}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
+    def save_sentiment_analysis(self, symbol: str, fecha, interpretacion: str, patron: str) -> None:
+        """Upsert de interpretación diaria de sentimiento para un símbolo."""
+        conn = self._conectar(tabla="update.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "INSERT INTO market_sentiment_analysis (symbol, fecha, interpretacion, patron) "
+                "VALUES (%s, %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE interpretacion = VALUES(interpretacion), patron = VALUES(patron)",
+                (symbol, fecha, interpretacion, patron),
+            )
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::save_sentiment_analysis]: {error}")
+        finally:
+            cursor.close()
+            conn.close()
+
+    def load_sentiment_analysis(self, account: str) -> dict:
+        """Retorna {symbol: {interpretacion, patron}} con el análisis de hoy para cartera."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT sa.symbol, sa.interpretacion, sa.patron "
+                "FROM market_sentiment_analysis sa "
+                "WHERE sa.fecha = CURDATE() "
+                "AND EXISTS ( "
+                "    SELECT 1 FROM market m "
+                "    WHERE m.symbol = sa.symbol AND m.account = %s AND m.encartera = 'Y' "
+                ")",
+                (account,),
+            )
+            return {row[0]: {"interpretacion": row[1], "patron": row[2]} for row in cursor.fetchall()}
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_sentiment_analysis]: {error}")
+            return {}
+        finally:
+            cursor.close()
+            conn.close()
+
+    def cleanup_sentiment(self, months: int = 6) -> int:
+        """Elimina lecturas de market_sentiment y analysis más antiguas de N meses."""
+        conn = self._conectar(tabla="update.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "DELETE FROM market_sentiment WHERE fecha_hora < DATE_SUB(NOW(), INTERVAL %s MONTH)",
+                (months,),
+            )
+            deleted = cursor.rowcount
+            cursor.execute(
+                "DELETE FROM market_sentiment_analysis WHERE fecha < DATE_SUB(CURDATE(), INTERVAL %s MONTH)",
+                (months,),
+            )
+            deleted += cursor.rowcount
+            conn.commit()
+            return deleted
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::cleanup_sentiment]: {error}")
+            return 0
+        finally:
+            cursor.close()
+            conn.close()
+
 
 class PlanInversion(BDsystem):  # ------------------------------------------------------------------------------------
     """
