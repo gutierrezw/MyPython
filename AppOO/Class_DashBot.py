@@ -482,7 +482,9 @@ class ClassAgenteIA:
     @wait_rate(3600, persist=True)
     def Agente_TechAlignment(self):
         try:
-            result = scan_sentimiento(account=self.account)
+            sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPI")
+            api_key = sesion["userapi"].decode("utf-8") if sesion else ""
+            result = scan_sentimiento(account=self.account, api_key=api_key)
             self.logger.warning(
                 f"TechAlignment: símbolos={result['symbols']} con_noticias={result['with_news']} "
                 f"clasificados={result['classified']}"
@@ -493,7 +495,9 @@ class ClassAgenteIA:
     @wait_rate(86400, persist=True)
     def Agente_InterpreteSentimiento(self):
         try:
-            result = interpretar_sentimiento(account=self.account)
+            sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPI")
+            api_key = sesion["userapi"].decode("utf-8") if sesion else ""
+            result = interpretar_sentimiento(account=self.account, api_key=api_key)
             self.logger.warning(f"InterpreteSentimiento: {len(result)} símbolos interpretados")
         except Exception as e:
             self.logger.error(f"Agente_InterpreteSentimiento(): {e}")

@@ -61,7 +61,7 @@ def _classify_batch(headlines_map: dict, api_key: str) -> dict:
 
 
 def scan_sentimiento(account: str, api_key: str = None, fuente: str = "yahoo") -> dict:
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+    key = api_key or ""
     market = MarketScreen()
     cartera = market.load_cartera_inst(account)
     symbols = [row["symbol"] for row in cartera if row.get("symbol")]

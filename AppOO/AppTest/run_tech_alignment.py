@@ -3,16 +3,18 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
+from Modulos_Mysql import BDsystem
 from ConvergIA.Scanner_Sentimiento import scan_sentimiento
 from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
-from ConvergIA.ThemeMapper import load_sentiment, load_analysis
+from ConvergIA.ThemeMapper import load_sentiment, load_analysis, voto_tech_alignment
 
 ACCOUNT = "U4214563"
 
 if __name__ == "__main__":
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPI")
+    api_key = sesion["userapi"].decode("utf-8") if sesion else ""
     if not api_key:
-        print("ADVERTENCIA: ANTHROPIC_API_KEY no definida")
+        print("ADVERTENCIA: ClaudeAPI no configurada en tabla sesion")
 
     print("=== Scanner ===")
     result = scan_sentimiento(account=ACCOUNT, api_key=api_key)
@@ -28,8 +30,6 @@ if __name__ == "__main__":
     print("\n=== Votos resultantes ===")
     sentiment = load_sentiment(ACCOUNT)
     analysis = load_analysis(ACCOUNT)
-    from ConvergIA.ThemeMapper import voto_tech_alignment
-
     for sym in sorted(sentiment):
         voto = voto_tech_alignment(sym, sentiment, analysis)
         info = analysis.get(sym, {})
