@@ -8,7 +8,7 @@ from Modulos_Utilitarios import (
     documentar_estructura,
 )
 from Class_customer import CustomTreeview
-from ConvergIA.ThemeMapper import load_sentiment, voto_tech_alignment
+from ConvergIA.ThemeMapper import load_sentiment, load_analysis, voto_tech_alignment
 from Modulos_python import (
     tk,
     ttk,
