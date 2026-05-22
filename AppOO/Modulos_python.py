@@ -142,7 +142,6 @@ from finvizfinance.quote import finvizfinance
 from finvizfinance.group.overview import Overview
 from finvizfinance.group.performance import Performance
 
-import feedparser
 import anthropic
 
 # modulos IA

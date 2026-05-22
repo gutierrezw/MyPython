@@ -4,27 +4,31 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from Modulos_python import logging
-from Modulos_Utilitarios import read_json_tmp
+from Modulos_Mysql import MarketScreen
 
 _logger = logging.getLogger("TechScanner")
-_TECH_TEMAS_FILE = "tech_temas.json"
 
-THEME_MAP = {
-    "ai_semiconductors": ["NVDA", "AMD", "INTC", "ASML", "QCOM", "MU"],
-    "clean_energy": ["VST", "PLUG", "NEE", "ENPH", "FSLR", "CEG"],
-    "biotech": ["PFE", "ABBV", "BMY", "AMGN", "GILD", "MRNA"],
-    "blockchain": ["CGPT", "MSTR", "COIN"],
-    "cloud_saas": ["MSFT", "AMZN", "GOOGL", "CRM", "NOW", "SNOW"],
-    "robotics": ["ISRG", "ABB", "ROK", "TER"],
+_PATRON_VOTO = {
+    "acumulacion": 1,
+    "inflexion": 1,
+    "neutro": 0,
+    "distribucion": -1,
 }
 
 
-def load_temas_activos() -> list:
-    return read_json_tmp(_TECH_TEMAS_FILE).get("temas", [])
+def load_sentiment(account: str) -> dict:
+    """Retorna {symbol: sentimiento} con la lectura más reciente de BD."""
+    return MarketScreen().load_latest_sentiment(account)
 
 
-def voto_tech_alignment(symbol: str, temas_activos: list) -> int:
-    for tema, tickers in THEME_MAP.items():
-        if symbol in tickers and tema in temas_activos:
-            return 1
-    return 0
+def load_analysis(account: str) -> dict:
+    """Retorna {symbol: {interpretacion, patron}} con el análisis de hoy de BD."""
+    return MarketScreen().load_sentiment_analysis(account)
+
+
+def voto_tech_alignment(symbol: str, sentiment: dict, analysis: dict = None) -> int:
+    """Voto −1/0/+1 combinando sentimiento reciente y patrón diario.
+    Si hay análisis disponible, el patrón tiene prioridad sobre la lectura puntual."""
+    if analysis and symbol in analysis:
+        return _PATRON_VOTO.get(analysis[symbol].get("patron", "neutro"), 0)
+    return sentiment.get(symbol, 0)
