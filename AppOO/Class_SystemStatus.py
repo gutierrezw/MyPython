@@ -19,7 +19,7 @@ from Modulos_python import (
     filedialog,
 )
 from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem
-from Modulos_Utilitarios import documentar_estructura, write_json_tmp
+from Modulos_Utilitarios import AGENTES_SCHEDULE, documentar_estructura, read_json_tmp, write_json_tmp
 from Class_customer import (
     MyMessageBox,
     DataHub,
@@ -61,6 +61,7 @@ class system_status(tk.Frame):
         self.modeloia = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.modeloiabuy = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.debugging = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
+        self.agentes = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
 
         # Frames para la derecha
         self.connect = ttk.Frame(self.right, padding=(1, 1, 1, 1), style="C.TFrame")
@@ -82,6 +83,7 @@ class system_status(tk.Frame):
         self.bottom.add(self.modeloia, text="Sell IA")
         self.bottom.add(self.modeloiabuy, text="Buy IA")
         self.bottom.add(self.debugging, text="Debugging")
+        self.bottom.add(self.agentes, text="Agentes")
 
         self.bottom.pack(side=tk.BOTTOM, fill=tk.BOTH)
         self.right.pack(side=tk.RIGHT, fill=tk.BOTH)
@@ -331,6 +333,7 @@ class system_status(tk.Frame):
             self.datahub_system()
             self.connect_api()
             self.debugging_system()
+            self.agentes_system()
 
             # bloqueado hasta que mejore consumo CPU
             # self.monitor_realtime()  # Activado con optimizaciones (actualiza cada 10s)
@@ -1489,6 +1492,118 @@ class system_status(tk.Frame):
 
         except Exception as e:
             print("debugging_system(): {}".format(e))
+
+    # panel interactivo para activar/desactivar agentes en runtime sin reiniciar la app
+    def agentes_system(self):
+        try:
+            COLOR_ACTIVE = "#00FF88"
+            COLOR_INACTIVE = "#FF6060"
+
+            def _fmt_intervalo(secs):
+                if secs >= 86400:
+                    return f"{secs // 86400}d"
+                if secs >= 3600:
+                    return f"{secs // 3600}h"
+                return f"{secs // 60}m"
+
+            def _save_agents():
+                data = {name: cfg["active"] for name, cfg in AGENTES_SCHEDULE.items()}
+                write_json_tmp("agents_config", data)
+
+            def _toggle_agent(iid):
+                name = tree.item(iid, "text")
+                cfg = AGENTES_SCHEDULE.get(name)
+                if cfg is None:
+                    return
+                cfg["active"] = not cfg["active"]
+                estado = "Activo" if cfg["active"] else "Inactivo"
+                tree.set(iid, "Estado", estado)
+                tree.item(iid, tags=(estado,))
+                _save_agents()
+
+            def _on_double_click(event):
+                iid = tree.identify_row(event.y)
+                if not iid:
+                    return
+                tree.selection_set(iid)
+                _toggle_agent(iid)
+
+            def _show_menu(event):
+                iid = tree.identify_row(event.y)
+                if iid:
+                    tree.selection_set(iid)
+                    menu.post(event.x_root, event.y_root)
+
+            def _activar_todos():
+                for iid in tree.get_children():
+                    name = tree.item(iid, "text")
+                    cfg = AGENTES_SCHEDULE.get(name)
+                    if cfg:
+                        cfg["active"] = True
+                        tree.set(iid, "Estado", "Activo")
+                        tree.item(iid, tags=("Activo",))
+                _save_agents()
+
+            def _set_agent_active(active: bool):
+                sel = tree.selection()
+                if not sel:
+                    return
+                iid = sel[0]
+                name = tree.item(iid, "text")
+                cfg = AGENTES_SCHEDULE.get(name)
+                if cfg is None:
+                    return
+                cfg["active"] = active
+                estado = "Activo" if active else "Inactivo"
+                tree.set(iid, "Estado", estado)
+                tree.item(iid, tags=(estado,))
+                _save_agents()
+
+            frame = ttk.Frame(self.agentes, style="C.TFrame")
+            frame.pack(expand=True, fill="both", padx=5, pady=(5, 0))
+
+            cols = ["Intervalo", "Estado", "Descripción"]
+            tree = ttk.Treeview(frame, columns=cols, height=15, show="tree headings")
+            tree.heading("#0", text="Agente")
+            tree.heading("Intervalo", text="Intervalo")
+            tree.heading("Estado", text="Estado")
+            tree.heading("Descripción", text="Descripción")
+            tree.column("#0", width=220, minwidth=180)
+            tree.column("Intervalo", width=70, minwidth=60, anchor="center")
+            tree.column("Estado", width=80, minwidth=70, anchor="center")
+            tree.column("Descripción", width=350, minwidth=200)
+
+            scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+            scroll.pack(side="right", fill="y")
+            tree.pack(side="left", expand=True, fill="both")
+
+            tree.tag_configure("Activo", foreground=COLOR_ACTIVE)
+            tree.tag_configure("Inactivo", foreground=COLOR_INACTIVE)
+
+            btn_frame = ttk.Frame(self.agentes, style="C.TFrame")
+            btn_frame.pack(fill="x", padx=5, pady=(2, 5))
+            ttk.Button(btn_frame, text="Activar todos", command=_activar_todos).pack(side="left")
+
+            menu = tk.Menu(tree, tearoff=0)
+            menu.add_command(label="Activar", command=lambda: _set_agent_active(True))
+            menu.add_command(label="Desactivar", command=lambda: _set_agent_active(False))
+
+            tree.bind("<Button-3>", _show_menu)
+            tree.bind("<Double-1>", _on_double_click)
+
+            for name, cfg in AGENTES_SCHEDULE.items():
+                active = cfg.get("active", True)
+                estado = "Activo" if active else "Inactivo"
+                tree.insert(
+                    "",
+                    "end",
+                    text=name,
+                    values=(_fmt_intervalo(cfg.get("intervalo", 0)), estado, cfg.get("desc", "")),
+                    tags=(estado,),
+                )
+
+        except Exception as e:
+            print("agentes_system(): {}".format(e))
 
     # visualiza manager_buysell con lista-detalle
     def manager_buysell_system(self):

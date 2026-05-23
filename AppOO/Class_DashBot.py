@@ -481,6 +481,8 @@ class ClassAgenteIA:
 
     @wait_rate(3600, persist=True)
     def Agente_Sentimiento(self):
+        if datetime.now().weekday() >= 5:  # sábado=5, domingo=6 — mercado cerrado
+            return
         try:
             sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIS")
             api_key = sesion["userapi"].decode("utf-8") if sesion else ""
@@ -494,6 +496,8 @@ class ClassAgenteIA:
 
     @wait_rate(86400, persist=True)
     def Agente_InterpreteSentimiento(self):
+        if datetime.now().weekday() >= 5:  # sábado=5, domingo=6 — mercado cerrado
+            return
         try:
             sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIS")
             api_key = sesion["userapi"].decode("utf-8") if sesion else ""
@@ -2298,6 +2302,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 self.logger.warning("evaluar_oportunidades_sell_con_IA(): df aplanado vacío")
                 return
 
+            sent_features = MarketScreen().load_sentiment_features(self.account)
+            df = self.IAsell.enriquecer_con_sentimiento(df, sent_features)
+
             resultado = self.IAsell.predecir_modelo(df)
             if resultado is None or resultado.empty:
                 self.logger.warning("evaluar_oportunidades_sell_con_IA(): resultado predicción vacío")
@@ -2542,6 +2549,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             if df is None or df.empty:
                 self.logger.warning("evaluar_oportunidades_buy_con_IA(): df aplanado vacío")
                 return
+
+            sent_features = MarketScreen().load_sentiment_features(self.account)
+            df = self.IAbuy.enriquecer_con_sentimiento(df, sent_features)
 
             resultado = self.IAbuy.predecir_modelo(df)
             if resultado is None or resultado.empty:

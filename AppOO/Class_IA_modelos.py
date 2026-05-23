@@ -109,6 +109,13 @@ class ModeloOportunidadesSell:
 
         return pd.DataFrame(registros)
 
+    def enriquecer_con_sentimiento(self, df, features: dict):
+        """Agrega columnas de sentimiento al df a partir de {symbol: {sentiment_score, ...}}.
+        Símbolos sin datos en features quedan en 0."""
+        for col in ("sentiment_score", "sentiment_3d_avg", "sentiment_7d_avg", "sentiment_patron"):
+            df[col] = df["symbol"].map(lambda s, c=col: features.get(s, {}).get(c, 0.0))
+        return df
+
     def aplanar_datos_tecnicos(self, df):
         """Extrae indicadores diarios, semanales y mensuales de la columna 'datos_tecnicos'"""
         try:
@@ -212,7 +219,7 @@ class ModeloOportunidadesSell:
             "fibo_longico",
         ]
         # Features que no dependen de timeframe
-        scalar_features = ["roi"]
+        scalar_features = ["roi", "sentiment_score", "sentiment_3d_avg", "sentiment_7d_avg", "sentiment_patron"]
         other_features = [
             "13_semanas_max_d",
             "13_semanas_min_d",
@@ -539,6 +546,13 @@ class ModeloOportunidadesBuy:
 
         return pd.DataFrame(registros)
 
+    def enriquecer_con_sentimiento(self, df, features: dict):
+        """Agrega columnas de sentimiento al df a partir de {symbol: {sentiment_score, ...}}.
+        Símbolos sin datos en features quedan en 0."""
+        for col in ("sentiment_score", "sentiment_3d_avg", "sentiment_7d_avg", "sentiment_patron"):
+            df[col] = df["symbol"].map(lambda s, c=col: features.get(s, {}).get(c, 0.0))
+        return df
+
     def aplanar_datos_tecnicos(self, df):
         """Extrae indicadores técnicos de la columna 'datos_tecnicos'."""
         try:
@@ -625,7 +639,16 @@ class ModeloOportunidadesBuy:
         ]
 
         # Features específicas para Buy (precio deprimido)
-        scalar_features = ["ganancia_precio", "ganancia_inversion", "dividend_yield", "score"]
+        scalar_features = [
+            "ganancia_precio",
+            "ganancia_inversion",
+            "dividend_yield",
+            "score",
+            "sentiment_score",
+            "sentiment_3d_avg",
+            "sentiment_7d_avg",
+            "sentiment_patron",
+        ]
 
         other_features = [
             "13_semanas_max_d",

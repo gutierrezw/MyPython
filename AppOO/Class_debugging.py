@@ -14,7 +14,7 @@ from Modulos_python import (
     traceback,
     textwrap,
 )
-from Modulos_Utilitarios import delete_file, read_json_tmp, write_json_tmp
+from Modulos_Utilitarios import AGENTES_SCHEDULE, delete_file, read_json_tmp, write_json_tmp
 from logging.handlers import RotatingFileHandler
 
 
@@ -42,7 +42,7 @@ class ManagerEvents:
         self.running_flags[name] = True
         self.thread_params[name] = (target, args, kwargs)  # Guarda parámetros
 
-        task_name = name if "(" in name else f"{name}()"
+        task_name = name
         counter = 0
         self.DataHub.procesos.append({"thread": {task_name: counter}})
 
@@ -50,6 +50,10 @@ class ManagerEvents:
             nonlocal counter
             while self.running_flags[name]:
                 try:
+                    if not AGENTES_SCHEDULE.get(name, {}).get("active", True):
+                        if loop_sleep > 0:
+                            time.sleep(loop_sleep)
+                        continue
                     target(*args, **kwargs)
                     counter += 1
                     self.DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=counter)
@@ -390,6 +394,14 @@ class Debugging:
 
         # restaurar niveles guardados por el usuario desde el panel Debugging
         self._apply_saved_levels()
+        self._apply_saved_agents()
+
+    def _apply_saved_agents(self):
+        """Carga agents_config.json y aplica estado active/inactive sobre AGENTES_SCHEDULE."""
+        saved = read_json_tmp("agents_config")
+        for name, active in saved.items():
+            if name in AGENTES_SCHEDULE:
+                AGENTES_SCHEDULE[name]["active"] = bool(active)
 
     def _apply_saved_levels(self):
         """Carga logger_levels.json y aplica los niveles guardados sobre los defaults."""
