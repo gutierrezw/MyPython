@@ -1506,6 +1506,31 @@ class system_status(tk.Frame):
                     return f"{secs // 3600}h"
                 return f"{secs // 60}m"
 
+            def _get_run_count(name):
+                for row in DataHub.procesos:
+                    if "thread" in row and name in row["thread"]:
+                        return row["thread"][name]
+                return 0
+
+            def _get_proxima(last_run, intervalo):
+                if not last_run:
+                    return "-"
+                next_ts = last_run + intervalo
+                if next_ts <= time.time():
+                    return "Pendiente"
+                return datetime.fromtimestamp(next_ts).strftime("%m-%d %H:%M")
+
+            def _refresh():
+                schedule_data = read_json_tmp("agents_schedule.json")
+                for iid in tree.get_children():
+                    name = tree.item(iid, "text")
+                    cfg = AGENTES_SCHEDULE.get(name, {})
+                    intervalo = cfg.get("intervalo", 0)
+                    last_run = schedule_data.get(name, 0)
+                    tree.set(iid, "Run", _get_run_count(name))
+                    tree.set(iid, "Próxima", _get_proxima(last_run, intervalo))
+                tree.after(10000, _refresh)
+
             def _save_agents():
                 data = {name: cfg["active"] for name, cfg in AGENTES_SCHEDULE.items()}
                 write_json_tmp("agents_config", data)
@@ -1562,16 +1587,20 @@ class system_status(tk.Frame):
             frame = ttk.Frame(self.agentes, style="C.TFrame")
             frame.pack(expand=True, fill="both", padx=5, pady=(5, 0))
 
-            cols = ["Intervalo", "Estado", "Descripción"]
+            cols = ["Intervalo", "Estado", "Run", "Próxima", "Descripción"]
             tree = ttk.Treeview(frame, columns=cols, height=15, show="tree headings")
             tree.heading("#0", text="Agente")
             tree.heading("Intervalo", text="Intervalo")
             tree.heading("Estado", text="Estado")
+            tree.heading("Run", text="Run")
+            tree.heading("Próxima", text="Próxima")
             tree.heading("Descripción", text="Descripción")
             tree.column("#0", width=220, minwidth=180)
             tree.column("Intervalo", width=70, minwidth=60, anchor="center")
             tree.column("Estado", width=80, minwidth=70, anchor="center")
-            tree.column("Descripción", width=350, minwidth=200)
+            tree.column("Run", width=55, minwidth=45, anchor="center")
+            tree.column("Próxima", width=90, minwidth=80, anchor="center")
+            tree.column("Descripción", width=310, minwidth=200)
 
             scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
             scroll.pack(side="right", fill="y")
@@ -1591,16 +1620,26 @@ class system_status(tk.Frame):
             tree.bind("<Button-3>", _show_menu)
             tree.bind("<Double-1>", _on_double_click)
 
+            schedule_data = read_json_tmp("agents_schedule.json")
             for name, cfg in AGENTES_SCHEDULE.items():
                 active = cfg.get("active", True)
                 estado = "Activo" if active else "Inactivo"
+                intervalo = cfg.get("intervalo", 0)
                 tree.insert(
                     "",
                     "end",
                     text=name,
-                    values=(_fmt_intervalo(cfg.get("intervalo", 0)), estado, cfg.get("desc", "")),
+                    values=(
+                        _fmt_intervalo(intervalo),
+                        estado,
+                        _get_run_count(name),
+                        _get_proxima(schedule_data.get(name, 0), intervalo),
+                        cfg.get("desc", ""),
+                    ),
                     tags=(estado,),
                 )
+
+            tree.after(10000, _refresh)
 
         except Exception as e:
             print("agentes_system(): {}".format(e))

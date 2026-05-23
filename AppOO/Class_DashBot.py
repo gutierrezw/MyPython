@@ -851,7 +851,7 @@ class ClassAgenteIA:
                 if DataHub.manager_sesion.get(vehiculo):
                     self._preservation_run_vehiculo(vehiculo)
                 else:
-                    self.logger.warning(f"Agente_ManagerPreservation({vehiculo}): sesion no activa → SKIP")
+                    self.logger.debug(f"Agente_ManagerPreservation({vehiculo}): sesion no activa → SKIP")
             except Exception as e:
                 self.logger.error(f"Agente_ManagerPreservation({vehiculo}): {e}")
 
