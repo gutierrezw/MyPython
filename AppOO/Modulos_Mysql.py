@@ -2486,6 +2486,52 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+    def load_sentiment_features(self, account: str) -> dict:
+        """Retorna {symbol: {sentiment_score, sentiment_3d_avg, sentiment_7d_avg, sentiment_patron}}
+        para todos los símbolos en cartera. Ventana máxima: 7 días. Fallback 0 cuando sin datos."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT ms.symbol, "
+                "    MAX(CASE WHEN ms.fecha_hora = latest.max_fh THEN ms.sentimiento END) AS sentiment_score, "
+                "    AVG(CASE WHEN ms.fecha_hora >= DATE_SUB(NOW(), INTERVAL 3 DAY) THEN ms.sentimiento END) AS sentiment_3d_avg, "
+                "    AVG(ms.sentimiento) AS sentiment_7d_avg, "
+                "    MAX(msa.patron) AS sentiment_patron "
+                "FROM market_sentiment ms "
+                "INNER JOIN ( "
+                "    SELECT symbol, MAX(fecha_hora) AS max_fh "
+                "    FROM market_sentiment "
+                "    WHERE fecha_hora >= DATE_SUB(NOW(), INTERVAL 7 DAY) "
+                "    GROUP BY symbol "
+                ") latest ON ms.symbol = latest.symbol "
+                "LEFT JOIN market_sentiment_analysis msa ON msa.symbol = ms.symbol AND msa.fecha = CURDATE() "
+                "WHERE ms.fecha_hora >= DATE_SUB(NOW(), INTERVAL 7 DAY) "
+                "AND EXISTS ( "
+                "    SELECT 1 FROM market m "
+                "    WHERE m.symbol = ms.symbol AND m.account = %s AND m.encartera = 'Y' "
+                ") "
+                "GROUP BY ms.symbol",
+                (account,),
+            )
+            _PATRON_MAP = {"acumulacion": 1.0, "inflexion": 0.5, "neutro": 0.0, "distribucion": -1.0}
+            result = {}
+            for row in cursor.fetchall():
+                sym, score, avg3, avg7, patron = row
+                result[sym] = {
+                    "sentiment_score": float(score) if score is not None else 0.0,
+                    "sentiment_3d_avg": round(float(avg3), 4) if avg3 is not None else 0.0,
+                    "sentiment_7d_avg": round(float(avg7), 4) if avg7 is not None else 0.0,
+                    "sentiment_patron": _PATRON_MAP.get(patron, 0.0) if patron else 0.0,
+                }
+            return result
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_sentiment_features]: {error}")
+            return {}
+        finally:
+            cursor.close()
+            conn.close()
+
     def cleanup_sentiment(self, months: int = 6) -> int:
         """Elimina lecturas de market_sentiment y analysis más antiguas de N meses."""
         conn = self._conectar(tabla="update.market")

@@ -1100,6 +1100,8 @@ class Screener(tk.Frame):
                 else None
             )
             flujo_str = f"{_fn:+.2f}" if _fn is not None else ""
+            _sent = votos.get("Sent", 0)
+            sent_str = f"{_sent:+d}" if _sent != 0 else "0"
             filas.append(
                 {
                     "values": (
@@ -1122,6 +1124,7 @@ class Screener(tk.Frame):
                         senal_inst,
                         senal_ana,
                         modelo,
+                        sent_str,
                         consenso,
                         row.get("website") or "",
                     ),
@@ -1177,6 +1180,7 @@ class Screener(tk.Frame):
             ("Inst Señal", 100, "w"),
             ("Analistas", 140, "w"),
             ("IA Signal", 90, "center"),
+            ("Sent", 45, "center"),
             ("Consenso", 160, "w"),
             ("Website", 200, "w"),
         )
