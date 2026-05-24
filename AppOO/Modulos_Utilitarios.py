@@ -63,6 +63,11 @@ AGENTES_SCHEDULE = {
         "desc": "Patrón histórico sentimiento vía Claude (diario)",
         "active": True,
     },
+    "Agente_ApiCostTracker": {
+        "intervalo": 3600,
+        "desc": "Costos API Anthropic del mes (1 hora)",
+        "active": True,
+    },
 }
 
 

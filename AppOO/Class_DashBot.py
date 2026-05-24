@@ -77,6 +77,7 @@ from Class_InstitucionalScore import (
 from edgar_13f import sync_fund_filings, sync_13f_holdings
 from ConvergIA.Scanner_Sentimiento import scan_sentimiento
 from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
+from Class_ApiCosts import ApiCostTracker
 from valuation_edgar_downloader import BASE_DIR, download_filing
 from valuation_xbrl_api import get_zip_files
 from Class_customer import DataHub, TickerInfo
@@ -506,6 +507,18 @@ class ClassAgenteIA:
         except Exception as e:
             self.logger.error(f"Agente_InterpreteSentimiento(): {e}")
 
+    @wait_rate(3600, persist=True)
+    def Agente_ApiCostTracker(self):
+        try:
+            sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIA")
+            api_key = sesion["userapi"].decode("utf-8") if sesion else ""
+            result = ApiCostTracker(api_key).get_monthly_summary()
+            self.logger.warning(
+                f"ApiCostTracker: cost=${result['total_cost']:.4f} reqs={result['total_reqs']} hoy=${result['today_cost']:.4f}"
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_ApiCostTracker(): {e}")
+
     # agente 13F Scores — recalcula inst_score con señales 13F, una vez al día
     @wait_rate(86400, persist=True)
     def Agente_13FScores(self):
@@ -689,9 +702,10 @@ class ClassAgenteIA:
             DataHub.manager_GyP["Crypto"]["Leverage"] = total_col / max(capital_neto, 1.0)
             beta_actual = DataHub.manager_GyP["Crypto"].get("BetaPortfolio", 1.5)
             mrg_actual = total_deuda / max(capital_neto, 1.0) * beta_actual
+            step = lconfig.get("rebalance_step", 0.25)
             self.logger.warning(
                 f"LtvControl DataHub: col={total_col:.2f} earn_col={capital_earn_col:.2f} "
-                f"deuda={total_deuda:.2f} neto={capital_neto:.2f} beta={beta_actual:.3f} → mrg={mrg_actual:.2%}"
+                f"deuda={total_deuda:.2f} neto={capital_neto:.2f} beta={beta_actual:.3f} → mrg={mrg_actual:.2%} step={step}"
             )
 
             # Ajuste LTV — solo si hay config explícita
@@ -2098,6 +2112,11 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             DataHub.manager_events.register_thread(
                 name="Agente_ClasificadorETF",
                 target=self.Agente_ClasificadorETF,
+                loop_sleep=300,
+            )
+            DataHub.manager_events.register_thread(
+                name="Agente_ApiCostTracker",
+                target=self.Agente_ApiCostTracker,
                 loop_sleep=300,
             )
         except Exception as error:

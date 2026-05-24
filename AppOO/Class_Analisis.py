@@ -1449,13 +1449,23 @@ class AnalisisCrypto(AnalisisBase):
             # ── AX1: LTV como línea blanca — encima de las áreas ────────────
             ax1.plot(x, ltvs, color="white", linewidth=1.0, marker="o", markersize=3, zorder=7, label="LTV actual")
 
-            # ⚠ solo si supera zona inicial
+            # etiqueta LTV% sobre cada punto de la línea
             for i in range(n):
+                ax1.text(
+                    x[i],
+                    ltvs[i] + 1.5,
+                    f"{ltvs[i]:.1f}%",
+                    color="white",
+                    fontsize=6,
+                    ha="center",
+                    va="bottom",
+                    zorder=8,
+                )
                 if ltvs[i] >= ltv_inicial * 100:
-                    ax1.text(x[i], ltvs[i] + 2.0, "⚠", color="#e74c3c", fontsize=7, ha="center", va="bottom", zorder=8)
+                    ax1.text(x[i], ltvs[i] + 4.5, "⚠", color="#e74c3c", fontsize=7, ha="center", va="bottom", zorder=8)
 
             ax1.set_ylim(0, ltv_liquidacion * 100 + 10)
-            ax1.set_ylabel("LTV %", color="white", fontsize=6)
+            ax1.set_ylabel("Ratio Deuda / Colateral (LTV)", color="white", fontsize=6)
             ax1.tick_params(axis="y", colors="white", labelsize=6)
             ax1.spines["left"].set_color("white")
             ax1.spines["left"].set_linewidth(1.0)
@@ -1501,10 +1511,10 @@ class AnalisisCrypto(AnalisisBase):
                 title="Zonas / LTV",
                 title_fontsize=5,
             )
-            leg2 = ax2.legend(
+            leg2 = fg.legend(
                 lines2,
                 labels2,
-                loc="upper right",
+                loc="outside upper right",
                 fontsize=5,
                 facecolor="white",
                 labelcolor="black",
@@ -1513,6 +1523,7 @@ class AnalisisCrypto(AnalisisBase):
                 title_fontsize=5,
             )
             fg.add_artist(leg1)
+            fg.add_artist(leg2)
             fg.suptitle("Deuda / Colateral USD", fontsize=9, color="white")
 
             frm = tk.Frame(parent, bg=self.CG_COLOR)
@@ -1520,7 +1531,7 @@ class AnalisisCrypto(AnalisisBase):
             canvas_fig = FigureCanvasTkAgg(fg, master=frm)
             canvas_fig.draw()
             canvas_fig.get_tk_widget().pack(fill="x", expand=True)
-            return row + 1
+            return row + 1, frm
 
         def _calcular_distribucion():
             try:
@@ -1529,9 +1540,12 @@ class AnalisisCrypto(AnalisisBase):
                 if requested <= 0:
                     return
                 delta_min = float(lconfig.get("delta_minimo", 1.0))
-                n = len(prestamos)
-                target_deuda = (total_deuda + requested) / n if n > 0 else 0
-                raw = [max(0.0, target_deuda - p["deuda"]) for p in prestamos]
+                # distribuir proporcional al earn disponible (colateral total, no solo bloqueado)
+                # BTC puede tener mucho earn libre aunque tenga poco colateral bloqueado
+                cap_disponible = [earn_map.get(p["activo"], p["col_usd"]) for p in prestamos]
+                total_cap = sum(cap_disponible)
+                target_ltv = (total_deuda + requested) / total_cap if total_cap > 0 else 0
+                raw = [max(0.0, cap * target_ltv - p["deuda"]) for cap, p in zip(cap_disponible, prestamos)]
                 total_raw = sum(raw)
                 scale = requested / total_raw if total_raw > 0 else 0
 
@@ -1539,9 +1553,9 @@ class AnalisisCrypto(AnalisisBase):
                     tree_result.delete(item)
 
                 total_borrow = 0.0
-                for p, r in zip(prestamos, raw):
+                for p, r, cap in zip(prestamos, raw, cap_disponible):
                     borrow = r * scale if r * scale >= delta_min else 0.0
-                    ltv_final = (p["deuda"] + borrow) / p["col_usd"] if p["col_usd"] > 0 else 0
+                    ltv_final = (p["deuda"] + borrow) / cap if cap > 0 else 0
                     total_borrow += borrow
                     tree_result.insert(
                         "",
@@ -1656,7 +1670,7 @@ class AnalisisCrypto(AnalisisBase):
         self._mrg_data = (total_deuda, capital_neto)
         row += 1
 
-        row = _crear_grafico_prestamos(frame, prestamos, earn_map, row)
+        row, frm_grafico = _crear_grafico_prestamos(frame, prestamos, earn_map, row)
 
         # simulador loan_distribute
         row = self.crear_seccion(frame, "Simulador loan_distribute", row)
@@ -1737,6 +1751,44 @@ class AnalisisCrypto(AnalisisBase):
         tree_result.pack(side="left", fill="both")
         sb_sim.pack(side="right", fill="y")
         row += 1
+
+        def _actualizar_live():
+            nonlocal frm_grafico
+            try:
+                nuevos = _get_loan_data()
+                if not nuevos:
+                    tree_result.after(10000, _actualizar_live)
+                    return
+                # actualizar treeview
+                iids = tree_result.get_children()
+                for iid, p in zip(iids, nuevos):
+                    vals = tree_result.item(iid, "values")
+                    if vals[0] == "TOTAL":
+                        continue
+                    tree_result.set(iid, "Col USD", f"{p['col_usd']:,.2f}")
+                    tree_result.set(iid, "LTV actual", f"{p['ltv']:.2%}")
+                    tree_result.set(iid, "USDT Actual", f"{p['deuda']:,.2f}")
+                    tree_result.set(iid, "Pedir USDT", "-")
+                    tree_result.set(iid, "LTV final", f"{p['ltv']:.2%}")
+                total_iid = iids[-1] if iids else None
+                if total_iid:
+                    t_col = sum(p["col_usd"] for p in nuevos)
+                    t_deu = sum(p["deuda"] for p in nuevos)
+                    t_ltv = t_deu / t_col if t_col > 0 else 0
+                    tree_result.set(total_iid, "Col USD", f"{t_col:,.2f}")
+                    tree_result.set(total_iid, "USDT Actual", f"{t_deu:,.2f}")
+                    tree_result.set(total_iid, "LTV final", f"{t_ltv:.2%}")
+                # redibujar gráfico: destruir frame anterior completo y recrear en mismo lugar
+                earn_nuevo = {b["asset"]: b.get("usdt_value", 0.0) for b in ServiciosCrypto().earn_spot_balances()}
+                grafico_parent = frm_grafico.master
+                grafico_row = frm_grafico.grid_info().get("row", 0)
+                frm_grafico.destroy()
+                _, frm_grafico = _crear_grafico_prestamos(grafico_parent, nuevos, earn_nuevo, grafico_row)
+            except Exception as e:
+                _logger.error(f"_actualizar_live: {e}")
+            tree_result.after(10000, _actualizar_live)
+
+        tree_result.after(10000, _actualizar_live)
 
         def _ejecutar_prestamo():
             from Class_ApiBinnace import BinanceClient  # import diferido — evita ciclo con Modulos_python chain
