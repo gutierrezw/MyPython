@@ -391,6 +391,8 @@ class Debugging:
         self.logger["Analisis"].setLevel(logging.WARNING)
         self.logger.update({"Sentimiento": logging.getLogger("Sentimiento")})
         self.logger["Sentimiento"].setLevel(logging.WARNING)
+        self.logger.update({"ApiTracker": logging.getLogger("ApiTracker")})
+        self.logger["ApiTracker"].setLevel(logging.WARNING)
 
         # restaurar niveles guardados por el usuario desde el panel Debugging
         self._apply_saved_levels()

@@ -62,6 +62,7 @@ class system_status(tk.Frame):
         self.modeloiabuy = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.debugging = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.agentes = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
+        self.apicost = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
 
         # Frames para la derecha
         self.connect = ttk.Frame(self.right, padding=(1, 1, 1, 1), style="C.TFrame")
@@ -84,6 +85,7 @@ class system_status(tk.Frame):
         self.bottom.add(self.modeloiabuy, text="Buy IA")
         self.bottom.add(self.debugging, text="Debugging")
         self.bottom.add(self.agentes, text="Agentes")
+        self.bottom.add(self.apicost, text="IA Cost")
 
         self.bottom.pack(side=tk.BOTTOM, fill=tk.BOTH)
         self.right.pack(side=tk.RIGHT, fill=tk.BOTH)
@@ -334,6 +336,7 @@ class system_status(tk.Frame):
             self.connect_api()
             self.debugging_system()
             self.agentes_system()
+            self.api_cost_system()
 
             # bloqueado hasta que mejore consumo CPU
             # self.monitor_realtime()  # Activado con optimizaciones (actualiza cada 10s)
@@ -1643,6 +1646,114 @@ class system_status(tk.Frame):
 
         except Exception as e:
             print("agentes_system(): {}".format(e))
+
+    def api_cost_system(self):
+        try:
+
+            def _fmt(n):
+                if n >= 1_000_000:
+                    return f"{n/1_000_000:.2f}M"
+                if n >= 1_000:
+                    return f"{n/1_000:.1f}K"
+                return str(n)
+
+            def _refresh():
+                data = read_json_tmp("api_costs.json")
+                if not data:
+                    lbl_estado.config(text="Sin datos — agente aún no ejecutó")
+                    tree.after(60000, _refresh)
+                    return
+
+                lbl_periodo.config(text=data.get("periodo", ""))
+                lbl_costo.config(text=f"${data.get('total_cost', 0):.2f}")
+                lbl_hoy.config(text=f"${data.get('today_cost', 0):.2f}")
+                total_tok = data.get("total_input_tokens", 0) + data.get("total_output_tokens", 0)
+                lbl_tokens.config(text=_fmt(total_tok))
+                lbl_estado.config(text="")
+
+                for iid in tree.get_children():
+                    tree.delete(iid)
+                by_model = data.get("by_model", {})
+                total = data.get("total_cost", 0)
+                for model, mu in sorted(by_model.items(), key=lambda x: x[1]["cost"], reverse=True):
+                    short = model.replace("claude-", "")
+                    pct = mu["cost"] / total * 100 if total else 0
+                    tok_in = _fmt(mu.get("input_tokens", 0))
+                    tok_out = _fmt(mu.get("output_tokens", 0))
+                    tree.insert(
+                        "",
+                        "end",
+                        values=(
+                            short,
+                            tok_in,
+                            f"${mu['input_cost']:.2f}",
+                            tok_out,
+                            f"${mu['output_cost']:.2f}",
+                            f"${mu['cost']:.2f}",
+                            f"{pct:.0f}%",
+                        ),
+                    )
+
+                for iid in tree_daily.get_children():
+                    tree_daily.delete(iid)
+                for d in data.get("daily", [])[-7:]:
+                    tree_daily.insert("", "end", values=(d["date"], f"${d['cost']:.2f}"))
+
+                tree.after(60000, _refresh)
+
+            frm = ttk.Frame(self.apicost, style="C.TFrame")
+            frm.pack(fill="both", expand=True, padx=5, pady=5)
+
+            # ── cards resumen ─────────────────────────────────────────────
+            cards = ttk.Frame(frm, style="C.TFrame")
+            cards.pack(fill="x", pady=(0, 6))
+
+            def _card(parent, titulo):
+                f = ttk.Frame(parent, style="B.TFrame", padding=4)
+                f.pack(side="left", padx=4)
+                ttk.Label(f, text=titulo, foreground="#888888", font=("Consolas", 7), style="B.TLabel").pack()
+                lbl = ttk.Label(f, text="—", foreground="white", font=("Consolas", 10, "bold"), style="B.TLabel")
+                lbl.pack()
+                return lbl
+
+            lbl_periodo = ttk.Label(cards, text="", foreground="#aaaaaa", font=("Consolas", 8), style="C.TLabel")
+            lbl_periodo.pack(side="left", padx=8)
+            lbl_costo = _card(cards, "Gasto mes")
+            lbl_hoy = _card(cards, "Hoy")
+            lbl_tokens = _card(cards, "Tokens est.")
+            lbl_estado = ttk.Label(
+                frm, text="Cargando...", foreground="#888888", font=("Consolas", 8), style="C.TLabel"
+            )
+            lbl_estado.pack(anchor="w")
+
+            # ── tabla por modelo ──────────────────────────────────────────
+            ttk.Label(frm, text="Por modelo", foreground="#aaaaaa", font=("Consolas", 8), style="C.TLabel").pack(
+                anchor="w", pady=(4, 0)
+            )
+            cols_m = ("Modelo", "Tok In", "$ In", "Tok Out", "$ Out", "Total $", "%")
+            tree = ttk.Treeview(frm, columns=cols_m, show="headings", height=5)
+            for c in cols_m:
+                tree.heading(c, text=c)
+                tree.column(c, width=80, anchor="e")
+            tree.column("Modelo", width=160, anchor="w")
+            tree.pack(fill="x", pady=2)
+
+            # ── historial diario ──────────────────────────────────────────
+            ttk.Label(frm, text="Últimos 7 días", foreground="#aaaaaa", font=("Consolas", 8), style="C.TLabel").pack(
+                anchor="w", pady=(6, 0)
+            )
+            cols_d = ("Fecha", "Costo USD")
+            tree_daily = ttk.Treeview(frm, columns=cols_d, show="headings", height=7)
+            for c in cols_d:
+                tree_daily.heading(c, text=c)
+                tree_daily.column(c, width=140, anchor="e")
+            tree_daily.column("Fecha", width=100, anchor="w")
+            tree_daily.pack(fill="x")
+
+            _refresh()
+
+        except Exception as e:
+            print(f"api_cost_system(): {e}")
 
     # visualiza manager_buysell con lista-detalle
     def manager_buysell_system(self):
