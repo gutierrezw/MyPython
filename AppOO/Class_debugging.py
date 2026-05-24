@@ -394,6 +394,16 @@ class Debugging:
         self.logger.update({"ApiTracker": logging.getLogger("ApiTracker")})
         self.logger["ApiTracker"].setLevel(logging.WARNING)
 
+        # manager logging AgentManager domain loggers
+        self.logger.update({"Agente.Stock": logging.getLogger("Agente.Stock")})
+        self.logger["Agente.Stock"].setLevel(logging.WARNING)
+        self.logger.update({"Agente.Crypto": logging.getLogger("Agente.Crypto")})
+        self.logger["Agente.Crypto"].setLevel(logging.WARNING)
+        self.logger.update({"Agente.IA": logging.getLogger("Agente.IA")})
+        self.logger["Agente.IA"].setLevel(logging.WARNING)
+        self.logger.update({"Agente.Infra": logging.getLogger("Agente.Infra")})
+        self.logger["Agente.Infra"].setLevel(logging.WARNING)
+
         # restaurar niveles guardados por el usuario desde el panel Debugging
         self._apply_saved_levels()
         self._apply_saved_agents()
