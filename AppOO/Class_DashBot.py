@@ -64,29 +64,12 @@ from Modulos_Mysql import (
     BDsystem,
     PlanInversion,
     MarketScreen,
-    EstrategiaInversion,
-    IPerformance,
 )
-from Class_Finance import scan_extractos
-from Class_Screener import sync_market, audit_portfolio, refresh_consenso_tags
-from Class_InstitucionalScore import (
-    sync_institutional,
-    sync_edgar_funds,
-    sync_13f_scores,
-)
-from edgar_13f import sync_fund_filings, sync_13f_holdings
-from ConvergIA.Scanner_Sentimiento import scan_sentimiento
-from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
-from Class_ApiCosts import ApiCostTracker
-from valuation_edgar_downloader import BASE_DIR, download_filing
-from valuation_xbrl_api import get_zip_files
 from Class_customer import DataHub, TickerInfo
 from Class_BrowserBridge import set_claude_contexto
-from Class_ApiBinnace import BinanceClient
-from Class_ServiciosCrypto import ServiciosCrypto
 from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
 from Modulos_Utilitarios import define_FileCache, read_json_tmp, write_json_tmp, AGENTES_SCHEDULE
-from Class_DataFrame import CacheHut
+from Class_AgentManager import AgentManager
 
 
 # Admistrador de Agentes IA
@@ -100,7 +83,6 @@ class ClassAgenteIA:
         self.PlanInversion = PlanInversion()
         self.sesion = self.PlanInversion.get_sesion_by_vehiculo(self.vehiculo)
         self.account = self.sesion["idcuenta"]
-        self.Performa = IPerformance()
 
         # variables Modelo sell
         modelo = BDsystem.get_modelo_ia(modelo="modelo_sellv01")
@@ -147,52 +129,6 @@ class ClassAgenteIA:
             self._preservation_logger.addHandler(_fh)
             self._preservation_logger.setLevel(logging.DEBUG)
             self._preservation_logger.propagate = False
-
-    # decorador para limitar ejecuciones
-    def wait_rate(intervalo_segundos: int, persist: bool = False):
-        """
-        Fábrica de Decoradores: Restringe la ejecución de la función
-        a un máximo de una vez por el intervalo de tiempo especificado.
-
-        Args:
-            intervalo_segundos (int): Tiempo mínimo de espera entre llamadas (en segundos).
-            persist (bool): Si True, persiste last_run en tmp/agents_schedule.json
-                            para sobrevivir reinicios. Usar para intervalos > 12h.
-        """
-        _FILE = "agents_schedule.json"
-
-        def decorator(func):
-            func.last_run = 0
-
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                tiempo_actual = time.time()
-                if func.last_run == 0 and persist:
-                    func.last_run = read_json_tmp(_FILE).get(func.__name__, 0)
-                tiempo_transcurrido = tiempo_actual - func.last_run
-
-                if tiempo_transcurrido < intervalo_segundos:
-                    tiempo_restante = intervalo_segundos - tiempo_transcurrido
-                    logging.getLogger("ClassAgenteIA").debug(
-                        f"wait_rate: '{func.__name__}' bloqueado — faltan {int(tiempo_restante)}s"
-                    )
-                    wrapper._overdue = False
-                    return None
-                else:
-                    # True si lleva más de 1.5x el intervalo sin ejecutar (reinicios frecuentes)
-                    wrapper._overdue = tiempo_transcurrido > intervalo_segundos * 1.5
-                    resultado = func(*args, **kwargs)
-                    func.last_run = tiempo_actual
-                    if persist:
-                        data = read_json_tmp(_FILE)
-                        data[func.__name__] = tiempo_actual
-                        write_json_tmp(_FILE, data)
-                    wrapper._overdue = False
-                    return resultado
-
-            return wrapper
-
-        return decorator
 
     _BUY_TAGS = {"UNANIME", "CONSENSO", "TENDENCIA"}
     _SELL_TAGS = {"ALERTA", "SALIDA"}
@@ -371,198 +307,6 @@ class ClassAgenteIA:
         except Exception as e:
             self.logger.error(f"Agente_ManagerTop10(): {e}")
 
-    # agente paras las descargas de filings cada 3600 seg
-    @wait_rate(3600)
-    def Agente_downloads_filings_EDGAR(self):
-        try:
-            # desacrga la estructura positions
-            self.positions = self.PlanInversion.select_inversion(tipoin=self.vehiculo, ticket="all")
-
-            counter = 1
-            for positio in self.positions:
-                ticker = positio.get("ticket")
-                sectype = positio.get("sectype")
-
-                # skip not found
-                if ticker in self.NotFound:
-                    continue
-
-                # skip is not STK
-                if sectype not in ("STK", "EQUITY"):
-                    continue
-
-                # valida filings en directorio
-                ticker_dir = Path(BASE_DIR) / f"{positio.get("ticket")}_EDGAR_Files"
-                files = get_zip_files(ticker_dir=ticker_dir)
-                if files:
-                    continue
-
-                # procede con la descarga de EDGAR
-                counter += 1
-                found = download_filing(ticker=ticker)
-                if not found:
-                    self.NotFound.append(ticker)
-                    self.logger.warning(textwrap.dedent(f"""
-                            ==============================================================================================
-                            Agente_downloads_filings_EDGAR(): 
-                            = 
-                            🚨 FILINGS DENEGADO. Posible deslistado del ticker: {ticker}
-                            ==============================================================================================
-
-                            """))
-
-                elif found:
-                    # controla que no haga mas de 2 downloads en EDGAR
-                    if counter > 2:
-                        return None
-        except Exception as e:
-            print(f"Angente_downloads_filings_EDGAR(): {e}")
-
-    # agente Market Screener — descubre símbolos + enriquece con Yahoo, una vez al día
-    @wait_rate(86400, persist=True)
-    def Agente_MarketScreener(self):
-        try:
-            result = sync_market(account=self.account)
-            self.logger.warning(
-                f"MarketScreener: descargados={result['descargados']} insertados={result['insertados']} "
-                f"omitidos={result['omitidos']} actualizados={result['actualizados']}"
-            )
-        except Exception as e:
-            self.logger.error(f"Agente_MarketScreener(): {e}")
-
-    # agente Institutional Score — enriquece Market con ownership institucional, una vez al día
-    @wait_rate(86400, persist=True)
-    def Agente_InstitucionalScore(self):
-        try:
-            result = sync_institutional(account=self.account)
-            self.logger.warning(
-                f"InstitucionalScore: procesados={result['symbols_processed']} actualizados={result['updated']}"
-            )
-        except Exception as e:
-            self.logger.error(f"Agente_InstitucionalScore(): {e}")
-
-    # agente Consenso Cache — materializa consenso_tag/suma (sin voto Mod) en market cada 5 min
-    @wait_rate(300, persist=True)
-    def Agente_ConsensoCache(self):
-        try:
-            result = refresh_consenso_tags(account=self.account)
-            self.logger.warning(f"ConsensoCache: actualizados={result['actualizados']}/{result['total']}")
-        except Exception as e:
-            self.logger.error(f"Agente_ConsensoCache(): {e}")
-
-    # agente Edgar Funds — carga todos los filers 13F-HR de EDGAR en tabla funds, una vez por mes
-    @wait_rate(2592000, persist=True)
-    def Agente_EdgarFunds(self):
-        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_EdgarFunds._overdue:
-            return
-        try:
-            result = sync_edgar_funds()
-            self.logger.warning(f"EdgarFunds: total={result['total']} insertados={result['inserted']}")
-        except Exception as e:
-            self.logger.error(f"Agente_EdgarFunds(): {e}")
-
-    # agente Fund Filings — descarga XMLs 13F-HR para top 50 fondos, una vez por semana
-    @wait_rate(604800, persist=True)
-    def Agente_FundFilings(self):
-        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_FundFilings._overdue:
-            return
-        try:
-            task_name = "Agente_FundFilings()"
-
-            def _progress(i, total):
-                DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=i)
-
-            result = sync_fund_filings(account=self.account, progress_cb=_progress)
-            self.logger.warning(
-                f"FundFilings: fondos={result['funds']} descargados={result['downloaded']} "
-                f"skipped={result['skipped']} fallidos={result['failed']}"
-            )
-        except Exception as e:
-            self.logger.error(f"Agente_FundFilings(): {e}")
-
-    @wait_rate(3600, persist=True)
-    def Agente_Sentimiento(self):
-        if datetime.now().weekday() >= 5:  # sábado=5, domingo=6 — mercado cerrado
-            return
-        try:
-            sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIS")
-            api_key = sesion["userapi"].decode("utf-8") if sesion else ""
-            result = scan_sentimiento(account=self.account, api_key=api_key)
-            self.logger.warning(
-                f"Sentimiento: símbolos={result['symbols']} con_noticias={result['with_news']} "
-                f"clasificados={result['classified']}"
-            )
-        except Exception as e:
-            self.logger.error(f"Agente_Sentimiento(): {e}")
-
-    @wait_rate(86400, persist=True)
-    def Agente_InterpreteSentimiento(self):
-        if datetime.now().weekday() >= 5:  # sábado=5, domingo=6 — mercado cerrado
-            return
-        try:
-            sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIS")
-            api_key = sesion["userapi"].decode("utf-8") if sesion else ""
-            result = interpretar_sentimiento(account=self.account, api_key=api_key)
-            self.logger.warning(f"InterpreteSentimiento: {len(result)} símbolos interpretados")
-        except Exception as e:
-            self.logger.error(f"Agente_InterpreteSentimiento(): {e}")
-
-    @wait_rate(3600, persist=True)
-    def Agente_ApiCostTracker(self):
-        try:
-            sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIA")
-            api_key = sesion["userapi"].decode("utf-8") if sesion else ""
-            result = ApiCostTracker(api_key).get_monthly_summary()
-            self.logger.warning(
-                f"ApiCostTracker: cost=${result['total_cost']:.4f} reqs={result['total_reqs']} hoy=${result['today_cost']:.4f}"
-            )
-        except Exception as e:
-            self.logger.error(f"Agente_ApiCostTracker(): {e}")
-
-    # agente 13F Scores — recalcula inst_score con señales 13F, una vez al día
-    @wait_rate(86400, persist=True)
-    def Agente_13FScores(self):
-        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_13FScores._overdue:
-            return
-        try:
-            result = sync_13f_scores(account=self.account)
-            self.logger.warning(
-                f"13FScores: símbolos={result['symbols']} actualizados={result['updated']} skipped={result['skipped']}"
-            )
-        except Exception as e:
-            self.logger.error(f"Agente_13FScores(): {e}")
-
-    # agente 13F Holdings — parsea XMLs descargados y pobla fund_holdings, una vez al día
-    @wait_rate(86400, persist=True)
-    def Agente_13FHoldings(self):
-        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_13FHoldings._overdue:
-            return
-        try:
-            result = sync_13f_holdings(account=self.account)
-            self.logger.warning(
-                f"13FHoldings: archivos={result['xml_files']} "
-                f"holdings={result['inserted_holdings']} opciones={result['inserted_options']}"
-            )
-            deleted = MarketScreen().cleanup_fund_holdings_nulls()
-            self.logger.warning(f"13FHoldings cleanup: eliminadas={deleted} filas NULL")
-        except Exception as e:
-            self.logger.error(f"Agente_13FHoldings(): {e}")
-
-    # agente auditoría cartera — detecta delistados/renombrados, mensual
-    @wait_rate(2592000, persist=True)
-    def Agente_AuditPortfolio(self):
-        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_AuditPortfolio._overdue:
-            return
-        try:
-            result = audit_portfolio(account=self.account)
-            self.logger.warning(
-                f"AuditPortfolio: total={result['total']} delistados={result['delistados']} "
-                f"nombres_upd={result['nombres_upd']} cusips_upd={result['cusips_upd']} "
-                f"etfs_upd={result['etfs_upd']} sin_precio={result['sin_precio']} errores={result['errores']}"
-            )
-        except Exception as e:
-            self.logger.error(f"Agente_AuditPortfolio(): {e}")
-
     def _consultar_claude(self, mensaje_usuario, contexto=""):
         """Llamada general a Claude API para el chatbot. Retorna respuesta en texto."""
         sesion_claude = BDsystem.get_sesion_by_vehiculo("ClaudeAPIC")
@@ -594,263 +338,6 @@ class ClassAgenteIA:
         if not resp.ok:
             raise RuntimeError(f"{resp.status_code} — {resp.json()}")
         return resp.json()["content"][0]["text"].strip()
-
-    def _clasificar_etf_claude(self, yf_info, opciones):
-        """Llama Claude Haiku para clasificar un ETF en una estrategia del sistema. Retorna código (P01..P05) o None."""
-        sesion_claude = BDsystem.get_sesion_by_vehiculo("ClaudeAPIE")
-        api_key = sesion_claude["userapi"].decode("utf-8")
-        if not api_key:
-            self.logger.error("_clasificar_etf_claude: userapi no configurada en sesion ClaudeAPIE")
-            return None
-
-        opciones_str = " | ".join(f"{o['descripcion']}({o['estrategia']})" for o in opciones)
-        nombre = yf_info.get("longName") or yf_info.get("shortName", "")
-        descripcion = (yf_info.get("longBusinessSummary") or "N/A")[:400]
-        categoria = yf_info.get("category") or "N/A"
-
-        prompt = (
-            f"Clasificá este activo financiero en exactamente una de estas categorías:\n"
-            f"{opciones_str}\n\n"
-            f"Nombre: {nombre}\n"
-            f"Descripción: {descripcion}\n"
-            f"Categoría Morningstar: {categoria}\n\n"
-            f"Respondé solo el código de estrategia (ej: P01). Sin explicación."
-        )
-
-        resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 10,
-                "messages": [{"role": "user", "content": prompt}],
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        codigo = resp.json()["content"][0]["text"].strip()
-        codigos_validos = {o["estrategia"] for o in opciones}
-        return codigo if codigo in codigos_validos else None
-
-    # agente clasificador ETF — corre semanalmente, asigna estrategia Balance (P01-P05)
-    # a ETFs detectados en market (categoriaActivo='X') usando DataHub + Claude Haiku.
-    # Write-once: no reclasifica ETFs que ya tienen estrategia Balance asignada.
-    @wait_rate(604800, persist=True)
-    def Agente_ClasificadorETF(self):
-        try:
-            estrategia_svc = EstrategiaInversion()
-            opciones = estrategia_svc.select(accion="vehiculo", ivehiculo="Balance")
-            etfs = estrategia_svc.get_etfs_pendientes(self.account)
-            clasificados, sin_info = 0, 0
-            for etf in etfs:
-                symbol = etf["symbol"]
-                yf_info = DataHub.info.get(symbol, {}).get("activos", {})
-                if not yf_info:
-                    sin_info += 1
-                    continue
-                codigo = self._clasificar_etf_claude(yf_info, opciones)
-                if codigo:
-                    estrategia_svc.update_estrategia_etf(symbol, self.account, codigo)
-                    clasificados += 1
-            self.logger.warning(
-                f"Agente_ClasificadorETF: pendientes={len(etfs)} clasificados={clasificados} sin_info={sin_info}"
-            )
-        except Exception as e:
-            self.logger.error(f"Agente_ClasificadorETF(): {e}")
-
-    # Agente LTV — mantiene el LTV en ~28% para evitar liquidaciones de colateral en Binance.
-    # Corre cada 5 min. Si el precio del colateral baja (LTV sube) → agrega colateral automáticamente.
-    # Si el precio sube (LTV baja) → retira colateral sobrante hacia Earn.
-    # Complementa loan_distribute (distribución inicial manual desde AnalisisCrypto).
-    # Parámetros: bloque "ltv" en el JSON de sesión Crypto (target, umbral_alto, umbral_bajo, umbral_critico).
-    # Doc completa: Doc/ltv_agent.md
-    @wait_rate(300, persist=True)
-    def Agente_LtvControl(self):
-        try:
-            params = self._load_params("Crypto")
-            lconfig = (params or {}).get("ltv", {})
-
-            svc = ServiciosCrypto()
-            analisis = svc.ltv_check_and_adjust(lconfig)
-            if not analisis:
-                self.logger.warning("Agente_LtvControl: sin préstamos activos")
-                return
-
-            # Siempre sincronizar DataHub — independiente de si hay lconfig o no
-            total_col = sum(i["collateral_usd"] for i in analisis)
-            total_deuda = sum(i["loan_usd"] for i in analisis)
-
-            # capital_neto = earn balance de activos en garantía - deuda
-            # misma base que _seccion_deuda en AnalisisCrypto (earn_spot_balances)
-            try:
-                earn_balances = svc.earn_spot_balances()
-                earn_map = {b["asset"]: b.get("usdt_value", 0.0) for b in earn_balances}
-                col_assets = {i["collateralCoin"] for i in analisis}
-                capital_earn_col = sum(earn_map.get(a, 0.0) for a in col_assets)
-            except Exception as e_earn:
-                self.logger.error(f"LtvControl earn_spot_balances: {e_earn}")
-                capital_earn_col = 0.0
-            capital_neto = (capital_earn_col if capital_earn_col > 0 else total_col) - total_deuda
-
-            DataHub.manager_GyP["Crypto"]["Colateral"] = total_col
-            DataHub.manager_GyP["Crypto"]["CapitalNeto"] = capital_neto
-            DataHub.manager_GyP["Crypto"]["Debit"] = total_deuda
-            DataHub.manager_GyP["Crypto"]["Leverage"] = total_col / max(capital_neto, 1.0)
-            beta_actual = DataHub.manager_GyP["Crypto"].get("BetaPortfolio", 1.5)
-            mrg_actual = total_deuda / max(capital_neto, 1.0) * beta_actual
-            step = lconfig.get("rebalance_step", 0.25)
-            self.logger.warning(
-                f"LtvControl DataHub: col={total_col:.2f} earn_col={capital_earn_col:.2f} "
-                f"deuda={total_deuda:.2f} neto={capital_neto:.2f} beta={beta_actual:.3f} → mrg={mrg_actual:.2%} step={step}"
-            )
-
-            # Ajuste LTV — solo si hay config explícita
-            if not lconfig:
-                return
-            for item in analisis:
-                gap = item["ltv_actual"] - lconfig.get("target", 0.50)
-                gap_str = f"+{gap:.2%}" if gap >= 0 else f"{gap:.2%}"
-                if item["ajuste_direction"] and item["ajuste_coin"] > 0:
-                    resp = svc._spot.get_flexible_adjust_ltv(
-                        loanCoin=item["loanCoin"],
-                        collateralCoin=item["collateralCoin"],
-                        adjustType=item["ajuste_direction"],
-                        amount=item["ajuste_coin"],
-                    )
-                    ajuste_str = (
-                        f"{item['ajuste_direction']} {item['ajuste_coin']:.4f} {item['collateralCoin']} → {resp}"
-                    )
-                else:
-                    ajuste_str = "sin ajuste"
-                self.logger.warning(
-                    f"LTV [{item['collateralCoin']}] {item['ltv_actual']:.2%} gap={gap_str} "
-                    f"{item['estado']} | col={item['collateral_amount']:.4f} (~{item['collateral_usd']:.2f}) "
-                    f"deuda={item['loan_usd']:.2f} | {ajuste_str}"
-                )
-
-        except Exception as e:
-            self.logger.error(f"Agente_LtvControl(): {e}")
-
-    # agente beta portfolio Stock — actualiza BetaPortfolio cada hora desde DB + posiciones vivas
-    @wait_rate(3600, persist=True)
-    def Agente_StockBeta(self):
-        try:
-            positions = [p for p in DataHub.manager_positions.get("Stock", []) if float(p.get("mktvalue", 0)) > 0]
-            if not positions:
-                return
-            result = MarketScreen().select_all(account=self.account)
-            if not result:
-                return
-            rows, ix = result
-            if not rows or not ix:
-                return
-            beta_map = {dict(zip(ix, row))["symbol"]: dict(zip(ix, row)).get("beta") for row in rows}
-            total_val, beta_sum = 0.0, 0.0
-            for p in positions:
-                val = float(p.get("mktvalue", 0))
-                beta_raw = beta_map.get(p.get("ticket", ""))
-                try:
-                    beta = float(beta_raw) if beta_raw is not None else 1.0
-                except (TypeError, ValueError):
-                    beta = 1.0
-                beta_sum += val * beta
-                total_val += val
-            beta_port = round(max(beta_sum / total_val, 0.1), 3) if total_val > 0 else 1.0
-            DataHub.manager_GyP["Stock"]["BetaPortfolio"] = beta_port
-            self.logger.warning(f"StockBeta: β={beta_port:.3f}  ({len(positions)} posiciones)")
-        except Exception as e:
-            self.logger.error(f"Agente_StockBeta(): {e}")
-
-    # agente beta portfolio Crypto — descarga histórico yfinance y calcula beta vs BTC cada 6h
-    @wait_rate(21600)
-    def Agente_CryptoBeta(self):
-        try:
-            positions = [p for p in DataHub.manager_positions.get("Crypto", []) if float(p.get("position", 0)) > 0]
-            if not positions:
-                return
-            orig_names = [p["ticket"] for p in positions]
-            yf_names = [s[:-4] + "-USD" if s.endswith("USDT") else s for s in orig_names]
-            name_map = dict(zip(yf_names, orig_names))
-            raw = yf.download(yf_names, period="6mo", auto_adjust=True, progress=False)
-            if raw.empty:
-                return
-            close = (
-                raw[["Close"]].rename(columns={"Close": orig_names[0]})
-                if len(yf_names) == 1
-                else raw["Close"].rename(columns=name_map)
-            )
-            returns = close.pct_change().dropna()
-            if returns.empty or len(returns) < 10:
-                return
-            btc_col = next((c for c in returns.columns if "BTC" in c.upper()), None)
-            market_ret = returns[btc_col] if btc_col else returns.mean(axis=1)
-            market_var = market_ret.var()
-            if market_var == 0:
-                return
-            beta_map = {col: returns[col].cov(market_ret) / market_var for col in returns.columns}
-            total_val = sum(float(p.get("mktvalue", 0)) for p in positions)
-            if total_val <= 0:
-                return
-            beta_port = sum(
-                (float(p.get("mktvalue", 0)) / total_val) * beta_map.get(p["ticket"], 1.5) for p in positions
-            )
-            DataHub.manager_GyP["Crypto"]["BetaPortfolio"] = round(max(beta_port, 0.1), 3)
-            self.logger.warning(
-                f"CryptoBeta: β={DataHub.manager_GyP['Crypto']['BetaPortfolio']:.3f}  ({len(positions)} posiciones)"
-            )
-        except Exception as e:
-            self.logger.error(f"Agente_CryptoBeta(): {e}")
-
-    # agente extractos bancarios — escanea tmp/extractos/ y carga PDFs nuevos cada hora
-    @wait_rate(3600, persist=True)
-    def Agente_ExtractosWatcher(self):
-        try:
-            result = scan_extractos()
-            self.logger.warning(f"Agente_ExtractosWatcher: {result}")
-        except Exception as e:
-            self.logger.error(f"Agente_ExtractosWatcher(): {e}")
-
-    # agente splits — detecta y aplica splits de yfinance a booktrading diariamente
-    @wait_rate(86400, persist=True)
-    def Agente_SplitsControl(self):
-        try:
-            result = self.RepositorioOportunidades.sync_splits(account=self.account)
-            self.logger.warning(
-                f"Agente_SplitsControl: nuevos={result['nuevos']} aplicados={result['aplicados']} residuos={result['residuos']}"
-            )
-        except Exception as e:
-            self.logger.error(f"Agente_SplitsControl(): {e}")
-
-    # agente validador de performa — detecta precios yfinance corruptos y purga para regeneración
-    @wait_rate(3600, persist=True)
-    def Agente_PerformaValidator(self):
-        try:
-            st = CacheHut.stats()
-            self.logger.warning(
-                f"Agente_PerformaValidator: cache size={st['size']}/{st['maxsize']} "
-                f"hits={st['hits']} misses={st['misses']} bypass={st['bypass']}"
-            )
-            result = self.Performa.validate_performa(account=self.account, vehiculo=self.vehiculo)
-            if result["purgados"]:
-                for a in result["anomalias"]:
-                    sym, fecha, ratio = a["symbol"], a["fecha"], a["ratio"]
-                    if a.get("quarantined"):
-                        self.logger.critical(
-                            f"Agente_PerformaValidator: {sym} CUARENTENA — purgado 3+ veces en 6h, "
-                            f"datos yfinance persistentemente malos (ratio={ratio:.2f}x). "
-                            f"Saltea regeneración hasta que yfinance se corrija."
-                        )
-                    else:
-                        self.logger.warning(
-                            f"Agente_PerformaValidator: {sym} {fecha} ratio={ratio:.2f}x purgado — bypass cache"
-                        )
-                        CacheHut.add_bypass(sym)
-        except Exception as e:
-            self.logger.error(f"Agente_PerformaValidator(): {e}")
 
     # agente defensivo: protege ganancias con órdenes STOP dinámicas
     async def Agente_ManagerPreservation(self):
@@ -2026,43 +1513,15 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         def agentesIA():
             try:
                 _log_schedule_status()
+                agent_mgr = AgentManager(self.account, self.vehiculo)
                 while True:
-                    # Agente for Sell
                     self.exec_modulo_async(self.Agente_ManagerSell())
-
-                    # Agente for Buy
                     self.exec_modulo_async(self.Agente_ManagerBuy())
-
-                    # Agente for Top 10 (monitorea cambios en ranking)
                     self.exec_modulo_async(self.Agente_ManagerTop10())
-
-                    # Agente for Donloads filings
-                    self.Agente_downloads_filings_EDGAR()
-
-                    # Agente LTV Control — monitorea ratio deuda/colateral Binance (DRY RUN)
-                    self.Agente_LtvControl()
-
-                    # Agente Beta Portfolio Stock — actualiza BetaPortfolio cada hora
-                    self.Agente_StockBeta()
-
-                    # Agente Extractos Watcher — escanea tmp/extractos/ y carga PDFs bancarios
-                    self.Agente_ExtractosWatcher()
-
-                    # Agente Beta Portfolio Crypto — descarga yfinance y calcula beta vs BTC cada 6h
-                    self.Agente_CryptoBeta()
-
-                    # Agente Splits — detecta y aplica splits a booktrading diariamente
-                    self.Agente_SplitsControl()
-
-                    # Agente PerformaValidator — detecta precios yfinance corruptos y purga para regeneración
-                    self.Agente_PerformaValidator()
-
-                    # Agente for Preservation (defensivo estructural) — dry-run activo, solo PLUG
+                    agent_mgr.run_loop()
                     self.exec_modulo_async(self.Agente_ManagerPreservation())
-
                     time.sleep(15)
                     self.counter += 1
-
                     DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=self.counter)
             except Exception as e:
                 print(f"agentesIA(): {e}")
@@ -2074,51 +1533,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 name=task_name,
                 target=agentesIA,
             )
-
-            DataHub.manager_events.register_thread(
-                name="Agente_MarketScreener", target=self.Agente_MarketScreener, loop_sleep=300
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_InstitucionalScore", target=self.Agente_InstitucionalScore, loop_sleep=300
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_ConsensoCache", target=self.Agente_ConsensoCache, loop_sleep=300
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_EdgarFunds", target=self.Agente_EdgarFunds, loop_sleep=300
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_FundFilings", target=self.Agente_FundFilings, loop_sleep=300
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_13FHoldings",
-                target=self.Agente_13FHoldings,
-                loop_sleep=300,
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_13FScores", target=self.Agente_13FScores, loop_sleep=300
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_Sentimiento", target=self.Agente_Sentimiento, loop_sleep=300
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_InterpreteSentimiento", target=self.Agente_InterpreteSentimiento, loop_sleep=300
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_AuditPortfolio",
-                target=self.Agente_AuditPortfolio,
-                loop_sleep=300,
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_ClasificadorETF",
-                target=self.Agente_ClasificadorETF,
-                loop_sleep=300,
-            )
-            DataHub.manager_events.register_thread(
-                name="Agente_ApiCostTracker",
-                target=self.Agente_ApiCostTracker,
-                loop_sleep=300,
-            )
+            agent_mgr = AgentManager(self.account, self.vehiculo)
+            agent_mgr.register_threads()
         except Exception as error:
             print(f"agentesIA(): {error}")
 

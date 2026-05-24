@@ -7,6 +7,9 @@ from Modulos_python import (
     os,
     sys,
     json,
+    time,
+    logging,
+    wraps,
     E,
     W,
     N,
@@ -69,6 +72,40 @@ AGENTES_SCHEDULE = {
         "active": True,
     },
 }
+
+
+def wait_rate(intervalo_segundos: int, persist: bool = False):
+    """Decorador: restringe la ejecución a una vez por intervalo. persist=True sobrevive reinicios."""
+    _FILE = "agents_schedule.json"
+
+    def decorator(func):
+        func.last_run = 0
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            ahora = time.time()
+            if func.last_run == 0 and persist:
+                func.last_run = read_json_tmp(_FILE).get(func.__name__, 0)
+            transcurrido = ahora - func.last_run
+            if transcurrido < intervalo_segundos:
+                logging.getLogger("ClassAgenteIA").debug(
+                    f"wait_rate: '{func.__name__}' bloqueado — faltan {int(intervalo_segundos - transcurrido)}s"
+                )
+                wrapper._overdue = False
+                return None
+            wrapper._overdue = transcurrido > intervalo_segundos * 1.5
+            resultado = func(*args, **kwargs)
+            func.last_run = ahora
+            if persist:
+                data = read_json_tmp(_FILE)
+                data[func.__name__] = ahora
+                write_json_tmp(_FILE, data)
+            wrapper._overdue = False
+            return resultado
+
+        return wrapper
+
+    return decorator
 
 
 def format_financiero(width=0, importe=0, divisa="USD"):
