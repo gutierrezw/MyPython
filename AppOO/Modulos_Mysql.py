@@ -2613,8 +2613,9 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 canales_str = ",".join(sorted(canales_set))
                 cursor.execute(
                     "UPDATE youtube_candidatos SET apariciones=%s, confidence=GREATEST(confidence,%s), "
-                    "market_cap=%s, canales=%s, ultima_vez=%s WHERE symbol=%s AND status='pending'",
-                    (apariciones, confidence, market_cap, canales_str, hoy, symbol),
+                    "market_cap=%s, canales=%s, ultima_vez=%s, "
+                    "company_name=COALESCE(company_name, %s) WHERE symbol=%s AND status='pending'",
+                    (apariciones, confidence, market_cap, canales_str, hoy, company_name or None, symbol),
                 )
             else:
                 cursor.execute(
@@ -2637,7 +2638,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT c.symbol, c.company_name, c.apariciones, c.confidence, c.market_cap, c.canales, "
+                "SELECT c.symbol, COALESCE(c.company_name, m.shortName) AS company_name, "
+                "c.apariciones, c.confidence, c.market_cap, c.canales, "
                 "c.primera_vez, c.ultima_vez, c.status, "
                 "CASE WHEN m.symbol IS NOT NULL THEN 1 ELSE 0 END AS en_market, "
                 "COALESCE(m.encartera, 'N') AS en_cartera, "
