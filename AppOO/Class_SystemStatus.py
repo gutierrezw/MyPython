@@ -628,419 +628,337 @@ class system_status(tk.Frame):
 
     # detalla uso de cache
     def monitor_cache(self):
-        """
-        Visualiza CacheHut.cache con patrón lista-detalle mejorado.
-        - LISTA (izquierda): Claves del cache con información resumida
-        - DETALLE (derecha): Información completa del item en cache
-        - Evento: Doble click para ver detalle completo
+        """Cache viewer: árbol por vehiculo + info + tabla OHLCV colapsable."""
 
-        Características:
-            ✅ Ver claves actuales del cache
-            ✅ Información de tipo, tamaño y timestamp
-            ✅ Refrescar contenido automático
-            ✅ Eliminar entradas manualmente
-            ✅ Ver detalles completos de DataFrames y otros objetos
-        """
+        _key_map = {}  # iid → cache key tuple
+        _last_key = [None]  # última key mostrada — se preserva en refresh
 
-        #   FUNCIONALIDAD PRINCIPAL
-        def get_cache_preview(key, value):
-            """Genera un preview descriptivo del contenido del cache."""
-            tipo = type(value).__name__
-            preview = ""
+        _VEHICULO_NORM = {"Stock": "Stock", "hist": "Stock", "Crypto": "Crypto"}
 
+        def _parse_key(key):
+            kv = dict(key[2]) if len(key) > 2 and key[2] else {}
+            raw = kv.get("vehiculo", "?")
+            return {
+                "ticker": kv.get("ticket", "?").upper(),
+                "vehiculo": _VEHICULO_NORM.get(raw, "Referencia"),
+                "vehiculo_raw": raw,
+                "period": kv.get("period", "—"),
+                "interval": kv.get("interval", "—"),
+            }
+
+        def _ttl_str(key):
             try:
-                if isinstance(value, pd.DataFrame):
-                    # DataFrame: mostrar filas y columnas clave
-                    rows = len(value)
-                    cols = len(value.columns)
-                    preview = f"{rows:,} filas, {cols} cols"
-
-                    # Si tiene columna Symbol, mostrar algunos símbolos
-                    if "Symbol" in value.columns:
-                        symbols = value["Symbol"].dropna().unique()[:3]
-                        if len(symbols) > 0:
-                            sym_str = ", ".join(str(s) for s in symbols)
-                            if len(value["Symbol"].dropna().unique()) > 3:
-                                sym_str += f"... +{len(value['Symbol'].dropna().unique())-3}"
-                            preview = f"{sym_str} | {preview}"
-                    elif "symbol" in value.columns:
-                        symbols = value["symbol"].dropna().unique()[:3]
-                        if len(symbols) > 0:
-                            sym_str = ", ".join(str(s) for s in symbols)
-                            if len(value["symbol"].dropna().unique()) > 3:
-                                sym_str += f"... +{len(value['symbol'].dropna().unique())-3}"
-                            preview = f"{sym_str} | {preview}"
-                    # Si la key parece un símbolo
-                    elif key.isupper() or key.endswith("_pd"):
-                        preview = f"🔹 {preview}"
-
-                elif isinstance(value, dict):
-                    # Diccionario: mostrar algunas claves
-                    keys_list = list(value.keys())[:3]
-                    preview = f"{len(value)} claves: {', '.join(str(k) for k in keys_list)}"
-                    if len(value) > 3:
-                        preview += "..."
-
-                elif isinstance(value, (list, tuple)):
-                    # Lista/Tupla: mostrar cantidad y primeros elementos
-                    preview = f"{len(value)} items"
-                    if len(value) > 0 and len(value) <= 5:
-                        items_str = ", ".join(str(i)[:15] for i in value[:3])
-                        preview = f"{items_str}"
-                        if len(value) > 3:
-                            preview += "..."
-                else:
-                    # Otros tipos: mostrar valor truncado
-                    val_str = str(value)[:50]
-                    preview = val_str + "..." if len(str(value)) > 50 else val_str
-
+                timer = CacheHut.cache.timer()
+                for attr in ("_TTLCache__expires", "_expires"):
+                    d = getattr(CacheHut.cache, attr, None)
+                    if d is not None:
+                        expires = d.get(key, 0)
+                        remaining = max(0.0, expires - timer)
+                        m, s = divmod(int(remaining), 60)
+                        return f"{m}m{s:02d}s"
+                return "—"
             except Exception:
-                preview = tipo
+                return "—"
 
-            return preview
-
-        def refresh_cache_list():
-            """Recarga la lista de claves desde el cache."""
+        def _size_str(obj):
             try:
-                # Limpiar lista
-                for item in lista.get_children():
-                    lista.delete(item)
+                b = sys.getsizeof(obj)
+                return f"{b/1024:.0f}KB" if b < 1024 * 1024 else f"{b/(1024*1024):.1f}MB"
+            except Exception:
+                return "?"
 
-                # Contador de elementos
-                total_items = 0
-                first_item_id = None
+        def refresh_lista():
+            _key_map.clear()
+            for item in lista.get_children():
+                lista.delete(item)
 
-                # Insertar items del cache
-                for k, v in CacheHut.cache.items():
-                    tipo = type(v).__name__
+            groups = {}
+            for k in CacheHut.keys():
+                p = _parse_key(k)
+                groups.setdefault(p["vehiculo"], []).append((k, p))
 
-                    # Calcular tamaño aproximado
-                    try:
-                        size_bytes = sys.getsizeof(v)
-                        if size_bytes < 1024:
-                            size_str = f"{size_bytes}B"
-                        elif size_bytes < 1024 * 1024:
-                            size_str = f"{size_bytes/1024:.1f}KB"
-                        else:
-                            size_str = f"{size_bytes/(1024*1024):.1f}MB"
-                    except:
-                        size_str = "N/A"
-
-                    # Insertar en lista con icono según tipo
-                    if tipo == "DataFrame":
-                        icon = "📊"
-                    elif tipo in ["dict", "DotMap"]:
-                        icon = "📂"
-                    elif tipo in ["list", "tuple"]:
-                        icon = "📋"
-                    else:
-                        icon = "📦"
-
-                    # Obtener preview descriptivo del contenido
-                    preview = get_cache_preview(k, v)
-
-                    item_id = lista.insert(
-                        "",
-                        tk.END,
-                        text=f"{icon} {k}",
-                        values=(tipo, size_str, preview),
+            first_leaf = None
+            for vehiculo in sorted(groups.keys()):
+                items = groups[vehiculo]
+                icono = "📈" if vehiculo == "Stock" else "🪙" if vehiculo == "Crypto" else "📦"
+                parent = lista.insert(
+                    "",
+                    "end",
+                    text=f"{icono} {vehiculo}  ({len(items)})",
+                    open=False,
+                    tags=("grupo",),
+                )
+                for k, p in sorted(items, key=lambda x: x[1]["ticker"]):
+                    iid = lista.insert(
+                        parent,
+                        "end",
+                        text=p["ticker"],
+                        values=(p["period"], p["interval"], _ttl_str(k)),
                         tags=("item",),
                     )
+                    _key_map[iid] = k
+                    if first_leaf is None:
+                        first_leaf = iid
 
-                    # Guardar primer item para auto-selección
-                    if first_item_id is None:
-                        first_item_id = item_id
-                    total_items += 1
+            st = CacheHut.stats()
+            uso_pct = int(st["size"] / st["maxsize"] * 100) if st["maxsize"] else 0
+            lbl_stats.config(
+                text=(
+                    f"  Entradas: {st['size']}/{st['maxsize']} ({uso_pct}%)  │"
+                    f"  Hits: {st['hits']}  │  Misses: {st['misses']}  │"
+                    f"  TTL: {st['ttl_seg']//60} min  │  Bypass: {len(st['bypass'])}"
+                )
+            )
+            lista.heading("#0", text=f"Cache  ({st['size']} items)")
 
-                # Actualizar header con contador
-                lista.heading("#0", text=f"Cache Keys ({total_items} items)")
-
-                # Si no hay items
-                if total_items == 0:
-                    lista.insert("", "end", text="(Vacío - sin datos en cache)", tags=("empty",))
-                    # Limpiar y mostrar mensaje en detalle
-                    for item in detalle.get_children():
-                        detalle.delete(item)
-                    detalle.insert("", "end", text="📭 Cache vacío", tags=("info",))
-                    detalle.insert("", "end", text="No hay datos almacenados en cache", tags=("summary",))
-                elif first_item_id:
-                    # Auto-seleccionar y mostrar primer item
-                    lista.selection_set(first_item_id)
-                    lista.focus(first_item_id)
-                    item_text = lista.item(first_item_id, "text")
-                    key = item_text.split(" ", 1)[1] if " " in item_text else item_text
-                    display_cache_detail(key)
-
-            except Exception as e:
-                print(f"[refresh_cache_list()]: {e}")
-
-        def display_cache_detail(key):
-            """Muestra detalle completo del item seleccionado en cache"""
-            try:
-                # Limpiar detalle
+            if not groups:
+                lista.insert("", "end", text="(vacío — cache expirado)", tags=("empty",))
                 for item in detalle.get_children():
                     detalle.delete(item)
-
-                # Obtener datos del cache
-                data = CacheHut.cache.get(key)
-
-                if data is None:
-                    detalle.insert(
-                        "",
-                        "end",
-                        text=f"⚠️ {key}: No disponible o expirado",
-                        tags=("warning",),
-                    )
-                    return
-
-                # Header con el nombre de la clave
-                detalle.insert("", "end", text=f"🔑 Key: {key}", tags=("header",))
-                detalle.insert("", "end", text="", tags=("spacer",))
-
-                # Información del tipo de objeto
-                tipo_data = type(data).__name__
-                detalle.insert("", "end", text=f"📦 Tipo: {tipo_data}", tags=("info",))
-
-                # Tamaño del objeto
-                try:
-                    size_bytes = sys.getsizeof(data)
-                    if size_bytes < 1024:
-                        size_str = f"{size_bytes} bytes"
-                    elif size_bytes < 1024 * 1024:
-                        size_str = f"{size_bytes/1024:.2f} KB"
-                    else:
-                        size_str = f"{size_bytes/(1024*1024):.2f} MB"
-                    detalle.insert("", "end", text=f"💾 Tamaño: {size_str}", tags=("info",))
-                except:
-                    pass
-
-                # Timestamp
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                detalle.insert("", "end", text=f"⏰ Consultado: {timestamp}", tags=("info",))
-                detalle.insert("", "end", text="", tags=("spacer",))
-
-                # Mostrar contenido según el tipo
-                if isinstance(data, pd.DataFrame):
-                    # DataFrame
-                    detalle.insert("", "end", text="📊 DataFrame - Resumen", tags=("section",))
-                    detalle.insert("", "end", text=f"  Filas: {data.shape[0]:,}", tags=("summary",))
-                    detalle.insert(
-                        "",
-                        "end",
-                        text=f"  Columnas: {data.shape[1]}",
-                        tags=("summary",),
-                    )
-                    detalle.insert(
-                        "",
-                        "end",
-                        text=f"  Nombres: {list(data.columns)[:8]}",
-                        tags=("summary",),
-                    )
-                    if len(data.columns) > 8:
-                        detalle.insert(
-                            "",
-                            "end",
-                            text=f"  ... y {len(data.columns) - 8} más",
-                            tags=("summary",),
-                        )
-
-                    # Mostrar primeras filas
-                    detalle.insert("", "end", text="", tags=("spacer",))
-                    node = detalle.insert(
-                        "",
-                        "end",
-                        text="📋 Primeras 5 filas (haz doble click para ver completo)",
-                        tags=("section",),
-                    )
-                    df_string = data.head(5).to_string()
-                    for line in df_string.split("\n")[:15]:  # Limitar líneas
-                        detalle.insert(node, "end", text=line, tags=("data",))
-
-                elif isinstance(data, dict):
-                    # Diccionario
-                    detalle.insert("", "end", text="📂 Diccionario - Contenido", tags=("section",))
-                    detalle.insert(
-                        "",
-                        "end",
-                        text=f"  Total de claves: {len(data)}",
-                        tags=("summary",),
-                    )
-                    detalle.insert("", "end", text="", tags=("spacer",))
-
-                    node = detalle.insert("", "end", text="🔹 Estructura", tags=("section",))
-                    for idx, (k, v) in enumerate(data.items()):
-                        if idx >= 20:  # Limitar a 20 items
-                            detalle.insert(
-                                node,
-                                "end",
-                                text=f"  ... y {len(data) - 20} más",
-                                tags=("value",),
-                            )
-                            break
-                        v_str = str(v)[:100] + "..." if len(str(v)) > 100 else str(v)
-                        detalle.insert(node, "end", text=f"  {k}: {v_str}", tags=("value",))
-
-                elif isinstance(data, (list, tuple)):
-                    # Lista o tupla
-                    detalle.insert("", "end", text=f"📋 {tipo_data} - Contenido", tags=("section",))
-                    detalle.insert(
-                        "",
-                        "end",
-                        text=f"  Total de elementos: {len(data)}",
-                        tags=("summary",),
-                    )
-                    detalle.insert("", "end", text="", tags=("spacer",))
-
-                    node = detalle.insert("", "end", text="🔹 Elementos", tags=("section",))
-                    for idx, item in enumerate(data):
-                        if idx >= 20:  # Limitar a 20 items
-                            detalle.insert(
-                                node,
-                                "end",
-                                text=f"  ... y {len(data) - 20} más",
-                                tags=("value",),
-                            )
-                            break
-                        item_str = str(item)[:100] + "..." if len(str(item)) > 100 else str(item)
-                        detalle.insert(node, "end", text=f"  [{idx}]: {item_str}", tags=("value",))
-
-                else:
-                    # Otros tipos
-                    detalle.insert("", "end", text="📦 Valor", tags=("section",))
-                    value_str = str(data)[:500] + "..." if len(str(data)) > 500 else str(data)
-                    detalle.insert("", "end", text=value_str, tags=("value",))
-
-            except Exception as e:
-                detalle.insert("", "end", text=f"❌ Error al mostrar detalle: {e}", tags=("error",))
-                print(f"[display_cache_detail({key})]: {e}")
-
-        def remove_selected_key():
-            """Elimina la clave seleccionada del cache."""
-            selected = lista.selection()
-            if not selected:
-                self.messagebox.showinfo("Información", "Seleccione una clave para eliminar.")
-                return
-
-            # Extraer key del texto (remover icono)
-            item_text = lista.item(selected[0], "text")
-            key = item_text.split(" ", 1)[1] if " " in item_text else item_text
-
-            if key in CacheHut.cache:
-                del CacheHut.cache[key]
-                self.messagebox.showinfo("Cache", f"✅ Clave '{key}' eliminada del cache.")
-                refresh_cache_list()
-                # Limpiar detalle
-                for item in detalle.get_children():
-                    detalle.delete(item)
+                for item in df_tabla.get_children():
+                    df_tabla.delete(item)
+                df_tabla.config(columns=())
                 detalle.insert(
                     "",
                     "end",
-                    text="👈 Selecciona un item de la izquierda",
-                    tags=("info",),
+                    text="  Cache vacío — las entradas expiraron (TTL 30 min). Se pobla al abrir un símbolo.",
+                    tags=("warning",),
                 )
-            else:
-                self.messagebox.showwarning("Cache", f"⚠️ Clave '{key}' no encontrada o ya expirada.")
+            elif first_leaf:
+                # restaurar última selección o usar primer elemento
+                restore_iid = next(
+                    (iid for iid, k in _key_map.items() if k == _last_key[0]),
+                    first_leaf,
+                )
+                lista.selection_set(restore_iid)
+                lista.focus(restore_iid)
+                show_detail(_key_map[restore_iid])
 
-        #   EVENTOS DE INTERFAZ
-        def on_double_click(event):
-            """Maneja doble clic sobre una clave: muestra detalle completo."""
-            selected = lista.selection()
-            if not selected:
+        def _build_df_table(df):
+            for col in df_tabla["columns"]:
+                pass
+            for item in df_tabla.get_children():
+                df_tabla.delete(item)
+
+            ohlcv = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]
+            extra = [c for c in df.columns if c not in ohlcv][:2]
+            show_cols = ohlcv + extra
+            df_tabla.config(columns=show_cols)
+            df_tabla.heading("#0", text="Fecha")
+            df_tabla.column("#0", width=95, anchor="w")
+            for col in show_cols:
+                df_tabla.heading(col, text=col)
+                w = 85 if col == "Volume" else 72
+                df_tabla.column(col, width=w, anchor="e")
+
+            for i, (idx, row) in enumerate(df.tail(15).iterrows()):
+                date_str = str(idx)[:10]
+                vals = []
+                for col in show_cols:
+                    v = row.get(col, "")
+                    if isinstance(v, float):
+                        vals.append(f"{v:,.2f}" if col != "Volume" else f"{v:,.0f}")
+                    else:
+                        vals.append(str(v)[:14])
+                tag = "row_alt" if i % 2 else "row"
+                df_tabla.insert("", "end", text=date_str, values=vals, tags=(tag,))
+
+        def show_detail(key):
+            _last_key[0] = key
+            for item in detalle.get_children():
+                detalle.delete(item)
+            for item in df_tabla.get_children():
+                df_tabla.delete(item)
+            df_tabla.config(columns=())
+
+            data = CacheHut.cache.get(key)
+            if data is None:
+                detalle.insert("", "end", text=f"⚠️  No disponible o expirado", tags=("warning",))
                 return
 
-            # Extraer key del texto (remover icono)
-            item_text = lista.item(selected[0], "text")
-            if item_text.startswith("("):  # Es el mensaje de vacío
+            p = _parse_key(key)
+            ttl = _ttl_str(key)
+
+            detalle.insert(
+                "",
+                "end",
+                text=f"  {p['ticker']}   —   {p['vehiculo_raw']}   |   {p['period']} / {p['interval']}   |   TTL: {ttl}",
+                tags=("header",),
+            )
+
+            activo, df = data if isinstance(data, tuple) and len(data) == 2 else ({}, data)
+
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                sz = _size_str(df)
+                detalle.insert(
+                    "", "end", text=f"  Filas: {len(df):,}   Cols: {len(df.columns)}   Tamaño: {sz}", tags=("info",)
+                )
+
+            if isinstance(activo, dict) and activo:
+                campos = [
+                    "shortName",
+                    "sector",
+                    "industry",
+                    "marketCap",
+                    "currency",
+                    "dividendYield",
+                    "trailingPE",
+                    "fiftyTwoWeekHigh",
+                    "fiftyTwoWeekLow",
+                ]
+                node = detalle.insert(
+                    "", "end", text="📋  Info del activo  (▶ expandir)", tags=("section",), open=False
+                )
+                for campo in campos:
+                    v = activo.get(campo)
+                    if v is None:
+                        continue
+                    if isinstance(v, float):
+                        v = f"{v:,.4f}"
+                    detalle.insert(node, "end", text=f"   {campo}: {v}", tags=("value",))
+
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                _build_df_table(df)
+                lbl_toggle.config(text="▼  Últimas 15 filas  —  clic para colapsar")
+                if not _expanded[0]:
+                    frame_df.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+                    _expanded[0] = True
+
+        def remove_selected_key():
+            sel = lista.selection()
+            if not sel:
+                self.messagebox.showinfo("Información", "Seleccione un ticker para eliminar.")
                 return
+            iid = sel[0]
+            key = _key_map.get(iid)
+            if key is None:
+                return
+            p = _parse_key(key)
+            if key in CacheHut.cache:
+                del CacheHut.cache[key]
+                self.messagebox.showinfo("Cache", f"✅ {p['ticker']} eliminado del cache.")
+                refresh_lista()
+                for item in detalle.get_children():
+                    detalle.delete(item)
 
-            key = item_text.split(" ", 1)[1] if " " in item_text else item_text
-            display_cache_detail(key)
-
-        def on_item_selected(event):
-            """Maneja selección simple en la lista"""
-            selected = lista.selection()
-            if selected:
-                item_text = lista.item(selected[0], "text")
-                if not item_text.startswith("("):  # No es mensaje de vacío
-                    key = item_text.split(" ", 1)[1] if " " in item_text else item_text
-                    display_cache_detail(key)
+        def on_select(event):
+            sel = lista.selection()
+            if not sel:
+                return
+            iid = sel[0]
+            key = _key_map.get(iid)
+            if key is None:
+                return
+            show_detail(key)
 
         def auto_refresh():
-            """Auto-actualiza la lista cada 30 segundos"""
-            # Verificar si debemos continuar ejecutando
             if not self.is_running:
                 return
-
-            refresh_cache_list()
-            # Registrar el after_id para poder cancelarlo luego
+            refresh_lista()
             after_id = self.system.after(30000, auto_refresh)
             self.after_ids.append(after_id)
 
+        _expanded = [True]
+
+        def toggle_table(event=None):
+            if _expanded[0]:
+                frame_df.pack_forget()
+                lbl_toggle.config(text="▶  Últimas 15 filas  —  clic para expandir")
+                _expanded[0] = False
+            else:
+                frame_df.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+                lbl_toggle.config(text="▼  Últimas 15 filas  —  clic para colapsar")
+                _expanded[0] = True
+
         try:
-            frame_top = ttk.Frame(self.cache, style="C.TFrame")
-            frame_top.pack(side=tk.TOP, fill=tk.X)
+            # — Stats bar —
+            frame_stats = ttk.Frame(self.cache, style="C.TFrame")
+            frame_stats.pack(side=tk.TOP, fill=tk.X)
+            lbl_stats = tk.Label(
+                frame_stats, text="", bg=self.bgcolor, fg="lightgreen", font=("Courier", 9), anchor="w"
+            )
+            lbl_stats.pack(fill=tk.X, padx=5, pady=(3, 0))
 
-            # Crear TreeViews para lista y detalle
-            lista = ttk.Treeview(frame_top, columns=("tipo", "tamaño", "preview"), height=14, style="TFrame")
-            detalle = ttk.Treeview(frame_top, height=16, style="TFrame")
+            # — Main area —
+            frame_main = ttk.Frame(self.cache, style="C.TFrame")
+            frame_main.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=3)
 
-            # Configurar headers y columnas de lista
-            lista.heading("#0", text="Cache Keys")
-            lista.heading("tipo", text="Tipo")
-            lista.heading("tamaño", text="Tamaño")
-            lista.heading("preview", text="Contenido")
+            # Lista (izquierda) agrupada por vehiculo
+            lista = ttk.Treeview(frame_main, columns=("period", "interval", "ttl"), height=20, style="TFrame")
+            lista.heading("#0", text="Cache")
+            lista.heading("period", text="Period")
+            lista.heading("interval", text="Int")
+            lista.heading("ttl", text="TTL")
+            lista.column("#0", width=130, minwidth=100)
+            lista.column("period", width=45, minwidth=40, anchor="center")
+            lista.column("interval", width=38, minwidth=35, anchor="center")
+            lista.column("ttl", width=65, minwidth=55, anchor="center")
+            vsb_lista = ttk.Scrollbar(frame_main, orient=tk.VERTICAL, command=lista.yview)
+            lista.configure(yscroll=vsb_lista.set)
+            lista.pack(side=tk.LEFT, fill=tk.Y)
+            vsb_lista.pack(side=tk.LEFT, fill=tk.Y)
 
-            lista.column("#0", width=180, minwidth=120)
-            lista.column("tipo", width=80, minwidth=60)
-            lista.column("tamaño", width=60, minwidth=50)
-            lista.column("preview", width=220, minwidth=150)
-
-            # Configurar header de detalle
-            detalle.heading("#0", text="Información Detallada")
-
-            # Pack widgets
-            lista.pack(side=tk.LEFT, fill=tk.BOTH, pady=5, padx=(5, 2))
-            detalle.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=5, padx=(2, 5))
-
-            # Configurar colores y estilos (consistente con otros módulos)
-            detalle.tag_configure("header", foreground=self.bgcolor, font=("TkDefaultFont", 10, "bold"))
-            detalle.tag_configure("section", foreground="yellow", font=("TkDefaultFont", 9, "bold"))
-            detalle.tag_configure("info", foreground="lightgreen")
-            detalle.tag_configure("summary", foreground="orange")
-            detalle.tag_configure("value", foreground=self.fgcolor)
-            detalle.tag_configure("data", foreground="lightgray", font=("Courier", 8))
-            detalle.tag_configure("error", foreground="red")
-            detalle.tag_configure("warning", foreground="orange")
-
+            lista.tag_configure("grupo", foreground="cyan", font=("TkDefaultFont", 9, "bold"))
             lista.tag_configure("item", foreground="lightgreen")
             lista.tag_configure("empty", foreground="gray")
 
-            # --- Scrollbars ---
-            hsb = ttk.Scrollbar(detalle, orient=tk.HORIZONTAL, command=detalle.xview)
-            detalle.configure(xscroll=hsb.set)
-            hsb.pack(side=tk.BOTTOM, fill=tk.X)
+            # Panel derecho
+            frame_right = ttk.Frame(frame_main, style="C.TFrame")
+            frame_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0))
 
-            # --- Botonera ---
+            # Info panel (arriba)
+            detalle = ttk.Treeview(frame_right, height=5, style="TFrame")
+            detalle.heading("#0", text="Información")
+            detalle.column("#0", width=600)
+            detalle.pack(side=tk.TOP, fill=tk.X)
+            detalle.tag_configure("header", foreground="cyan", font=("TkDefaultFont", 10, "bold"))
+            detalle.tag_configure("section", foreground="yellow")
+            detalle.tag_configure("info", foreground="lightgreen")
+            detalle.tag_configure("value", foreground="lightgray")
+            detalle.tag_configure("warning", foreground="orange")
+
+            # Toggle bar
+            frame_toggle = tk.Frame(frame_right, bg="#007080", cursor="hand2")
+            frame_toggle.pack(side=tk.TOP, fill=tk.X, pady=(4, 0))
+            lbl_toggle = tk.Label(
+                frame_toggle,
+                text="▼  Últimas 15 filas  —  clic para colapsar",
+                bg="#007080",
+                fg="white",
+                anchor="w",
+                padx=8,
+                font=("TkDefaultFont", 9, "bold"),
+                cursor="hand2",
+            )
+            lbl_toggle.pack(fill=tk.X)
+            frame_toggle.bind("<Button-1>", toggle_table)
+            lbl_toggle.bind("<Button-1>", toggle_table)
+
+            # DataFrame table (abajo, colapsable)
+            frame_df = tk.Frame(frame_right, bg="black")
+            frame_df.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+            df_tabla = ttk.Treeview(frame_df, height=12, style="TFrame")
+            df_tabla.heading("#0", text="Fecha")
+            vsb_df = ttk.Scrollbar(frame_df, orient=tk.VERTICAL, command=df_tabla.yview)
+            df_tabla.configure(yscroll=vsb_df.set)
+            df_tabla.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            vsb_df.pack(side=tk.RIGHT, fill=tk.Y)
+            df_tabla.tag_configure("row", foreground="lightgray")
+            df_tabla.tag_configure("row_alt", foreground="white")
+
+            # — Botones —
             frame_btn = ttk.Frame(self.cache, style="C.TFrame")
             frame_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=(0, 5), padx=5)
-
-            ttk.Button(frame_btn, text="Refrescar", width=10, command=refresh_cache_list).pack(side=tk.LEFT, padx=5)
+            ttk.Button(frame_btn, text="Refrescar", width=10, command=refresh_lista).pack(side=tk.LEFT, padx=5)
             ttk.Button(frame_btn, text="Eliminar", width=10, command=remove_selected_key).pack(side=tk.LEFT, padx=5)
-            ttk.Button(
-                frame_btn,
-                text="Modelo",
-                width=10,
-                command=lambda: self._documentar_estructura("Cache"),
-            ).pack(side=tk.LEFT, padx=5)
+            ttk.Button(frame_btn, text="Modelo", width=10, command=lambda: self._documentar_estructura("Cache")).pack(
+                side=tk.LEFT, padx=5
+            )
 
-            # --- Bind eventos ---
-            lista.bind("<Double-Button-1>", on_double_click)
-            lista.bind("<<TreeviewSelect>>", on_item_selected)
+            lista.bind("<<TreeviewSelect>>", on_select)
 
-            # --- Carga inicial y auto-refresh ---
-            # El mensaje inicial se muestra solo si no hay datos
-            # refresh_cache_list() auto-selecciona el primer item si existe
-            refresh_cache_list()
+            refresh_lista()
             auto_refresh()
         except Exception as e:
             traceback.print_exc()

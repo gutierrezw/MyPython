@@ -393,6 +393,8 @@ class Debugging:
         self.logger["Sentimiento"].setLevel(logging.WARNING)
         self.logger.update({"ApiTracker": logging.getLogger("ApiTracker")})
         self.logger["ApiTracker"].setLevel(logging.WARNING)
+        self.logger.update({"YouTubeScanner": logging.getLogger("YouTubeScanner")})
+        self.logger["YouTubeScanner"].setLevel(logging.WARNING)
 
         # manager logging AgentManager domain loggers
         self.logger.update({"Agente.Stock": logging.getLogger("Agente.Stock")})

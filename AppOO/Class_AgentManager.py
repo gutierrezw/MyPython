@@ -18,6 +18,7 @@ from Class_Screener import sync_market, audit_portfolio, refresh_consenso_tags
 from Class_InstitucionalScore import sync_institutional, sync_edgar_funds, sync_13f_scores
 from edgar_13f import sync_fund_filings, sync_13f_holdings
 from ConvergIA.Scanner_Sentimiento import scan_sentimiento
+from ConvergIA.Scanner_YouTube import scan_youtube
 from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
 from valuation_edgar_downloader import BASE_DIR, download_filing
 from valuation_xbrl_api import get_zip_files
@@ -444,6 +445,19 @@ class AgentManager:
         except Exception as e:
             self._log_ia.error(f"Agente_ApiCostTracker(): {e}")
 
+    @wait_rate(86400, persist=True)
+    def Agente_YouTubeScanner(self):
+        try:
+            sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIS")
+            api_key = sesion["userapi"].decode("utf-8") if sesion else ""
+            result = scan_youtube(self.account, api_key)
+            self._log_ia.warning(
+                f"YouTubeScanner: videos={result['videos']} financieros={result['filtered']} "
+                f"detectados={result['detected']} nuevos={result['new_validated']}"
+            )
+        except Exception as e:
+            self._log_ia.error(f"Agente_YouTubeScanner(): {e}")
+
     # ── Agente.Infra ──────────────────────────────────────────────────────────
 
     @wait_rate(3600, persist=True)
@@ -481,6 +495,7 @@ class AgentManager:
             ("Agente_Sentimiento", self.Agente_Sentimiento, 300),
             ("Agente_InterpreteSentimiento", self.Agente_InterpreteSentimiento, 300),
             ("Agente_ApiCostTracker", self.Agente_ApiCostTracker, 300),
+            ("Agente_YouTubeScanner", self.Agente_YouTubeScanner, 300),
         ]
         for name, target, sleep in _threads:
             DataHub.procesos.append({"thread": {name: 1}})

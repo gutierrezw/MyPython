@@ -71,6 +71,11 @@ AGENTES_SCHEDULE = {
         "desc": "Costos API Anthropic del mes (1 hora)",
         "active": True,
     },
+    "Agente_YouTubeScanner": {
+        "intervalo": 86400,
+        "desc": "Candidatos de canales YouTube de inversión vía RSS + Claude (diario)",
+        "active": True,
+    },
 }
 
 
