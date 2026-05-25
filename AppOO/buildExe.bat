@@ -17,11 +17,11 @@ echo Creando estructura deploy si no existe...
 if not exist "%DEPLOY%" mkdir "%DEPLOY%"
 if not exist "%DEPLOY%\tmp" mkdir "%DEPLOY%\tmp"
 if not exist "%DEPLOY%\logs" mkdir "%DEPLOY%\logs"
+if not exist "%DEPLOY%\setup" mkdir "%DEPLOY%\setup"
 
 echo.
-echo Limpiando AppOO anterior...
+echo Limpiando build anterior...
 rmdir /s /q build 2>nul
-rmdir /s /q "%DEPLOY%\AppOO" 2>nul
 
 echo.
 echo Ejecutando PyInstaller...
@@ -69,15 +69,18 @@ echo Ejecutando PyInstaller...
     DashMain.py
 
 echo.
-echo Copiando profiles al deploy...
-xcopy /s /e /i /y profiles "%DEPLOY%\AppOO\profiles" >nul
+echo Copiando profiles...
+xcopy /s /e /i /y profiles "%DEPLOY%\profiles" >nul
+xcopy /s /e /i /y profiles "%DEPLOY%\setup\profiles" >nul
 
 echo.
 echo ======================================================
 echo == PROCESO TERMINADO                                 ==
-echo == Ejecutable: %DEPLOY%\AppOO\AppOO.exe
-echo == Para distribuir al hijo: AppTest\export_hijo.bat
+echo == Ejecutable : %DEPLOY%\AppOO.exe
+echo == Profiles   : %DEPLOY%\profiles\
+echo == Setup/inst.: %DEPLOY%\setup\profiles\
+echo == Para hijo  : AppTest\export_hijo.bat
 echo ======================================================
 
-cd /d "%DEPLOY%\AppOO"
+cd /d "%DEPLOY%"
 pause
