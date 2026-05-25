@@ -4,7 +4,7 @@ cd /d "%~dp0"
 set PYENV=C:\Users\InversionesWildaga\Documents\MyPython\.venv\Scripts
 set DEPLOY=C:\Users\InversionesWildaga\Documents\deploy
 
-:: ── Leer version.py ────────────────────────────────────────────────────────
+:: --- Leer version.py --------------------------------------------------
 set APP_VERSION=unknown
 set APP_DATE=unknown
 for /f "tokens=3 delims== " %%a in ('findstr /r "^VERSION" version.py 2^>nul') do set APP_VERSION=%%~a
@@ -12,7 +12,7 @@ for /f "tokens=3 delims== " %%a in ('findstr /r "^RELEASE_DATE" version.py 2^>nu
 set APP_VERSION=%APP_VERSION:"=%
 set APP_DATE=%APP_DATE:"=%
 
-:: ── Timestamp para log ─────────────────────────────────────────────────────
+:: --- Timestamp para log -----------------------------------------------
 for /f "tokens=*" %%a in ('powershell -nologo -command "Get-Date -Format yyyyMMdd_HHmm"') do set STAMP=%%a
 set LOGDIR=%~dp0build_logs
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
@@ -20,31 +20,30 @@ set LOGFILE=%LOGDIR%\build_%STAMP%.log
 
 echo ======================================================
 echo == AppOO v%APP_VERSION%  (%APP_DATE%)
-echo == Log : %LOGFILE%
+echo == Log: %LOGFILE%
 echo ======================================================
 echo.
 
-:: ── PRE-BUILD: AppOO.exe corriendo? ───────────────────────────────────────
+:: --- PRE-BUILD: AppOO.exe corriendo? ----------------------------------
 echo [1/5] Verificando procesos...
 tasklist /fi "imagename eq AppOO.exe" 2>nul | findstr /i "AppOO.exe" >nul
 if not errorlevel 1 (
     echo.
-    echo !! AppOO.exe esta corriendo. Cerralo y vuelve a ejecutar.
+    echo ERROR: AppOO.exe esta corriendo. Cerralo y vuelve a ejecutar.
     goto :error
 )
-echo       OK — AppOO.exe no esta en ejecucion.
+echo       OK - AppOO.exe no esta en ejecucion.
 
-:: ── PRE-BUILD: .venv existe? ──────────────────────────────────────────────
+:: --- PRE-BUILD: .venv existe? -----------------------------------------
 echo [2/5] Verificando entorno virtual...
 if not exist "%PYENV%\pyinstaller.exe" (
     echo.
-    echo !! PyInstaller no encontrado en: %PYENV%
-    echo    Activa el venv e instala PyInstaller.
+    echo ERROR: PyInstaller no encontrado en: %PYENV%
     goto :error
 )
-echo       OK — PyInstaller encontrado.
+echo       OK - PyInstaller encontrado.
 
-:: ── Estructura deploy ─────────────────────────────────────────────────────
+:: --- Estructura deploy ------------------------------------------------
 echo [3/5] Preparando directorios deploy...
 if not exist "%DEPLOY%" mkdir "%DEPLOY%"
 if not exist "%DEPLOY%\tmp" mkdir "%DEPLOY%\tmp"
@@ -53,25 +52,17 @@ if not exist "%DEPLOY%\setup" mkdir "%DEPLOY%\setup"
 rmdir /s /q build 2>nul
 echo       OK
 
-:: ── PYINSTALLER ───────────────────────────────────────────────────────────
-echo [4/5] Ejecutando PyInstaller...
+:: --- PYINSTALLER ------------------------------------------------------
+echo [4/5] Ejecutando PyInstaller (ver log para detalle)...
 echo.
 
 set ICON=C:\Users\InversionesWildaga\Documents\MyPython\Iconos\Systems\WGM_icon.ico
 set ICON_FLAG=
 if exist "%ICON%" set ICON_FLAG=--icon "%ICON%"
 
-(
-%PYENV%\pyinstaller ^
-    --noconfirm ^
-    --onefile ^
-    --windowed ^
-    %ICON_FLAG% ^
-    --paths "." ^
-    --paths "AppValuations" ^
-    --paths "ConvergIA" ^
-    --name "AppOO" ^
-    --distpath "%DEPLOY%" ^
+%PYENV%\pyinstaller --noconfirm --onefile --windowed %ICON_FLAG% ^
+    --paths "." --paths "AppValuations" --paths "ConvergIA" ^
+    --name "AppOO" --distpath "%DEPLOY%" ^
     --add-data "profiles;profiles" ^
     --hidden-import "pymysql" ^
     --hidden-import "schedule" ^
@@ -102,28 +93,27 @@ if exist "%ICON%" set ICON_FLAG=--icon "%ICON%"
     --hidden-import "anthropic" ^
     --collect-all "binance" ^
     --collect-all "tkinter" ^
-    DashMain.py
-) >> "%LOGFILE%" 2>&1
+    DashMain.py >> "%LOGFILE%" 2>&1
 
 if %ERRORLEVEL% neq 0 goto :error
 
-:: ── POST-BUILD: verificar exe ─────────────────────────────────────────────
+:: --- POST-BUILD: verificar exe ----------------------------------------
 echo [5/5] Verificando ejecutable generado...
 if not exist "%DEPLOY%\AppOO.exe" (
-    echo !! AppOO.exe no encontrado en %DEPLOY%
+    echo ERROR: AppOO.exe no encontrado en %DEPLOY%
     goto :error
 )
 for %%A in ("%DEPLOY%\AppOO.exe") do set EXE_SIZE=%%~zA
 set /a EXE_MB=%EXE_SIZE% / 1048576
-echo       OK — AppOO.exe  %EXE_MB% MB
+echo       OK - AppOO.exe  %EXE_MB% MB
 
-:: ── Copiar profiles ───────────────────────────────────────────────────────
+:: --- Copiar profiles --------------------------------------------------
 xcopy /s /e /i /y profiles "%DEPLOY%\profiles" >nul
 if %ERRORLEVEL% neq 0 goto :error
 xcopy /s /e /i /y profiles "%DEPLOY%\setup\profiles" >nul
 if %ERRORLEVEL% neq 0 goto :error
 
-:: ── RELEASE: git tag + push ───────────────────────────────────────────────
+:: --- RESULTADO --------------------------------------------------------
 echo.
 echo ======================================================
 echo == BUILD EXITOSO
@@ -132,11 +122,12 @@ echo == Version    : v%APP_VERSION%  (%APP_DATE%)
 echo == Log        : %LOGFILE%
 echo ======================================================
 echo.
-set /p DO_TAG="Crear git tag v%APP_VERSION% y push? (s/n): "
+
+set /p DO_TAG=Crear git tag v%APP_VERSION% y push? (s/n):
 if /i "%DO_TAG%"=="s" (
-    git tag -a "v%APP_VERSION%" -m "v%APP_VERSION% — %APP_DATE%"
+    git tag -a "v%APP_VERSION%" -m "v%APP_VERSION% -- %APP_DATE%"
     if %ERRORLEVEL% neq 0 (
-        echo !! git tag fallo — revisa si el tag ya existe.
+        echo AVISO: git tag fallo. Puede que el tag ya exista.
     ) else (
         git push
         git push --tags
@@ -150,7 +141,7 @@ exit /b 0
 
 :error
 echo.
-echo !! BUILD FALLIDO — revisa el log: %LOGFILE%
+echo BUILD FALLIDO - revisa el log: %LOGFILE%
 cd /d "%~dp0"
 pause
 exit /b 1
