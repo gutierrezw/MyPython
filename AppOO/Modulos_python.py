@@ -143,6 +143,7 @@ from finvizfinance.group.overview import Overview
 from finvizfinance.group.performance import Performance
 
 import anthropic
+import feedparser
 
 # modulos IA
 from sklearn.exceptions import UndefinedMetricWarning

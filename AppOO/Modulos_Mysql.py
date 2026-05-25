@@ -57,6 +57,7 @@ class BDsystem:  # -------------------------------------------------------------
             ValueError: Si no existe sesión para el vehículo
         """
         conn = BDsystem.connect_dbase("select.sesion", False)
+        cursor = None
         try:
             cursor = conn.cursor()
             if not principal:
@@ -2554,6 +2555,143 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             return 0
         finally:
             cursor.close()
+            conn.close()
+
+    def load_youtube_canales(self) -> dict:
+        """Retorna {canal: {channel_id, score}} de canales activos, ordenados por score desc."""
+        conn = self._conectar(tabla="select.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT canal, channel_id, score FROM youtube_canales WHERE active = 1 ORDER BY score DESC")
+            return {row[0]: {"channel_id": row[1], "score": row[2]} for row in cursor.fetchall()}
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_youtube_canales]: {error}")
+            return {}
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def update_youtube_canal_stats(self, channel_id: str, detecciones: int, validados: int) -> None:
+        """Actualiza contadores acumulados y last_scan de un canal."""
+        conn = self._conectar(tabla="update.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE youtube_canales SET "
+                "detecciones = detecciones + %s, "
+                "validados = validados + %s, "
+                "last_scan = NOW() "
+                "WHERE channel_id = %s",
+                (detecciones, validados, channel_id),
+            )
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::update_youtube_canal_stats]: {error}")
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def upsert_youtube_candidato(self, symbol: str, confidence: float, market_cap: int, canal: str) -> None:
+        """INSERT nuevo candidato o incrementa apariciones si ya existe (solo si sigue en pending)."""
+        conn = self._conectar(tabla="update.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT apariciones, canales FROM youtube_candidatos WHERE symbol = %s", (symbol,))
+            row = cursor.fetchone()
+            hoy = date.today()
+            if row:
+                apariciones = row[0] + 1
+                canales_set = set((row[1] or "").split(","))
+                canales_set.add(canal)
+                canales_str = ",".join(sorted(canales_set))
+                cursor.execute(
+                    "UPDATE youtube_candidatos SET apariciones=%s, confidence=GREATEST(confidence,%s), "
+                    "market_cap=%s, canales=%s, ultima_vez=%s WHERE symbol=%s AND status='pending'",
+                    (apariciones, confidence, market_cap, canales_str, hoy, symbol),
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO youtube_candidatos (symbol, apariciones, confidence, market_cap, canales, primera_vez, ultima_vez) "
+                    "VALUES (%s, 1, %s, %s, %s, %s, %s)",
+                    (symbol, confidence, market_cap, canal, hoy, hoy),
+                )
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::upsert_youtube_candidato]: {error}")
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def load_youtube_candidatos(self, status: str = "pending") -> list:
+        """Retorna candidatos con estado en market: en_market, en_cartera."""
+        conn = self._conectar(tabla="select.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT c.symbol, c.apariciones, c.confidence, c.market_cap, c.canales, "
+                "c.primera_vez, c.ultima_vez, c.status, "
+                "CASE WHEN m.symbol IS NOT NULL THEN 1 ELSE 0 END AS en_market, "
+                "COALESCE(m.encartera, 'N') AS en_cartera "
+                "FROM youtube_candidatos c "
+                "LEFT JOIN market m ON m.symbol = c.symbol "
+                "WHERE c.status = %s "
+                "ORDER BY c.apariciones DESC, c.confidence DESC",
+                (status,),
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_youtube_candidatos]: {error}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def set_youtube_candidato_status(self, symbol: str, status: str) -> None:
+        """Cambia status de un candidato: pending / approved / rejected."""
+        conn = self._conectar(tabla="update.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE youtube_candidatos SET status=%s WHERE symbol=%s", (status, symbol))
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::set_youtube_candidato_status]: {error}")
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def cleanup_youtube_candidatos(self) -> int:
+        """Rechaza candidatos pendientes que no reaparecer en el tiempo esperado."""
+        conn = self._conectar(tabla="update.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE youtube_candidatos SET status = 'rejected' "
+                "WHERE status = 'pending' AND ("
+                "  (apariciones = 1 AND ultima_vez < CURDATE() - INTERVAL 15 DAY) "
+                "  OR "
+                "  (apariciones < 3 AND ultima_vez < CURDATE() - INTERVAL 30 DAY) "
+                ")"
+            )
+            conn.commit()
+            return cursor.rowcount
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::cleanup_youtube_candidatos]: {error}")
+            return 0
+        finally:
+            if cursor:
+                cursor.close()
             conn.close()
 
 

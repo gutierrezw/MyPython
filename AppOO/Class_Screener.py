@@ -246,6 +246,7 @@ class Screener(tk.Frame):
         self.market = None
         self.counter = 0
         self._inst_win = None
+        self._cand_win = None
         self.ix = []
         self.ctree = []  # poblado en widgets_screener vía _COL_DEFS
         self.ctree_widget = None  # instancia CustomTreeview
@@ -723,6 +724,13 @@ class Screener(tk.Frame):
                 command=lambda: documentar_estructura("Screener", self, self.colors),
             ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
 
+            ttk.Button(
+                btn_frame,
+                text="Candidatos",
+                width=10,
+                command=self._show_youtube_candidatos,
+            ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
+
             # Status bar — health check pipeline 13F (derecha)
             self._health_labels = {}
             for key, texto in (
@@ -953,6 +961,109 @@ class Screener(tk.Frame):
             self._health_labels["inconsistencias"].config(text=f"⚠ {v} inconsistencias", fg=c)
 
         threading.Thread(target=_fetch, daemon=True).start()
+
+    def _show_youtube_candidatos(self):
+        if self._cand_win is not None and self._cand_win.winfo_exists():
+            self._cand_win.lift()
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Candidatos YouTube")
+        win.configure(bg="black")
+        win.geometry("820x460")
+        self._cand_win = win
+
+        _COLS = ("Symbol", "Apariciones", "Conf", "Mkt Cap", "Canales", "Desde", "En Market", "Cartera")
+        _WIDTHS = (70, 90, 60, 90, 190, 90, 80, 65)
+
+        frame = tk.Frame(win, bg="black")
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 4))
+
+        tree = ttk.Treeview(frame, columns=_COLS, show="headings", selectmode="browse")
+        for col, w in zip(_COLS, _WIDTHS):
+            tree.heading(col, text=col)
+            tree.column(col, width=w, anchor=tk.CENTER)
+        tree.column("Canales", anchor=tk.W)
+        tree.tag_configure("en_market", foreground="#888888")
+        tree.tag_configure("en_cartera", foreground="#00cc88")
+
+        vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.LEFT, fill=tk.Y)
+
+        btn_frame = tk.Frame(win, bg="black")
+        btn_frame.pack(fill=tk.X, padx=10, pady=(0, 8))
+
+        status_lbl = tk.Label(btn_frame, text="", bg="black", fg="#aaaaaa", font=("Courier", 9))
+        status_lbl.pack(side=tk.RIGHT, padx=8)
+
+        def _refresh():
+            for row in tree.get_children():
+                tree.delete(row)
+            rows = MarketScreen().load_youtube_candidatos("pending")
+            for r in rows:
+                mc = r.get("market_cap") or 0
+                mc_str = f"${mc/1e9:.1f}B" if mc >= 1e9 else f"${mc/1e6:.0f}M"
+                en_market = bool(r.get("en_market"))
+                en_cartera = r.get("en_cartera") == "Y"
+                tag = "en_cartera" if en_cartera else ("en_market" if en_market else "")
+                tree.insert(
+                    "",
+                    tk.END,
+                    iid=r["symbol"],
+                    values=(
+                        r["symbol"],
+                        r["apariciones"],
+                        f"{r['confidence']:.2f}",
+                        mc_str,
+                        r.get("canales") or "",
+                        str(r.get("primera_vez") or "")[:10],
+                        "Si" if en_market else "No",
+                        "Si" if en_cartera else "No",
+                    ),
+                    tags=(tag,) if tag else (),
+                )
+            status_lbl.config(text=f"{len(rows)} pendientes")
+
+        def _comprar():
+            sel = tree.selection()
+            if not sel:
+                return
+            symbol = sel[0]
+            vals = tree.item(symbol, "values")
+            if vals[6] == "Si":
+                status_lbl.config(text=f"{symbol} ya está en market", fg="#888888")
+                return
+            try:
+                db = MarketScreen()
+                db.insert(
+                    upd=["symbol", "encartera", "categoriaActivo"],
+                    val=[symbol, "N", "T"],
+                    symbol=symbol,
+                )
+                db.set_youtube_candidato_status(symbol, "approved")
+                status_lbl.config(
+                    text=f"{symbol} agregado a market (T) — Consenso lo tomará en el próximo ciclo", fg="#00cc88"
+                )
+                tree.delete(symbol)
+            except Exception as e:
+                status_lbl.config(text=f"Error: {e}", fg="red")
+
+        def _rechazar():
+            sel = tree.selection()
+            if not sel:
+                return
+            symbol = sel[0]
+            MarketScreen().set_youtube_candidato_status(symbol, "rejected")
+            tree.delete(symbol)
+            status_lbl.config(text=f"{symbol} rechazado", fg="#888888")
+
+        ttk.Button(btn_frame, text="Comprar", width=10, command=_comprar).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_frame, text="Rechazar", width=10, command=_rechazar).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_frame, text="Refresh", width=10, command=_refresh).pack(side=tk.LEFT, padx=(0, 6))
+
+        _refresh()
 
     def _show_institucionales_cartera(self):
         if self._inst_win is not None and self._inst_win.winfo_exists():
