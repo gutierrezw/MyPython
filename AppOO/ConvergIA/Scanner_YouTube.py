@@ -192,7 +192,9 @@ def scan_youtube(account: str, api_key: str = None) -> dict:
             (v["canal"] for v in videos if nombre in v["title"].lower() or nombre in v["summary"].lower()),
             "unknown",
         )
-        market.upsert_youtube_candidato(ticker, data["confidence"], data.get("market_cap", 0), canal_origen)
+        market.upsert_youtube_candidato(
+            ticker, data["confidence"], data.get("market_cap", 0), canal_origen, company_names.get(ticker, "")
+        )
 
     rechazados = market.cleanup_youtube_candidatos()
     if rechazados:

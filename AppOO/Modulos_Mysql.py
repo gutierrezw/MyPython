@@ -2595,7 +2595,9 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 cursor.close()
             conn.close()
 
-    def upsert_youtube_candidato(self, symbol: str, confidence: float, market_cap: int, canal: str) -> None:
+    def upsert_youtube_candidato(
+        self, symbol: str, confidence: float, market_cap: int, canal: str, company_name: str = ""
+    ) -> None:
         """INSERT nuevo candidato o incrementa apariciones si ya existe (solo si sigue en pending)."""
         conn = self._conectar(tabla="update.market")
         cursor = None
@@ -2616,9 +2618,9 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 )
             else:
                 cursor.execute(
-                    "INSERT INTO youtube_candidatos (symbol, apariciones, confidence, market_cap, canales, primera_vez, ultima_vez) "
-                    "VALUES (%s, 1, %s, %s, %s, %s, %s)",
-                    (symbol, confidence, market_cap, canal, hoy, hoy),
+                    "INSERT INTO youtube_candidatos (symbol, company_name, apariciones, confidence, market_cap, canales, primera_vez, ultima_vez) "
+                    "VALUES (%s, %s, 1, %s, %s, %s, %s, %s)",
+                    (symbol, company_name or None, confidence, market_cap, canal, hoy, hoy),
                 )
             conn.commit()
         except (Exception, connect.Error) as error:
@@ -2635,7 +2637,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT c.symbol, c.apariciones, c.confidence, c.market_cap, c.canales, "
+                "SELECT c.symbol, c.company_name, c.apariciones, c.confidence, c.market_cap, c.canales, "
                 "c.primera_vez, c.ultima_vez, c.status, "
                 "CASE WHEN m.symbol IS NOT NULL THEN 1 ELSE 0 END AS en_market, "
                 "COALESCE(m.encartera, 'N') AS en_cartera "

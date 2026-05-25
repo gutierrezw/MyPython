@@ -970,11 +970,11 @@ class Screener(tk.Frame):
         win = tk.Toplevel(self)
         win.title("Candidatos YouTube")
         win.configure(bg="black")
-        win.geometry("820x460")
+        win.geometry("1000x460")
         self._cand_win = win
 
-        _COLS = ("Symbol", "Apariciones", "Conf", "Mkt Cap", "Canales", "Desde", "En Market", "Cartera")
-        _WIDTHS = (70, 90, 60, 90, 190, 90, 80, 65)
+        _COLS = ("Symbol", "Empresa", "Apariciones", "Conf", "Mkt Cap", "Canales", "Desde", "En Market", "Cartera")
+        _WIDTHS = (70, 160, 80, 55, 75, 170, 85, 75, 60)
 
         frame = tk.Frame(win, bg="black")
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 4))
@@ -984,6 +984,7 @@ class Screener(tk.Frame):
             tree.heading(col, text=col)
             tree.column(col, width=w, anchor=tk.CENTER)
         tree.column("Symbol", anchor=tk.E)
+        tree.column("Empresa", anchor=tk.W)
         tree.column("Canales", anchor=tk.W)
         tree.tag_configure("en_market", foreground="#888888")
         tree.tag_configure("en_cartera", foreground="#00cc88")
@@ -1015,6 +1016,7 @@ class Screener(tk.Frame):
                     iid=r["symbol"],
                     values=(
                         r["symbol"],
+                        r.get("company_name") or "",
                         r["apariciones"],
                         f"{r['confidence']:.2f}",
                         mc_str,
