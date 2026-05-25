@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from Modulos_python import feedparser, anthropic, logging, json, re, yf
+from Modulos_python import feedparser, anthropic, logging, json, re, yf, time
 from Modulos_Mysql import MarketScreen
 from Modulos_Utilitarios import read_json_tmp, write_json_tmp
 
@@ -71,9 +71,10 @@ def _filter_financial(videos: list) -> list:
     return [v for v in videos if _FINANCE_KEYWORDS.search(v["title"]) or _FINANCE_KEYWORDS.search(v["summary"])]
 
 
-def _resolve_names(nombres: list) -> dict:
-    """Convierte lista de nombres de empresa → {ticker: 0.90} usando yf.Search."""
-    result = {}
+def _resolve_names(nombres: list) -> tuple:
+    """Convierte lista de nombres → ({ticker: confidence}, {ticker: market_cap}) usando yf.Search."""
+    candidates = {}
+    market_caps = {}
     for nombre in nombres:
         try:
             quotes = yf.Search(nombre, max_results=1).quotes
@@ -83,16 +84,19 @@ def _resolve_names(nombres: list) -> dict:
             if top.get("quoteType") != "EQUITY":
                 continue
             ticker = top.get("symbol", "").upper()
-            if ticker:
-                result[ticker] = 0.90
+            if not ticker:
+                continue
+            candidates[ticker] = 0.90
+            market_caps[ticker] = int(top.get("regularMarketCap") or top.get("marketCap") or 0)
         except Exception as e:
             _logger.warning(f"_resolve_names [{nombre}]: {e}")
-    return result
+        time.sleep(0.3)
+    return candidates, market_caps
 
 
-def _classify(videos: list, api_key: str) -> dict:
+def _classify(videos: list, api_key: str) -> tuple:
     if not videos or not api_key:
-        return {}
+        return {}, {}
 
     lines = []
     for v in videos:
@@ -121,26 +125,20 @@ def _classify(videos: list, api_key: str) -> dict:
             return _resolve_names(nombres)
     except Exception as e:
         _logger.error(f"_classify: {e}")
-    return {}
+    return {}, {}
 
 
-def _validate(candidates: dict, account: str) -> dict:
+def _validate(candidates: dict, market_caps: dict, account: str) -> dict:
     try:
         existing = set(MarketScreen().load_symbols(account).keys())
     except Exception as e:
         _logger.warning(f"_validate: BD no disponible, omitiendo filtro existentes — {e}")
         existing = set()
-    validated = {}
-    for ticker, conf in candidates.items():
-        if ticker in existing:
-            continue
-        try:
-            info = yf.Ticker(ticker).fast_info
-            if getattr(info, "market_cap", None) and info.market_cap > 0:
-                validated[ticker] = {"confidence": round(conf, 2), "market_cap": int(info.market_cap)}
-        except Exception:
-            pass
-    return validated
+    return {
+        ticker: {"confidence": round(conf, 2), "market_cap": market_caps.get(ticker, 0)}
+        for ticker, conf in candidates.items()
+        if ticker not in existing and len(ticker) <= 10
+    }
 
 
 def _update_canal_stats(videos_nuevos: list, candidates_raw: dict, validated: dict) -> None:
@@ -182,8 +180,8 @@ def scan_youtube(account: str, api_key: str = None) -> dict:
 
     videos, all_ids = _fetch_videos(canales, seen_ids)
     filtered = _filter_financial(videos)
-    candidates_raw = _classify(filtered, key)
-    validated = _validate(candidates_raw, account)
+    candidates_raw, market_caps = _classify(filtered, key)
+    validated = _validate(candidates_raw, market_caps, account)
 
     market = MarketScreen()
     for ticker, data in validated.items():
