@@ -72,9 +72,10 @@ def _filter_financial(videos: list) -> list:
 
 
 def _resolve_names(nombres: list) -> tuple:
-    """Convierte lista de nombres → ({ticker: confidence}, {ticker: market_cap}) usando yf.Search."""
+    """Convierte lista de nombres → ({ticker: confidence}, {ticker: market_cap}, {ticker: company_name})."""
     candidates = {}
     market_caps = {}
+    company_names = {}
     for nombre in nombres:
         try:
             quotes = yf.Search(nombre, max_results=1).quotes
@@ -88,15 +89,16 @@ def _resolve_names(nombres: list) -> tuple:
                 continue
             candidates[ticker] = 0.90
             market_caps[ticker] = int(top.get("regularMarketCap") or top.get("marketCap") or 0)
+            company_names[ticker] = nombre
         except Exception as e:
             _logger.warning(f"_resolve_names [{nombre}]: {e}")
         time.sleep(0.3)
-    return candidates, market_caps
+    return candidates, market_caps, company_names
 
 
 def _classify(videos: list, api_key: str) -> tuple:
     if not videos or not api_key:
-        return {}, {}
+        return {}, {}, {}
 
     lines = []
     for v in videos:
@@ -125,7 +127,7 @@ def _classify(videos: list, api_key: str) -> tuple:
             return _resolve_names(nombres)
     except Exception as e:
         _logger.error(f"_classify: {e}")
-    return {}, {}
+    return {}, {}, {}
 
 
 def _validate(candidates: dict, market_caps: dict, account: str) -> dict:
@@ -180,12 +182,16 @@ def scan_youtube(account: str, api_key: str = None) -> dict:
 
     videos, all_ids = _fetch_videos(canales, seen_ids)
     filtered = _filter_financial(videos)
-    candidates_raw, market_caps = _classify(filtered, key)
+    candidates_raw, market_caps, company_names = _classify(filtered, key)
     validated = _validate(candidates_raw, market_caps, account)
 
     market = MarketScreen()
     for ticker, data in validated.items():
-        canal_origen = next((v["canal"] for v in videos if ticker in v["title"] or ticker in v["summary"]), "unknown")
+        nombre = company_names.get(ticker, ticker).lower()
+        canal_origen = next(
+            (v["canal"] for v in videos if nombre in v["title"].lower() or nombre in v["summary"].lower()),
+            "unknown",
+        )
         market.upsert_youtube_candidato(ticker, data["confidence"], data.get("market_cap", 0), canal_origen)
 
     rechazados = market.cleanup_youtube_candidatos()
