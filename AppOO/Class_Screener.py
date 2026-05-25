@@ -976,7 +976,7 @@ class Screener(tk.Frame):
         _COLS = (
             "Symbol",
             "Empresa",
-            "Apariciones",
+            "Veces",
             "Conf",
             "Mkt Cap",
             "Sector",
