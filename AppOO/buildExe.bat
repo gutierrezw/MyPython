@@ -8,8 +8,7 @@ set PYENV=C:\Users\InversionesWildaga\Documents\MyPython\.venv\Scripts
 set DEPLOY=C:\Users\InversionesWildaga\Documents\deploy
 
 echo.
-echo IMPORTANTE: Cerrar el Explorador de Windows apuntando a deploy\AppOO\
-echo            y cerrar AppOO.exe si esta corriendo.
+echo IMPORTANTE: Cerrar AppOO.exe si esta corriendo.
 echo.
 pause
 
@@ -26,11 +25,15 @@ rmdir /s /q build 2>nul
 echo.
 echo Ejecutando PyInstaller...
 
+set ICON=C:\Users\InversionesWildaga\Documents\MyPython\Iconos\Systems\WGM_icon.ico
+set ICON_FLAG=
+if exist "%ICON%" set ICON_FLAG=--icon "%ICON%"
+
 %PYENV%\pyinstaller ^
     --noconfirm ^
     --onefile ^
     --windowed ^
-    --icon "C:\Users\InversionesWildaga\Documents\MyPython\Iconos\Systems\WGM_icon.ico" ^
+    %ICON_FLAG% ^
     --paths "." ^
     --paths "AppValuations" ^
     --paths "ConvergIA" ^
@@ -68,10 +71,14 @@ echo Ejecutando PyInstaller...
     --collect-all "tkinter" ^
     DashMain.py
 
+if %ERRORLEVEL% neq 0 goto :error
+
 echo.
 echo Copiando profiles...
 xcopy /s /e /i /y profiles "%DEPLOY%\profiles" >nul
+if %ERRORLEVEL% neq 0 goto :error
 xcopy /s /e /i /y profiles "%DEPLOY%\setup\profiles" >nul
+if %ERRORLEVEL% neq 0 goto :error
 
 echo.
 echo ======================================================
@@ -84,3 +91,11 @@ echo ======================================================
 
 cd /d "%DEPLOY%"
 pause
+exit /b 0
+
+:error
+echo.
+echo !! ERROR en el build — revisa el traceback arriba.
+cd /d "%~dp0"
+pause
+exit /b 1
