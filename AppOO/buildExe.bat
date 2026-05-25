@@ -1,4 +1,5 @@
 @echo off
+cls
 cd /d "%~dp0"
 
 set PYENV=C:\Users\InversionesWildaga\Documents\MyPython\.venv\Scripts
