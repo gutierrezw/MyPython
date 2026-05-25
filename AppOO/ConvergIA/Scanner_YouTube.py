@@ -139,7 +139,7 @@ def _validate(candidates: dict, market_caps: dict, account: str) -> dict:
     return {
         ticker: {"confidence": round(conf, 2), "market_cap": market_caps.get(ticker, 0)}
         for ticker, conf in candidates.items()
-        if ticker not in existing and len(ticker) <= 10
+        if len(ticker) <= 10
     }
 
 
