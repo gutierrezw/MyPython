@@ -1042,41 +1042,6 @@ class Screener(tk.Frame):
                 )
             status_lbl.config(text=f"{len(rows)} pendientes")
 
-        def _comprar():
-            sel = tree.selection()
-            if not sel:
-                return
-            symbol = sel[0]
-            vals = tree.item(symbol, "values")
-            if vals[6] == "Si":
-                status_lbl.config(text=f"{symbol} ya está en market", fg="#888888")
-                return
-            try:
-                db = MarketScreen()
-                db.insert(
-                    upd=["symbol", "encartera", "categoriaActivo"],
-                    val=[symbol, "N", "T"],
-                    symbol=symbol,
-                )
-                db.set_youtube_candidato_status(symbol, "approved")
-                status_lbl.config(
-                    text=f"{symbol} agregado a market (T) — Consenso lo tomará en el próximo ciclo", fg="#00cc88"
-                )
-                tree.delete(symbol)
-            except Exception as e:
-                status_lbl.config(text=f"Error: {e}", fg="red")
-
-        def _rechazar():
-            sel = tree.selection()
-            if not sel:
-                return
-            symbol = sel[0]
-            MarketScreen().set_youtube_candidato_status(symbol, "rejected")
-            tree.delete(symbol)
-            status_lbl.config(text=f"{symbol} rechazado", fg="#888888")
-
-        ttk.Button(btn_frame, text="Comprar", width=10, command=_comprar).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(btn_frame, text="Rechazar", width=10, command=_rechazar).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(btn_frame, text="Refresh", width=10, command=_refresh).pack(side=tk.LEFT, padx=(0, 6))
 
         _refresh()
