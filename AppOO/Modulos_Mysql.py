@@ -2603,7 +2603,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor = conn.cursor()
             cursor.execute("SELECT apariciones, canales FROM youtube_candidatos WHERE symbol = %s", (symbol,))
             row = cursor.fetchone()
-            hoy = date.today()
+            hoy = datetime.now().date()
             if row:
                 apariciones = row[0] + 1
                 canales_set = set((row[1] or "").split(","))
