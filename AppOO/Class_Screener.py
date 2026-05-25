@@ -983,6 +983,7 @@ class Screener(tk.Frame):
         for col, w in zip(_COLS, _WIDTHS):
             tree.heading(col, text=col)
             tree.column(col, width=w, anchor=tk.CENTER)
+        tree.column("Symbol", anchor=tk.E)
         tree.column("Canales", anchor=tk.W)
         tree.tag_configure("en_market", foreground="#888888")
         tree.tag_configure("en_cartera", foreground="#00cc88")
