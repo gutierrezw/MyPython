@@ -2334,9 +2334,35 @@ class TickerInfo(MyOrders):
             if not symbols:
                 return "sin símbolos"
 
-            df = yf.download(symbols, period="1d", interval="5m", progress=False, auto_adjust=True, prepost=True)
+            # Cargar mapeo yfinance desde otros_activos (base_asset/quote_asset)
+            otros = BDsystem()
+            yf_map = {}  # {symbol: yf_symbol}  ej: {"ABX": "ABX.TO"}
+            fx_map = {}  # {symbol: currency}    ej: {"ABX": "CAD"}
+            for sym in symbols:
+                rows, found = otros.select_otros_activos(symbol=sym)
+                if found and rows:
+                    row = rows[0]
+                    ba = row.get("base_asset") or ""
+                    qa = row.get("quote_asset") or "USD"
+                    if ba:
+                        yf_map[sym] = ba
+                    if qa and qa.upper() != "USD":
+                        fx_map[sym] = qa.upper()
+
+            # Construir lista de símbolos yfinance (puede diferir del ticket interno)
+            yf_symbols = [yf_map.get(s, s) for s in symbols]
+
+            df = yf.download(yf_symbols, period="1d", interval="5m", progress=False, auto_adjust=True, prepost=True)
             if df.empty:
                 return "yfinance sin datos"
+
+            # Cargar tipos de cambio necesarios (una sola llamada por divisa)
+            fx_rates = {}
+            for currency in set(fx_map.values()):
+                try:
+                    fx_rates[currency] = float(yf.Ticker(f"{currency}USD=X").fast_info.last_price or 1.0)
+                except Exception:
+                    fx_rates[currency] = 1.0
 
             close = df["Close"]
             actualizados = 0
@@ -2345,9 +2371,14 @@ class TickerInfo(MyOrders):
                 if not symbol:
                     continue
                 try:
-                    col = close[symbol] if hasattr(close, "columns") and symbol in close.columns else close
+                    yf_sym = yf_map.get(symbol, symbol)
+                    col = close[yf_sym] if hasattr(close, "columns") and yf_sym in close.columns else close
                     last_price = float(col.dropna().iloc[-1])
                     if last_price > 0:
+                        # Convertir a USD si corresponde
+                        currency = fx_map.get(symbol)
+                        if currency:
+                            last_price = last_price * fx_rates.get(currency, 1.0)
                         qty = position.get("position", 0)
                         xopen = position.get("open", 0)
                         position["mrkprice"] = last_price
