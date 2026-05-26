@@ -8,6 +8,7 @@ from Modulos_Utilitarios import (
     documentar_estructura,
 )
 from Class_customer import CustomTreeview
+from Class_BrowserBridge import abrir_tradingview
 from ConvergIA.ThemeMapper import load_sentiment, load_analysis, voto_tech_alignment
 from Modulos_python import (
     tk,
@@ -970,14 +971,19 @@ class Screener(tk.Frame):
         win = tk.Toplevel(self)
         win.title("Candidatos YouTube")
         win.configure(bg="black")
-        win.geometry("1150x460")
         self._cand_win = win
+        win.update_idletasks()
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        w, h = 1220, 460
+        win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
 
         _COLS = (
             "Symbol",
             "Empresa",
             "Veces",
             "Conf",
+            "Precio",
             "Mkt Cap",
             "Sector",
             "Canales",
@@ -985,14 +991,15 @@ class Screener(tk.Frame):
             "En Market",
             "Cartera",
         )
-        _WIDTHS = (70, 150, 75, 50, 70, 130, 150, 85, 70, 55)
+        _WIDTHS = (70, 150, 75, 50, 70, 70, 130, 150, 85, 70, 55)
 
         frame = tk.Frame(win, bg="black")
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 4))
 
+        _sort_state = {}
+
         tree = ttk.Treeview(frame, columns=_COLS, show="headings", selectmode="browse")
         for col, w in zip(_COLS, _WIDTHS):
-            tree.heading(col, text=col)
             tree.column(col, width=w, anchor=tk.CENTER)
         tree.column("Symbol", anchor=tk.E)
         tree.column("Empresa", anchor=tk.W)
@@ -1000,6 +1007,32 @@ class Screener(tk.Frame):
         tree.column("Canales", anchor=tk.W)
         tree.tag_configure("en_market", foreground="#888888")
         tree.tag_configure("en_cartera", foreground="#00cc88")
+
+        def _sort_col(col):
+            asc = not _sort_state.get(col, False)
+            _sort_state[col] = asc
+            col_idx = _COLS.index(col)
+            _NUMERIC = {"Veces", "Conf", "Precio", "Mkt Cap"}
+
+            def _key(iid):
+                val = tree.set(iid, col)
+                if col in _NUMERIC:
+                    try:
+                        return float(val.replace("$", "").replace("B", "e9").replace("M", "e6").replace(",", ""))
+                    except ValueError:
+                        return -1
+                return val.lower()
+
+            items = sorted(tree.get_children(), key=_key, reverse=not asc)
+            for i, iid in enumerate(items):
+                tree.move(iid, "", i)
+
+            for c in _COLS:
+                arrow = (" ↑" if asc else " ↓") if c == col else ""
+                tree.heading(c, text=c + arrow, command=lambda c=c: _sort_col(c))
+
+        for col in _COLS:
+            tree.heading(col, text=col, command=lambda c=col: _sort_col(c))
 
         vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
@@ -1022,6 +1055,8 @@ class Screener(tk.Frame):
                 en_market = bool(r.get("en_market"))
                 en_cartera = r.get("en_cartera") == "Y"
                 tag = "en_cartera" if en_cartera else ("en_market" if en_market else "")
+                price = r.get("lastPrice")
+                price_str = f"{price:,.2f}" if price else ""
                 tree.insert(
                     "",
                     tk.END,
@@ -1031,6 +1066,7 @@ class Screener(tk.Frame):
                         r.get("company_name") or "",
                         r["apariciones"],
                         f"{r['confidence']:.2f}",
+                        price_str,
                         mc_str,
                         r.get("sector") or "",
                         r.get("canales") or "",
@@ -1042,7 +1078,62 @@ class Screener(tk.Frame):
                 )
             status_lbl.config(text=f"{len(rows)} pendientes")
 
+        def _context_menu(event):
+            sel = tree.selection()
+            if not sel:
+                return
+            symbol = sel[0]
+
+            bgcolor = (self.colors or {}).get("bgcolor", "black")
+            cgcolor = (self.colors or {}).get("cgcolor", "DarkCyan")
+
+            menu = tk.Toplevel(win)
+            menu.overrideredirect(True)
+            menu.configure(bg=bgcolor)
+            menu.attributes("-topmost", True)
+
+            btn_cfg = dict(
+                bg=bgcolor,
+                fg="white",
+                activebackground="#2a5298",
+                activeforeground="white",
+                relief=tk.FLAT,
+                anchor="w",
+                font=("Arial", 10),
+                width=15,
+                pady=2,
+                cursor="hand2",
+            )
+
+            tk.Label(menu, text=f"  {symbol}", bg=bgcolor, fg=cgcolor, font=("Arial", 10, "bold"), anchor="w").pack(
+                fill=tk.X
+            )
+
+            tk.Button(
+                menu,
+                text="TradingView",
+                command=lambda: (menu.destroy(), abrir_tradingview(symbol, vehiculo="Stock")),
+                **btn_cfg,
+            ).pack(fill=tk.X, padx=1, pady=(0, 1))
+
+            x = win.winfo_pointerx() + 5
+            y = win.winfo_pointery()
+            menu.geometry(f"+{x}+{y}")
+
+            def _close_if_outside(e, m=menu):
+                if m.winfo_exists():
+                    mx, my = m.winfo_rootx(), m.winfo_rooty()
+                    mw, mh = m.winfo_width(), m.winfo_height()
+                    if not (mx <= e.x_root <= mx + mw and my <= e.y_root <= my + mh):
+                        m.destroy()
+
+            win.bind("<Button-1>", _close_if_outside, add="+")
+            menu.bind("<Escape>", lambda e: menu.destroy())
+
+        tree.bind("<<TreeviewSelect>>", _context_menu)
+
         ttk.Button(btn_frame, text="Refresh", width=10, command=_refresh).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_frame, text="Cancelar", width=10, command=win.destroy).pack(side=tk.LEFT)
 
         _refresh()
 
