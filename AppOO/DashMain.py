@@ -689,10 +689,15 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                     # extrae trader mas reciente en la cuenta
                     if DataHub.ultimoTraderCrypto is None:
-                        utrading, ix = self.RepositorioOportunidades.select_booktrading(
-                            accion="timestamp", account=self.account, idivisa="USD"
-                        )
-                        DataHub.ultimoTraderCrypto = utrading[0]["fechahora"]
+                        if self._trader_first_run:
+                            utrading, ix = self.RepositorioOportunidades.select_booktrading(
+                                accion="timestamp", account=self.account, idivisa="USD"
+                            )
+                            DataHub.ultimoTraderCrypto = utrading[0]["fechahora"]
+                        else:
+                            DataHub.ultimoTraderCrypto = datetime.now().replace(
+                                hour=0, minute=0, second=0, microsecond=0
+                            )
 
                     hoy = datetime.now()
 
@@ -856,7 +861,16 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
             try:
                 hasta = datetime.today()
-                desde = hasta - timedelta(days=60)
+                if self._trader_first_run:
+                    try:
+                        utrading, ix = self.RepositorioOportunidades.select_booktrading(
+                            accion="timestamp", account="ARS-0001", idivisa="USD"
+                        )
+                        desde = utrading[0]["fechahora"] if utrading else hasta - timedelta(days=10)
+                    except Exception:
+                        desde = hasta - timedelta(days=10)
+                else:
+                    desde = hasta.replace(hour=0, minute=0, second=0, microsecond=0)
                 start_time = int(desde.timestamp() * 1000)
                 end_time = int(hasta.timestamp() * 1000)
 
@@ -1015,7 +1029,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
         def trader_iteractive():
             try:
                 datos = list()
-                trades = self.IClient.trades(account_id=self.account, days=10)
+                trades = self.IClient.trades(account_id=self.account, days=10 if self._trader_first_run else 1)
                 if trades:
                     for keys in trades:
                         values = {}
@@ -1082,10 +1096,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
             if self.vehiculo == "Crypto":
                 trade_USDT_diario()
                 trader_binance()
-                get_orders_binance()
 
             if self.vehiculo == "Stock":
-                get_orders_iteractive()
                 trader_iteractive()
         except (Exception, EnvironmentError, ExceptionGroup) as e:
             print(f"trader_api_vehiculo({self.vehiculo}): {e}")
@@ -2748,49 +2760,87 @@ class DashMain:
             heard.xview(*args)
             tree.xview(*args)
 
-        # agregas orders a treeview
+        def _load_stock_orders_today() -> list:
+            rows, ix = self.RepositorioOportunidades.select_order_trader_today(self.account, "Stock")
+            ib_status = {}
+            try:
+                live = self.IClient.get_live_orders()
+                for o in (live or {}).get("orders", []):
+                    coid = str(o.get("orderId", ""))
+                    if coid:
+                        ib_status[coid] = o.get("status", "")
+            except Exception as e:
+                print(f"_load_stock_orders_today IB: {e}")
+            result = []
+            for row in rows:
+                r = dict(zip(ix, row))
+                coid = str(r.get("clientOrderId") or "")
+                result.append(
+                    {
+                        "account": r.get("account", ""),
+                        "conid": r.get("conid", ""),
+                        "symbol": r.get("symbol", ""),
+                        "side": r.get("side", ""),
+                        "orderType": r.get("orderType", ""),
+                        "price": r.get("price", ""),
+                        "quantity": r.get("quantity", ""),
+                        "status": ib_status.get(coid) or r.get("status", ""),
+                        "tif": r.get("tif", ""),
+                        "id_order": r.get("id_order", ""),
+                        "id_enviar": coid,
+                    }
+                )
+            return result
+
+        # agrega orders a treeview
         def insert_ordenes_treeview(tree):
             try:
-                for orders, values in self.orders.items():
-                    for i, orden in enumerate(values):
-                        insert, id_order, id_enviar = (
-                            True,
+                for i, orden in enumerate(_load_stock_orders_today()):
+                    st = orden["status"]
+                    tag = "green" if "Fill" in st else "red" if "Cancel" in st else ""
+                    tree.insert(
+                        Stock,
+                        "end",
+                        text="{:>3}".format(i + 1),
+                        values=[
+                            orden["account"],
+                            orden["conid"],
+                            orden["symbol"],
+                            orden["side"],
+                            orden["orderType"],
+                            orden["price"],
+                            orden["quantity"],
+                            orden["status"],
+                            orden["tif"],
                             orden["id_order"],
                             orden["id_enviar"],
-                        )
-
-                        # agregar a lista de órdenes pendientes
-                        if insert:
-                            values = [
-                                orden["account"],
-                                orden["conid"],
-                                orden["symbol"],
-                                orden["side"],
-                                orden["orderType"],
-                                orden["price"],
-                                orden["quantity"],
-                                orden["status"],
-                                orden["tif"],
-                                orden["id_order"],
-                                orden["id_enviar"],
-                            ]
-
-                            if orders == "Crypto":
-                                tree.insert(
-                                    Crypto,
-                                    "end",
-                                    text="{:>3.0f}".format(i + 1),
-                                    values=values,
-                                )
-
-                            if orders == "Stock":
-                                tree.insert(
-                                    Stock,
-                                    "end",
-                                    text="{:>3.0f}".format(i + 1),
-                                    values=values,
-                                )
-
+                        ],
+                        tags=(tag,) if tag else (),
+                    )
+                rows, ix = self.RepositorioOportunidades.select_order_trader_today(self.account, "Crypto")
+                for i, row in enumerate(rows):
+                    r = dict(zip(ix, row))
+                    st = r.get("status", "")
+                    tag = "green" if "Fill" in st else "red" if "Cancel" in st else ""
+                    tree.insert(
+                        Crypto,
+                        "end",
+                        text="{:>3}".format(i + 1),
+                        values=[
+                            r.get("account", ""),
+                            r.get("conid", ""),
+                            r.get("symbol", ""),
+                            r.get("side", ""),
+                            r.get("orderType", ""),
+                            r.get("price", ""),
+                            r.get("quantity", ""),
+                            st,
+                            r.get("tif", ""),
+                            r.get("id_order", ""),
+                            str(r.get("clientOrderId") or ""),
+                        ],
+                        tags=(tag,) if tag else (),
+                    )
             except Exception as e:
                 print("insert_ordenes_treeview(): {}".format(e))
 
@@ -2856,8 +2906,12 @@ class DashMain:
             except Exception as e:
                 print("eliminar_orden(): {}".format(e))
 
-        # refresca ordenes en treeview
+        # sincroniza BD con IB y refresca treeview
         def update_treeview_ordenes():
+            try:
+                self.RepositorioOportunidades.sync_orders_from_ib(self.IClient, self.account)
+            except Exception as e:
+                print(f"update_treeview_ordenes sync: {e}")
             try:
                 padres = tree.get_children()
                 for padre in padres:

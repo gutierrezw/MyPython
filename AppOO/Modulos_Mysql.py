@@ -2730,9 +2730,9 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 "CASE WHEN m.symbol IS NOT NULL THEN 1 ELSE 0 END AS en_market, "
                 "COALESCE(m.encartera, 'N') AS en_cartera, "
                 "COALESCE(c.sector, m.sector) AS sector, "
-                "m.lastPrice AS lastPrice, "
-                "m.website AS website, "
-                "m.country AS country "
+                "COALESCE(m.lastPrice, c.last_price) AS lastPrice, "
+                "COALESCE(m.website, c.website) AS website, "
+                "COALESCE(m.country, c.country) AS country "
                 "FROM youtube_candidatos c "
                 "LEFT JOIN market m ON m.symbol = c.symbol "
                 "WHERE c.status = %s "
@@ -2773,7 +2773,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.execute(
                 "SELECT symbol FROM youtube_candidatos "
                 "WHERE status = 'pending' "
-                "AND (website IS NULL OR sector IS NULL OR market_cap IS NULL OR market_cap = 0) "
+                "AND (website IS NULL OR sector IS NULL OR market_cap IS NULL OR market_cap = 0 "
+                "     OR country IS NULL OR last_price IS NULL OR last_price = 0) "
                 "ORDER BY apariciones DESC LIMIT %s",
                 (limit,),
             )
@@ -2787,7 +2788,14 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             conn.close()
 
     def update_youtube_candidato_fields(
-        self, symbol: str, website: str = None, sector: str = None, market_cap: int = None, company_name: str = None
+        self,
+        symbol: str,
+        website: str = None,
+        sector: str = None,
+        market_cap: int = None,
+        company_name: str = None,
+        country: str = None,
+        last_price: float = None,
     ) -> None:
         """Actualiza solo los campos proporcionados (no pisa valores existentes)."""
         parts = []
@@ -2804,6 +2812,12 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         if company_name is not None:
             parts.append("company_name = COALESCE(company_name, NULLIF(%s, ''))")
             params.append(company_name)
+        if country is not None:
+            parts.append("country = COALESCE(country, NULLIF(%s, ''))")
+            params.append(country)
+        if last_price is not None and last_price > 0:
+            parts.append("last_price = COALESCE(NULLIF(last_price, 0), %s)")
+            params.append(last_price)
         if not parts:
             return
         params.append(symbol)
@@ -5103,6 +5117,34 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: update_order_trader()]: {}".format(error))
 
+    def update_order_trader_by_client_id(
+        self, client_order_id: str, account: str, status: str, stamp_submit=None
+    ) -> bool:
+        """Actualiza status (y opcionalmente stampSubmit) en order_trader usando clientOrderId."""
+        conn = self._conectar(tabla="insert.order_trader")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            if stamp_submit:
+                cursor.execute(
+                    "UPDATE order_trader SET status=%s, stampSubmit=%s WHERE clientOrderId=%s AND account=%s",
+                    (status, stamp_submit, client_order_id, account),
+                )
+            else:
+                cursor.execute(
+                    "UPDATE order_trader SET status=%s WHERE clientOrderId=%s AND account=%s",
+                    (status, client_order_id, account),
+                )
+            conn.commit()
+            return cursor.rowcount > 0
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::update_order_trader_by_client_id]: {error}")
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
     def select_order_trader(self, account=None, vehiculo=None, symbol=None, conid=None):
         """
         @param account: id de cuenta inversionista
@@ -5136,6 +5178,117 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             return sql, ix
         except conn.ProgrammingError as error:
             print("[Mysql:: select_order_trader({})]: {}".format(vehiculo, error))
+
+    def select_order_trader_today(self, account: str, vehiculo: str) -> tuple:
+        """Retorna todas las órdenes de hoy para account/vehiculo desde order_trader."""
+        conn = self._conectar(tabla="select.order_trader")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM order_trader "
+                "WHERE account = %s AND vehiculo = %s AND DATE(stampPlace) = CURDATE() "
+                "ORDER BY stampPlace DESC",
+                (account, vehiculo),
+            )
+            rows = cursor.fetchall()
+            ix = [col[0] for col in cursor.description]
+            return rows, ix
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::select_order_trader_today]: {error}")
+            return [], []
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def sync_orders_from_ib(self, ib_client, account: str) -> int:
+        """Sincroniza order_trader con get_live_orders() de IB. Retorna registros actualizados."""
+        _STATUS_MAP = {
+            "Cancelled": "CANCELED",
+            "Filled": "Filled",
+            "Submitted": "Submitted",
+            "PreSubmitted": "PreSubmitted",
+            "Inactive": "Inactive",
+            "New": "New",
+        }
+        try:
+            orders = (ib_client.get_live_orders() or {}).get("orders", [])
+        except Exception as e:
+            _logger.error(f"[sync_orders_from_ib] get_live_orders: {e}")
+            return 0
+        updated = 0
+        for o in orders:
+            coid = str(o.get("orderId", ""))
+            ib_status = o.get("status", "")
+            if not coid or not ib_status:
+                continue
+            if self.update_order_trader_by_client_id(coid, account, _STATUS_MAP.get(ib_status, ib_status)):
+                updated += 1
+        if updated:
+            _logger.warning(f"sync_orders_from_ib: {updated} actualizadas account={account}")
+        return updated
+
+    def sync_orders_from_binance(self, b_client, account: str) -> int:
+        """Sincroniza order_trader (Crypto) comparando contra órdenes abiertas en Binance.
+        Órdenes que ya no están abiertas → consulta estado real y actualiza BD."""
+        _STATUS_MAP = {
+            "FILLED": "Filled",
+            "CANCELED": "CANCELED",
+            "EXPIRED": "CANCELED",
+            "NEW": "New",
+            "PARTIALLY_FILLED": "Submitted",
+        }
+        try:
+            open_orders = b_client.Myget_open_orders() or []
+            open_ids = {str(o.get("orderId", "")) for o in open_orders}
+        except Exception as e:
+            _logger.error(f"[sync_orders_from_binance] get_open_orders: {e}")
+            return 0
+
+        rows, ix = self.select_order_trader_today(account, "Crypto")
+        pending = [
+            dict(zip(ix, r)) for r in rows if dict(zip(ix, r)).get("status") in ("New", "Submitted", "PreSubmitted")
+        ]
+        updated = 0
+        for r in pending:
+            coid = str(r.get("clientOrderId") or "")
+            if not coid or coid in open_ids:
+                continue
+            try:
+                detail = b_client.get_order_status(symbol=r["symbol"], order_id=int(coid)) if coid.isdigit() else None
+                if not detail:
+                    continue
+                bn_status = _STATUS_MAP.get(detail.get("status", ""), detail.get("status", ""))
+                if self.update_order_trader_by_client_id(coid, account, bn_status):
+                    updated += 1
+            except Exception as e:
+                _logger.warning(f"[sync_orders_from_binance] {r.get('symbol')}: {e}")
+        if updated:
+            _logger.warning(f"sync_orders_from_binance: {updated} actualizadas account={account}")
+        return updated
+
+    def cleanup_order_trader_eod(self, account: str) -> int:
+        """Elimina de order_trader las órdenes de hoy que no sean Filled ni Submitted (limpieza fin de día)."""
+        conn = self._conectar(tabla="insert.order_trader")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM order_trader "
+                "WHERE account = %s AND DATE(stampPlace) = CURDATE() "
+                "AND status NOT IN ('Filled', 'Submitted', 'New')",
+                (account,),
+            )
+            conn.commit()
+            return cursor.rowcount
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::cleanup_order_trader_eod]: {error}")
+            return 0
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
 
     def sync_splits(self, account="U4214563"):
         """Detecta splits via yfinance para posiciones abiertas (stock>0), registra en bdinv.split

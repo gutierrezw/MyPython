@@ -215,6 +215,7 @@ class DataHub:
     manager_after = {}
     manager_buysell = {}
     manager_sesion = {}
+    clients = {}  # {vehiculo: client_instance} — IClient para Stock, BClient para Crypto
     manager_GyP = {
         "BotCrypto": {"Value": 0, "Inversion": 0, "dGyP": 0, "Debit": 0, "Margen": 0},
         "Stock": {"Debit": 0, "DebitMax": 0, "BetaPortfolio": 1.0},
@@ -1159,8 +1160,11 @@ class MyOrders:
         # clientes de vehiculos
         self.BClient = BinanceClient().spot
         self.IClient = IB()
+        DataHub.clients["Stock"] = self.IClient
+        DataHub.clients["Crypto"] = self.BClient
 
         # variables de TRADER
+        self._trader_first_run = True  # True = primera ejecución → lookback 10 días; False = solo hoy
         self.entry_qty = None
         self.entry_prc = None
         self.entry_tip = None
@@ -2731,6 +2735,13 @@ class TickerInfo(MyOrders):
 
         return l_activos
 
+    def eod_cleanup_orders(self, ib_client, account: str) -> dict:
+        """Fin de día: sincroniza status desde IB y elimina órdenes que no sean Filled/Submitted/New."""
+        synced = self.RepositorioOportunidades.sync_orders_from_ib(ib_client, account)
+        deleted = self.RepositorioOportunidades.cleanup_order_trader_eod(account)
+        self.logger.warning(f"eod_cleanup_orders: synced={synced} deleted={deleted}")
+        return {"synced": synced, "deleted": deleted}
+
     # envía ordenes remotas desde DataHub QremoteOrder
     def schedule_order_remote(self):
         try:
@@ -2885,6 +2896,7 @@ class TickerInfo(MyOrders):
         try:
             # revisa update trader vehículos
             self.trader_api_vehiculo()
+            self._trader_first_run = False
 
             # contabiliza ejecución del schedule
             task = f"schedule_trader({self.vehiculo})"

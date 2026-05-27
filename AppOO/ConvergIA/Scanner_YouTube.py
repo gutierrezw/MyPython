@@ -142,12 +142,15 @@ def _backfill_incomplete(market: MarketScreen, limit: int = 5) -> int:
     for sym in symbols:
         try:
             info = yf.Ticker(sym).info
+            price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
             market.update_youtube_candidato_fields(
                 sym,
                 website=info.get("website") or None,
                 sector=info.get("sector") or None,
                 market_cap=int(info.get("marketCap") or 0) or None,
                 company_name=info.get("shortName") or info.get("longName") or None,
+                country=info.get("country") or None,
+                last_price=float(price) if price else None,
             )
             updated += 1
         except Exception as e:
