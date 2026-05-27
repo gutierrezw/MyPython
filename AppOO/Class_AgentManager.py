@@ -18,7 +18,7 @@ from Class_Screener import sync_market, audit_portfolio, refresh_consenso_tags
 from Class_InstitucionalScore import sync_institutional, sync_edgar_funds, sync_13f_scores
 from edgar_13f import sync_fund_filings, sync_13f_holdings
 from ConvergIA.Scanner_Sentimiento import scan_sentimiento
-from ConvergIA.Scanner_YouTube import scan_youtube
+from ConvergIA.Scanner_YouTube import scan_youtube, backfill_youtube_candidatos
 from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
 from valuation_edgar_downloader import BASE_DIR, download_filing
 from valuation_xbrl_api import get_zip_files
@@ -438,18 +438,23 @@ class AgentManager:
     def Agente_ApiCostTracker(self):
         try:
             sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIA")
-            api_key = sesion["userapi"].decode("utf-8") if sesion else ""
-            workspace_id = sesion["environment"].decode("utf-8") if sesion else ""
+
+            def _s(v):
+                return v.decode("utf-8") if isinstance(v, bytes) else (v or "")
+
+            api_key = _s(sesion.get("userapi")) if sesion else ""
+            workspace_id = _s(sesion.get("environment")) if sesion else ""
             result = ApiCostTracker(api_key, workspace_id).get_monthly_summary()
             self._log_ia.warning(f"ApiCostTracker: cost=${result['total_cost']:.4f} hoy=${result['today_cost']:.4f}")
         except Exception as e:
             self._log_ia.error(f"Agente_ApiCostTracker(): {e}")
 
-    @wait_rate(86400, persist=True)
+    @wait_rate(21600, persist=True)
     def Agente_YouTubeScanner(self):
         try:
             sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIS")
-            api_key = sesion["userapi"].decode("utf-8") if sesion else ""
+            _s = lambda v: v.decode("utf-8") if isinstance(v, bytes) else (v or "")
+            api_key = _s(sesion.get("userapi")) if sesion else ""
             result = scan_youtube(self.account, api_key)
             self._log_ia.warning(
                 f"YouTubeScanner: videos={result['videos']} financieros={result['filtered']} "
@@ -457,6 +462,15 @@ class AgentManager:
             )
         except Exception as e:
             self._log_ia.error(f"Agente_YouTubeScanner(): {e}")
+
+    @wait_rate(900, persist=True)
+    def Agente_YouTubeBackfill(self):
+        try:
+            completados = backfill_youtube_candidatos(limit=5)
+            if completados:
+                self._log_ia.warning(f"YouTubeBackfill: {completados} candidatos completados")
+        except Exception as e:
+            self._log_ia.error(f"Agente_YouTubeBackfill(): {e}")
 
     # ── Agente.Infra ──────────────────────────────────────────────────────────
 
@@ -496,6 +510,7 @@ class AgentManager:
             ("Agente_InterpreteSentimiento", self.Agente_InterpreteSentimiento, 300),
             ("Agente_ApiCostTracker", self.Agente_ApiCostTracker, 300),
             ("Agente_YouTubeScanner", self.Agente_YouTubeScanner, 300),
+            ("Agente_YouTubeBackfill", self.Agente_YouTubeBackfill, 60),
         ]
         for name, target, sleep in _threads:
             DataHub.procesos.append({"thread": {name: 1}})

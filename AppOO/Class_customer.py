@@ -1127,13 +1127,23 @@ class DataHub:
 
     @staticmethod
     def preservation_extract_order_id(response):
-        """Extrae order_id de la respuesta tras colocar una orden."""
+        """Extrae order_id de la respuesta tras colocar una orden.
+        El procesador QremoteOrder envuelve la respuesta como {"values": {...}, "status": ...}
+        donde values contiene "clientOrderId" (confirmado) o "id_order" (IB raw id).
+        """
         try:
             if isinstance(response, dict):
-                return response.get("order_id") or response.get("id")
+                values = response.get("values") or response
+                if isinstance(values, dict):
+                    return (
+                        values.get("clientOrderId")
+                        or values.get("id_order")
+                        or values.get("order_id")
+                        or values.get("id")
+                    )
             if isinstance(response, (list, tuple)) and response:
                 first = response[0] if isinstance(response[0], dict) else response
-                return first.get("order_id") or first.get("id")
+                return first.get("clientOrderId") or first.get("id_order") or first.get("order_id") or first.get("id")
         except Exception:
             pass
         return None
@@ -2747,24 +2757,33 @@ class TickerInfo(MyOrders):
 
                 if vehiculo == "Stock":
 
-                    response = self.put_completa_orden(
-                        account=account,
-                        vehiculo=vehiculo,
-                        symbol=symbol,
-                        pedido=pedido,
-                        hash_id_Op=hash_id,
-                        remote=True,
-                        origen="Telegram",
-                    )
-
-                    # arma respuesta compuesta para el bot
-                    resp = {
-                        "values": response,
-                        "status": response.get("status", "No Submit"),
-                    }
-
-                    # libera recursos y entrega response
-                    DataHub.QremoteOrder[self.vehiculo]._complete(future, resp)
+                    if isinstance(pedido, dict) and pedido.get("action") == "cancel":
+                        order_id = pedido.get("order_id")
+                        try:
+                            self.IClient.delete_order(account_id=account, customer_order_id=str(order_id))
+                            self.logger.warning(
+                                f"schedule_order_remote: cancel OK | order_id={order_id} | symbol={symbol}"
+                            )
+                            resp = {"values": {"order_id": order_id}, "status": "Cancelled"}
+                        except Exception as e:
+                            self.logger.error(f"schedule_order_remote: cancel FAIL | order_id={order_id} | {e}")
+                            resp = {"values": {}, "status": "CancelError"}
+                        DataHub.QremoteOrder[self.vehiculo]._complete(future, resp)
+                    else:
+                        response = self.put_completa_orden(
+                            account=account,
+                            vehiculo=vehiculo,
+                            symbol=symbol,
+                            pedido=pedido,
+                            hash_id_Op=hash_id,
+                            remote=True,
+                            origen="Telegram",
+                        )
+                        resp = {
+                            "values": response,
+                            "status": response.get("status", "No Submit"),
+                        }
+                        DataHub.QremoteOrder[self.vehiculo]._complete(future, resp)
 
                 elif vehiculo == "Crypto":
                     response = self.put_completa_orden(

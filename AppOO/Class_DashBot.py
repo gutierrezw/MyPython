@@ -103,7 +103,7 @@ class ClassAgenteIA:
         self.preservation_config = {}  # {vehiculo: sub-dict "preservation"} — extraído de _params_cache
         self.preservation_last_run = {}  # {vehiculo: datetime} — última evaluación por vehículo
         self._params_cache = {}  # {vehiculo: full parsed parameters dict} — compartido entre agentes
-        self._preservation_dry_run = True  # True = solo log, sin órdenes reales
+        self._preservation_dry_run = True
         self._preservation_live_symbols = set()
         # Cargar estado persistido (sobrevive reinicios — stop_prev correcto sin depender de IB)
         _saved = read_json_tmp("preservation_state.json")
@@ -119,12 +119,13 @@ class ClassAgenteIA:
             for k, v in _saved.items()
         }
 
-        # Logger dedicado a preservation — escribe a tmp/preservation_diag.log
+        # Logger dedicado a preservation — escribe a logs/preservation_diag.log
         self._preservation_logger = logging.getLogger("Preservation")
         if not self._preservation_logger.handlers:
             _tmp = os.environ.get("APPOO_TMP") or os.path.join(os.getcwd(), "tmp")
-            os.makedirs(_tmp, exist_ok=True)
-            _fh = logging.FileHandler(os.path.join(_tmp, "preservation_diag.log"), encoding="utf-8")
+            _logs = os.path.normpath(os.path.join(_tmp, "..", "logs"))
+            os.makedirs(_logs, exist_ok=True)
+            _fh = logging.FileHandler(os.path.join(_logs, "preservation_diag.log"), encoding="utf-8")
             _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
             self._preservation_logger.addHandler(_fh)
             self._preservation_logger.setLevel(logging.DEBUG)
@@ -633,7 +634,7 @@ class Telegram:
                 asyncio.set_event_loop(loop)
 
                 # Construir app en el MISMO loop que hará polling
-                self.telegram_app = ApplicationBuilder().token(self.TOKEN).build()
+                self.telegram_app = ApplicationBuilder().token(self.TOKEN).connect_timeout(30).read_timeout(30).build()
 
                 self.telegram_app.add_handler(CommandHandler("menu", self.handle_menu))
                 self.telegram_app.add_handler(CommandHandler("start", self.handle_segurity_message))
@@ -663,6 +664,7 @@ class Telegram:
                     self.telegram_app.run_polling(
                         allowed_updates=["message", "callback_query"],
                         drop_pending_updates=True,
+                        bootstrap_retries=-1,
                     )
                 )
             except Exception as e:
