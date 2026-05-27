@@ -29,7 +29,7 @@ while True:
     params = {
         "starting_at": start.strftime("%Y-%m-%dT00:00:00Z"),
         "ending_at": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "group_by[]": "description",
+        "group_by[]": "model",
         "bucket_width": "1d",
     }
     if next_page:

@@ -16,5 +16,7 @@ CREATE TABLE IF NOT EXISTS youtube_candidatos (
     INDEX idx_ultima_vez (ultima_vez)
 );
 
--- Agregar columna website si no existe
-ALTER TABLE youtube_candidatos ADD COLUMN IF NOT EXISTS website VARCHAR(200) DEFAULT NULL AFTER sector;
+-- Agregar columnas si no existen
+ALTER TABLE youtube_candidatos ADD COLUMN IF NOT EXISTS website    VARCHAR(200) DEFAULT NULL AFTER sector;
+ALTER TABLE youtube_candidatos ADD COLUMN IF NOT EXISTS country    VARCHAR(60)  DEFAULT NULL AFTER website;
+ALTER TABLE youtube_candidatos ADD COLUMN IF NOT EXISTS last_price DECIMAL(12,4) DEFAULT NULL AFTER country;

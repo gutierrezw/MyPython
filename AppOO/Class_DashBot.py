@@ -340,6 +340,38 @@ class ClassAgenteIA:
             raise RuntimeError(f"{resp.status_code} — {resp.json()}")
         return resp.json()["content"][0]["text"].strip()
 
+    @wait_rate(300, persist=True)
+    def Agente_SyncOrders(self):
+        """Sincroniza order_trader con el estado real en IB (Stock) y Binance (Crypto) cada 5 min."""
+        try:
+            ib = DataHub.clients.get("Stock")
+            if ib:
+                n = self.RepositorioOportunidades.sync_orders_from_ib(ib, self.account)
+                self.logger.warning(f"Agente_SyncOrders IB: {n} actualizadas")
+        except Exception as e:
+            self.logger.error(f"Agente_SyncOrders IB: {e}")
+        try:
+            bc = DataHub.clients.get("Crypto")
+            if bc:
+                n = self.RepositorioOportunidades.sync_orders_from_binance(bc, self.account)
+                self.logger.warning(f"Agente_SyncOrders Binance: {n} actualizadas")
+        except Exception as e:
+            self.logger.error(f"Agente_SyncOrders Binance: {e}")
+
+    @wait_rate(3600, persist=True)
+    def Agente_OrderEodCleanup(self):
+        """Fin de día: elimina de order_trader órdenes que no sean Filled/Submitted/New.
+        Solo ejecuta entre 16:30 y 20:00 hora local (post-cierre mercado).
+        El sync con IB se hace previamente via botón Update en Lista de Ordenes."""
+        try:
+            hora = datetime.now().hour + datetime.now().minute / 60
+            if not (16.5 <= hora <= 20.0):
+                return
+            deleted = self.RepositorioOportunidades.cleanup_order_trader_eod(self.account)
+            self.logger.warning(f"Agente_OrderEodCleanup: deleted={deleted}")
+        except Exception as e:
+            self.logger.error(f"Agente_OrderEodCleanup(): {e}")
+
     # agente defensivo: protege ganancias con órdenes STOP dinámicas
     async def Agente_ManagerPreservation(self):
         """
@@ -1522,6 +1554,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     self.exec_modulo_async(self.Agente_ManagerTop10())
                     agent_mgr.run_loop()
                     self.exec_modulo_async(self.Agente_ManagerPreservation())
+                    self.Agente_SyncOrders()
+                    self.Agente_OrderEodCleanup()
                     time.sleep(15)
                     self.counter += 1
                     DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=self.counter)

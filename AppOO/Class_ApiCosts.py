@@ -69,7 +69,7 @@ class ApiCostTracker:
         all_data = []
         next_page = None
         while True:
-            params = {"starting_at": start, "ending_at": end, "group_by[]": "description", "bucket_width": "1d"}
+            params = {"starting_at": start, "ending_at": end, "group_by[]": "model", "bucket_width": "1d"}
             if self._workspace_id:
                 params["workspace_id"] = self._workspace_id
             if next_page:
