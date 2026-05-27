@@ -713,9 +713,9 @@ class Screener(tk.Frame):
 
             ttk.Button(
                 btn_frame,
-                text="Inst. Out",
+                text="Candidatos",
                 width=10,
-                state=tk.DISABLED,
+                command=self._show_youtube_candidatos,
             ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
 
             ttk.Button(
@@ -727,9 +727,9 @@ class Screener(tk.Frame):
 
             ttk.Button(
                 btn_frame,
-                text="Candidatos",
+                text="Canales YT",
                 width=10,
-                command=self._show_youtube_candidatos,
+                command=self._show_youtube_canales,
             ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
 
             # Status bar — health check pipeline 13F (derecha)
@@ -975,12 +975,13 @@ class Screener(tk.Frame):
         win.update_idletasks()
         sw = win.winfo_screenwidth()
         sh = win.winfo_screenheight()
-        w, h = 1220, 460
+        w, h = 1300, 460
         win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
 
         _COLS = (
             "Symbol",
             "Empresa",
+            "País",
             "Veces",
             "Conf",
             "Precio",
@@ -991,10 +992,12 @@ class Screener(tk.Frame):
             "En Market",
             "Cartera",
         )
-        _WIDTHS = (70, 150, 75, 50, 70, 70, 130, 150, 85, 70, 55)
+        _WIDTHS = (70, 150, 55, 75, 50, 70, 70, 130, 150, 85, 70, 55)
 
         frame = tk.Frame(win, bg="black")
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 4))
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
 
         _sort_state = {}
 
@@ -1011,7 +1014,6 @@ class Screener(tk.Frame):
         def _sort_col(col):
             asc = not _sort_state.get(col, False)
             _sort_state[col] = asc
-            col_idx = _COLS.index(col)
             _NUMERIC = {"Veces", "Conf", "Precio", "Mkt Cap"}
 
             def _key(iid):
@@ -1035,9 +1037,11 @@ class Screener(tk.Frame):
             tree.heading(col, text=col, command=lambda c=col: _sort_col(c))
 
         vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
-        tree.configure(yscrollcommand=vsb.set)
-        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vsb.pack(side=tk.LEFT, fill=tk.Y)
+        hsb = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=tree.xview)
+        tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
 
         btn_frame = tk.Frame(win, bg="black")
         btn_frame.pack(fill=tk.X, padx=10, pady=(0, 8))
@@ -1045,7 +1049,10 @@ class Screener(tk.Frame):
         status_lbl = tk.Label(btn_frame, text="", bg="black", fg="#aaaaaa", font=("Courier", 9))
         status_lbl.pack(side=tk.RIGHT, padx=8)
 
+        _websites = {}
+
         def _refresh():
+            _websites.clear()
             for row in tree.get_children():
                 tree.delete(row)
             rows = MarketScreen().load_youtube_candidatos("pending")
@@ -1057,6 +1064,8 @@ class Screener(tk.Frame):
                 tag = "en_cartera" if en_cartera else ("en_market" if en_market else "")
                 price = r.get("lastPrice")
                 price_str = f"{price:,.2f}" if price else ""
+                if r.get("website"):
+                    _websites[r["symbol"]] = r["website"]
                 tree.insert(
                     "",
                     tk.END,
@@ -1064,6 +1073,7 @@ class Screener(tk.Frame):
                     values=(
                         r["symbol"],
                         r.get("company_name") or "",
+                        r.get("country") or "",
                         r["apariciones"],
                         f"{r['confidence']:.2f}",
                         price_str,
@@ -1116,6 +1126,21 @@ class Screener(tk.Frame):
                 **btn_cfg,
             ).pack(fill=tk.X, padx=1, pady=(0, 1))
 
+            def _abrir_web(sym=symbol):
+                menu.destroy()
+                url = _websites.get(sym) or ""
+                if not url:
+                    try:
+                        url = yf.Ticker(sym).info.get("website") or ""
+                        if url:
+                            _websites[sym] = url
+                    except Exception:
+                        pass
+                if url:
+                    webbrowser.open(url)
+
+            tk.Button(menu, text="Web", command=_abrir_web, **btn_cfg).pack(fill=tk.X, padx=1, pady=(0, 1))
+
             x = win.winfo_pointerx() + 5
             y = win.winfo_pointery()
             menu.geometry(f"+{x}+{y}")
@@ -1133,7 +1158,173 @@ class Screener(tk.Frame):
         tree.bind("<<TreeviewSelect>>", _context_menu)
 
         ttk.Button(btn_frame, text="Refresh", width=10, command=_refresh).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(btn_frame, text="Cancelar", width=10, command=win.destroy).pack(side=tk.LEFT)
+        ttk.Button(btn_frame, text="Cancel", width=10, command=win.destroy).pack(side=tk.LEFT)
+
+        _refresh()
+
+    def _show_youtube_canales(self):
+        win = tk.Toplevel(self)
+        win.title("Mantenimiento — Canales YouTube")
+        win.configure(bg="black")
+        win.resizable(False, False)
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        w, h = 960, 380
+        win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+
+        bgcolor = (self.colors or {}).get("bgcolor", "black")
+        cgcolor = (self.colors or {}).get("cgcolor", "DarkCyan")
+        entry_bg = "#1a1a2e"
+
+        _COLS = ("ID", "Canal", "Channel ID", "URL", "Activo", "Score", "Detecciones", "Validados", "Último Scan")
+        _WIDTHS = (35, 140, 200, 180, 50, 50, 85, 75, 120)
+
+        frame = tk.Frame(win, bg="black")
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 4))
+
+        tree = ttk.Treeview(frame, columns=_COLS, show="headings", selectmode="browse")
+        for col, cw in zip(_COLS, _WIDTHS):
+            tree.column(col, width=cw, anchor=tk.CENTER)
+        tree.column("Canal", anchor=tk.W)
+        tree.column("URL", anchor=tk.W)
+        for col in _COLS:
+            tree.heading(col, text=col)
+        tree.tag_configure("inactivo", foreground="#555555")
+
+        vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.LEFT, fill=tk.Y)
+
+        def _refresh():
+            for row in tree.get_children():
+                tree.delete(row)
+            for r in MarketScreen().load_youtube_canales_all():
+                last = str(r.get("last_scan") or "")[:16]
+                tag = "" if r.get("active") else "inactivo"
+                tree.insert(
+                    "",
+                    tk.END,
+                    iid=str(r["id"]),
+                    values=(
+                        r["id"],
+                        r["canal"],
+                        r["channel_id"],
+                        r.get("url") or "",
+                        "Sí" if r.get("active") else "No",
+                        r.get("score", 50),
+                        r.get("detecciones", 0),
+                        r.get("validados", 0),
+                        last,
+                    ),
+                    tags=(tag,) if tag else (),
+                )
+
+        def _get_selected_id():
+            sel = tree.selection()
+            return int(sel[0]) if sel else None
+
+        def _open_editor(data=None):
+            ed = tk.Toplevel(win)
+            ed.title("Agregar canal" if data is None else "Editar canal")
+            ed.configure(bg=bgcolor)
+            ed.resizable(False, False)
+            ew, eh = 560, 280
+            ed.geometry(f"{ew}x{eh}+{(sw - ew) // 2}+{(sh - eh) // 2}")
+
+            fields = [
+                ("Canal (nombre)", "canal", data.get("canal", "") if data else ""),
+                ("Channel ID (UC...)", "channel_id", data.get("channel_id", "") if data else ""),
+                ("URL", "url", data.get("url", "") if data else ""),
+            ]
+            entries = {}
+            for label, key, val in fields:
+                row = tk.Frame(ed, bg=bgcolor)
+                row.pack(fill=tk.X, padx=16, pady=5)
+                tk.Label(row, text=label, width=18, anchor="w", bg=bgcolor, fg="white").pack(side=tk.LEFT)
+                e = tk.Entry(row, bg=entry_bg, fg="white", insertbackground="white", width=40)
+                e.insert(0, val)
+                e.pack(side=tk.LEFT)
+                entries[key] = e
+
+            row_act = tk.Frame(ed, bg=bgcolor)
+            row_act.pack(fill=tk.X, padx=16, pady=5)
+            tk.Label(row_act, text="Activo", width=20, anchor="w", bg=bgcolor, fg="white").pack(side=tk.LEFT)
+            var_active = tk.IntVar(value=int(data.get("active", 1)) if data else 1)
+            tk.Checkbutton(
+                row_act, variable=var_active, bg=bgcolor, fg="white", activebackground=bgcolor, selectcolor=bgcolor
+            ).pack(side=tk.LEFT)
+
+            row_score = tk.Frame(ed, bg=bgcolor)
+            row_score.pack(fill=tk.X, padx=16, pady=5)
+            tk.Label(row_score, text="Score (0-100)", width=20, anchor="w", bg=bgcolor, fg="white").pack(side=tk.LEFT)
+            var_score = tk.IntVar(value=int(data.get("score", 50)) if data else 50)
+            tk.Spinbox(
+                row_score,
+                from_=0,
+                to=100,
+                textvariable=var_score,
+                bg=entry_bg,
+                fg="white",
+                width=6,
+                insertbackground="white",
+            ).pack(side=tk.LEFT)
+
+            def _guardar():
+                canal = entries["canal"].get().strip()
+                channel_id = entries["channel_id"].get().strip()
+                url = entries["url"].get().strip()
+                if not canal or not channel_id:
+                    messagebox.showwarning("Faltan datos", "Canal y Channel ID son obligatorios.", parent=ed)
+                    return
+                market = MarketScreen()
+                if data is None:
+                    ok = market.insert_youtube_canal(canal, channel_id, url, var_active.get(), var_score.get())
+                else:
+                    ok = market.update_youtube_canal(
+                        data["id"], canal, channel_id, url, var_active.get(), var_score.get()
+                    )
+                if ok:
+                    ed.destroy()
+                    _refresh()
+                else:
+                    messagebox.showerror("Error", "No se pudo guardar.", parent=ed)
+
+            btn = tk.Frame(ed, bg=bgcolor)
+            btn.pack(fill=tk.X, padx=16, pady=(12, 8))
+            ttk.Button(btn, text="Guardar", width=10, command=_guardar).pack(side=tk.LEFT, padx=(0, 6))
+            ttk.Button(btn, text="Cancel", width=10, command=ed.destroy).pack(side=tk.LEFT)
+
+        def _on_agregar():
+            _open_editor(data=None)
+
+        def _on_editar(event=None):
+            sel_id = _get_selected_id()
+            if sel_id is None:
+                return
+            rows = MarketScreen().load_youtube_canales_all()
+            data = next((r for r in rows if r["id"] == sel_id), None)
+            if data:
+                _open_editor(data)
+
+        def _on_eliminar():
+            sel_id = _get_selected_id()
+            if sel_id is None:
+                messagebox.showwarning("Sin selección", "Seleccione un canal primero.", parent=win)
+                return
+            canal_name = tree.set(str(sel_id), "Canal")
+            if messagebox.askyesno("Confirmar", f"¿Eliminar canal '{canal_name}'?", parent=win):
+                if MarketScreen().delete_youtube_canal(sel_id):
+                    _refresh()
+                else:
+                    messagebox.showerror("Error", "No se pudo eliminar.", parent=win)
+
+        tree.bind("<Double-1>", _on_editar)
+
+        btn_frame = tk.Frame(win, bg="black")
+        btn_frame.pack(fill=tk.X, padx=10, pady=(0, 8))
+        ttk.Button(btn_frame, text="Agregar", width=10, command=_on_agregar).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_frame, text="Eliminar", width=10, command=_on_eliminar).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_frame, text="Cancel", width=10, command=win.destroy).pack(side=tk.LEFT)
 
         _refresh()
 

@@ -72,10 +72,11 @@ def _filter_financial(videos: list) -> list:
 
 
 def _resolve_names(nombres: list) -> tuple:
-    """Convierte lista de nombres → ({ticker: confidence}, {ticker: market_cap}, {ticker: company_name})."""
+    """Convierte lista de nombres → ({ticker: confidence}, {ticker: market_cap}, {ticker: company_name}, {ticker: website})."""
     candidates = {}
     market_caps = {}
     company_names = {}
+    websites = {}
     for nombre in nombres:
         try:
             quotes = yf.Search(nombre, max_results=1).quotes
@@ -90,15 +91,19 @@ def _resolve_names(nombres: list) -> tuple:
             candidates[ticker] = 0.90
             market_caps[ticker] = int(top.get("regularMarketCap") or top.get("marketCap") or 0)
             company_names[ticker] = nombre
+            try:
+                websites[ticker] = yf.Ticker(ticker).info.get("website") or ""
+            except Exception:
+                websites[ticker] = ""
         except Exception as e:
             _logger.warning(f"_resolve_names [{nombre}]: {e}")
         time.sleep(0.3)
-    return candidates, market_caps, company_names
+    return candidates, market_caps, company_names, websites
 
 
 def _classify(videos: list, api_key: str) -> tuple:
     if not videos or not api_key:
-        return {}, {}, {}
+        return {}, {}, {}, {}
 
     lines = []
     for v in videos:
@@ -127,7 +132,28 @@ def _classify(videos: list, api_key: str) -> tuple:
             return _resolve_names(nombres)
     except Exception as e:
         _logger.error(f"_classify: {e}")
-    return {}, {}, {}
+    return {}, {}, {}, {}
+
+
+def _backfill_incomplete(market: MarketScreen, limit: int = 5) -> int:
+    """Completa campos nulos en candidatos existentes. Máx `limit` por ejecución para no saturar yfinance."""
+    symbols = market.load_youtube_candidatos_incomplete(limit)
+    updated = 0
+    for sym in symbols:
+        try:
+            info = yf.Ticker(sym).info
+            market.update_youtube_candidato_fields(
+                sym,
+                website=info.get("website") or None,
+                sector=info.get("sector") or None,
+                market_cap=int(info.get("marketCap") or 0) or None,
+                company_name=info.get("shortName") or info.get("longName") or None,
+            )
+            updated += 1
+        except Exception as e:
+            _logger.warning(f"_backfill_incomplete [{sym}]: {e}")
+        time.sleep(0.5)
+    return updated
 
 
 def _validate(candidates: dict, market_caps: dict, account: str) -> dict:
@@ -182,7 +208,7 @@ def scan_youtube(account: str, api_key: str = None) -> dict:
 
     videos, all_ids = _fetch_videos(canales, seen_ids)
     filtered = _filter_financial(videos)
-    candidates_raw, market_caps, company_names = _classify(filtered, key)
+    candidates_raw, market_caps, company_names, websites = _classify(filtered, key)
     validated = _validate(candidates_raw, market_caps, account)
 
     market = MarketScreen()
@@ -193,7 +219,12 @@ def scan_youtube(account: str, api_key: str = None) -> dict:
             "unknown",
         )
         market.upsert_youtube_candidato(
-            ticker, data["confidence"], data.get("market_cap", 0), canal_origen, company_names.get(ticker, "")
+            ticker,
+            data["confidence"],
+            data.get("market_cap", 0),
+            canal_origen,
+            company_names.get(ticker, ""),
+            websites.get(ticker, ""),
         )
 
     rechazados = market.cleanup_youtube_candidatos()
@@ -232,3 +263,9 @@ def scan_youtube(account: str, api_key: str = None) -> dict:
         "new_validated": len(validated),
         "validated": validated,
     }
+
+
+def backfill_youtube_candidatos(limit: int = 5) -> int:
+    """Completa campos nulos en candidatos existentes. Sin RSS ni Claude. Máx `limit` por llamada."""
+    market = MarketScreen()
+    return _backfill_incomplete(market, limit)

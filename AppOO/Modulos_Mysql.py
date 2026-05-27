@@ -2557,6 +2557,82 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+    def load_youtube_canales_all(self) -> list:
+        """Retorna todos los canales (activos e inactivos) como lista de dicts para la UI de mantenimiento."""
+        conn = self._conectar(tabla="select.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, canal, channel_id, url, active, score, detecciones, validados, last_scan "
+                "FROM youtube_canales ORDER BY score DESC, canal ASC"
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_youtube_canales_all]: {error}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def insert_youtube_canal(self, canal: str, channel_id: str, url: str, active: int, score: int) -> bool:
+        conn = self._conectar(tabla="update.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO youtube_canales (canal, channel_id, url, active, score) VALUES (%s, %s, %s, %s, %s)",
+                (canal, channel_id, url or None, active, score),
+            )
+            conn.commit()
+            return True
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::insert_youtube_canal]: {error}")
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def update_youtube_canal(
+        self, canal_id: int, canal: str, channel_id: str, url: str, active: int, score: int
+    ) -> bool:
+        conn = self._conectar(tabla="update.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE youtube_canales SET canal=%s, channel_id=%s, url=%s, active=%s, score=%s WHERE id=%s",
+                (canal, channel_id, url or None, active, score, canal_id),
+            )
+            conn.commit()
+            return True
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::update_youtube_canal]: {error}")
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def delete_youtube_canal(self, canal_id: int) -> bool:
+        conn = self._conectar(tabla="update.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM youtube_canales WHERE id=%s", (canal_id,))
+            conn.commit()
+            return True
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::delete_youtube_canal]: {error}")
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
     def load_youtube_canales(self) -> dict:
         """Retorna {canal: {channel_id, score}} de canales activos, ordenados por score desc."""
         conn = self._conectar(tabla="select.market")
@@ -2596,7 +2672,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             conn.close()
 
     def upsert_youtube_candidato(
-        self, symbol: str, confidence: float, market_cap: int, canal: str, company_name: str = ""
+        self, symbol: str, confidence: float, market_cap: int, canal: str, company_name: str = "", website: str = ""
     ) -> None:
         """INSERT nuevo candidato o incrementa apariciones si ya existe (solo si sigue en pending)."""
         conn = self._conectar(tabla="update.market")
@@ -2614,14 +2690,24 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 cursor.execute(
                     "UPDATE youtube_candidatos SET apariciones=%s, confidence=GREATEST(confidence,%s), "
                     "market_cap=%s, canales=%s, ultima_vez=%s, "
-                    "company_name=COALESCE(company_name, %s) WHERE symbol=%s AND status='pending'",
-                    (apariciones, confidence, market_cap, canales_str, hoy, company_name or None, symbol),
+                    "company_name=COALESCE(company_name, %s), "
+                    "website=COALESCE(website, NULLIF(%s,'')) WHERE symbol=%s AND status='pending'",
+                    (
+                        apariciones,
+                        confidence,
+                        market_cap,
+                        canales_str,
+                        hoy,
+                        company_name or None,
+                        website or None,
+                        symbol,
+                    ),
                 )
             else:
                 cursor.execute(
-                    "INSERT INTO youtube_candidatos (symbol, company_name, apariciones, confidence, market_cap, canales, primera_vez, ultima_vez) "
-                    "VALUES (%s, %s, 1, %s, %s, %s, %s, %s)",
-                    (symbol, company_name or None, confidence, market_cap, canal, hoy, hoy),
+                    "INSERT INTO youtube_candidatos (symbol, company_name, apariciones, confidence, market_cap, canales, website, primera_vez, ultima_vez) "
+                    "VALUES (%s, %s, 1, %s, %s, %s, %s, %s, %s)",
+                    (symbol, company_name or None, confidence, market_cap, canal, website or None, hoy, hoy),
                 )
             conn.commit()
         except (Exception, connect.Error) as error:
@@ -2644,7 +2730,9 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 "CASE WHEN m.symbol IS NOT NULL THEN 1 ELSE 0 END AS en_market, "
                 "COALESCE(m.encartera, 'N') AS en_cartera, "
                 "COALESCE(c.sector, m.sector) AS sector, "
-                "m.lastPrice AS lastPrice "
+                "m.lastPrice AS lastPrice, "
+                "m.website AS website, "
+                "m.country AS country "
                 "FROM youtube_candidatos c "
                 "LEFT JOIN market m ON m.symbol = c.symbol "
                 "WHERE c.status = %s "
@@ -2671,6 +2759,62 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             conn.commit()
         except (Exception, connect.Error) as error:
             _logger.error(f"[Mysql::set_youtube_candidato_status]: {error}")
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def load_youtube_candidatos_incomplete(self, limit: int = 5) -> list:
+        """Retorna símbolos pending con campos incompletos (website/sector/market_cap nulos)."""
+        conn = self._conectar(tabla="select.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT symbol FROM youtube_candidatos "
+                "WHERE status = 'pending' "
+                "AND (website IS NULL OR sector IS NULL OR market_cap IS NULL OR market_cap = 0) "
+                "ORDER BY apariciones DESC LIMIT %s",
+                (limit,),
+            )
+            return [row[0] for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_youtube_candidatos_incomplete]: {error}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def update_youtube_candidato_fields(
+        self, symbol: str, website: str = None, sector: str = None, market_cap: int = None, company_name: str = None
+    ) -> None:
+        """Actualiza solo los campos proporcionados (no pisa valores existentes)."""
+        parts = []
+        params = []
+        if website is not None:
+            parts.append("website = COALESCE(website, NULLIF(%s, ''))")
+            params.append(website)
+        if sector is not None:
+            parts.append("sector = COALESCE(sector, NULLIF(%s, ''))")
+            params.append(sector)
+        if market_cap is not None and market_cap > 0:
+            parts.append("market_cap = COALESCE(NULLIF(market_cap, 0), %s)")
+            params.append(market_cap)
+        if company_name is not None:
+            parts.append("company_name = COALESCE(company_name, NULLIF(%s, ''))")
+            params.append(company_name)
+        if not parts:
+            return
+        params.append(symbol)
+        conn = self._conectar(tabla="update.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"UPDATE youtube_candidatos SET {', '.join(parts)} WHERE symbol = %s", params)
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::update_youtube_candidato_fields]: {error}")
         finally:
             if cursor:
                 cursor.close()
