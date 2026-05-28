@@ -1297,6 +1297,13 @@ class MyOrders:
                     quantity=pedido["quantity"],
                     timeInForce=pedido["timeInForce"],
                 )
+                _BINANCE_STATUS = {
+                    "NEW": "Submitted",
+                    "FILLED": "Filled",
+                    "CANCELED": "CANCELED",
+                    "EXPIRED": "CANCELED",
+                    "PARTIALLY_FILLED": "Submitted",
+                }
                 if response:
                     self.SwichSumitOrder = True
                     if "transactTime" in response.keys():
@@ -1310,7 +1317,7 @@ class MyOrders:
                             "price": response["price"],
                             "side": response["side"],
                             "tif": response["timeInForce"],
-                            "status": response["status"],
+                            "status": _BINANCE_STATUS.get(response["status"], response["status"]),
                             "quantity": response["origQty"],
                             "clientOrderId": response["clientOrderId"],
                             "stampPlace": datetime.fromtimestamp(stamp),

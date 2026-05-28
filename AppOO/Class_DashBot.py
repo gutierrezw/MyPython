@@ -68,7 +68,7 @@ from Modulos_Mysql import (
 from Class_customer import DataHub, TickerInfo
 from Class_BrowserBridge import set_claude_contexto
 from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
-from Modulos_Utilitarios import define_FileCache, read_json_tmp, write_json_tmp, AGENTES_SCHEDULE
+from Modulos_Utilitarios import define_FileCache, read_json_tmp, write_json_tmp, AGENTES_SCHEDULE, wait_rate
 from Class_AgentManager import AgentManager
 
 
