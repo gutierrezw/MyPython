@@ -1,11 +1,3 @@
-SELECT * FROM bdinv.order_trader;
-
-
-SELECT vehiculo, status, count(*) 
-FROM bdinv.order_trader
-group by vehiculo, status;
-
-
--- ALTER TABLE order_trader
--- ADD CONSTRAINT chk_intent
--- CHECK (intent IN ('ENTRY','TP1','TP2','EXIT'));
+SELECT * FROM bdinv.order_trader
+Where stampPlace > '2026-05-27 00:24:24.747000'
+;
