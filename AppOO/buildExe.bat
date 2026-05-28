@@ -13,11 +13,10 @@ for /f "tokens=3 delims== " %%a in ('findstr /r "^RELEASE_DATE" version.py 2^>nu
 set APP_VERSION=%APP_VERSION:"=%
 set APP_DATE=%APP_DATE:"=%
 
-:: --- Timestamp para log -----------------------------------------------
-for /f "tokens=*" %%a in ('powershell -nologo -command "Get-Date -Format yyyyMMdd_HHmm"') do set STAMP=%%a
+:: --- Log fijo (se sobreescribe en cada build) --------------------------
 set LOGDIR=%~dp0build_logs
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
-set LOGFILE=%LOGDIR%\build_%STAMP%.log
+set LOGFILE=%LOGDIR%\build.log
 
 echo ======================================================
 echo == AppOO v%APP_VERSION%  (%APP_DATE%)
@@ -124,17 +123,17 @@ echo == Log        : %LOGFILE%
 echo ======================================================
 echo.
 
-set /p DO_TAG=Crear git tag v%APP_VERSION% y push? (s/n):
-if /i "%DO_TAG%"=="s" (
-    git tag -a "v%APP_VERSION%" -m "v%APP_VERSION% -- %APP_DATE%"
-    if %ERRORLEVEL% neq 0 (
-        echo AVISO: git tag fallo. Puede que el tag ya exista.
-    ) else (
-        git push
-        git push --tags
-        echo Tag v%APP_VERSION% publicado.
-    )
-)
+:: set /p DO_TAG=Crear git tag v%APP_VERSION% y push? (s/n):
+:: if /i "%DO_TAG%"=="s" (
+::     git tag -a "v%APP_VERSION%" -m "v%APP_VERSION% -- %APP_DATE%"
+::     if %ERRORLEVEL% neq 0 (
+::         echo AVISO: git tag fallo. Puede que el tag ya exista.
+::     ) else (
+::         git push
+::         git push --tags
+::         echo Tag v%APP_VERSION% publicado.
+::     )
+:: )
 
 cd /d "%DEPLOY%"
 pause
