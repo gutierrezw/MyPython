@@ -2062,6 +2062,10 @@ class DashMain:
         self.PlanInversion = PlanInversion()
         self.Estrategia = EstrategiaInversion()
         self.RepositorioOportunidades = RepositorioOportunidadesBuySell()
+        _sesion = BDsystem.get_sesion_by_vehiculo("Stock")
+        self.account = _sesion.get("idcuenta", "U4214563") if _sesion else "U4214563"
+        _sesion_crypto = BDsystem.get_sesion_by_vehiculo("Crypto")
+        self.account_crypto = _sesion_crypto.get("idcuenta", "B0000001") if _sesion_crypto else "B0000001"
 
         self.program = f"{APP_NAME} v{VERSION}"
         self.dimension = "%dx%d+0+0" % (self.max_dw, self.max_dh)
@@ -2701,8 +2705,16 @@ class DashMain:
                 self.after_ids.append(after_id)
 
     def car_ordenes_activas(self):
+        _refresh_id = [None]
+
         def eexit():
+            if _refresh_id[0]:
+                rnb.after_cancel(_refresh_id[0])
             rnb.destroy()
+
+        def _auto_refresh():
+            update_treeview_ordenes()
+            _refresh_id[0] = rnb.after(30000, _auto_refresh)
 
         # construye treeview con todas las orders
         def config_treeview_ordenes(tree, heard):
@@ -2764,11 +2776,13 @@ class DashMain:
             rows, ix = self.RepositorioOportunidades.select_order_trader_today(self.account, "Stock")
             ib_status = {}
             try:
-                live = self.IClient.get_live_orders()
-                for o in (live or {}).get("orders", []):
-                    coid = str(o.get("orderId", ""))
-                    if coid:
-                        ib_status[coid] = o.get("status", "")
+                ib = getattr(self.stock, "IClient", None)
+                if ib:
+                    live = ib.get_live_orders()
+                    for o in (live or {}).get("orders", []):
+                        coid = str(o.get("orderId", ""))
+                        if coid:
+                            ib_status[coid] = o.get("status", "")
             except Exception as e:
                 print(f"_load_stock_orders_today IB: {e}")
             result = []
@@ -2797,7 +2811,7 @@ class DashMain:
             try:
                 for i, orden in enumerate(_load_stock_orders_today()):
                     st = orden["status"]
-                    tag = "green" if "Fill" in st else "red" if "Cancel" in st else ""
+                    tag = "green" if "fill" in st.lower() else "red" if "cancel" in st.lower() else ""
                     tree.insert(
                         Stock,
                         "end",
@@ -2817,11 +2831,11 @@ class DashMain:
                         ],
                         tags=(tag,) if tag else (),
                     )
-                rows, ix = self.RepositorioOportunidades.select_order_trader_today(self.account, "Crypto")
+                rows, ix = self.RepositorioOportunidades.select_order_trader_today(self.account_crypto, "Crypto")
                 for i, row in enumerate(rows):
                     r = dict(zip(ix, row))
                     st = r.get("status", "")
-                    tag = "green" if "Fill" in st else "red" if "Cancel" in st else ""
+                    tag = "green" if "fill" in st.lower() else "red" if "cancel" in st.lower() else ""
                     tree.insert(
                         Crypto,
                         "end",
@@ -2852,7 +2866,6 @@ class DashMain:
                 items = tree.parent(selected_item)
                 vehiculo = tree.item(items, "text")
 
-                print(f"Botón en la fila seleccionada: {accion} {vehiculo} {values}")
                 if accion == "elimina":
                     eliminar_orden(vehiculo, fields, values)
 
@@ -2862,46 +2875,40 @@ class DashMain:
         # cancela orders en espera para su ejecución
         def eliminar_orden(vehiculo, fields, values):
             try:
+                symbol = values[fields.index("symbol")]
+                account = values[fields.index("account")]
+                id_order = str(values[fields.index("id")])  # Binance orderId / IB UUID
+                id_enviar = str(values[fields.index("id_enviar")])  # clientOrderId
+
                 if vehiculo == "Crypto":
-                    symbol = values[fields.index("symbol")]
-                    orderId = values[fields.index("id")]
-                    account = values[fields.index("account")]
-
-                    # ejecuta API y actualiza order_trader
-                    response = self.crypto_ts.BClient.get_cancel_order(symbol=symbol, orderId=orderId)
+                    bc = getattr(self.crypto, "BClient", None)
+                    if not bc:
+                        print("eliminar_orden: BClient no disponible")
+                        return
+                    response = bc.get_cancel_order(symbol=symbol, orderId=int(id_order))
                     if response:
-                        timestamp = response["transactTime"] / 1000.0
-                        stamp = datetime.fromtimestamp(timestamp)
-                        values = {"status": "CANCELED", "stampSubmit": stamp}
-
                         self.RepositorioOportunidades.update_order_trader(
                             account=account,
-                            values=values,
+                            values={"status": "CANCELED"},
                             symbol=symbol,
-                            orderid=orderId,
+                            orderid=id_order,
                         )
+                        update_treeview_ordenes()
 
                 if vehiculo == "Stock":
-                    symbol = values[fields.index("symbol")]
-                    orderId = str(values[fields.index("id")])
-                    account = values[fields.index("account")]
-
-                    # ejecuta API y actualiza order_trader
-                    # response = self.stock_ts.IClient.delete_order(account_id=account, customer_order_id=orderId)
-
-                    response = self.stock_ts.IClient.deleteorder(account_id=account, customer_order_id=orderId)
-
+                    ib = getattr(self.stock, "IClient", None)
+                    if not ib:
+                        print("eliminar_orden: IClient no disponible")
+                        return
+                    response = ib.delete_order(account_id=account, customer_order_id=id_enviar)
                     if response:
-                        timestamp = response["transactTime"] / 1000.0
-                        stamp = datetime.fromtimestamp(timestamp)
-                        values = {"status": "CANCELED", "stampSubmit": stamp}
-
                         self.RepositorioOportunidades.update_order_trader(
                             account=account,
-                            values=values,
+                            values={"status": "CANCELED"},
                             symbol=symbol,
-                            orderid=orderId,
+                            orderid=id_enviar,
                         )
+                        update_treeview_ordenes()
 
             except Exception as e:
                 print("eliminar_orden(): {}".format(e))
@@ -2909,7 +2916,9 @@ class DashMain:
         # sincroniza BD con IB y refresca treeview
         def update_treeview_ordenes():
             try:
-                self.RepositorioOportunidades.sync_orders_from_ib(self.IClient, self.account)
+                ib = getattr(self.stock, "IClient", None)
+                if ib:
+                    self.RepositorioOportunidades.sync_orders_from_ib(ib, self.account)
             except Exception as e:
                 print(f"update_treeview_ordenes sync: {e}")
             try:
@@ -2931,8 +2940,27 @@ class DashMain:
                 nro = 1
                 today = datetime.now().date()
 
+                # lookup de ids desde order_trader (Filled de hoy)
+                def _build_id_map(account):
+                    rows_ot, ix_ot = self.RepositorioOportunidades.select_order_trader_today(
+                        account, "Stock" if account == self.account else "Crypto"
+                    )
+                    mp = {}
+                    for r in rows_ot:
+                        d = dict(zip(ix_ot, r))
+                        if "fill" in (d.get("status") or "").lower():
+                            sym = d.get("symbol", "")
+                            mp.setdefault(sym, []).append(
+                                (str(d.get("id_order", "")), str(d.get("clientOrderId") or ""))
+                            )
+                    return mp
+
+                ids_stock = _build_id_map(self.account)
+                ids_crypto = _build_id_map(self.account_crypto)
+
                 # --- Stock: IB API ---
                 trades_ib = self.stock_ts.IClient.trades(account_id=self.stock_ts.account, days=1) or []
+                sym_count_stock = {}
                 for t in trades_ib:
                     ts = int(t.get("trade_time_r", 0)) / 1000
                     fh = datetime.fromtimestamp(ts)
@@ -2942,15 +2970,35 @@ class DashMain:
                     side = "BUY" if t.get("side", "") == "B" else "SELL"
                     precio = t.get("price", "")
                     cant = t.get("size", "")
-                    values = ["", "", simbolo, side, "", precio, cant, "", str(fh), "", "", "", ""]
+                    order_type = t.get("order_type", "LMT")
+                    idx = sym_count_stock.get(simbolo, 0)
+                    sym_count_stock[simbolo] = idx + 1
+                    id_list = ids_stock.get(simbolo, [])
+                    id_order, id_enviar = id_list[idx] if idx < len(id_list) else ("", "")
+                    values = [
+                        "",
+                        "",
+                        simbolo,
+                        side,
+                        order_type,
+                        precio,
+                        cant,
+                        "Filled",
+                        str(fh),
+                        id_order,
+                        id_enviar,
+                        "",
+                        "",
+                    ]
                     tree.insert(Stock, "end", text="{:>3.0f}".format(nro), values=values)
                     nro += 1
 
                 # --- Crypto: booktrading hoy ---
                 rows, ix = self.RepositorioOportunidades.select_booktrading(accion="hoy")
+                sym_count_crypto = {}
                 for row in rows:
                     cuenta = row[ix.index("cuenta")]
-                    if cuenta == self.stock_ts.account:
+                    if cuenta != self.account_crypto:
                         continue
                     simbolo = row[ix.index("simbolo")]
                     raw_cod = row[ix.index("codigo")]
@@ -2959,7 +3007,25 @@ class DashMain:
                     basico = row[ix.index("basico")]
                     gp = row[ix.index("gprealizadas")]
                     fh = row[ix.index("fechahora")]
-                    values = ["", "", simbolo, codigo, "", basico, cant, "", str(fh), "", "", gp, ""]
+                    idx = sym_count_crypto.get(simbolo, 0)
+                    sym_count_crypto[simbolo] = idx + 1
+                    id_list = ids_crypto.get(simbolo, [])
+                    id_order, id_enviar = id_list[idx] if idx < len(id_list) else ("", "")
+                    values = [
+                        "",
+                        "",
+                        simbolo,
+                        codigo,
+                        "LIMIT",
+                        basico,
+                        cant,
+                        "Filled",
+                        str(fh),
+                        id_order,
+                        id_enviar,
+                        gp,
+                        "",
+                    ]
                     tree.insert(Crypto, "end", text="{:>3.0f}".format(nro), values=values)
                     nro += 1
             except Exception as e:
@@ -3031,8 +3097,8 @@ class DashMain:
 
             ct1 = tk.Button(
                 win3,
-                text="Eliminar",
-                width=8,
+                text="Order Cancel",
+                width=12,
                 bg="gray",
                 fg="white",
                 command=lambda: on_button_click("elimina", cols),
@@ -3040,51 +3106,49 @@ class DashMain:
             ct2 = tk.Button(
                 win3,
                 text="Modificar",
-                width=8,
+                width=12,
                 bg="gray",
                 fg="white",
                 command=lambda: on_button_click("modifica", cols),
             )
             ct3 = tk.Button(
                 win3,
-                text="Enviar",
-                width=8,
+                text="Order Send",
+                width=12,
                 bg="gray",
                 fg="white",
                 command=lambda: on_button_click("enviar", cols),
             )
             ct4 = tk.Button(
                 win3,
-                text="Update",
-                width=8,
+                text="Refresh",
+                width=12,
                 bg="gray",
                 fg="white",
                 command=lambda: update_treeview_ordenes(),
             )
-
             ct5 = tk.Button(
                 win3,
-                text="Ejecutadas",
-                width=10,
+                text="Order Filled",
+                width=12,
                 bg="gray",
                 fg="white",
                 command=lambda: insert_ejecutadas_treeview(),
             )
-
             ct6 = tk.Button(
                 win3,
                 text="Cancel",
-                width=8,
+                width=12,
                 bg="gray",
                 fg="white",
                 command=lambda: eexit(),
             )
 
             ct1.pack(side=tk.LEFT, padx=5, pady=20)
+            ct5.pack(side=tk.LEFT, padx=5, pady=20)
             ct2.pack(side=tk.LEFT, padx=5, pady=20)
             ct3.pack(side=tk.LEFT, padx=5, pady=20)
             ct4.pack(side=tk.LEFT, padx=5, pady=20)
-            ct5.pack(side=tk.LEFT, padx=5, pady=20)
             ct6.pack(side=tk.LEFT, padx=40, pady=20)
 
             ct2.config(state="disabled")
@@ -3113,6 +3177,7 @@ class DashMain:
             tree.item(Crypto, open=True)
 
             insert_ordenes_treeview(tree)
+            _refresh_id[0] = rnb.after(30000, _auto_refresh)
         except Exception as e:
             print("car_ordenes_activas(): {}".format(e))
 

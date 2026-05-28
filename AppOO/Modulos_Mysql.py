@@ -5236,7 +5236,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             "FILLED": "Filled",
             "CANCELED": "CANCELED",
             "EXPIRED": "CANCELED",
-            "NEW": "New",
+            "NEW": "Submitted",
             "PARTIALLY_FILLED": "Submitted",
         }
         try:
@@ -5248,15 +5248,18 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
         rows, ix = self.select_order_trader_today(account, "Crypto")
         pending = [
-            dict(zip(ix, r)) for r in rows if dict(zip(ix, r)).get("status") in ("New", "Submitted", "PreSubmitted")
+            dict(zip(ix, r))
+            for r in rows
+            if dict(zip(ix, r)).get("status") in ("New", "NEW", "Submitted", "PreSubmitted")
         ]
         updated = 0
         for r in pending:
+            binance_order_id = str(r.get("id_order") or "")
             coid = str(r.get("clientOrderId") or "")
-            if not coid or coid in open_ids:
+            if not binance_order_id or binance_order_id in open_ids:
                 continue
             try:
-                detail = b_client.get_order_status(symbol=r["symbol"], order_id=int(coid)) if coid.isdigit() else None
+                detail = b_client.get_order_status(symbol=r["symbol"], order_id=int(binance_order_id))
                 if not detail:
                     continue
                 bn_status = _STATUS_MAP.get(detail.get("status", ""), detail.get("status", ""))
