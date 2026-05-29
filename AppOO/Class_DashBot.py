@@ -83,6 +83,8 @@ class ClassAgenteIA:
         self.PlanInversion = PlanInversion()
         self.sesion = self.PlanInversion.get_sesion_by_vehiculo(self.vehiculo)
         self.account = self.sesion["idcuenta"]
+        _sesion_crypto = self.PlanInversion.get_sesion_by_vehiculo("Crypto")
+        self.account_crypto = _sesion_crypto.get("idcuenta", "B0000001") if _sesion_crypto else "B0000001"
 
         # variables Modelo sell
         modelo = BDsystem.get_modelo_ia(modelo="modelo_sellv01")
@@ -353,22 +355,22 @@ class ClassAgenteIA:
         try:
             bc = DataHub.clients.get("Crypto")
             if bc:
-                n = self.RepositorioOportunidades.sync_orders_from_binance(bc, self.account)
+                n = self.RepositorioOportunidades.sync_orders_from_binance(bc, self.account_crypto)
                 self.logger.warning(f"Agente_SyncOrders Binance: {n} actualizadas")
         except Exception as e:
             self.logger.error(f"Agente_SyncOrders Binance: {e}")
 
     @wait_rate(3600, persist=True)
     def Agente_OrderEodCleanup(self):
-        """Fin de día: elimina de order_trader órdenes que no sean Filled/Submitted/New.
-        Solo ejecuta entre 16:30 y 20:00 hora local (post-cierre mercado).
-        El sync con IB se hace previamente via botón Update en Lista de Ordenes."""
+        """Cleanup periódico de order_trader: plazos fijos + validación API para NEW/Submitted 2-7d."""
         try:
-            hora = datetime.now().hour + datetime.now().minute / 60
-            if not (16.5 <= hora <= 20.0):
-                return
-            deleted = self.RepositorioOportunidades.cleanup_order_trader_eod(self.account)
-            self.logger.warning(f"Agente_OrderEodCleanup: deleted={deleted}")
+            d_stock = self.RepositorioOportunidades.cleanup_order_trader_eod(self.account)
+            d_crypto = self.RepositorioOportunidades.cleanup_order_trader_eod(self.account_crypto)
+            ib = DataHub.clients.get("Stock")
+            v_stock = self.RepositorioOportunidades.validate_stale_stock_orders(self.account, ib) if ib else 0
+            bc = DataHub.clients.get("Crypto")
+            v_crypto = self.RepositorioOportunidades.validate_stale_crypto_orders(self.account_crypto, bc) if bc else 0
+            self.logger.warning(f"Agente_OrderEodCleanup: deleted={d_stock + d_crypto} validated={v_stock + v_crypto}")
         except Exception as e:
             self.logger.error(f"Agente_OrderEodCleanup(): {e}")
 

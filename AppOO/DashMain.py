@@ -2747,11 +2747,21 @@ class DashMain:
                 tree.column("#0", width=70, minwidth=70, anchor=tk.W)
                 tree.heading("#0", text="Nro")
 
+                _widths = {
+                    "symbol": 80,
+                    "side": 55,
+                    "orderType": 60,
+                    "price": 80,
+                    "quantity": 70,
+                    "importe": 90,
+                    "status": 90,
+                    "hora": 75,
+                    "tiempo": 55,
+                    "id": 90,
+                    "id_enviar": 90,
+                }
                 for i, key in enumerate(cols):
-                    width = 100 if key != "id" else 100
-                    width = 100 if key != "id_enviar" else 100
-
-                    # oculta columnas en panel de orders activas
+                    width = _widths.get(key, 100)
                     width = 0 if key in ("account", "conid", "del", "sub") else width
 
                     tree.column(key, width=width, minwidth=width, anchor=tk.E)
@@ -2802,16 +2812,29 @@ class DashMain:
                         "tif": r.get("tif", ""),
                         "id_order": r.get("id_order", ""),
                         "id_enviar": coid,
+                        "stampPlace": str(r.get("stampPlace", "")),
                     }
                 )
             return result
 
         # agrega orders a treeview
         def insert_ordenes_treeview(tree):
+            def _hora(stamp_str):
+                s = str(stamp_str)
+                return s.split(" ")[1][:8] if " " in s else ""
+
+            def _importe(price, qty):
+                try:
+                    return round(float(price) * float(qty), 4)
+                except Exception:
+                    return ""
+
             try:
                 for i, orden in enumerate(_load_stock_orders_today()):
                     st = orden["status"]
                     tag = "green" if "fill" in st.lower() else "red" if "cancel" in st.lower() else ""
+                    price = orden["price"]
+                    qty = orden["quantity"]
                     tree.insert(
                         Stock,
                         "end",
@@ -2822,9 +2845,11 @@ class DashMain:
                             orden["symbol"],
                             orden["side"],
                             orden["orderType"],
-                            orden["price"],
-                            orden["quantity"],
-                            orden["status"],
+                            price,
+                            qty,
+                            _importe(price, qty),
+                            st,
+                            _hora(orden["stampPlace"]),
                             orden["tif"],
                             orden["id_order"],
                             orden["id_enviar"],
@@ -2836,6 +2861,8 @@ class DashMain:
                     r = dict(zip(ix, row))
                     st = r.get("status", "")
                     tag = "green" if "fill" in st.lower() else "red" if "cancel" in st.lower() else ""
+                    price = r.get("price", "")
+                    qty = r.get("quantity", "")
                     tree.insert(
                         Crypto,
                         "end",
@@ -2846,9 +2873,11 @@ class DashMain:
                             r.get("symbol", ""),
                             r.get("side", ""),
                             r.get("orderType", ""),
-                            r.get("price", ""),
-                            r.get("quantity", ""),
+                            price,
+                            qty,
+                            _importe(price, qty),
                             st,
+                            _hora(str(r.get("stampPlace", ""))),
                             r.get("tif", ""),
                             r.get("id_order", ""),
                             str(r.get("clientOrderId") or ""),
@@ -2913,14 +2942,20 @@ class DashMain:
             except Exception as e:
                 print("eliminar_orden(): {}".format(e))
 
-        # sincroniza BD con IB y refresca treeview
+        # sincroniza BD con IB + Binance y refresca treeview
         def update_treeview_ordenes():
             try:
                 ib = getattr(self.stock, "IClient", None)
                 if ib:
                     self.RepositorioOportunidades.sync_orders_from_ib(ib, self.account)
             except Exception as e:
-                print(f"update_treeview_ordenes sync: {e}")
+                print(f"update_treeview_ordenes IB sync: {e}")
+            try:
+                bc = getattr(self.crypto, "BClient", None)
+                if bc:
+                    self.RepositorioOportunidades.sync_orders_from_binance(bc, self.account_crypto)
+            except Exception as e:
+                print(f"update_treeview_ordenes Binance sync: {e}")
             try:
                 padres = tree.get_children()
                 for padre in padres:
@@ -2933,6 +2968,16 @@ class DashMain:
         # carga órdenes ejecutadas hoy en treeview
         # Stock: directo de IB API (frescos); Crypto: desde booktrading (bot escribe ahí al cerrar)
         def insert_ejecutadas_treeview():
+            def _hora(stamp):
+                s = str(stamp)
+                return s.split(" ")[1][:8] if " " in s else ""
+
+            def _importe(price, qty):
+                try:
+                    return round(float(price) * float(qty), 4)
+                except Exception:
+                    return ""
+
             try:
                 for padre in tree.get_children():
                     for hijo in tree.get_children(padre):
@@ -2983,7 +3028,9 @@ class DashMain:
                         order_type,
                         precio,
                         cant,
+                        _importe(precio, cant),
                         "Filled",
+                        fh.strftime("%H:%M:%S"),
                         str(fh),
                         id_order,
                         id_enviar,
@@ -3019,7 +3066,9 @@ class DashMain:
                         "LIMIT",
                         basico,
                         cant,
+                        _importe(basico, cant),
                         "Filled",
+                        _hora(fh),
                         str(fh),
                         id_order,
                         id_enviar,
@@ -3053,8 +3102,9 @@ class DashMain:
 
         try:
             rnb = tk.Toplevel()
-            title = "Lista de Ordenes"
-            dimension = "%dx%d+%d+%d" % (740, 500, self.colors["df"] - 140, 65)
+            title = "Lista de Ordenes  " + datetime.now().strftime("%Y-%m-%d")
+            _sw = rnb.winfo_screenwidth()
+            dimension = "%dx%d+%d+%d" % (920, 500, _sw - 930, 65)
             rnb.geometry(dimension)
             rnb.resizable(False, False)
             rnb.attributes("-toolwindow", 1)
@@ -3080,7 +3130,9 @@ class DashMain:
                 "orderType",
                 "price",
                 "quantity",
+                "importe",
                 "status",
+                "hora",
                 "tiempo",
                 "id",
                 "id_enviar",

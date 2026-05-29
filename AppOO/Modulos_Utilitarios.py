@@ -76,6 +76,16 @@ AGENTES_SCHEDULE = {
         "desc": "Candidatos de canales YouTube de inversión vía RSS + Claude (diario)",
         "active": True,
     },
+    "Agente_SyncOrders": {
+        "intervalo": 300,
+        "desc": "Sincroniza order_trader con IB y Binance (5 min)",
+        "active": True,
+    },
+    "Agente_OrderEodCleanup": {
+        "intervalo": 3600,
+        "desc": "Limpieza periódica order_trader: plazos + validación API (1 hora)",
+        "active": True,
+    },
 }
 
 

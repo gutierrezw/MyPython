@@ -272,7 +272,7 @@ class BinanceSpot(Spot):
     @handle_binance_exceptions
     def get_order_status(self, symbol: str, order_id: int):
         """Consulta estado de una orden específica por orderId — incluye FILLED y CANCELED."""
-        return self.query_order(symbol=symbol, orderId=order_id)
+        return self.get_order(symbol=symbol, orderId=order_id)
 
     # =========================
     # CUENTA

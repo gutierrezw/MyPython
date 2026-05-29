@@ -1006,6 +1006,7 @@ class Screener(tk.Frame):
             tree.column(col, width=w, anchor=tk.CENTER)
         tree.column("Symbol", anchor=tk.E)
         tree.column("Empresa", anchor=tk.W)
+        tree.column("País", anchor=tk.W)
         tree.column("Sector", anchor=tk.W)
         tree.column("Canales", anchor=tk.W)
         tree.tag_configure("en_market", foreground="#888888")
