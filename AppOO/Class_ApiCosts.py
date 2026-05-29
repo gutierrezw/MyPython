@@ -13,8 +13,9 @@ _API_BASE = "https://api.anthropic.com"
 _API_VER = "2023-06-01"
 _TMP_FILE = "api_costs.json"
 
-_INPUT_TYPES = {"uncached_input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"}
-_OUTPUT_TYPES = {"output_tokens"}
+# Fragmentos que aparecen en el campo description para cada tipo de token
+_INPUT_KEYWORDS = ("input token", "cache creation", "cache read")
+_OUTPUT_KEYWORDS = ("output token",)
 
 # Precio por 1M tokens (USD) — para estimar tokens a partir del costo
 _PRECIO_INPUT = {
@@ -69,15 +70,15 @@ class ApiCostTracker:
         all_data = []
         next_page = None
         while True:
-            params = {"starting_at": start, "ending_at": end, "group_by[]": "model", "bucket_width": "1d"}
-            if self._workspace_id:
-                params["workspace_id"] = self._workspace_id
+            params = {"starting_at": start, "ending_at": end, "group_by[]": "description", "bucket_width": "1d"}
             if next_page:
                 params["page"] = next_page
             r = requests.get(
                 f"{_API_BASE}/v1/organizations/cost_report", headers=self._headers, params=params, timeout=15
             )
-            r.raise_for_status()
+            if not r.ok:
+                _logger.error(f"[ApiCosts] HTTP {r.status_code}: {r.text}")
+                r.raise_for_status()
             page = r.json()
             all_data.extend(page.get("data", []))
             if not page.get("has_more"):
@@ -102,9 +103,15 @@ class ApiCostTracker:
         for bucket in buckets:
             day = bucket["starting_at"][:10]
             for r in bucket.get("results", []):
-                model = r.get("model", "unknown")
+                desc = r.get("description", "").lower()
                 amount = float(r.get("amount", 0))
-                ttype = r.get("token_type", "")
+
+                # description: "claude-haiku-4-5-20251001 - Input tokens"
+                # extraer el modelo como la parte antes del " - "
+                if " - " in desc:
+                    model = r.get("description", "unknown").split(" - ")[0].strip()
+                else:
+                    model = r.get("description", "unknown").strip() or "unknown"
 
                 total_cost += amount
                 if day == hoy_str:
@@ -121,12 +128,15 @@ class ApiCostTracker:
 
                 by_model[model]["cost"] += amount
 
-                if ttype in _INPUT_TYPES:
+                is_input = any(kw in desc for kw in _INPUT_KEYWORDS)
+                is_output = any(kw in desc for kw in _OUTPUT_KEYWORDS)
+
+                if is_input:
                     by_model[model]["input_cost"] += amount
                     tokens = int(amount / _precio_input(model) * 1_000_000)
                     by_model[model]["input_tokens"] += tokens
                     total_input_tokens += tokens
-                elif ttype in _OUTPUT_TYPES:
+                elif is_output:
                     by_model[model]["output_cost"] += amount
                     tokens = int(amount / _precio_output(model) * 1_000_000)
                     by_model[model]["output_tokens"] += tokens

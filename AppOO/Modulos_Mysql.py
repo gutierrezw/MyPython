@@ -5202,6 +5202,30 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.close()
             conn.close()
 
+    def select_pending_orders(self, account: str, vehiculo: str) -> tuple:
+        """Retorna todas las órdenes pendientes (sin importar fecha) para account/vehiculo."""
+        _PENDING = ("New", "NEW", "Submitted", "PreSubmitted", "PendingSubmit", "PARTIALLY_FILLED")
+        conn = self._conectar(tabla="select.order_trader")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            placeholders = ",".join(["%s"] * len(_PENDING))
+            cursor.execute(
+                f"SELECT * FROM order_trader WHERE account = %s AND vehiculo = %s "
+                f"AND status IN ({placeholders}) ORDER BY stampPlace DESC",
+                (account, vehiculo, *_PENDING),
+            )
+            rows = cursor.fetchall()
+            ix = [col[0] for col in cursor.description]
+            return rows, ix
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::select_pending_orders]: {error}")
+            return [], []
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
     def sync_orders_from_ib(self, ib_client, account: str) -> int:
         """Sincroniza order_trader con get_live_orders() de IB. Retorna registros actualizados."""
         _STATUS_MAP = {
@@ -5246,12 +5270,8 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             _logger.error(f"[sync_orders_from_binance] get_open_orders: {e}")
             return 0
 
-        rows, ix = self.select_order_trader_today(account, "Crypto")
-        pending = [
-            dict(zip(ix, r))
-            for r in rows
-            if dict(zip(ix, r)).get("status") in ("New", "NEW", "Submitted", "PreSubmitted")
-        ]
+        rows, ix = self.select_pending_orders(account, "Crypto")
+        pending = [dict(zip(ix, r)) for r in rows]
         updated = 0
         for r in pending:
             binance_order_id = str(r.get("id_order") or "")
@@ -5272,19 +5292,43 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         return updated
 
     def cleanup_order_trader_eod(self, account: str) -> int:
-        """Elimina de order_trader las órdenes de hoy que no sean Filled ni Submitted (limpieza fin de día)."""
+        """Elimina órdenes obsoletas por plazo fijo (sin validación API).
+        - Hoy: CANCELED, Inactive.
+        - >1d: PendingSubmit.
+        - >2d: PreSubmitted, PARTIALLY_FILLED.
+        - >7d: todo excepto Filled (last resort)."""
         conn = self._conectar(tabla="insert.order_trader")
         cursor = None
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "DELETE FROM order_trader "
-                "WHERE account = %s AND DATE(stampPlace) = CURDATE() "
-                "AND status NOT IN ('Filled', 'Submitted', 'New')",
+                "DELETE FROM order_trader WHERE account = %s AND DATE(stampPlace) = CURDATE() "
+                "AND status IN ('CANCELED', 'Inactive')",
                 (account,),
             )
+            d1 = cursor.rowcount
+            cursor.execute(
+                "DELETE FROM order_trader WHERE account = %s AND DATE(stampPlace) < CURDATE() "
+                "AND status IN ('PendingSubmit', 'CANCELED', 'Inactive')",
+                (account,),
+            )
+            d2 = cursor.rowcount
+            cursor.execute(
+                "DELETE FROM order_trader WHERE account = %s "
+                "AND DATE(stampPlace) <= DATE_SUB(CURDATE(), INTERVAL 2 DAY) "
+                "AND status IN ('PreSubmitted', 'PARTIALLY_FILLED')",
+                (account,),
+            )
+            d3 = cursor.rowcount
+            cursor.execute(
+                "DELETE FROM order_trader WHERE account = %s "
+                "AND DATE(stampPlace) <= DATE_SUB(CURDATE(), INTERVAL 7 DAY) "
+                "AND status NOT IN ('Filled', 'FILLED')",
+                (account,),
+            )
+            d4 = cursor.rowcount
             conn.commit()
-            return cursor.rowcount
+            return d1 + d2 + d3 + d4
         except (Exception, connect.Error) as error:
             print(f"[Mysql::cleanup_order_trader_eod]: {error}")
             return 0
@@ -5292,6 +5336,119 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             if cursor:
                 cursor.close()
             conn.close()
+
+    def get_stale_pending_orders(self, account: str, vehiculo: str, days_min: int = 2, days_max: int = 7) -> list:
+        """Retorna órdenes NEW/Submitted entre days_min y days_max días, con id_order válido."""
+        conn = self._conectar(tabla="select.order_trader")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, symbol, status, id_order, clientOrderId "
+                "FROM order_trader "
+                "WHERE account = %s AND vehiculo = %s "
+                "AND status IN ('NEW', 'New', 'Submitted') "
+                "AND DATE(stampPlace) <= DATE_SUB(CURDATE(), INTERVAL %s DAY) "
+                "AND DATE(stampPlace) > DATE_SUB(CURDATE(), INTERVAL %s DAY) "
+                "AND id_order IS NOT NULL AND id_order != ''",
+                (account, vehiculo, days_min, days_max),
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::get_stale_pending_orders]: {error}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def delete_order_trader_by_id(self, record_id: int, account: str) -> bool:
+        """Elimina un registro de order_trader por su id (PK)."""
+        conn = self._conectar(tabla="insert.order_trader")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM order_trader WHERE id = %s AND account = %s", (record_id, account))
+            conn.commit()
+            return cursor.rowcount > 0
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::delete_order_trader_by_id]: {error}")
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def validate_stale_crypto_orders(self, account: str, b_client, days_min: int = 2, days_max: int = 7) -> int:
+        """Valida con Binance órdenes NEW/Submitted de days_min-days_max días.
+        Actualiza status o elimina registros huérfanos según respuesta de la API."""
+        _STATUS_MAP = {"FILLED": "Filled", "CANCELED": "CANCELED", "EXPIRED": "CANCELED"}
+        candidates = self.get_stale_pending_orders(account, "Crypto", days_min, days_max)
+        if not candidates:
+            return 0
+        try:
+            open_ids = {str(o.get("orderId", "")) for o in (b_client.Myget_open_orders() or [])}
+        except Exception as e:
+            _logger.error(f"[validate_stale_crypto_orders] get_open_orders: {e}")
+            return 0
+        resolved = 0
+        for row in candidates:
+            order_id = str(row.get("id_order", ""))
+            if order_id in open_ids:
+                continue
+            try:
+                detail = b_client.get_order_status(symbol=row["symbol"], order_id=int(order_id))
+                bn_raw = (detail or {}).get("status", "")
+                new_status = _STATUS_MAP.get(bn_raw)
+                if bn_raw == "NEW":
+                    continue  # activa en Binance → no tocar
+                if new_status:
+                    coid = str(row.get("clientOrderId") or "")
+                    if coid and self.update_order_trader_by_client_id(coid, account, new_status):
+                        resolved += 1
+                else:
+                    if self.delete_order_trader_by_id(row["id"], account):
+                        resolved += 1
+            except Exception as e:
+                err = str(e)
+                if "-2011" in err or "Unknown order" in err:
+                    if self.delete_order_trader_by_id(row["id"], account):
+                        resolved += 1
+                        _logger.warning(
+                            f"[validate_stale_crypto_orders] {row['symbol']} id={order_id} no existe en Binance → eliminado"
+                        )
+                else:
+                    _logger.warning(f"[validate_stale_crypto_orders] {row['symbol']}: {e}")
+        if resolved:
+            _logger.warning(f"validate_stale_crypto_orders: {resolved} resueltas account={account}")
+        return resolved
+
+    def validate_stale_stock_orders(self, account: str, ib_client, days_min: int = 2, days_max: int = 7) -> int:
+        """Valida con IB órdenes Submitted de days_min-days_max días.
+        Las no encontradas en live orders se eliminan (registros huérfanos)."""
+        candidates = self.get_stale_pending_orders(account, "Stock", days_min, days_max)
+        if not candidates:
+            return 0
+        try:
+            orders = (ib_client.get_live_orders() or {}).get("orders", [])
+            live_coids = {str(o.get("orderId", "")) for o in orders}
+        except Exception as e:
+            _logger.error(f"[validate_stale_stock_orders] get_live_orders: {e}")
+            return 0
+        resolved = 0
+        for row in candidates:
+            coid = str(row.get("clientOrderId") or "")
+            if coid and coid in live_coids:
+                continue
+            if self.delete_order_trader_by_id(row["id"], account):
+                resolved += 1
+                _logger.warning(
+                    f"[validate_stale_stock_orders] {row['symbol']} coid={coid} no está en IB live → eliminado"
+                )
+        if resolved:
+            _logger.warning(f"validate_stale_stock_orders: {resolved} eliminadas account={account}")
+        return resolved
 
     def sync_splits(self, account="U4214563"):
         """Detecta splits via yfinance para posiciones abiertas (stock>0), registra en bdinv.split
