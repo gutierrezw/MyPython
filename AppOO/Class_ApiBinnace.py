@@ -219,8 +219,8 @@ class BinanceSpot(Spot):
         headers = {"X-MBX-APIKEY": self.api_key}
         r = requests.post(self._base_url + "/api/v3/order", headers=headers, params=signed_query, timeout=5)
 
-        self.logger.debug(f"API << {r.status_code} | {r.text[:500]}")
-
+        if not r.ok:
+            self.logger.error(f"get_new_order {r.status_code} | {r.text[:500]}")
         r.raise_for_status()
         return r.json()
 

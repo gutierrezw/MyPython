@@ -602,25 +602,7 @@
     }
 
     // ── Enviar orden al servidor local ────────────────────────────────────
-    function postOrder(side) {
-        const qtyEl = document.getElementById("tv-order-qty");
-        const statusEl = document.getElementById("tv-order-status");
-        const val = parseFloat(qtyEl ? qtyEl.value : 0);
-        if (!val || val <= 0) { if (statusEl) { statusEl.textContent = "valor requerido"; statusEl.style.color = "#ef5350"; } return; }
-        const pos = lastPosicion || {};
-        const price = pos.last || 0;
-        if (!price) { if (statusEl) { statusEl.textContent = "sin precio"; statusEl.style.color = "#ef5350"; } return; }
-        if (statusEl) { statusEl.textContent = "enviando…"; statusEl.style.color = "#787b86"; }
-        const body = {
-            symbol: tvSymbol(),
-            vehiculo: pos.vehiculo || "Stock",
-            account: pos.account || "",
-            side: side,
-            price: price,
-            conid: pos.conid || null,
-        };
-        if (_tvModo === "USD") body.importe = val;
-        else body.qty = val;
+    function _doPostOrder(body, qtyEl, statusEl) {
         GM_xmlhttpRequest({
             method: "POST",
             url: `http://localhost:${PORT}/order`,
@@ -640,6 +622,54 @@
             },
             onerror: () => { if (statusEl) { statusEl.textContent = "sin conexión"; statusEl.style.color = "#ef5350"; } },
         });
+    }
+
+    function postOrder(side) {
+        const qtyEl = document.getElementById("tv-order-qty");
+        const statusEl = document.getElementById("tv-order-status");
+        const val = parseFloat(qtyEl ? qtyEl.value : 0);
+        if (!val || val <= 0) { if (statusEl) { statusEl.textContent = "valor requerido"; statusEl.style.color = "#ef5350"; } return; }
+        const pos = lastPosicion || {};
+        const price = pos.last || 0;
+        if (!price) { if (statusEl) { statusEl.textContent = "sin precio"; statusEl.style.color = "#ef5350"; } return; }
+        if (statusEl) { statusEl.textContent = "enviando…"; statusEl.style.color = "#787b86"; }
+        const body = {
+            symbol: tvSymbol(),
+            vehiculo: pos.vehiculo || "Stock",
+            account: pos.account || "",
+            side: side,
+            price: price,
+            conid: pos.conid || null,
+        };
+        if (_tvModo === "USD") body.importe = val;
+        else body.qty = val;
+
+        // Para BUY Crypto: verificar saldo USDT antes de enviar
+        if (side === "BUY" && (pos.vehiculo || "") === "Crypto") {
+            const cost = _tvModo === "USD" ? val : val * price;
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: `http://localhost:${PORT}/balance`,
+                onload: (rb) => {
+                    try {
+                        const bd = JSON.parse(rb.responseText);
+                        const usdt = bd.usdt_free || 0;
+                        if (usdt < cost) {
+                            if (statusEl) {
+                                statusEl.textContent = `USDT insuficiente: necesitás $${cost.toFixed(2)}, disponible $${usdt.toFixed(2)}`;
+                                statusEl.style.color = "#ef5350";
+                            }
+                            return;
+                        }
+                    } catch (_) { /* si falla el chequeo, deja pasar */ }
+                    _doPostOrder(body, qtyEl, statusEl);
+                },
+                onerror: () => _doPostOrder(body, qtyEl, statusEl),
+            });
+            return;
+        }
+
+        _doPostOrder(body, qtyEl, statusEl);
     }
 
     // ── Actualizar contenido ───────────────────────────────────────────────

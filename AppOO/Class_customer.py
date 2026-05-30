@@ -1289,6 +1289,21 @@ class MyOrders:
                     f"place_OrderCrypto: origen={origen} | symbol={symbol} | side={pedido['side']} | qty={pedido['quantity']} | price={pedido['price']}"
                 )
 
+                if pedido["side"] in ("BUY", "Buy"):
+                    cost = float(pedido["price"]) * float(pedido["quantity"])
+                    usdt_disp = float(pedido.get("disponibilidad", 0))
+                    if usdt_disp <= 0:
+                        # ruta Telegram: disponibilidad no calculada → obtener balance live
+                        try:
+                            usdt_disp = self.crypto_wallet_free(symbol="USDT")
+                        except Exception:
+                            usdt_disp = 0.0
+                    if usdt_disp < cost:
+                        self.logger.error(
+                            f"place_OrderCrypto: USDT insuficiente | needed={cost:.2f} disponible={usdt_disp:.2f} | {symbol}"
+                        )
+                        return {}, {}, {}
+
                 response = self.BClient.get_new_order(
                     symbol=pedido["symbol"],
                     side=pedido["side"],
@@ -1672,13 +1687,16 @@ class MyOrders:
             }
 
         elif vehiculo == "Crypto":
-            cantidad = self.crypto_wallet_free(symbol=symbol, SetLotSize=True)
-
-            # valida cantidad en spot y rescata de earn si es necesario
-            if cantidad < qty and tip in ("Sell", "SELL"):
-                rescata = round(qty - cantidad, 1)
-                ticket = symbol.replace("USDT", "001")
-                self.crypto_earn_rescate(symbol=ticket, amount=rescata)
+            if opt in ("BUY", "Buy"):
+                # Para compra: disponibilidad = saldo USDT libre
+                cantidad = self.crypto_wallet_free(symbol="USDT")
+            else:
+                cantidad = self.crypto_wallet_free(symbol=symbol, SetLotSize=True)
+                # valida cantidad en spot y rescata de earn si es necesario
+                if cantidad < qty and tip in ("Sell", "SELL"):
+                    rescata = round(qty - cantidad, 1)
+                    ticket = symbol.replace("USDT", "001")
+                    self.crypto_earn_rescate(symbol=ticket, amount=rescata)
 
             orden = {
                 "conid": idd,
@@ -2633,20 +2651,17 @@ class TickerInfo(MyOrders):
             response = self.BClient.account_spot()
             if response:
                 if symbol != "all":
-                    ticket = symbol.replace("USDT", "")
+                    ticket = symbol if symbol == "USDT" else symbol.replace("USDT", "")
                     ticket = "LD" + ticket if wallet == "earn" else ticket
 
                     for keys in response["balances"]:
                         if float(keys["free"]) > 0 and keys["asset"] == ticket:
-
-                            # si Sell busca lotSize
+                            cantidad = float(keys["free"])
                             if SetLotSize:
                                 if "lotSize" in self.info[symbol]["lotSize"]:
                                     stepSize = self.info[symbol]["lotSize"]["stepSize"]
                                     Exp = calculate_decimal_places(stepSize)
                                     cantidad = math.trunc(float(keys["free"] * 10**Exp)) / (10**Exp)
-                                else:
-                                    cantidad = float(keys["free"])
                             break
                     return cantidad
 
