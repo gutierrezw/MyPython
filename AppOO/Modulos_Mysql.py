@@ -1306,15 +1306,22 @@ class EstrategiaInversion(BDsystem):  # ----------------------------------------
             print("[Mysql:: Estrategia.Select()]: {}".format(error))
 
     def get_etfs_pendientes(self, account):
-        """ETFs en market (categoriaActivo='X') sin estrategia Balance asignada en inversion."""
+        """ETFs (categoriaActivo='X') y stocks de commodities (sector Basic Materials/Energy
+        con estrategia=P02 por default) pendientes de clasificación por Claude."""
         try:
             conn = self._conectar(tabla="select.etf_pendientes")
             cursor = conn.cursor()
             qry = """SELECT m.symbol, m.shortName
                      FROM market m
                      LEFT JOIN inversion i ON i.ticket = m.symbol AND i.useraccount = %s AND i.iactiva = 'Y'
-                     WHERE m.account = %s AND m.categoriaActivo = 'X'
-                       AND (i.estrategia IS NULL OR i.estrategia NOT IN ('P01','P02','P03','P04','P05'))"""
+                     WHERE m.account = %s AND (
+                       (m.categoriaActivo = 'X'
+                        AND (i.estrategia IS NULL OR i.estrategia NOT IN ('P01','P02','P03','P04','P05')))
+                       OR
+                       (m.categoriaActivo IN ('I','S','N') AND m.encartera = 'Y'
+                        AND (i.estrategia IS NULL OR i.estrategia = 'P02')
+                        AND m.shortName REGEXP 'Gold|Silver|Plata|Oro')
+                     )"""
             cursor.execute(qry, (account, account))
             cols = [c[0] for c in cursor.description]
             rows = cursor.fetchall()
