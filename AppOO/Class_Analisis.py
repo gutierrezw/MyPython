@@ -1384,31 +1384,28 @@ class AnalisisCrypto(AnalisisBase):
                 _logger.error(f"[_get_loan_data]: {e}")
                 return []
 
-        def _crear_grafico_prestamos(parent, prestamos, earn_map_local, row):
-            if not prestamos:
-                return row
-
+        def _draw_grafico_en_fig(fg, prestamos_data, earn_map_local):
+            """Dibuja datos LTV/Colateral sobre una Figure — reutilizable para actualización sin parpadeo."""
+            if not prestamos_data:
+                return
             ltv_inicial = float(lconfig.get("ltv_inicial", 0.78))
             ltv_alerta = float(lconfig.get("ltv_alerta", 0.85))
             ltv_liquidacion = float(lconfig.get("ltv_liquidacion", 0.91))
 
-            activos = [p["activo"] for p in prestamos]
-            ltvs = [p["ltv"] * 100 for p in prestamos]
-            deudas = [p["deuda"] for p in prestamos]
-            cols_usd = [p["col_usd"] for p in prestamos]
+            activos = [p["activo"] for p in prestamos_data]
+            ltvs = [p["ltv"] * 100 for p in prestamos_data]
+            deudas = [p["deuda"] for p in prestamos_data]
+            cols_usd = [p["col_usd"] for p in prestamos_data]
             n = len(activos)
             x = np.arange(n)
 
-            fg = Figure(figsize=(5.6, 3.2), dpi=100)
             fg.patch.set_facecolor(self.CG_COLOR)
             fg.subplots_adjust(left=0.10, right=0.88, top=0.82, bottom=0.18)
-
-            ax1 = fg.add_subplot(111)  # eje Y izquierdo: LTV %
+            ax1 = fg.add_subplot(111)
             ax1.set_facecolor(self.CG_COLOR)
-            ax2 = ax1.twinx()  # eje Y derecho: USD
+            ax2 = ax1.twinx()
 
-            # ── AX1: zonas de riesgo en coordenadas de ejes (0-1) para no afectar ax2 ──
-            ltv_max = ltv_liquidacion * 100 + 10  # mismo ylim que ax1
+            ltv_max = ltv_liquidacion * 100 + 10
 
             def _span(y0, y1, color, alpha):
                 y0n = y0 / ltv_max
@@ -1446,10 +1443,7 @@ class AnalisisCrypto(AnalisisBase):
                 label=f"Liquidación {ltv_liquidacion:.0%}",
             )
 
-            # ── AX1: LTV como línea blanca — encima de las áreas ────────────
             ax1.plot(x, ltvs, color="white", linewidth=1.0, marker="o", markersize=3, zorder=7, label="LTV actual")
-
-            # etiqueta LTV% sobre cada punto de la línea
             for i in range(n):
                 ax1.text(
                     x[i],
@@ -1471,10 +1465,8 @@ class AnalisisCrypto(AnalisisBase):
             ax1.spines["left"].set_linewidth(1.0)
             ax1.grid(True, alpha=0.12, color="gray", axis="y", linestyle=":", zorder=0)
 
-            # ── AX2: áreas — rojo deuda (0→deuda) + azul colateral (0→col) ──
             deudas_arr = np.array(deudas)
             cols_arr = np.array(cols_usd)
-
             ax2.fill_between(x, 0, deudas_arr, color="#e74c3c", alpha=0.40, zorder=3, label="Deuda USD")
             ax2.plot(x, deudas_arr, color="#e74c3c", linewidth=0.9, zorder=4)
             ax2.fill_between(x, deudas_arr, cols_arr, color="#2980b9", alpha=0.35, zorder=3, label="Col. USD")
@@ -1487,7 +1479,6 @@ class AnalisisCrypto(AnalisisBase):
             ax2.spines["right"].set_color("gray")
             ax2.grid(True, alpha=0.22, color="gray", axis="y", linestyle=":", zorder=1)
 
-            # ── eje X: etiquetas solo en ax1, rotadas 60° ────────────────────
             ax1.set_xticks(x)
             ax1.set_xticklabels(activos, color="white", fontsize=7, rotation=60, ha="right")
             ax1.set_xlim(-0.6, n - 0.4)
@@ -1497,7 +1488,6 @@ class AnalisisCrypto(AnalisisBase):
                 ax.spines["bottom"].set_visible(False)
                 ax.tick_params(axis="x", length=0)
 
-            # ── leyendas separadas: zonas Binance | importes USD ─────────────
             lines1, labels1 = ax1.get_legend_handles_labels()
             lines2, labels2 = ax2.get_legend_handles_labels()
             leg1 = fg.legend(
@@ -1514,7 +1504,7 @@ class AnalisisCrypto(AnalisisBase):
             leg2 = fg.legend(
                 lines2,
                 labels2,
-                loc="outside upper right",
+                loc="lower right",
                 fontsize=5,
                 facecolor="white",
                 labelcolor="black",
@@ -1526,11 +1516,18 @@ class AnalisisCrypto(AnalisisBase):
             fg.add_artist(leg2)
             fg.suptitle("Deuda / Colateral USD", fontsize=9, color="white")
 
+        def _crear_grafico_prestamos(parent, prestamos_data, earn_map_local, row):
+            if not prestamos_data:
+                return row, None
+            fg = Figure(figsize=(5.6, 3.2), dpi=100)
+            _draw_grafico_en_fig(fg, prestamos_data, earn_map_local)
             frm = tk.Frame(parent, bg=self.CG_COLOR)
             frm.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
             canvas_fig = FigureCanvasTkAgg(fg, master=frm)
             canvas_fig.draw()
             canvas_fig.get_tk_widget().pack(fill="x", expand=True)
+            frm._fg = fg
+            frm._canvas = canvas_fig
             return row + 1, frm
 
         def _calcular_distribucion():
@@ -1753,7 +1750,7 @@ class AnalisisCrypto(AnalisisBase):
         row += 1
 
         def _actualizar_live():
-            nonlocal frm_grafico
+            nonlocal frm_grafico, prestamos, earn_map
             try:
                 nuevos = _get_loan_data()
                 if not nuevos:
@@ -1778,12 +1775,15 @@ class AnalisisCrypto(AnalisisBase):
                     tree_result.set(total_iid, "Col USD", f"{t_col:,.2f}")
                     tree_result.set(total_iid, "USDT Actual", f"{t_deu:,.2f}")
                     tree_result.set(total_iid, "LTV final", f"{t_ltv:.2%}")
-                # redibujar gráfico: destruir frame anterior completo y recrear en mismo lugar
+                # actualizar closures para que _calcular_distribucion use datos frescos
                 earn_nuevo = {b["asset"]: b.get("usdt_value", 0.0) for b in ServiciosCrypto().earn_spot_balances()}
-                grafico_parent = frm_grafico.master
-                grafico_row = frm_grafico.grid_info().get("row", 0)
-                frm_grafico.destroy()
-                _, frm_grafico = _crear_grafico_prestamos(grafico_parent, nuevos, earn_nuevo, grafico_row)
+                prestamos = nuevos
+                earn_map = earn_nuevo
+                # redibujar gráfico in-place — sin destroy para eliminar parpadeo
+                if frm_grafico is not None and hasattr(frm_grafico, "_fg"):
+                    frm_grafico._fg.clear()
+                    _draw_grafico_en_fig(frm_grafico._fg, nuevos, earn_nuevo)
+                    frm_grafico._canvas.draw_idle()
             except Exception as e:
                 _logger.error(f"_actualizar_live: {e}")
             tree_result.after(10000, _actualizar_live)

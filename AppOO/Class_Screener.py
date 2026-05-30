@@ -975,7 +975,7 @@ class Screener(tk.Frame):
         win.update_idletasks()
         sw = win.winfo_screenwidth()
         sh = win.winfo_screenheight()
-        w, h = 1300, 460
+        w, h = 1460, 520
         win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
 
         _COLS = (
@@ -994,17 +994,24 @@ class Screener(tk.Frame):
         )
         _WIDTHS = (70, 150, 55, 75, 50, 70, 70, 130, 150, 85, 70, 55)
 
-        frame = tk.Frame(win, bg="black")
-        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 4))
+        _sort_state = {}
+        _all_rows = []
+        _websites = {}
+
+        # ── Layout principal: tree (izq) + panel filtros (der) ───────────
+        main = tk.Frame(win, bg="black")
+        main.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 4))
+
+        # Tree frame
+        frame = tk.Frame(main, bg="black")
+        frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
-
-        _sort_state = {}
 
         tree = ttk.Treeview(frame, columns=_COLS, show="headings", selectmode="browse")
         for col, w in zip(_COLS, _WIDTHS):
             tree.column(col, width=w, anchor=tk.CENTER)
-        tree.column("Symbol", anchor=tk.E)
+        tree.column("Symbol", anchor=tk.W)
         tree.column("Empresa", anchor=tk.W)
         tree.column("País", anchor=tk.W)
         tree.column("Sector", anchor=tk.W)
@@ -1029,7 +1036,6 @@ class Screener(tk.Frame):
             items = sorted(tree.get_children(), key=_key, reverse=not asc)
             for i, iid in enumerate(items):
                 tree.move(iid, "", i)
-
             for c in _COLS:
                 arrow = (" ↑" if asc else " ↓") if c == col else ""
                 tree.heading(c, text=c + arrow, command=lambda c=c: _sort_col(c))
@@ -1044,19 +1050,77 @@ class Screener(tk.Frame):
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
 
+        # Panel filtros (derecha)
+        options = ttk.Frame(main, style="C.TFrame", padding=(5, 5, 5, 5))
+        options.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
+
+        lb_pais = lb_sector = lb_canal = None
+
+        def _make_listbox(parent, label, height=5):
+            ttk.Label(parent, text=label, style="C.TLabel").grid(sticky="w", pady=(8, 2))
+            frm = ttk.Frame(parent, style="C.TFrame")
+            frm.grid(sticky="ew")
+            lb = tk.Listbox(frm, width=22, height=height, exportselection=False)
+            sb = ttk.Scrollbar(frm, orient=tk.VERTICAL, command=lb.yview)
+            lb.config(yscrollcommand=sb.set)
+            lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            sb.pack(side=tk.RIGHT, fill=tk.Y)
+            return lb
+
+        lb_pais = _make_listbox(options, "PAÍS ::", height=5)
+        lb_sector = _make_listbox(options, "SECTOR ::", height=5)
+        lb_canal = _make_listbox(options, "CANAL ::", height=5)
+
+        btn_opt = ttk.Frame(options, style="C.TFrame")
+        btn_opt.grid(sticky="ew", pady=10)
+        tk.Button(btn_opt, text="Apply", width=7, bg="gray", fg="white", command=lambda: _apply_filters()).pack(
+            side=tk.LEFT, padx=(0, 4)
+        )
+        tk.Button(
+            btn_opt,
+            text="Reset",
+            width=7,
+            bg="gray",
+            fg="white",
+            command=lambda: [
+                lb_pais.selection_clear(0, tk.END),
+                lb_sector.selection_clear(0, tk.END),
+                lb_canal.selection_clear(0, tk.END),
+                _apply_filters(),
+            ],
+        ).pack(side=tk.LEFT)
+
+        # ── Bottom bar ────────────────────────────────────────────────────
         btn_frame = tk.Frame(win, bg="black")
         btn_frame.pack(fill=tk.X, padx=10, pady=(0, 8))
 
         status_lbl = tk.Label(btn_frame, text="", bg="black", fg="#aaaaaa", font=("Courier", 9))
         status_lbl.pack(side=tk.RIGHT, padx=8)
 
-        _websites = {}
+        def _apply_filters():
+            sel_pais = {lb_pais.get(i) for i in lb_pais.curselection()}
+            sel_sector = {lb_sector.get(i) for i in lb_sector.curselection()}
+            sel_canal = {lb_canal.get(i) for i in lb_canal.curselection()}
+            for iid in tree.get_children():
+                tree.delete(iid)
+            shown = 0
+            for vals, tag in _all_rows:
+                if sel_pais and vals[2] not in sel_pais:
+                    continue
+                if sel_sector and vals[7] not in sel_sector:
+                    continue
+                if sel_canal and not any(c.strip() in sel_canal for c in (vals[8] or "").split(",")):
+                    continue
+                tree.insert("", tk.END, iid=vals[0], values=vals, tags=(tag,) if tag else ())
+                shown += 1
+            status_lbl.config(text=f"{shown} de {len(_all_rows)} pendientes")
 
         def _refresh():
+            nonlocal _all_rows
             _websites.clear()
-            for row in tree.get_children():
-                tree.delete(row)
+            _all_rows = []
             rows = MarketScreen().load_youtube_candidatos("pending")
+            paises, sectores, canales = set(), set(), set()
             for r in rows:
                 mc = r.get("market_cap") or 0
                 mc_str = f"${mc/1e9:.1f}B" if mc >= 1e9 else f"${mc/1e6:.0f}M"
@@ -1067,33 +1131,54 @@ class Screener(tk.Frame):
                 price_str = f"{price:,.2f}" if price else ""
                 if r.get("website"):
                     _websites[r["symbol"]] = r["website"]
-                tree.insert(
-                    "",
-                    tk.END,
-                    iid=r["symbol"],
-                    values=(
-                        r["symbol"],
-                        r.get("company_name") or "",
-                        r.get("country") or "",
-                        r["apariciones"],
-                        f"{r['confidence']:.2f}",
-                        price_str,
-                        mc_str,
-                        r.get("sector") or "",
-                        r.get("canales") or "",
-                        str(r.get("primera_vez") or "")[:10],
-                        "Si" if en_market else "No",
-                        "Si" if en_cartera else "No",
-                    ),
-                    tags=(tag,) if tag else (),
+                pais_val = r.get("country") or ""
+                sector_val = r.get("sector") or ""
+                canales_val = r.get("canales") or ""
+                if pais_val:
+                    paises.add(pais_val)
+                if sector_val:
+                    sectores.add(sector_val)
+                for c in canales_val.split(","):
+                    c = c.strip()
+                    if c:
+                        canales.add(c)
+                _all_rows.append(
+                    (
+                        (
+                            r["symbol"],
+                            r.get("company_name") or "",
+                            pais_val,
+                            r["apariciones"],
+                            f"{r['confidence']:.2f}",
+                            price_str,
+                            mc_str,
+                            sector_val,
+                            canales_val,
+                            str(r.get("primera_vez") or "")[:10],
+                            "Si" if en_market else "No",
+                            "Si" if en_cartera else "No",
+                        ),
+                        tag,
+                    )
                 )
-            status_lbl.config(text=f"{len(rows)} pendientes")
+
+            for lb, opciones in ((lb_pais, sorted(paises)), (lb_sector, sorted(sectores)), (lb_canal, sorted(canales))):
+                lb.delete(0, tk.END)
+                for item in opciones:
+                    lb.insert(tk.END, item)
+
+            _apply_filters()
 
         def _context_menu(event):
-            sel = tree.selection()
-            if not sel:
+            if tree.identify_region(event.x, event.y) != "cell":
                 return
-            symbol = sel[0]
+            if tree.identify_column(event.x) != "#1":
+                return
+            item = tree.identify_row(event.y)
+            if not item:
+                return
+            tree.selection_set(item)
+            symbol = item
 
             bgcolor = (self.colors or {}).get("bgcolor", "black")
             cgcolor = (self.colors or {}).get("cgcolor", "DarkCyan")
@@ -1156,7 +1241,7 @@ class Screener(tk.Frame):
             win.bind("<Button-1>", _close_if_outside, add="+")
             menu.bind("<Escape>", lambda e: menu.destroy())
 
-        tree.bind("<<TreeviewSelect>>", _context_menu)
+        tree.bind("<Button-1>", _context_menu)
 
         ttk.Button(btn_frame, text="Refresh", width=10, command=_refresh).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(btn_frame, text="Cancel", width=10, command=win.destroy).pack(side=tk.LEFT)
@@ -2108,26 +2193,33 @@ def cleanup_market(account):
 
 def _resolve_cusip_from_edgar(symbol, short_name):
     """
-    Busca el CUSIP de un símbolo en los propios filings 10-K/20-F de la compañía en EDGAR.
-    Estrategia 1: buscar por ticker/nombre via entity search → descargar header .hdr.sgml.
-    Estrategia 2: descargar primeros 64KB del documento principal y buscar patrón CUSIP.
+    Busca el CUSIP de un símbolo en EDGAR.
+    Estrategia 1: lookup CIK por ticker en company_tickers.json.
+    Estrategia 2: full-text search por nombre en efts.sec.gov (q=).
+    Luego descarga submissions API → header SGM o primeros 64KB del doc principal.
     Retorna el CUSIP (str 9 chars) o None si no lo encuentra.
     """
     _HEADERS = {"User-Agent": "AppOO research@appoo.com"}
-    _SEARCH = "https://efts.sec.gov/LATEST/search-index"
-    _CUSIP_RE = re.compile(r"CUSIP[:\s#]*([A-Z0-9]{9})", re.I)
+    _CUSIP_RE = re.compile(r"CUSIP[^0-9A-Z]{0,15}([0-9A-Z]{9})", re.I)
 
-    queries = [symbol]
-    if short_name and short_name.upper() != symbol.upper():
-        queries.append(short_name)
+    # 1. Resolver CIK
+    cik = None
+    try:
+        r = requests.get("https://www.sec.gov/files/company_tickers.json", headers=_HEADERS, timeout=15)
+        for entry in r.json().values():
+            if entry.get("ticker", "").upper() == symbol.upper():
+                cik = int(entry["cik_str"])
+                break
+    except Exception as e:
+        _logger.warning(f"_resolve_cusip_from_edgar({symbol}): company_tickers: {e}")
 
-    for query in queries:
+    if not cik and short_name:
         try:
             r = requests.get(
-                _SEARCH,
+                "https://efts.sec.gov/LATEST/search-index",
                 params={
-                    "entity": query,
-                    "forms": "10-K,20-F",
+                    "q": f'"{short_name}"',
+                    "forms": "10-K,20-F,40-F",
                     "dateRange": "custom",
                     "startdt": "2022-01-01",
                 },
@@ -2135,43 +2227,56 @@ def _resolve_cusip_from_edgar(symbol, short_name):
                 timeout=15,
             )
             hits = r.json().get("hits", {}).get("hits", [])
-
-            for hit in hits[:4]:
-                src = hit.get("_source", {})
-                ciks = src.get("ciks", [])
-                hit_id = hit.get("_id", "")
-                if not ciks or ":" not in hit_id:
-                    continue
-                accn, xmlfile = hit_id.split(":", 1)
-                cik = int(ciks[0])
-                acc_clean = accn.replace("-", "")
-
-                # Intentar primero el header SGML (archivo pequeño, ~2-10KB)
-                hdr_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_clean}/{accn}.hdr.sgml"
-                r2 = requests.get(hdr_url, headers=_HEADERS, timeout=10)
-                if r2.ok:
-                    m = _CUSIP_RE.search(r2.text)
-                    if m:
-                        return m.group(1).upper()
-
-                # Fallback: primeros 64KB del documento principal (cover page del 10-K)
-                doc_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_clean}/{xmlfile}"
-                r3 = requests.get(doc_url, headers=_HEADERS, stream=True, timeout=20)
-                if r3.ok:
-                    raw = b""
-                    for chunk in r3.iter_content(8192):
-                        raw += chunk
-                        if len(raw) >= 65536:
-                            break
-                    r3.close()
-                    m = _CUSIP_RE.search(raw.decode("utf-8", errors="ignore"))
-                    if m:
-                        return m.group(1).upper()
-
-                time.sleep(0.4)
-
+            for hit in hits[:3]:
+                ciks = hit.get("_source", {}).get("ciks", [])
+                if ciks:
+                    cik = int(ciks[0])
+                    break
         except Exception as e:
-            _logger.warning(f"_resolve_cusip_from_edgar({symbol}, q={query!r}): {e}")
+            _logger.warning(f"_resolve_cusip_from_edgar({symbol}): efts search: {e}")
+
+    if not cik:
+        return None
+
+    # 2. Obtener filings via submissions API
+    try:
+        r = requests.get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json", headers=_HEADERS, timeout=15)
+        subs = r.json()
+        recent = subs.get("filings", {}).get("recent", {})
+        forms = recent.get("form", [])
+        accns = recent.get("accessionNumber", [])
+        docs = recent.get("primaryDocument", [])
+
+        for form, accn, doc in zip(forms, accns, docs):
+            if form not in ("10-K", "20-F", "40-F"):
+                continue
+            acc_clean = accn.replace("-", "")
+
+            hdr_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_clean}/{accn}.hdr.sgml"
+            r2 = requests.get(hdr_url, headers=_HEADERS, timeout=10)
+            if r2.ok:
+                m = _CUSIP_RE.search(r2.text)
+                if m:
+                    return m.group(1).upper()
+
+            doc_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_clean}/{doc}"
+            r3 = requests.get(doc_url, headers=_HEADERS, stream=True, timeout=20)
+            if r3.ok:
+                raw = b""
+                for chunk in r3.iter_content(8192):
+                    raw += chunk
+                    if len(raw) >= 65536:
+                        break
+                r3.close()
+                m = _CUSIP_RE.search(raw.decode("utf-8", errors="ignore"))
+                if m:
+                    return m.group(1).upper()
+
+            time.sleep(0.4)
+            break  # solo el filing más reciente
+
+    except Exception as e:
+        _logger.warning(f"_resolve_cusip_from_edgar({symbol}): submissions: {e}")
 
     return None
 
