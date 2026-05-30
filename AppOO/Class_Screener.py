@@ -158,6 +158,8 @@ def senal_consenso(votos_activos, suma):
 
 
 _ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
+# Palabras en el nombre que indican fondo/trust aunque Yahoo devuelva quoteType='EQUITY'
+_ETF_NAME_KEYWORDS = {"etf", "trust", "fund", "physical gold", "index fund", "reit index"}
 
 
 def _yahoo_session():
@@ -2310,11 +2312,14 @@ def audit_portfolio(account):
             nombre_yf = (info.get("shortName") or info.get("longName") or "").strip()
             precio_yf = info.get("regularMarketPrice") or info.get("previousClose")
 
-            # ETF/fondo → eliminar de market, solo acciones
-            if qt in _ETF_TYPES:
+            # ETF/fondo → eliminar de market (posición vive en inversion/booktrading)
+            # PHYS y similares: Yahoo devuelve quoteType='EQUITY' para trusts de materias primas
+            nombre_lower = (nombre_yf or nombre_db or "").lower()
+            es_etf = qt in _ETF_TYPES or any(kw in nombre_lower for kw in _ETF_NAME_KEYWORDS)
+            if es_etf:
                 market.delete(sym, account)
                 etfs_upd += 1
-                _logger.warning(f"audit_portfolio: ETF eliminado {sym} qt={qt}")
+                _logger.warning(f"audit_portfolio: ETF/trust eliminado {sym} qt={qt} nombre={nombre_yf!r}")
                 continue
 
             if not qt or qt == "NONE":
