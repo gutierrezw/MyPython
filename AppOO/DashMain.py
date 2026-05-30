@@ -122,6 +122,7 @@ from Class_BrowserBridge import (
     set_switch_callback,
     set_symbols_fn,
     set_info_fn,
+    set_balance_fn,
 )
 from Class_Finance import FinancePanel
 
@@ -2631,6 +2632,7 @@ class DashMain:
             self.boton_flotante = BotonFlotante(self.root, on_click=mostrar_asistente)
             set_order_callback(self.chatbot.put_order)
             set_info_fn(lambda: DataHub.info)
+            set_balance_fn(lambda: self.crypto.crypto_wallet_free(symbol="USDT") if self.crypto else 0.0)
 
             # Iniciar el chatbot
             self.chatbot.run()

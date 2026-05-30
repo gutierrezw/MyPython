@@ -32,6 +32,7 @@ _tv_server = None  # referencia para shutdown limpio
 _tv_contexto = {}  # contexto de cartera para inyección en claude.ai
 _order_callback = None  # fn(symbol, vehiculo, account, opt, qty, price, conid, razon) → (response, symbol)
 _info_fn = None  # fn() → DataHub.info dict
+_balance_fn = None  # fn() → float; retorna saldo USDT libre para validación de compra Crypto
 
 
 def _calc_qty_from_importe(importe, price, vehiculo, symbol):
@@ -102,6 +103,12 @@ class _TVRequestHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/symbols":
             symbols = sorted(_symbols_fn()) if _symbols_fn else sorted(_tv_data.keys())
             self._send_json({"symbols": symbols})
+        elif parsed.path == "/balance":
+            try:
+                usdt_free = float(_balance_fn()) if _balance_fn else 0.0
+            except Exception:
+                usdt_free = 0.0
+            self._send_json({"usdt_free": usdt_free})
         else:
             self._send_json({"error": "not found"}, 404)
 
@@ -212,6 +219,12 @@ def set_info_fn(fn):
     """Registra fn() → DataHub.info para calcular qty desde importe en /order."""
     global _info_fn
     _info_fn = fn
+
+
+def set_balance_fn(fn):
+    """Registra fn() → float con saldo USDT libre (para validación de BUY Crypto en TV)."""
+    global _balance_fn
+    _balance_fn = fn
 
 
 def set_claude_contexto(data):
