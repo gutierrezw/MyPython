@@ -516,10 +516,7 @@ class DataHub:
                             continue
 
                         ventas = DataHub.maximiza_sell_lotes(
-                            account=item["account"],
-                            symbol=item["symbol"],
-                            last=item["last"],
-                            c_sell=item["cantidad lotes"],
+                            list_gain=item.get("list_gain", []),
                             position=item["position"],
                             costobase=item["costobase"],
                         )
@@ -680,6 +677,7 @@ class DataHub:
                                 "disponible": value["sell"]["disponible"],
                                 "divisa": value["sell"]["divisa"],
                                 "factor": value["sell"]["factor"],
+                                "list_gain": value["sell"].get("list_gain", []),
                                 "datos_tecnicos": datos_tecnicos,
                             }
                         )
@@ -872,148 +870,71 @@ class DataHub:
             return []
 
     # optimiza venta de lotes para la gain de capital
-    def maximiza_sell_lotes(
-        account=None, symbol=None, last=None, c_sell=None, position=None, costobase=None, divisa="USD"
-    ):
+    def maximiza_sell_lotes(list_gain=None, position=None, costobase=None):
+        pre_sell = {
+            " 25%": {
+                "cantidad sell": 0.0,
+                "profit": 0.0,
+                "lotes": 0,
+                "costo lote": 0.0,
+                "roi": 0.0,
+                "pos avgCost": 0.0,
+                "pos position": 0.0,
+                "pos costobase": 0.0,
+            },
+            " 33%": {
+                "cantidad sell": 0.0,
+                "profit": 0.0,
+                "lotes": 0,
+                "costo lote": 0.0,
+                "roi": 0.0,
+                "pos avgCost": 0.0,
+                "pos position": 0.0,
+                "pos costobase": 0.0,
+            },
+            "100%": {
+                "cantidad sell": 0.0,
+                "profit": 0.0,
+                "lotes": 0,
+                "costo lote": 0.0,
+                "roi": 0.0,
+                "pos avgCost": 0.0,
+                "pos position": 0.0,
+                "pos costobase": 0.0,
+            },
+        }
         try:
-            pre_sell = {
-                " 25%": {
-                    "cantidad sell": 0.0,
-                    "profit": 0.0,
-                    "lotes": 0,
-                    "costo lote": 0.0,
-                    "roi": 0.0,
-                    "pos avgCost": 0.0,
-                    "pos position": 0.0,
-                    "pos costobase": 0.0,
-                },
-                " 33%": {
-                    "cantidad sell": 0.0,
-                    "profit": 0.0,
-                    "lotes": 0,
-                    "costo lote": 0.0,
-                    "roi": 0.0,
-                    "pos avgCost": 0.0,
-                    "pos position": 0.0,
-                    "pos costobase": 0.0,
-                },
-                "100%": {
-                    "cantidad sell": 0.0,
-                    "profit": 0.0,
-                    "lotes": 0,
-                    "costo lote": 0.0,
-                    "roi": 0.0,
-                    "pos avgCost": 0.0,
-                    "pos position": 0.0,
-                    "pos costobase": 0.0,
-                },
-            }
+            if not list_gain:
+                return pre_sell
+            c_sell = len(list_gain)
+            for read in list_gain:
+                last = read["last"]
+                cant = read["cantidad"]
+                cost = read["costo lote"]
+                gain = last * cant - cost
+                stock = cant
 
-            # lista de lotes ganadores y last
-            list_gain = DataHub.get_lotesGainLost(
-                opcion="gain", account=account, symbol=symbol, divisa=divisa, last=last
-            )
-            # cap al position real — evita contar cuotas ya rescatadas (FCI con activa='Y' históricas)
-            if position and position > 0:
-                acum_qty = 0.0
-                capped = []
-                for g in list_gain:
-                    if acum_qty >= position:
-                        break
-                    rem = position - acum_qty
-                    if g["cantidad"] > rem:
-                        scale = rem / g["cantidad"]
-                        g = dict(g, cantidad=rem, gyp=g["gyp"] * scale, **{"costo lote": g["costo lote"] * scale})
-                    capped.append(g)
-                    acum_qty += g["cantidad"]
-                list_gain = capped
-            if list_gain:
-                ebook, lotes_gain, pos_sell = (enumerate(list_gain), len(list_gain), {})
-                eof_book, read = next(ebook, (None, None))
-
-                while eof_book is not None:
-                    key, stock, costo, gain = read["fechahora"], 0.0, 0.0, 0.0
-
-                    last = read["last"]
-                    cant = read["cantidad"]
-                    cost = read["costo lote"]
-
-                    gain += last * cant - cost
-                    costo += cost
-                    stock += cant
-
-                    cant_acum = pre_sell[" 25%"]["cantidad sell"] + cant
-                    cant_lote = pre_sell[" 25%"]["lotes"] + 1
-                    p_sell = (cant_lote / c_sell) if c_sell > 0 else 0
-                    if p_sell <= 0.25:
-                        gain_acum = pre_sell[" 25%"]["profit"] + gain
-                        cost_acum = pre_sell[" 25%"]["costo lote"] + costo
+                for opcion, threshold in ((" 25%", 0.25), (" 33%", 0.336), ("100%", 1.0)):
+                    cant_lote = pre_sell[opcion]["lotes"] + 1
+                    if cant_lote / c_sell <= threshold:
+                        cant_acum = pre_sell[opcion]["cantidad sell"] + stock
+                        gain_acum = pre_sell[opcion]["profit"] + gain
+                        cost_acum = pre_sell[opcion]["costo lote"] + cost
                         new_position = position - cant_acum
                         new_costobase = costobase - cost_acum
-                        new_avgCost = new_costobase / new_position if new_position > 0 else 0
-                        roi = (gain_acum / cost_acum) if cost_acum > 0 else 0
-                        pre_sell[" 25%"] = {
+                        pre_sell[opcion] = {
                             "cantidad sell": cant_acum,
                             "profit": gain_acum,
                             "lotes": cant_lote,
                             "costo lote": cost_acum,
-                            "roi": roi,
-                            "pos avgCost": new_avgCost,
+                            "roi": gain_acum / cost_acum if cost_acum > 0 else 0,
+                            "pos avgCost": new_costobase / new_position if new_position > 0 else 0,
                             "pos position": new_position,
                             "pos costobase": new_costobase,
                         }
-
-                    cant_acum = pre_sell[" 33%"]["cantidad sell"] + cant
-                    cant_lote = pre_sell[" 33%"]["lotes"] + 1
-                    p_sell = (cant_lote / c_sell) if c_sell > 0 else 0
-                    if p_sell <= 0.336:
-                        cant_acum = pre_sell[" 33%"]["cantidad sell"] + stock
-                        gain_acum = pre_sell[" 33%"]["profit"] + gain
-                        cost_acum = pre_sell[" 33%"]["costo lote"] + costo
-                        new_position = position - cant_acum
-                        new_costobase = costobase - cost_acum
-                        new_avgCost = new_costobase / new_position if new_position > 0 else 0
-                        roi = (gain_acum / cost_acum) if cost_acum > 0 else 0
-
-                        pre_sell[" 33%"] = {
-                            "cantidad sell": cant_acum,
-                            "profit": gain_acum,
-                            "lotes": cant_lote,
-                            "costo lote": cost_acum,
-                            "roi": roi,
-                            "pos avgCost": new_avgCost,
-                            "pos position": new_position,
-                            "pos costobase": new_costobase,
-                        }
-
-                    cant_acum = pre_sell["100%"]["cantidad sell"] + stock
-                    cant_lote = pre_sell["100%"]["lotes"] + 1
-                    p_sell = (cant_lote / c_sell) if c_sell > 0 else 0
-                    if p_sell <= 1.0:
-                        cant_acum = pre_sell["100%"]["cantidad sell"] + stock
-                        gain_acum = pre_sell["100%"]["profit"] + gain
-                        cost_acum = pre_sell["100%"]["costo lote"] + costo
-                        new_position = position - cant_acum
-                        new_costobase = costobase - cost_acum
-                        new_avgCost = new_costobase / new_position if new_position > 0 else 0
-                        roi = (gain_acum / cost_acum) if cost_acum > 0 else 0
-
-                        pre_sell["100%"] = {
-                            "cantidad sell": cant_acum,
-                            "profit": gain_acum,
-                            "lotes": cant_lote,
-                            "costo lote": cost_acum,
-                            "roi": roi,
-                            "pos avgCost": new_avgCost,
-                            "pos position": new_position,
-                            "pos costobase": new_costobase,
-                        }
-
-                    eof_book, read = next(ebook, (None, None))
-
-            return pre_sell
         except Exception as e:
             print(f"maximiza_sell_lotes(): {e}")
+        return pre_sell
 
     # ========================================================================================================
     # PRESERVATION: Lógica de vehículo para el Agente de Preservación de Ganancias
@@ -3164,12 +3085,26 @@ class TickerInfo(MyOrders):
                         costCum += gain["costo lote"]
                         sell += gain["cantidad"]
 
-                    # cap al position real — FCI mantiene compras históricas con activa='Y'
-                    if pos_max > 0 and sell > pos_max:
+                    # cap solo para FCI — mantiene compras históricas con activa='Y'
+                    if self.vehiculo in ("BBVA.ARS", "SANT.ARS") and pos_max > 0 and sell > pos_max:
                         ratio = pos_max / sell
                         profit *= ratio
                         costCum *= ratio
                         sell = pos_max
+                        acum_qty, capped = 0.0, []
+                        for g in l_gain:
+                            if acum_qty >= pos_max:
+                                break
+                            rem = pos_max - acum_qty
+                            if g["cantidad"] > rem:
+                                scale = rem / g["cantidad"]
+                                g = dict(
+                                    g, cantidad=rem, gyp=g["gyp"] * scale, **{"costo lote": g["costo lote"] * scale}
+                                )
+                            capped.append(g)
+                            acum_qty += g["cantidad"]
+                        l_gain = capped
+                        lotes = len(l_gain)
 
                     disponible = sell
                     if self.vehiculo == "Crypto":
@@ -3192,6 +3127,7 @@ class TickerInfo(MyOrders):
                             "divisa": position["divisa"],
                             "factor": position["factor_cambio"],
                             "account": account or self.account,
+                            "list_gain": l_gain,
                         }
                     }
                 return datos
@@ -3206,6 +3142,8 @@ class TickerInfo(MyOrders):
 
                 # actualiza metadata del activo para el rebalanceo
                 if symbol in self.info:
+                    self.info[symbol]["account"] = account
+                    self.info[symbol]["vehiculo"] = self.vehiculo
                     self.info[symbol]["sector"] = position.get("sector")
                     self.info[symbol]["region"] = position.get("region")
                     self.info[symbol]["costobase"] = position.get("costobase", 0)
@@ -5247,8 +5185,10 @@ class WidgetVehiculo(TickerInfo):
             return tree
 
         def update_windows():
-            # ordena lista de lotes ganadores y asigna acum=0 e insert symbols padres
-            s_sell, acum = DataHub.get_info_symbols_gain(), 0.0
+            # vehículo actual primero, resto por profit desc
+            s_sell_all = DataHub.get_info_symbols_gain()
+            s_sell = sorted(s_sell_all, key=lambda x: (0 if x["vehiculo"] == self.vehiculo else 1, -x["profit"]))
+            acum = 0.0
 
             delete_items()
 
@@ -5285,13 +5225,9 @@ class WidgetVehiculo(TickerInfo):
 
                 # detalla lotes ganadores --
                 ventas = DataHub.maximiza_sell_lotes(
-                    account=value["account"],
-                    symbol=value["symbol"],
-                    last=value["last"],
-                    c_sell=value["cantidad lotes"],
+                    list_gain=value.get("list_gain", []),
                     position=value["position"],
                     costobase=value["costobase"],
-                    divisa=value["divisa"],
                 )
                 for keys, sell in ventas.items():
                     tree.insert(
@@ -5334,7 +5270,7 @@ class WidgetVehiculo(TickerInfo):
 
         try:
             ons = tk.Toplevel()
-            title = "Grail Capital"
+            title = "Gain Capital"
             dimension = "%dx%d+%d+%d" % (1270, 220, 0, 775)
             ons.geometry(dimension)
             ons.resizable(False, False)
