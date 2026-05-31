@@ -4023,7 +4023,7 @@ class DashMain:
             return
 
         # inicia performace de  ultimos 6 meses
-        self.setup_graph_income(tipo="3")
+        self.setup_graph_income(tipo="6")
 
         # indicador de miedo y VIX
         parm = {
