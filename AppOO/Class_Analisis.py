@@ -196,6 +196,18 @@ class AnalisisBase:
         entry.grid(row=row, column=1, padx=10, pady=3, sticky="w")
         return row + 1
 
+    @staticmethod
+    def _sin_outliers(df, col):
+        """Excluye outliers estadísticos por IQR×3 en la columna dada."""
+        if df.empty or col not in df.columns or len(df) < 3:
+            return df
+        q1 = df[col].quantile(0.25)
+        q3 = df[col].quantile(0.75)
+        iqr = q3 - q1
+        if iqr == 0:
+            return df
+        return df[(df[col] >= q1 - 3 * iqr) & (df[col] <= q3 + 3 * iqr)]
+
     def obtener_color_ganancia(self, valor):
         """Retorna color según ganancia/pérdida"""
         if valor > 0:
@@ -445,8 +457,9 @@ class AnalisisBase:
         periodos_ok = [c for c in periodos if c in df.columns]
         n_p = len(periodos_ok)
 
-        # Selección top 5
-        top5 = df.nlargest(5, col_ref) if es_ganadores else df.nsmallest(5, col_ref)
+        # Selección top 5 — excluye outliers estadísticos antes de rankear
+        df_ok = self._sin_outliers(df, col_ref)
+        top5 = df_ok.nlargest(5, col_ref) if es_ganadores else df_ok.nsmallest(5, col_ref)
         nombres = top5[columna_nombre].tolist()
         n_fondos = len(nombres)
 
@@ -836,11 +849,21 @@ class AnalisisFCI(AnalisisBase):
             fg_valor=color_gan,
         )
 
-        # ========== GRÁFICOS EVOLUCIÓN HISTÓRICA (Rendimiento 90d) ==========
+        # fondos en cartera — separa cartera vs candidatos de migración
+        fondos_cartera = set(self.df_lotes["fondo"].tolist()) if not self.df_lotes.empty else set()
+        df_en_cartera = (
+            self.df_ultimo[self.df_ultimo["fondo"].isin(fondos_cartera)] if fondos_cartera else self.df_ultimo
+        )
+        df_fuera_cartera = (
+            self.df_ultimo[~self.df_ultimo["fondo"].isin(fondos_cartera)] if fondos_cartera else pd.DataFrame()
+        )
+
+        # ========== GRÁFICOS EVOLUCIÓN HISTÓRICA (Rendimiento 90d) — solo cartera ==========
         row = self.crear_seccion(frame, f"Rendimiento Posiciones:", row)
-        if not self.df_historico.empty and not self.df_ultimo.empty:
-            top_mejores = self.df_ultimo.nlargest(self.top, "variacion90dias")["fondo"].tolist()
-            top_peores = self.df_ultimo.nsmallest(self.top, "variacion90dias")["fondo"].tolist()
+        if not self.df_historico.empty and not df_en_cartera.empty:
+            df_filtrado = self._sin_outliers(df_en_cartera, "variacion90dias")
+            top_mejores = df_filtrado.nlargest(self.top, "variacion90dias")["fondo"].tolist()
+            top_peores = df_filtrado.nsmallest(self.top, "variacion90dias")["fondo"].tolist()
             row = self.crear_grafico_evolucion_combinado(
                 parent=frame,
                 df_historico=self.df_historico,
@@ -854,12 +877,12 @@ class AnalisisFCI(AnalisisBase):
 
         row = self.crear_grafico_vs_indice(parent=frame, row=row)
 
-        # ========== GRÁFICOS TOP 5 (Ganadores y Perdedores — 30d / 60d / 90d / 180d) ==========
+        # ========== GRÁFICOS TOP 5 (Ganadores y Perdedores — candidatos migración, fuera de cartera) ==========
         row = self.crear_seccion(frame, "Gráficos Top 5:", row)
-        if not self.df_ultimo.empty and "variacion30dias" in self.df_ultimo.columns:
+        if not df_fuera_cartera.empty and "variacion30dias" in df_fuera_cartera.columns:
             row = self.crear_grafico_top5_periodos(
                 parent=frame,
-                df=self.df_ultimo,
+                df=df_fuera_cartera,
                 df_historico=self.df_historico,
                 columna_nombre="fondo",
                 titulo="FCIs GANADORES",
@@ -869,7 +892,7 @@ class AnalisisFCI(AnalisisBase):
 
             row = self.crear_grafico_top5_periodos(
                 parent=frame,
-                df=self.df_ultimo,
+                df=df_fuera_cartera,
                 df_historico=self.df_historico,
                 columna_nombre="fondo",
                 titulo="FCIs PERDEDORES",
