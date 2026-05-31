@@ -3245,36 +3245,89 @@ class DashMain:
         # Ubica información de yfinance. Ticker, para mostrar gráfico de dividends
         def grafico_rendimiento_symbol(symbol=None, windows=None):
             try:
+                # limpiar widgets previos (excepto Cancel)
+                for w in windows.winfo_children():
+                    if isinstance(w, tk.Button):
+                        continue
+                    w.destroy()
 
-                # if symbol in self.stock_ts.info:
+                rg.clf()  # reset figura antes de redibujar
                 activo, datos, update = self.crypto_ts.ts_yfinance_symbol(symbol=symbol, vehiculo="Stock")
-                self.crypto_ts.rendimiento_dividends(fg=rg, activo=activo, datos=datos, symbol=symbol, plot="yes")
+                result = self.crypto_ts.rendimiento_dividends(
+                    fg=rg, activo=activo, datos=datos, symbol=symbol, plot="yes"
+                )
+                sin_div = result is None or (isinstance(result, tuple) and (result[0].empty or result[1] == "X"))
+                if sin_div and not datos.empty:
+                    ax = rg.add_subplot(111)
+                    ax.set_facecolor("#0d1117")
+                    rg.patch.set_facecolor("#0d1117")
+                    ax.plot(datos.index, datos["Close"], color="#2196F3", linewidth=1.5)
+                    ax.set_title(f"{symbol} — Precio histórico", color="white", fontsize=9)
+                    ax.tick_params(colors="white", labelsize=7)
+                    ax.tick_params(axis="x", rotation=30)
+                    for spine in ax.spines.values():
+                        spine.set_color("#333333")
+                    ax.yaxis.label.set_color("white")
                 rv.draw()
 
-                # resultados del simbolo
-                inicial = datos["Close"].iloc[0]
-                final = datos["Close"].iloc[-1]
-                growth = (final - inicial) / inicial
+                inicial = datos["Close"].iloc[0] if not datos.empty else 0
+                final = datos["Close"].iloc[-1] if not datos.empty else 0
+                years = max(len(datos) / 252, 1)
+                growth_total = (final - inicial) / inicial if inicial else 0
+                apr = (1 + growth_total) ** (1 / years) - 1
+
+                # datos de consenso desde market
+                mkt, ix = self.Market.select(account=self.account, symbol=symbol)
+                inst_score = consenso_lbl = ""
+                if mkt and ix:
+                    r = dict(zip(ix, mkt[0]))
+                    inst_score = f"{r.get('inst_score') or 0:.2f}"
+                    # buscar campo consenso con variantes de nombre
+                    tag = r.get("consenso_tag") or r.get("consensoTag") or r.get("consenso") or ""
+                    suma = r.get("consenso_suma") or r.get("consensoSuma")
+                    if tag and suma is not None:
+                        consenso_lbl = f"{tag}  ({int(suma):+d})"
+                    elif suma is not None:
+                        consenso_lbl = f"{int(suma):+d} votos"
+                    elif tag:
+                        consenso_lbl = tag
+                    else:
+                        # debug: mostrar qué campos con "consenso" están disponibles
+                        campos_c = [k for k in ix if "consenso" in k.lower()]
+                        consenso_lbl = f"campos: {campos_c}" if campos_c else "sin datos"
+
                 analisis = {
                     "symbol": symbol,
-                    "Precio": "{:>10.2f}".format(inicial) + " - " + "{:>10.2f}".format(final),
-                    "Growth": "{:>10.2%}".format(growth),
-                    "Dividend Yield": "{:>10.2%}".format(activo.get("dividendYield", 0)),
-                    "Dividend Rate": "{:>10.2f}".format(activo.get("dividendRate", 0)),
-                    "P/E Ratio": "{:>10.2f}".format(activo.get("trailingPE", 0)),
-                    "Beta": "{:>10.2f}".format(activo.get("beta", 0)),
+                    "Precio": f"{inicial:.2f}  →  {final:.2f}",
+                    "Growth 5y": f"{growth_total:+.1%}",
+                    "APR": f"{apr:+.1%}",
+                    "Div Yield": f"{(lambda v: v / 100 if v > 1 else v)(activo.get('dividendYield') or 0):.2%}",
+                    "Div Rate": f"{activo.get('dividendRate') or 0:.2f}",
+                    "P/E": f"{activo.get('trailingPE') or 0:.1f}",
+                    "Beta": f"{activo.get('beta') or 0:.2f}",
+                    "─" * 12: "",
+                    "Inst Score": inst_score,
+                    "Consenso": consenso_lbl,
                 }
 
                 for i, (key, value) in enumerate(analisis.items()):
+                    sep = key.startswith("─")
                     lbl = tk.Label(
                         windows,
-                        text=str(key),
+                        text=key if not sep else "",
                         bg=self.bgcolor,
                         font=("Arial", 9, "bold"),
+                        fg="white" if not sep else self.bgcolor,
                     )
-                    lbv = tk.Label(windows, text=str(value), bg=self.bgcolor, font=("Arial", 9))
-                    lbv.grid(row=i + 1, column=1, padx=5, pady=1, sticky=W)
-                    lbl.grid(row=i + 1, column=0, padx=5, pady=1, sticky=W)
+                    lbv = tk.Label(
+                        windows,
+                        text=value,
+                        bg=self.bgcolor,
+                        font=("Arial", 9),
+                        fg="#00cc88" if key == "Consenso" else "white",
+                    )
+                    lbl.grid(row=i + 1, column=0, padx=5, pady=1 if not sep else 3, sticky=W)
+                    lbv.grid(row=i + 1, column=1, padx=5, pady=1 if not sep else 3, sticky=W)
 
             except Exception as e:
                 print("grafico_rendimiento_symbol(): {}".format(e))
@@ -3300,14 +3353,9 @@ class DashMain:
                     self.messagebox.showwarning("Advertencia", message)
 
             elif tipo == "Activo":
-                if str_float(values[4]) > 0.0:
-                    symbol = values[1]
+                symbol = values[1]
+                if symbol:
                     grafico_rendimiento_symbol(symbol=symbol, windows=windows)
-
-                else:
-                    symbol = values[1]
-                    message = "symbol :" + symbol + " No informa pago de dividendos"
-                    self.messagebox.showwarning("Advertencia", message)
 
             elif tipo == "Region":
                 symbol = str(values[1]).strip()
@@ -3700,7 +3748,7 @@ class DashMain:
                 # construye e inserta symbol y proyecta los dividends
                 resumen_mes, producto, costobase = [0] * 12, 0.0, 0.0
                 book = resumen_cartera(option="Activo", meses=meses)
-                TActivo, div_sector, min_base, ticket = "", 0.0, pow(10, 9), ""
+                TActivo, div_sector, ticket, first_exdiv = "", 0.0, "", ""
 
                 for symbol, activo in book.items():
 
@@ -3714,9 +3762,10 @@ class DashMain:
                         t_symbol[i] = "{:4.1f}".format(activo["dividends"][i]) if activo["dividends"][i] > 0 else ""
                         resumen_mes[i] += activo["dividends"][i]
 
-                    if min_base > activo["costobase"]:
-                        min_base = activo["costobase"]
-                        ticket = symbol
+                    # preferir primer símbolo con fecha ex-div
+                    if not first_exdiv and activo.get("exdiv"):
+                        first_exdiv = symbol
+                    ticket = first_exdiv or symbol
 
                     total_row = "{:4.1f}".format(sum(activo["dividends"]))
                     costo = "{:9.1f}".format(activo["costobase"])
@@ -3949,7 +3998,7 @@ class DashMain:
                 fg="white",
                 command=lambda: eexit(),
             )
-            ft1.grid(pady=10)
+            ft1.grid(row=30, pady=12, sticky="w", padx=6)
         except Exception as e:
             print("detalle_graph(): {}".format(e))
 

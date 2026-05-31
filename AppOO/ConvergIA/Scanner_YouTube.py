@@ -1,9 +1,4 @@
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-
-from Modulos_python import feedparser, anthropic, logging, json, re, yf, time
+from Modulos_python import feedparser, anthropic, logging, json, re, yf, time, os
 from Modulos_Mysql import MarketScreen
 from Modulos_Utilitarios import read_json_tmp, write_json_tmp
 

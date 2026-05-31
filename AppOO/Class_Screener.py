@@ -162,6 +162,88 @@ _ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
 _ETF_NAME_KEYWORDS = {"etf", "trust", "fund", "physical gold", "index fund", "reit index"}
 
 
+def bind_tv_web_menu(tree, win, colors=None, col_symbol="#1", get_url=None):
+    """Agrega menú contextual TradingView/Web al hacer click en columna Symbol de un Treeview.
+
+    Args:
+        tree: ttk.Treeview al que se aplica el binding.
+        win: ventana padre (para cerrar menú al clickear afuera).
+        colors: dict con 'bgcolor' y 'cgcolor' (opcional).
+        col_symbol: columna que activa el menú (default '#1').
+        get_url: callable(symbol) → url str | None (opcional).
+    """
+    bgcolor = (colors or {}).get("bgcolor", "black")
+    cgcolor = (colors or {}).get("cgcolor", "DarkCyan")
+
+    def _on_click(event):
+        if tree.identify_region(event.x, event.y) != "cell":
+            return
+        if tree.identify_column(event.x) != col_symbol:
+            return
+        item = tree.identify_row(event.y)
+        if not item:
+            return
+        tree.selection_set(item)
+        values = tree.item(item, "values")
+        symbol = str(values[0]).strip() if values else item
+        if not symbol:
+            return
+
+        menu = tk.Toplevel(win)
+        menu.overrideredirect(True)
+        menu.configure(bg=bgcolor)
+        menu.attributes("-topmost", True)
+
+        btn_cfg = dict(
+            bg=bgcolor,
+            fg="white",
+            activebackground="#2a5298",
+            activeforeground="white",
+            relief=tk.FLAT,
+            anchor="w",
+            font=("Arial", 10),
+            width=15,
+            pady=2,
+            cursor="hand2",
+        )
+
+        tk.Label(menu, text=f"  {symbol}", bg=bgcolor, fg=cgcolor, font=("Arial", 10, "bold"), anchor="w").pack(
+            fill=tk.X
+        )
+        tk.Button(
+            menu,
+            text="TradingView",
+            command=lambda: (menu.destroy(), abrir_tradingview(symbol, vehiculo="Stock")),
+            **btn_cfg,
+        ).pack(fill=tk.X, padx=1, pady=(0, 1))
+
+        def _web(sym=symbol):
+            menu.destroy()
+            url = get_url(sym) if get_url else None
+            if not url:
+                try:
+                    url = yf.Ticker(sym).info.get("website") or ""
+                except Exception:
+                    pass
+            if url:
+                webbrowser.open(str(url))
+
+        tk.Button(menu, text="Web", command=_web, **btn_cfg).pack(fill=tk.X, padx=1, pady=(0, 1))
+
+        menu.geometry(f"+{win.winfo_pointerx() + 5}+{win.winfo_pointery()}")
+        menu.update_idletasks()
+        menu.grab_set()
+
+        def _on_menu_click(e, m=menu):
+            if m.winfo_exists() and not (0 <= e.x <= m.winfo_width() and 0 <= e.y <= m.winfo_height()):
+                m.destroy()
+
+        menu.bind("<Button-1>", _on_menu_click, add="+")
+        menu.bind("<Escape>", lambda e: menu.destroy())
+
+    tree.bind("<Button-1>", _on_click)
+
+
 def _yahoo_session():
     """Obtiene cookie + crumb para autenticar requests a Yahoo Finance.
     Nuevo flujo: fc.yahoo.com primero (cambia de autenticación Yahoo ~2024).
@@ -250,6 +332,7 @@ class Screener(tk.Frame):
         self.counter = 0
         self._inst_win = None
         self._cand_win = None
+        self._exp_win = None
         self.ix = []
         self.ctree = []  # poblado en widgets_screener vía _COL_DEFS
         self.ctree_widget = None  # instancia CustomTreeview
@@ -498,6 +581,7 @@ class Screener(tk.Frame):
                     webbrowser.open(str(url))
 
             self.ctree_widget.tree_scroll.bind("<Double-1>", _open_website)
+            bind_tv_web_menu(self.ctree_widget.tree_fixed, self.root, colors=self.colors)
 
             # set position of all above objects by pack panel
             imagen_tk = BDsystem.select_image(idd=200, size=(32, 32))
@@ -1171,79 +1255,7 @@ class Screener(tk.Frame):
 
             _apply_filters()
 
-        def _context_menu(event):
-            if tree.identify_region(event.x, event.y) != "cell":
-                return
-            if tree.identify_column(event.x) != "#1":
-                return
-            item = tree.identify_row(event.y)
-            if not item:
-                return
-            tree.selection_set(item)
-            symbol = item
-
-            bgcolor = (self.colors or {}).get("bgcolor", "black")
-            cgcolor = (self.colors or {}).get("cgcolor", "DarkCyan")
-
-            menu = tk.Toplevel(win)
-            menu.overrideredirect(True)
-            menu.configure(bg=bgcolor)
-            menu.attributes("-topmost", True)
-
-            btn_cfg = dict(
-                bg=bgcolor,
-                fg="white",
-                activebackground="#2a5298",
-                activeforeground="white",
-                relief=tk.FLAT,
-                anchor="w",
-                font=("Arial", 10),
-                width=15,
-                pady=2,
-                cursor="hand2",
-            )
-
-            tk.Label(menu, text=f"  {symbol}", bg=bgcolor, fg=cgcolor, font=("Arial", 10, "bold"), anchor="w").pack(
-                fill=tk.X
-            )
-
-            tk.Button(
-                menu,
-                text="TradingView",
-                command=lambda: (menu.destroy(), abrir_tradingview(symbol, vehiculo="Stock")),
-                **btn_cfg,
-            ).pack(fill=tk.X, padx=1, pady=(0, 1))
-
-            def _abrir_web(sym=symbol):
-                menu.destroy()
-                url = _websites.get(sym) or ""
-                if not url:
-                    try:
-                        url = yf.Ticker(sym).info.get("website") or ""
-                        if url:
-                            _websites[sym] = url
-                    except Exception:
-                        pass
-                if url:
-                    webbrowser.open(url)
-
-            tk.Button(menu, text="Web", command=_abrir_web, **btn_cfg).pack(fill=tk.X, padx=1, pady=(0, 1))
-
-            x = win.winfo_pointerx() + 5
-            y = win.winfo_pointery()
-            menu.geometry(f"+{x}+{y}")
-
-            def _close_if_outside(e, m=menu):
-                if m.winfo_exists():
-                    mx, my = m.winfo_rootx(), m.winfo_rooty()
-                    mw, mh = m.winfo_width(), m.winfo_height()
-                    if not (mx <= e.x_root <= mx + mw and my <= e.y_root <= my + mh):
-                        m.destroy()
-
-            win.bind("<Button-1>", _close_if_outside, add="+")
-            menu.bind("<Escape>", lambda e: menu.destroy())
-
-        tree.bind("<Button-1>", _context_menu)
+        bind_tv_web_menu(tree, win, colors=self.colors, get_url=lambda sym: _websites.get(sym))
 
         ttk.Button(btn_frame, text="Refresh", width=10, command=_refresh).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(btn_frame, text="Cancel", width=10, command=win.destroy).pack(side=tk.LEFT)
@@ -1415,6 +1427,268 @@ class Screener(tk.Frame):
         ttk.Button(btn_frame, text="Cancel", width=10, command=win.destroy).pack(side=tk.LEFT)
 
         _refresh()
+
+    def _show_consenso_explicado(self, symbol):
+        if self._exp_win is not None and self._exp_win.winfo_exists():
+            self._exp_win.destroy()
+        self._exp_win = None
+        cartera = self.ScMarket.load_cartera_inst(self.account)
+        row = next((r for r in cartera if r["symbol"] == symbol), None)
+        if not row:
+            return
+
+        p33_net, p67_net = _build_net_percentiles(cartera)
+        p33_flujo, p67_flujo = _build_flujo_percentiles(cartera)
+        syms_buy, syms_sell = _load_csv_signals()
+        sentiment = load_sentiment(self.account)
+        analysis = load_analysis(self.account)
+
+        buy_r = float(row.get("fh_buy_ratio") or 0.0)
+        sell_r = float(row.get("fh_sell_ratio") or 0.0)
+        call_s = row.get("fh_call_shares") or 0
+        put_s = row.get("fh_put_shares") or 0
+        fh_count = row.get("fh_count") or 0
+        new_ent = row.get("new_entrants") or 0
+        exits = row.get("full_exits") or 0
+        rec = (row.get("analyst_rec") or "").lower().replace(" ", "_")
+        n_ana = row.get("analyst_count") or 0
+        categ = row.get("categoriaActivo") or ""
+
+        v_net = voto_net_relativo(buy_r, sell_r, p33_net, p67_net, row.get("fh_count"))
+        v_opt = voto_options(call_s, put_s)
+        v_flujo = voto_flujo(new_ent, exits, row.get("fh_count"), p33_flujo, p67_flujo)
+        v_ana = voto_analistas(rec)
+        v_val = voto_valuacion(categ) if categ not in ("X", "T") else None
+        v_cob = voto_cobertura(fh_count)
+        v_sent = voto_tech_alignment(symbol, sentiment, analysis)
+        ia_signal = "BUY" if symbol in syms_buy else ("SELL" if symbol in syms_sell else "—")
+
+        def _rank(val, p33, p67):
+            if val >= p67:
+                return "top 33%"
+            if val >= p33:
+                return "mid 33%"
+            return "bot 33%"
+
+        if fh_count:
+            net = buy_r - sell_r
+            d_net = f"Buy {buy_r:.1%}  Sell {sell_r:.1%}  →  {_rank(net, p33_net, p67_net)}"
+        else:
+            d_net = "sin fondos 13F"
+
+        total_opts = call_s + put_s
+        if total_opts > 0:
+            ratio = call_s / total_opts
+            d_opt = f"CALL {call_s/1e6:.1f}M  PUT {put_s/1e6:.1f}M  →  ratio {ratio:.0%}"
+        else:
+            d_opt = "sin opciones registradas"
+
+        if fh_count:
+            fn = max(-1.0, min(1.0, (new_ent - exits) / fh_count))
+            d_flujo = f"+{new_ent} nuevos  −{exits} salidas  →  {_rank(fn, p33_flujo, p67_flujo)}"
+        else:
+            d_flujo = "sin datos de flujo"
+
+        rec_lbl = rec.replace("_", " ") if rec else "—"
+        d_ana = f"{rec_lbl}  ({n_ana} analistas)" if rec else "sin recomendación"
+
+        _CATEG = {
+            "I": "Infravalorado",
+            "S": "Sobrevalorado",
+            "N": "Neutral",
+            "X": "ETF/Fondo  →  abstiene",
+            "T": "Descubierto 13F  →  abstiene",
+        }
+        d_val = _CATEG.get(categ, categ)
+        level_cob = "≥20" if fh_count >= 20 else ("≥5" if fh_count >= 5 else "<5")
+        d_cob = f"{fh_count} fondos 13F  ({level_cob})"
+
+        if symbol in (analysis or {}):
+            patron = analysis[symbol].get("patron", "neutro")
+            d_sent = f"patron: {patron}"
+        elif symbol in (sentiment or {}):
+            d_sent = f"sentimiento: {sentiment[symbol]:+d}"
+        else:
+            d_sent = "sin datos de sentimiento"
+
+        _VOTO_COLOR = {1: "#00FF88", 0: "#888888", -1: "#FF6060", None: "#444444"}
+        _VOTO_LABEL = {1: " +1", 0: "  0", -1: " −1", None: "  —"}
+        _TAG_DISPLAY = {
+            "UNANIME": "★ UNÁNIME",
+            "CONSENSO": "▲ CONSENSO",
+            "TENDENCIA": "↗ TENDENCIA",
+            "NEUTRO": "→ NEUTRO",
+            "ALERTA": "↘ ALERTA",
+            "SALIDA": "▼ SALIDA",
+            "S/D": "— S/D",
+        }
+        _TAG_COLOR = {
+            "UNANIME": "#FFD700",
+            "CONSENSO": "#00FF88",
+            "TENDENCIA": "cyan",
+            "NEUTRO": "#888888",
+            "ALERTA": "#FFA500",
+            "SALIDA": "#FF6060",
+        }
+
+        votos_activos = [v for v in [v_net, v_opt, v_flujo, v_ana, v_val, v_cob, v_sent] if v is not None]
+        suma = sum(votos_activos)
+        tag, _, _ = senal_consenso(votos_activos, suma)
+        n_activos = len(votos_activos)
+
+        # (fuente, detalle, regla, voto, es_ia)
+        filas = [
+            ("1. NET (13F)", d_net, "buy% − sell%  →  ranking top/mid/bot 33% sobre toda la cartera", v_net, False),
+            ("2. OPTIONS(13F)", d_opt, "CALL / (CALL+PUT):  ≥60% → +1   ≥40% → 0   <40% → −1", v_opt, False),
+            (
+                "3. FLUJO (13F)",
+                d_flujo,
+                "(nuevos − salidas) / total fondos  →  ranking top/mid/bot 33%",
+                v_flujo,
+                False,
+            ),
+            ("4. ANALISTAS(YF)", d_ana, "strong_buy / buy → +1     hold → 0     sell / strong_sell → −1", v_ana, False),
+            (
+                "5. VALUACION",
+                d_val,
+                "I = Infravalorado → +1     N = Neutral → 0     S = Sobrevalorado → −1     X/T → abstiene",
+                v_val,
+                False,
+            ),
+            (
+                "6. COBERTURA",
+                d_cob,
+                "cantidad de fondos 13F que reportan el activo:  ≥20 → +1   ≥5 → 0   <5 → −1",
+                v_cob,
+                False,
+            ),
+            (
+                "7. SENTIMIENTO",
+                d_sent,
+                "patron diario ConvergIA:  acumulacion → +1     neutro → 0     distribucion → −1",
+                v_sent,
+                False,
+            ),
+            (
+                "— IA SIGNAL",
+                ia_signal,
+                "solo display — señal técnica CSV, excluida del cálculo de consenso",
+                None,
+                True,
+            ),
+        ]
+
+        tag_color = _TAG_COLOR.get(tag, "white")
+        tag_label = _TAG_DISPLAY.get(tag, tag)
+
+        win = tk.Toplevel(self)
+        self._exp_win = win
+        win.protocol("WM_DELETE_WINDOW", lambda: (win.destroy(), setattr(self, "_exp_win", None)))
+        win.title(f"Consenso — {symbol}")
+        win.configure(bg="#0d1117")
+        win.resizable(True, False)
+
+        # Encabezado compacto: ticker  |  señal  |  score
+        hdr = tk.Frame(win, bg="#0d1117")
+        hdr.pack(fill=tk.X, padx=14, pady=(10, 2))
+        tk.Label(
+            hdr,
+            text=f"Desglose Consenso — {symbol}",
+            bg="#0d1117",
+            fg="cyan",
+            font=("Arial", 11, "bold"),
+            anchor="w",
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            hdr,
+            text=f"   {tag_label}",
+            bg="#0d1117",
+            fg=tag_color,
+            font=("Arial", 10, "bold"),
+            anchor="w",
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            hdr,
+            text=f"   score = {suma:+d} / {n_activos}",
+            bg="#0d1117",
+            fg="#888888",
+            font=("Consolas", 9),
+            anchor="w",
+        ).pack(side=tk.LEFT)
+
+        tk.Frame(win, bg="#333333", height=1).pack(fill=tk.X, padx=14, pady=(4, 2))
+
+        tf = tk.Frame(win, bg="#0d1117")
+        tf.pack(fill=tk.X, padx=14, pady=(0, 6))
+
+        # Cabecera columnas
+        for col, (txt, w, anchor) in enumerate(
+            [
+                ("FUENTE", 15, "w"),
+                ("DETALLE", 34, "w"),
+                ("REGLA", 56, "w"),
+                ("VOTO", 5, "center"),
+            ]
+        ):
+            tk.Label(
+                tf,
+                text=txt,
+                bg="#1a1a2e",
+                fg="#888888",
+                font=("Consolas", 8, "bold"),
+                width=w,
+                anchor=anchor,
+                padx=4,
+            ).grid(row=0, column=col, padx=1, pady=(0, 2), sticky="ew")
+
+        for r_idx, (fuente, detalle, regla, voto, es_ia) in enumerate(filas, start=1):
+            row_bg = "#111822" if r_idx % 2 else "#0d1117"
+            voto_color = "#555555" if es_ia else _VOTO_COLOR.get(voto, "#444444")
+            voto_txt = "  —" if es_ia else _VOTO_LABEL.get(voto, "  —")
+            fg_det = "#555555" if es_ia else "#cccccc"
+            fg_reg = "#444444" if es_ia else "#666666"
+
+            tk.Label(
+                tf,
+                text=fuente,
+                bg=row_bg,
+                fg="white",
+                font=("Consolas", 9),
+                width=15,
+                anchor="w",
+                padx=4,
+            ).grid(row=r_idx, column=0, padx=1, pady=1, sticky="ew")
+            tk.Label(
+                tf,
+                text=detalle,
+                bg=row_bg,
+                fg=fg_det,
+                font=("Consolas", 9),
+                width=34,
+                anchor="w",
+                padx=4,
+            ).grid(row=r_idx, column=1, padx=1, pady=1, sticky="ew")
+            tk.Label(
+                tf,
+                text=regla,
+                bg=row_bg,
+                fg=fg_reg,
+                font=("Consolas", 8),
+                width=56,
+                anchor="w",
+                padx=4,
+            ).grid(row=r_idx, column=2, padx=1, pady=1, sticky="ew")
+            tk.Label(
+                tf,
+                text=voto_txt,
+                bg=row_bg,
+                fg=voto_color,
+                font=("Consolas", 9, "bold"),
+                width=5,
+                anchor="center",
+            ).grid(row=r_idx, column=3, padx=1, pady=1, sticky="ew")
+
+        ttk.Button(win, text="Cancel", width=10, command=win.destroy).pack(pady=(2, 8))
 
     def _show_institucionales_cartera(self):
         if self._inst_win is not None and self._inst_win.winfo_exists():
@@ -1699,6 +1973,26 @@ class Screener(tk.Frame):
                     webbrowser.open(str(url))
 
         ct.tree_scroll.bind("<Double-1>", _open_website_consenso)
+        bind_tv_web_menu(ct.tree_fixed, win, colors=self.colors)
+
+        def _open_consenso_explicado(event):
+            tree = event.widget
+            if tree.identify_region(event.x, event.y) != "cell":
+                return
+            col = tree.identify_column(event.x)
+            col_id = tree.column(col, "id") if col else ""
+            if col_id == "Website":
+                return
+            sel = ct.tree_fixed.selection()
+            if not sel:
+                return
+            vals = ct.tree_fixed.item(sel[0], "values")
+            sym = str(vals[0]).strip() if vals else ""
+            if sym:
+                self._show_consenso_explicado(sym)
+
+        ct.tree_fixed.bind("<Double-1>", _open_consenso_explicado)
+        ct.tree_scroll.bind("<Double-1>", _open_consenso_explicado, add="+")
 
         # Barra resumen
         resumen_frame = tk.Frame(win, bg="#111111")

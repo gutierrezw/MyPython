@@ -667,7 +667,7 @@ class DataHub:
                         a_sell.append(
                             {
                                 "symbol": keys,
-                                "account": account,
+                                "account": value["sell"].get("account", account),
                                 "vehiculo": vehiculo,
                                 "profit": value["sell"]["profit"],
                                 "cantidad lotes": value["sell"]["cantidad lotes"],
@@ -872,7 +872,9 @@ class DataHub:
             return []
 
     # optimiza venta de lotes para la gain de capital
-    def maximiza_sell_lotes(account=None, symbol=None, last=None, c_sell=None, position=None, costobase=None):
+    def maximiza_sell_lotes(
+        account=None, symbol=None, last=None, c_sell=None, position=None, costobase=None, divisa="USD"
+    ):
         try:
             pre_sell = {
                 " 25%": {
@@ -908,7 +910,23 @@ class DataHub:
             }
 
             # lista de lotes ganadores y last
-            list_gain = DataHub.get_lotesGainLost(opcion="gain", account=account, symbol=symbol, last=last)
+            list_gain = DataHub.get_lotesGainLost(
+                opcion="gain", account=account, symbol=symbol, divisa=divisa, last=last
+            )
+            # cap al position real — evita contar cuotas ya rescatadas (FCI con activa='Y' históricas)
+            if position and position > 0:
+                acum_qty = 0.0
+                capped = []
+                for g in list_gain:
+                    if acum_qty >= position:
+                        break
+                    rem = position - acum_qty
+                    if g["cantidad"] > rem:
+                        scale = rem / g["cantidad"]
+                        g = dict(g, cantidad=rem, gyp=g["gyp"] * scale, **{"costo lote": g["costo lote"] * scale})
+                    capped.append(g)
+                    acum_qty += g["cantidad"]
+                list_gain = capped
             if list_gain:
                 ebook, lotes_gain, pos_sell = (enumerate(list_gain), len(list_gain), {})
                 eof_book, read = next(ebook, (None, None))
@@ -2596,8 +2614,9 @@ class TickerInfo(MyOrders):
                             forward_yield_calculated = trailing_annual / current_price
 
                             # Actualizar último año (año en curso) con rendimiento forward
-                            y_datos.loc[y_index[-1], "Rendimiento"] = forward_yield_calculated
-                            y_datos.loc[y_index[-1], "Close"] = current_price
+                            if len(y_index) > 0:
+                                y_datos.loc[y_index[-1], "Rendimiento"] = forward_yield_calculated
+                                y_datos.loc[y_index[-1], "Close"] = current_price
 
                             # NOTA: También podríamos actualizar el dividendo proyectado del año actual
                             # pero mantenemos solo el histórico. El forward solo sirve para comparar yields.
@@ -2631,8 +2650,9 @@ class TickerInfo(MyOrders):
                             i = y_datos[y_datos["Rendimiento"] > m]["Rendimiento"].mean()
                             s = y_datos[y_datos["Rendimiento"] < m]["Rendimiento"].mean()
 
-                            dforward = y_datos.loc[y_index[-1], "Rendimiento"]
-                            value = ("I" if dforward > m else "S" if dforward < m else "N",)
+                            if len(y_index) > 0:
+                                dforward = y_datos.loc[y_index[-1], "Rendimiento"]
+                                value = ("I" if dforward > m else "S" if dforward < m else "N",)
 
                 return y_datos, value, meses
         except Exception as e:
@@ -3126,7 +3146,7 @@ class TickerInfo(MyOrders):
 
     # recorre positions para actualizar oportunidades Sell general"""
     def oportunidades_sell(self):
-        def obtiene_lotes(symbol=None, divisa="USD"):
+        def obtiene_lotes(symbol=None, divisa="USD", account=None):
             nonlocal datos
             try:
 
@@ -3134,14 +3154,22 @@ class TickerInfo(MyOrders):
 
                 last = position["mrkprice"]
                 l_gain = DataHub.get_lotesGainLost(
-                    opcion="gain", account=self.account, symbol=symbol, divisa=divisa, last=last
+                    opcion="gain", account=account or self.account, symbol=symbol, divisa=divisa, last=last
                 )
 
                 if l_gain:
+                    pos_max = position.get("position", 0)
                     for lotes, gain in enumerate(l_gain, 1):
                         profit += gain["gyp"]
                         costCum += gain["costo lote"]
                         sell += gain["cantidad"]
+
+                    # cap al position real — FCI mantiene compras históricas con activa='Y'
+                    if pos_max > 0 and sell > pos_max:
+                        ratio = pos_max / sell
+                        profit *= ratio
+                        costCum *= ratio
+                        sell = pos_max
 
                     disponible = sell
                     if self.vehiculo == "Crypto":
@@ -3163,6 +3191,7 @@ class TickerInfo(MyOrders):
                             "disponible": disponible,
                             "divisa": position["divisa"],
                             "factor": position["factor_cambio"],
+                            "account": account or self.account,
                         }
                     }
                 return datos
@@ -3172,7 +3201,8 @@ class TickerInfo(MyOrders):
         try:
             for position in self.positions:
                 symbol = position["ticket"]
-                datos = obtiene_lotes(symbol=symbol, divisa=position["divisa"])
+                account = position.get("useraccount") or self.account
+                datos = obtiene_lotes(symbol=symbol, divisa=position["divisa"], account=account)
 
                 # actualiza metadata del activo para el rebalanceo
                 if symbol in self.info:
@@ -5255,38 +5285,36 @@ class WidgetVehiculo(TickerInfo):
 
                 # detalla lotes ganadores --
                 ventas = DataHub.maximiza_sell_lotes(
-                    account=self.account,
+                    account=value["account"],
                     symbol=value["symbol"],
                     last=value["last"],
                     c_sell=value["cantidad lotes"],
                     position=value["position"],
                     costobase=value["costobase"],
+                    divisa=value["divisa"],
                 )
-                anterior = None
                 for keys, sell in ventas.items():
-                    if sell["profit"] != anterior:
-                        items = tree.insert(
-                            activo,
-                            "end",
-                            text="",
-                            values=(
-                                "",
-                                "",
-                                "",
-                                "",
-                                "",
-                                "{:>10}".format(keys),
-                                "{:>10.0f}".format(sell["profit"]),
-                                "{:>10.0f}".format(sell["lotes"]),
-                                "{:>10.5f}".format(sell["cantidad sell"]),
-                                "{:>10.1%}".format(sell["roi"]),
-                                "{:>10.6f}".format(sell["pos avgCost"]),
-                                "{:>10.5f}".format(sell["pos position"]),
-                                "{:>10.2f}".format(sell["pos costobase"]),
-                            ),
-                            tags=("sell",),
-                        )
-                    anterior = sell["profit"]
+                    tree.insert(
+                        activo,
+                        "end",
+                        text="",
+                        values=(
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "{:>10}".format(keys),
+                            "{:>10.0f}".format(sell["profit"]),
+                            "{:>10.0f}".format(sell["lotes"]),
+                            "{:>10.5f}".format(sell["cantidad sell"]),
+                            "{:>10.1%}".format(sell["roi"]),
+                            "{:>10.6f}".format(sell["pos avgCost"]),
+                            "{:>10.5f}".format(sell["pos position"]),
+                            "{:>10.2f}".format(sell["pos costobase"]),
+                        ),
+                        tags=("sell",),
+                    )
 
                 # muestra las opciones para el activo
                 tree.item(activo, open=True)
@@ -5306,7 +5334,7 @@ class WidgetVehiculo(TickerInfo):
 
         try:
             ons = tk.Toplevel()
-            title = "Grain Capital"
+            title = "Grail Capital"
             dimension = "%dx%d+%d+%d" % (1270, 220, 0, 775)
             ons.geometry(dimension)
             ons.resizable(False, False)
@@ -6186,6 +6214,7 @@ class CustomTreeview:
 
         # set selección de items
         self.tree_fixed.bind("<<TreeviewSelect>>", self.sync_fixed_selection)
+        self.tree_scroll.bind("<<TreeviewSelect>>", self.sync_scroll_selection)
 
         # Sincronizar el scroll vertical si se habilita
         if self.show_vscroll:
@@ -6333,8 +6362,14 @@ class CustomTreeview:
 
     # Función para sincronizar la selección
     def sync_fixed_selection(self, event):
-        selected_item = self.tree_fixed.selection()
-        self.tree_scroll.selection_set(selected_item)
+        selected = self.tree_fixed.selection()
+        if self.tree_scroll.selection() != selected:
+            self.tree_scroll.selection_set(selected)
+
+    def sync_scroll_selection(self, event):
+        selected = self.tree_scroll.selection()
+        if self.tree_fixed.selection() != selected:
+            self.tree_fixed.selection_set(selected)
 
     def insert_row(self, padre=None, texto=None, values=None, summary=None):
         """Método para insertar una fila en los Treeviews.

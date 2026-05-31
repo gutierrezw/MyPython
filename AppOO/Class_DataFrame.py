@@ -1227,6 +1227,12 @@ def chart_symbol(fg=None, datos=None, keys=None):
         # Elimina columnas duplicadas si existen (toma la primera)
         datos = datos.loc[:, ~datos.columns.duplicated()]
 
+        if datos.empty or not isinstance(datos.index, pd.DatetimeIndex):
+            _logger.warning(
+                f"chart_symbol(): sin DatetimeIndex ({type(datos.index).__name__}) — sin datos para graficar"
+            )
+            return None
+
         # Resample cada columna por separado para evitar problemas de compatibilidad
         resampled = datos.resample(periodo)
         pdatos = pd.DataFrame()
