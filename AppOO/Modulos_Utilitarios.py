@@ -27,6 +27,11 @@ from Modulos_python import (
 
 AGENTES_SCHEDULE = {
     "Agente_MarketScreener": {"intervalo": 86400, "desc": "Discovery + Yahoo (diario)", "active": True},
+    "Agente_PriceSync": {
+        "intervalo": 43200,
+        "desc": "Precios batch Screener+Consenso+Candidatos (12h)",
+        "active": True,
+    },
     "Agente_InstitucionalScore": {"intervalo": 86400, "desc": "Ownership institucional (diario)", "active": True},
     "Agente_ConsensoCache": {"intervalo": 300, "desc": "Materializa consenso_tag en market (5 min)", "active": True},
     "Agente_EdgarFunds": {"intervalo": 2592000, "desc": "Fondos EDGAR company.idx (mensual)", "active": True},
@@ -89,8 +94,9 @@ AGENTES_SCHEDULE = {
 }
 
 
-def wait_rate(intervalo_segundos: int, persist: bool = False):
-    """Decorador: restringe la ejecución a una vez por intervalo. persist=True sobrevive reinicios."""
+def wait_rate(intervalo_segundos: int, persist: bool = False, initial_delay: int = 0):
+    """Decorador: restringe la ejecución a una vez por intervalo. persist=True sobrevive reinicios.
+    initial_delay: segundos a esperar en el primer arranque antes de ejecutar por primera vez."""
     _FILE = "agents_schedule.json"
 
     def decorator(func):
@@ -99,8 +105,11 @@ def wait_rate(intervalo_segundos: int, persist: bool = False):
         @wraps(func)
         def wrapper(*args, **kwargs):
             ahora = time.time()
-            if func.last_run == 0 and persist:
-                func.last_run = read_json_tmp(_FILE).get(func.__name__, 0)
+            if func.last_run == 0:
+                if persist:
+                    func.last_run = read_json_tmp(_FILE).get(func.__name__, 0)
+                if func.last_run == 0 and initial_delay > 0:
+                    func.last_run = ahora - intervalo_segundos + initial_delay
             transcurrido = ahora - func.last_run
             if transcurrido < intervalo_segundos:
                 logging.getLogger("ClassAgenteIA").debug(

@@ -2713,6 +2713,64 @@ def refresh_consenso_tags(account):
     return {"actualizados": actualizados, "total": len(cartera)}
 
 
+def sync_prices(account):
+    """Actualiza lastPrice y volume en market + last_price en youtube_candidatos (2x/día).
+    Una sola llamada batch yf.download para todos los símbolos — sin duplicar esfuerzo.
+    Screener, Consenso y Candidatos quedan actualizados automáticamente."""
+    market = MarketScreen()
+
+    market_syms = set(market.load_symbols(account).keys())
+    yt_syms = set(market.load_youtube_candidatos_symbols())
+    all_syms = market_syms | yt_syms
+
+    if not all_syms:
+        return {"updated": 0, "errors": 0, "market": 0, "candidatos": 0}
+
+    tickers_str = " ".join(s.replace("^", "-") for s in sorted(all_syms))
+    try:
+        df = yf.download(tickers_str, period="2d", threads=True, progress=False, auto_adjust=True)
+    except Exception as e:
+        _logger.error(f"sync_prices yf.download: {e}")
+        return {"updated": 0, "errors": len(all_syms), "market": 0, "candidatos": 0}
+
+    if df.empty:
+        return {"updated": 0, "errors": 0, "market": 0, "candidatos": 0}
+
+    prices = {}
+    is_multi = isinstance(df.columns, pd.MultiIndex)
+    for sym in all_syms:
+        sym_yf = sym.replace("^", "-")
+        try:
+            if is_multi:
+                close_series = df["Close"][sym_yf].dropna()
+                vol_series = df["Volume"][sym_yf].dropna() if "Volume" in df.columns.get_level_values(0) else None
+            else:
+                close_series = df["Close"].dropna()
+                vol_series = df["Volume"].dropna() if "Volume" in df.columns else None
+            if close_series.empty:
+                continue
+            price = float(close_series.iloc[-1])
+            vol = int(vol_series.iloc[-1]) if vol_series is not None and not vol_series.empty else None
+            if price > 0:
+                prices[sym] = {"price": price, "volume": vol}
+        except (KeyError, IndexError):
+            pass
+
+    market_rows = [(sym, account, d["price"], d.get("volume")) for sym, d in prices.items() if sym in market_syms]
+    yt_only = {sym: d["price"] for sym, d in prices.items() if sym in yt_syms and sym not in market_syms}
+
+    updated_market = market.update_prices_batch(market_rows)
+    updated_yt = market.update_youtube_prices(yt_only)
+
+    errors = len(all_syms) - len(prices)
+    return {
+        "updated": len(prices),
+        "errors": errors,
+        "market": updated_market,
+        "candidatos": updated_yt,
+    }
+
+
 if __name__ == "__main__":
     print("Iniciando cleanup_market ...")
     result = cleanup_market(account="U4214563")

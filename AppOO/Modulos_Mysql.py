@@ -2865,6 +2865,69 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 cursor.close()
             conn.close()
 
+    def load_youtube_candidatos_symbols(self) -> list:
+        """Retorna todos los símbolos de youtube_candidatos con status='pending'."""
+        conn = self._conectar(tabla="select.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT symbol FROM youtube_candidatos WHERE status = 'pending'")
+            return [row[0] for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_youtube_candidatos_symbols]: {error}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def update_prices_batch(self, rows: list) -> int:
+        """Actualiza lastPrice y volume en market. rows = [(symbol, account, price, volume), ...]"""
+        if not rows:
+            return 0
+        conn = self._conectar(tabla="update.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            now = datetime.now()
+            data = [(price, vol if vol else None, now, sym, acc) for sym, acc, price, vol in rows]
+            cursor.executemany(
+                "UPDATE market SET lastPrice=%s, volume=%s, timestamp=%s " "WHERE symbol=%s AND account=%s",
+                data,
+            )
+            conn.commit()
+            return cursor.rowcount
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::update_prices_batch]: {error}")
+            return 0
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def update_youtube_prices(self, prices: dict) -> int:
+        """Actualiza last_price en youtube_candidatos. prices = {symbol: price}"""
+        if not prices:
+            return 0
+        conn = self._conectar(tabla="update.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            data = [(price, sym) for sym, price in prices.items() if price and price > 0]
+            cursor.executemany(
+                "UPDATE youtube_candidatos SET last_price=%s WHERE symbol=%s",
+                data,
+            )
+            conn.commit()
+            return cursor.rowcount
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::update_youtube_prices]: {error}")
+            return 0
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
 
 class PlanInversion(BDsystem):  # ------------------------------------------------------------------------------------
     """
