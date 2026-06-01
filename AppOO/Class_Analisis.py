@@ -216,78 +216,6 @@ class AnalisisBase:
             return "red"
         return self.VALUE_FG
 
-    def crear_grafico_top5(self, parent, df, columna_nombre, columna_valor, titulo, row, es_ganadores=True):
-        """
-        Crea gráfico de barras horizontales TOP 5.
-
-        Args:
-            parent: Frame padre
-            df: DataFrame con datos
-            columna_nombre: Columna para nombres (eje Y)
-            columna_valor: Columna para valores (barras)
-            titulo: Título del gráfico
-            row: Fila donde ubicar
-            es_ganadores: True para ordenar descendente, False para ascendente
-
-        Returns:
-            int: Siguiente fila disponible
-        """
-        if df.empty:
-            return row
-
-        # Ordenar y tomar TOP 5
-        if es_ganadores:
-            top5 = df.nlargest(5, columna_valor)
-        else:
-            top5 = df.nsmallest(5, columna_valor)
-
-        nombres = [str(n) for n in top5[columna_nombre].values]
-        valores = top5[columna_valor].values
-
-        # Crear figura
-        fg = Figure(figsize=(5.4, 2.0), dpi=100)
-        fg.patch.set_facecolor(self.CG_COLOR)
-        fg.suptitle(titulo, fontsize=10, color="white")
-        fg.subplots_adjust(left=0.35, right=0.95, top=0.85, bottom=0.10)
-
-        ax = fg.add_subplot(111)
-        ax.set_facecolor(self.CG_COLOR)
-
-        colores = ["#024E02" if v > 0 else "#FF4444" for v in valores]
-        bars = ax.barh(nombres[::-1], valores[::-1], color=colores[::-1], height=0.6)
-
-        # Texto dentro de las barras
-        for bar, val in zip(bars, valores[::-1]):
-            x_pos = bar.get_width()
-            ha = "right" if x_pos >= 0 else "left"
-            offset = -0.02 if x_pos >= 0 else 0.02
-            ax.text(
-                x_pos + offset,
-                bar.get_y() + bar.get_height() / 2,
-                f"{val:+.1f}%",
-                va="center",
-                ha=ha,
-                fontsize=7,
-                color="white",
-                fontweight="bold",
-            )
-
-        ax.tick_params(colors="white", labelsize=7)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.spines["bottom"].set_color("gray")
-        ax.spines["left"].set_color("gray")
-        ax.axvline(x=0, color="gray", linewidth=0.5)
-
-        frame_grafico = tk.Frame(parent, bg=self.CG_COLOR)
-        frame_grafico.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
-
-        canvas = FigureCanvasTkAgg(fg, master=frame_grafico)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill="x", expand=True)
-
-        return row + 1
-
     def crear_grafico_vs_indice(self, parent, row):
         """
         Gráfico de líneas: rendimiento acumulado de la cartera vs índice de referencia.
@@ -413,133 +341,6 @@ class AnalisisBase:
             traceback.print_exc()
             return row
 
-    def crear_grafico_top5_periodos(self, parent, df, df_historico, columna_nombre, titulo, row, es_ganadores=True):
-        """
-        Crea gráfico de barras agrupadas horizontales TOP 5 con variaciones 30d, 60d, 90d y 180d.
-        El top 5 se selecciona por variacion30dias. El 180d se calcula desde df_historico.
-        Color único por período (coherente con leyenda). Leyenda fondo blanco debajo del título.
-        """
-        if df.empty:
-            return row
-
-        col_ref = "variacion30dias"
-        if col_ref not in df.columns:
-            return row
-
-        # Un color por período — coherente con la leyenda (sin distinción positivo/negativo)
-        PERIOD_CFG = {
-            "variacion30dias": ("30d", "#ADFF2F"),  # GreenYellow
-            "variacion60dias": ("60d", "#00CED1"),  # DarkTurquoise
-            "variacion90dias": ("90d", "#2E8B57"),  # SeaGreen
-            "variacion180dias": ("180d", "#9370DB"),  # MediumPurple
-        }
-
-        periodos = ["variacion30dias", "variacion60dias", "variacion90dias"]
-
-        # Calcular variacion180dias desde historico
-        df = df.copy()
-        if not df_historico.empty and "fecha" in df_historico.columns:
-            try:
-                df_h = df_historico.copy()
-                df_h["fecha"] = pd.to_datetime(df_h["fecha"])
-                fecha_max = df_h["fecha"].max()
-                fecha_180 = fecha_max - pd.Timedelta(days=180)
-                df_prev = df_h[df_h["fecha"] <= fecha_180].sort_values("fecha")
-                df_prev = df_prev.groupby("fondo").last()[["valorActual"]].reset_index()
-                df_prev.columns = ["fondo", "val_180"]
-                df_m = df[["fondo", "valorActual"]].copy().merge(df_prev, on="fondo", how="left")
-                df_m["variacion180dias"] = ((df_m["valorActual"] / df_m["val_180"]) - 1) * 100
-                df = df.merge(df_m[["fondo", "variacion180dias"]], on="fondo", how="left")
-                periodos.append("variacion180dias")
-            except Exception:
-                pass
-
-        periodos_ok = [c for c in periodos if c in df.columns]
-        n_p = len(periodos_ok)
-
-        # Selección top 5 — excluye outliers estadísticos antes de rankear
-        df_ok = self._sin_outliers(df, col_ref)
-        top5 = df_ok.nlargest(5, col_ref) if es_ganadores else df_ok.nsmallest(5, col_ref)
-        nombres = top5[columna_nombre].tolist()
-        n_fondos = len(nombres)
-
-        # Rango del eje X para offset de etiquetas fuera de la barra
-        all_vals = top5[periodos_ok].fillna(0).values.flatten()
-        xmax = max(abs(float(all_vals.max())), abs(float(all_vals.min())), 1.0)
-        x_label_offset = xmax * 0.02
-
-        # Layout: título (y=0.97) → leyenda (y≈0.89) → gráfico (top=0.78)
-        altura = max(3.2, n_fondos * 0.62 + 1.1)
-        fg = Figure(figsize=(5.4, altura), dpi=100)
-        fg.patch.set_facecolor(self.CG_COLOR)
-        fg.suptitle(titulo, fontsize=10, color="white", y=0.97)
-        fg.subplots_adjust(left=0.35, right=0.92, top=0.76, bottom=0.08)
-
-        ax = fg.add_subplot(111)
-        ax.set_facecolor(self.CG_COLOR)
-
-        bar_h = 0.15
-        y_pos = np.arange(n_fondos)
-        p_legend = []
-
-        for i, col in enumerate(periodos_ok):
-            label, color = PERIOD_CFG[col]
-            valores = top5[col].fillna(0).values
-            y_offset = (i - (n_p - 1) / 2) * bar_h
-            bars = ax.barh(y_pos + y_offset, valores[::-1], height=bar_h, color=color, alpha=0.92)
-
-            # Etiqueta fuera del extremo de la barra (no invade etiquetas del eje Y)
-            for bar, val in zip(bars, valores[::-1]):
-                x_pos = bar.get_width()
-                if x_pos >= 0:
-                    x_text = x_pos + x_label_offset
-                    ha = "left"
-                else:
-                    x_text = x_pos - x_label_offset
-                    ha = "right"
-                ax.text(
-                    x_text,
-                    bar.get_y() + bar.get_height() / 2,
-                    f"{val:+.1f}%",
-                    va="center",
-                    ha=ha,
-                    fontsize=5,
-                    color="white",
-                    fontweight="bold",
-                )
-
-            p_legend.append(mpatches.Patch(label=label, color=color))
-
-        ax.set_yticks(y_pos)
-        ax.set_yticklabels(nombres[::-1], fontsize=7, color="white")
-        ax.set_xlim(-xmax * 1.18, xmax * 1.18)
-        ax.axvline(x=0, color="gray", linewidth=0.5)
-        ax.tick_params(colors="white", labelsize=7)
-        ax.spines[["top", "right"]].set_visible(False)
-        ax.spines["bottom"].set_color("gray")
-        ax.spines["left"].set_color("gray")
-
-        # Leyenda fondo blanco debajo del título — igual estilo que crear_grafico_evolucion_top
-        fg.legend(
-            handles=p_legend,
-            loc="upper left",
-            bbox_to_anchor=(0.0, 0.91),
-            bbox_transform=fg.transFigure,
-            fontsize=6,
-            ncol=n_p,
-            facecolor="white",
-            labelcolor="black",
-            framealpha=1.0,
-        )
-
-        frame_grafico = tk.Frame(parent, bg=self.CG_COLOR)
-        frame_grafico.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
-        canvas = FigureCanvasTkAgg(fg, master=frame_grafico)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill="x", expand=True)
-
-        return row + 1
-
     def _dibujar_evolucion_ax(self, ax, df_historico, fondos_list, titulo_ax, color_titulo):
         """Helper compartido: filtra, calcula rendimiento acumulado y dibuja sobre un eje existente."""
         df_f = df_historico[df_historico["fondo"].isin(fondos_list)].copy()
@@ -570,35 +371,190 @@ class AnalisisBase:
             sp.set_color("gray")
         return p_legend
 
+    # Fondos que forman la banda de referencia (piso y techo)
+    _BANDA_PISO = "FBA Horizonte"
+    _BANDA_TECHO = "Supergestion Mix VI - Clase A"
+    # Fondos de renta variable a graficar sobre la banda
+    _EQUITY_FONDOS = [
+        "FBA Acciones Argentinas - Clase A",
+        "Superfondo Acciones - Clase A",
+        "Superfondo Renta Variable - Clase A",
+    ]
+    _EQUITY_COLORES = ["#2ecc71", "#e74c3c", "#3498db"]
+
     def crear_grafico_evolucion_combinado(self, parent, df_historico, fondos_mejores, fondos_peores, row):
-        """Dos Figure separados apilados: MEJORES (verde) y PEORES (naranja), leyenda blanca fuera."""
+        """Un único gráfico: banda o estimador sintético + líneas renta variable. Botones Banda/Estimador."""
         if df_historico.empty:
             return row
         try:
-            n = self.top
             frame_g = tk.Frame(parent, bg=self.CG_COLOR)
             frame_g.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
-            for simbolos, titulo, color_titulo in (
-                (fondos_mejores, f"TOP {n} MEJORES FCIs", "#2ecc71"),
-                (fondos_peores, f"TOP {n} PEORES FCIs", "#e67e22"),
-            ):
-                fg = Figure(figsize=(5.4, 2.8), dpi=100)
-                fg.patch.set_facecolor(self.CG_COLOR)
+
+            df = df_historico.copy()
+            df["fecha"] = pd.to_datetime(df["fecha"])
+            df = df.sort_values(["fondo", "fecha"])
+            df["rend"] = df.groupby("fondo")["valorActual"].transform(lambda x: (x / x.iloc[0] - 1) * 100)
+
+            def _serie(nombre):
+                s = df[df["fondo"] == nombre][["fecha", "rend"]].dropna()
+                return s["fecha"].values, s["rend"].values
+
+            # Precalcular series de referencia y estimador
+            fechas_piso, vals_piso = _serie(self._BANDA_PISO)
+            fechas_techo, vals_techo = _serie(self._BANDA_TECHO)
+            piso_s = pd.Series(vals_piso, index=pd.to_datetime(fechas_piso))
+            techo_s = pd.Series(vals_techo, index=pd.to_datetime(fechas_techo))
+            idx_comun = piso_s.index.intersection(techo_s.index)
+            estimador_s = ((piso_s[idx_comun] + techo_s[idx_comun]) / 2) if len(idx_comun) else pd.Series()
+
+            fondos_equity = [f for f in self._EQUITY_FONDOS if f in df["fondo"].values]
+
+            # Precomputar bloques de señal: spread avg_equity vs piso
+            def _compute_señales():
+                if piso_s.empty or not fondos_equity:
+                    return []
+                eq_series = []
+                for fondo in fondos_equity:
+                    fechas_e, vals_e = _serie(fondo)
+                    if len(fechas_e):
+                        eq_series.append(pd.Series(vals_e, index=pd.to_datetime(fechas_e)))
+                if not eq_series:
+                    return []
+                eq_avg = pd.DataFrame(eq_series).T.sort_index().mean(axis=1)
+                common = piso_s.index.intersection(eq_avg.index)
+                if common.empty:
+                    return []
+                spread = eq_avg[common] - piso_s[common]
+                bloques, prev_tipo, bloque_ini, fecha_prev = [], None, None, None
+                for fecha in spread.index:
+                    s = spread[fecha]
+                    tipo = "COMPRA" if s < -10 else ("CAUTELA" if s > 10 else None)
+                    if tipo != prev_tipo:
+                        if prev_tipo and bloque_ini:
+                            bloques.append((bloque_ini, fecha_prev, prev_tipo))
+                        bloque_ini = fecha if tipo else None
+                        prev_tipo = tipo
+                    if tipo:
+                        fecha_prev = fecha
+                if prev_tipo and bloque_ini:
+                    bloques.append((bloque_ini, fecha_prev, prev_tipo))
+                return bloques
+
+            señales_bloques = _compute_señales()
+
+            fg = Figure(figsize=(5.4, 3.2), dpi=100)
+            fg.patch.set_facecolor(self.CG_COLOR)
+            canvas = FigureCanvasTkAgg(fg, master=frame_g)
+            canvas.get_tk_widget().pack(fill="x", expand=True, pady=2)
+
+            def _dibujar(modo="banda"):
+                fg.clear()
                 ax = fg.add_subplot(111)
-                p_legend = self._dibujar_evolucion_ax(ax, df_historico, simbolos, titulo, color_titulo)
+                ax.set_facecolor(self.CG_COLOR)
+
+                if modo == "banda":
+                    if len(idx_comun):
+                        ax.fill_between(
+                            idx_comun,
+                            piso_s[idx_comun],
+                            techo_s[idx_comun],
+                            color="#f1c40f",
+                            alpha=0.15,
+                            zorder=1,
+                            label="_banda",
+                        )
+                    if len(fechas_piso):
+                        ax.plot(
+                            fechas_piso,
+                            vals_piso,
+                            color="#ffffff",
+                            linewidth=1.2,
+                            linestyle="--",
+                            alpha=0.6,
+                            label=self._BANDA_PISO[:22],
+                        )
+                    if len(fechas_techo):
+                        ax.plot(
+                            fechas_techo,
+                            vals_techo,
+                            color="#f1c40f",
+                            linewidth=1.2,
+                            linestyle="--",
+                            alpha=0.8,
+                            label=self._BANDA_TECHO[:22],
+                        )
+                else:
+                    if not estimador_s.empty:
+                        ax.plot(
+                            estimador_s.index,
+                            estimador_s.values,
+                            color="#f1c40f",
+                            linewidth=1.8,
+                            linestyle="-",
+                            alpha=0.9,
+                            label="Estimador (punto medio)",
+                        )
+
+                for i, fondo in enumerate(fondos_equity):
+                    color = self._EQUITY_COLORES[i % len(self._EQUITY_COLORES)]
+                    fechas_e, vals_e = _serie(fondo)
+                    if len(fechas_e):
+                        ax.plot(fechas_e, vals_e, color=color, linewidth=1.2, alpha=0.9, label=fondo[:28], zorder=3)
+
+                ax.axhline(y=0, color="gray", linewidth=0.5, alpha=0.5)
+
+                _señal_added = set()
+                for ini, fin, tipo in señales_bloques:
+                    color = "#27ae60" if tipo == "COMPRA" else "#e67e22"
+                    lbl = ("▲ RV" if tipo == "COMPRA" else "▼ RF") if tipo not in _señal_added else f"_{tipo}"
+                    ax.axvspan(ini, fin, color=color, alpha=0.18, zorder=0, label=lbl)
+                    _señal_added.add(tipo)
+
+                ax.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
+                ax.set_ylabel("Rend. Acum. (%)", fontsize=6, color="white")
+                ax.yaxis.set_label_position("right")
+                ax.yaxis.tick_right()
+                ax.tick_params(colors="white", labelsize=6)
+                ax.tick_params(axis="x", rotation=30)
+                ax.grid(True, alpha=0.3, color="gray")
+                ax.spines[["top", "left"]].set_visible(False)
+                ax.spines["bottom"].set_visible(True)
+                ax.spines["right"].set_visible(True)
+                for sp in ax.spines.values():
+                    sp.set_color("gray")
+
+                handles, labels = ax.get_legend_handles_labels()
+                handles = [h for h, l in zip(handles, labels) if not l.startswith("_")]
+                labels = [l for l in labels if not l.startswith("_")]
                 fg.legend(
-                    handles=p_legend,
+                    handles=handles,
+                    labels=labels,
                     loc="outside upper left",
                     fontsize=6,
                     facecolor="white",
                     labelcolor="black",
                     framealpha=1.0,
                 )
-                fg.suptitle(titulo, fontsize=9, color=color_titulo)
-                fg.subplots_adjust(left=0.05, right=0.88, top=0.80, bottom=0.18)
-                canvas = FigureCanvasTkAgg(fg, master=frame_g)
-                canvas.get_tk_widget().pack(fill="x", expand=True, pady=2)
+                titulo = "Renta Variable vs Banda" if modo == "banda" else "Renta Variable vs Estimador"
+                fg.suptitle(titulo, fontsize=9, color="white", y=0.98)
+                fg.subplots_adjust(left=0.05, right=0.88, top=0.88, bottom=0.18)
                 canvas.draw()
+
+            frame_btns = tk.Frame(frame_g, bg=self.CG_COLOR)
+            frame_btns.pack(anchor="e", padx=4)
+            for label, modo in (("Banda", "banda"), ("Estimador", "estimador")):
+                m = modo
+                tk.Button(
+                    frame_btns,
+                    text=label,
+                    width=8,
+                    bg=self.CG_COLOR,
+                    fg=self.BG_COLOR,
+                    relief=tk.FLAT,
+                    command=lambda m=m: _dibujar(m),
+                ).pack(side="left")
+
+            _dibujar("banda")
             return row + 1
         except Exception as e:
             _logger.error(f"[crear_grafico_evolucion_combinado]: {e}")
@@ -849,78 +805,22 @@ class AnalisisFCI(AnalisisBase):
             fg_valor=color_gan,
         )
 
-        # fondos en cartera — separa cartera vs candidatos de migración
-        fondos_cartera = set(self.df_lotes["fondo"].tolist()) if not self.df_lotes.empty else set()
-        df_en_cartera = (
-            self.df_ultimo[self.df_ultimo["fondo"].isin(fondos_cartera)] if fondos_cartera else self.df_ultimo
-        )
-        df_fuera_cartera = (
-            self.df_ultimo[~self.df_ultimo["fondo"].isin(fondos_cartera)] if fondos_cartera else pd.DataFrame()
-        )
-
-        # ========== GRÁFICOS EVOLUCIÓN HISTÓRICA (Rendimiento 90d) — solo cartera ==========
-        row = self.crear_seccion(frame, f"Rendimiento Posiciones:", row)
-        if not self.df_historico.empty and not df_en_cartera.empty:
-            df_filtrado = self._sin_outliers(df_en_cartera, "variacion90dias")
-            top_mejores = df_filtrado.nlargest(self.top, "variacion90dias")["fondo"].tolist()
-            top_peores = df_filtrado.nsmallest(self.top, "variacion90dias")["fondo"].tolist()
+        # ========== GRÁFICO BANDA + RENTA VARIABLE ==========
+        row = self.crear_seccion(frame, "Renta Variable vs Banda de Referencia:", row)
+        if not self.df_historico.empty:
             row = self.crear_grafico_evolucion_combinado(
                 parent=frame,
                 df_historico=self.df_historico,
-                fondos_mejores=top_mejores,
-                fondos_peores=top_peores,
+                fondos_mejores=[],
+                fondos_peores=[],
                 row=row,
             )
 
         # ========== CARTERA VS ÍNDICE DE REFERENCIA ==========
         row = self.crear_seccion(frame, f"Cartera vs Índice:", row)
-
         row = self.crear_grafico_vs_indice(parent=frame, row=row)
 
-        # ========== GRÁFICOS TOP 5 (Ganadores y Perdedores — candidatos migración, fuera de cartera) ==========
-        row = self.crear_seccion(frame, "Gráficos Top 5:", row)
-        if not df_fuera_cartera.empty and "variacion30dias" in df_fuera_cartera.columns:
-            row = self.crear_grafico_top5_periodos(
-                parent=frame,
-                df=df_fuera_cartera,
-                df_historico=self.df_historico,
-                columna_nombre="fondo",
-                titulo="FCIs GANADORES",
-                row=row,
-                es_ganadores=True,
-            )
-
-            row = self.crear_grafico_top5_periodos(
-                parent=frame,
-                df=df_fuera_cartera,
-                df_historico=self.df_historico,
-                columna_nombre="fondo",
-                titulo="FCIs PERDEDORES",
-                row=row,
-                es_ganadores=False,
-            )
-
-        # ========== RANKING DE FONDOS ==========
-        if not self.metricas.empty:
-            ranking = self.metricas.nlargest(10, "score_decision")
-            columnas = [
-                ("fondo", "Fondo", 145),
-                ("score_decision", "Score", 50),
-                ("senal", "Señal", 75),
-                ("rendimiento_total", "Rend%", 50),
-                ("volatilidad", "Volat.", 45),
-                ("sharpe_ratio", "Sharpe", 50),
-                ("drawdown_max", "MaxDD%", 55),
-                ("posicion_relativa", "PosRel%", 55),
-            ]
-            row = self.crear_treeview_ranking(
-                parent=frame,
-                df=ranking,
-                columnas=columnas,
-                titulo="Ranking Fondos (Score)",
-                row=row,
-                height=min(10, len(ranking)),
-            )
+        row = self.crear_tabla_spread_banda(parent=frame, row=row)
 
         # ========== SEÑALES ==========
         if not self.df_lotes.empty and "decision" in self.df_lotes.columns:
@@ -941,6 +841,63 @@ class AnalisisFCI(AnalisisBase):
                     row=row,
                     height=min(8, len(senales_df)),
                 )
+
+    def crear_tabla_spread_banda(self, parent, row):
+        """Tabla de spread de cada fondo vs FBA Horizonte (piso) y Supergestion Mix VI (techo)."""
+        if self.df_historico.empty:
+            return row
+        try:
+            df = self.df_historico.copy()
+            df["fecha"] = pd.to_datetime(df["fecha"])
+            df = df.sort_values(["fondo", "fecha"])
+            df["rend"] = df.groupby("fondo")["valorActual"].transform(lambda x: (x / x.iloc[0] - 1) * 100)
+
+            ultima = df.groupby("fondo")["rend"].last()
+            rend_piso = ultima.get(self._BANDA_PISO, None)
+            rend_techo = ultima.get(self._BANDA_TECHO, None)
+            if rend_piso is None or rend_techo is None:
+                return row
+
+            excluir = {self._BANDA_PISO, self._BANDA_TECHO}
+            fondos = [f for f in ultima.index if f not in excluir]
+
+            filas = []
+            for fondo in sorted(fondos):
+                rend = ultima[fondo]
+                vs_piso = round(rend - rend_piso, 1)
+                vs_techo = round(rend - rend_techo, 1)
+                if vs_piso < 0:
+                    señal = "COMPRA"
+                elif vs_techo > 0:
+                    señal = "CAUTELA"
+                else:
+                    señal = "MANTENER"
+                filas.append(
+                    {"fondo": fondo, "rend": round(rend, 1), "vs_piso": vs_piso, "vs_techo": vs_techo, "senal": señal}
+                )
+
+            if not filas:
+                return row
+
+            df_spread = pd.DataFrame(filas).sort_values("vs_piso")
+            columnas = [
+                ("fondo", "Fondo", 160),
+                ("rend", "Rend%", 55),
+                ("vs_piso", "vs Horizonte", 75),
+                ("vs_techo", "vs Supergestion", 80),
+                ("senal", "Señal", 70),
+            ]
+            row = self.crear_treeview_ranking(
+                parent=parent,
+                df=df_spread,
+                columnas=columnas,
+                titulo="Spread vs Banda de Referencia",
+                row=row,
+                height=min(12, len(df_spread)),
+            )
+        except Exception as e:
+            _logger.error(f"[crear_tabla_spread_banda]: {e}")
+        return row
 
     def cargar_datos_historicos(self):
         """Carga historial de precios desde diaria_cnv"""

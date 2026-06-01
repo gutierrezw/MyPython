@@ -14,7 +14,7 @@ from Modulos_Mysql import (
     IPerformance,
 )
 from Class_Finance import scan_extractos
-from Class_Screener import sync_market, audit_portfolio, refresh_consenso_tags
+from Class_Screener import sync_market, sync_prices, audit_portfolio, refresh_consenso_tags
 from Class_InstitucionalScore import sync_institutional, sync_edgar_funds, sync_13f_scores
 from edgar_13f import sync_fund_filings, sync_13f_holdings
 from ConvergIA.Scanner_Sentimiento import scan_sentimiento
@@ -131,6 +131,17 @@ class AgentManager:
             )
         except Exception as e:
             self._log_stock.error(f"Agente_MarketScreener(): {e}")
+
+    @wait_rate(43200, persist=True, initial_delay=120)
+    def Agente_PriceSync(self):
+        try:
+            result = sync_prices(account=self.account)
+            self._log_stock.warning(
+                f"PriceSync: updated={result['updated']} market={result['market']} "
+                f"candidatos={result['candidatos']} errors={result['errors']}"
+            )
+        except Exception as e:
+            self._log_stock.error(f"Agente_PriceSync(): {e}")
 
     @wait_rate(86400, persist=True)
     def Agente_InstitucionalScore(self):
@@ -498,6 +509,7 @@ class AgentManager:
         """Registra agentes de larga duración como threads independientes."""
         _threads = [
             ("Agente_MarketScreener", self.Agente_MarketScreener, 300),
+            ("Agente_PriceSync", self.Agente_PriceSync, 300),
             ("Agente_InstitucionalScore", self.Agente_InstitucionalScore, 300),
             ("Agente_ConsensoCache", self.Agente_ConsensoCache, 300),
             ("Agente_EdgarFunds", self.Agente_EdgarFunds, 300),
