@@ -224,6 +224,7 @@ class DataHub:
     manager_positions = {"Stock": [], "Crypto": []}  # posiciones vivas por vehículo para agentes
     rebalanceo = {}
     telegram_botcrypto = {}
+    system_alerts = []  # alertas de sistema para enviar a Telegram (DashMain → agentesIA)
     procesos = []
     logger = {}
     orders = {}

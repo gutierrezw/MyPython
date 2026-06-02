@@ -118,7 +118,16 @@ class ClassAgenteIA:
                 ),
             }
             for k, v in _saved.items()
+            if not k.startswith("_last_run_")
         }
+        # Restaurar last_run por vehículo — evita re-ejecución al reabrir Chatbot
+        for _veh in ("Stock", "Crypto"):
+            _lr = _saved.get(f"_last_run_{_veh}")
+            if _lr:
+                try:
+                    self.preservation_last_run[_veh] = datetime.fromisoformat(_lr)
+                except Exception:
+                    pass
 
         # Logger dedicado a preservation — escribe a logs/preservation_diag.log
         self._preservation_logger = logging.getLogger("Preservation")
@@ -375,6 +384,15 @@ class ClassAgenteIA:
         except Exception as e:
             self.logger.error(f"Agente_OrderEodCleanup(): {e}")
 
+    async def _flush_system_alerts(self):
+        """Envía alertas de sistema acumuladas en DataHub.system_alerts a Telegram."""
+        while DataHub.system_alerts:
+            msg = DataHub.system_alerts.pop(0)
+            try:
+                await self.send_Telegram(msg)
+            except Exception as e:
+                self.logger.error(f"_flush_system_alerts: {e}")
+
     # agente defensivo: protege ganancias con órdenes STOP dinámicas
     async def Agente_ManagerPreservation(self):
         """
@@ -443,21 +461,23 @@ class ClassAgenteIA:
 
         # 2. Verificar intervalo por vehículo — único acceso a BD solo cuando toca
         last_run = self.preservation_last_run.get(vehiculo)
-        if last_run is None:
-            # Primera ejecución: inicializa reloj pero no evalúa todavía
-            self.preservation_last_run[vehiculo] = datetime.now()
-            return pconfig, intervalo_min, False
+        if last_run is not None:
+            elapsed = (datetime.now() - last_run).total_seconds()
+            if elapsed < intervalo_min:
+                return pconfig, intervalo_min, False
 
-        elapsed = (datetime.now() - last_run).total_seconds()
-        if elapsed < intervalo_min:
-            return pconfig, intervalo_min, False
-
-        # Toca revisión: actualiza reloj y autoriza evaluación
-        self.preservation_last_run[vehiculo] = datetime.now()
+        # Primera ejecución o toca revisión: autoriza evaluación
+        now = datetime.now()
+        self.preservation_last_run[vehiculo] = now
+        # Persistir last_run en JSON para sobrevivir reinicios del Chatbot
+        _state_snap = read_json_tmp("preservation_state.json")
+        _state_snap[f"_last_run_{vehiculo}"] = now.isoformat()
+        write_json_tmp("preservation_state.json", _state_snap)
         roi_minimo = pconfig.get("roi_minimo", 0.10)
         proteccion_base = pconfig.get("proteccion_base", 0.50)
+        elapsed_log = (now - last_run).total_seconds() if last_run else 0
         self.logger.warning(
-            f"Preservation({vehiculo}): REVISIÓN | roi_min={roi_minimo} | prot={proteccion_base} | elapsed={elapsed:.0f}s"
+            f"Preservation({vehiculo}): REVISIÓN | roi_min={roi_minimo} | prot={proteccion_base} | elapsed={elapsed_log:.0f}s"
         )
         return pconfig, intervalo_min, True
 
@@ -1557,6 +1577,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     self.exec_modulo_async(self.Agente_ManagerPreservation())
                     self.Agente_SyncOrders()
                     self.Agente_OrderEodCleanup()
+                    self.exec_modulo_async(self._flush_system_alerts())
                     time.sleep(15)
                     self.counter += 1
                     DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=self.counter)

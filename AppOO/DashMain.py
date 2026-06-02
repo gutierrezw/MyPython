@@ -1969,10 +1969,12 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         _log.error(
                             f"websocket_stream(Stock): websocket_loop() terminó, esperando 30s antes de reconectar"
                         )
+                        DataHub.system_alerts.append("⚠️ IB Gateway caído — reconectando en 30s")
                         time.sleep(30)
 
                 except Exception as e:
                     _log.error(f"websocket_stream(Stock): excepción fatal — {e}")
+                    DataHub.system_alerts.append(f"🔴 IB Gateway error fatal: {e}")
 
             try:
                 self.ib_connection = self.IClient.create_session()
@@ -2528,6 +2530,7 @@ class DashMain:
                     self.root.after(100, lambda: self.stock.run_graficos())
                     self.root.after(200, lambda: self.update_widget(vehiculo=vehiculo))
                     _log.warning("✅ IB reconnect: WebSocket + posiciones levantados desde offline")
+                    DataHub.system_alerts.append("✅ IB Gateway reconectado")
 
                 # en ambos casos la sesión ya está activa
                 DataHub.manager_sesion.update({"Stock": True})
@@ -2751,28 +2754,41 @@ class DashMain:
 
                 _widths = {
                     "symbol": 80,
-                    "side": 55,
-                    "orderType": 60,
-                    "price": 80,
-                    "quantity": 70,
-                    "importe": 90,
+                    "side": 50,
+                    "orderType": 65,
+                    "stop": 70,
+                    "price": 75,
+                    "quantity": 60,
+                    "importe": 75,
                     "status": 90,
-                    "hora": 75,
-                    "tiempo": 55,
-                    "id": 90,
-                    "id_enviar": 90,
+                    "hora": 70,
+                    "tiempo": 45,
+                    "id": 120,
                 }
+                _headers = {
+                    "symbol": "symbol",
+                    "side": "side",
+                    "orderType": "orderType",
+                    "stop": "Stop",
+                    "price": "Price",
+                    "quantity": "Qty",
+                    "importe": "importe",
+                    "status": "status",
+                    "hora": "hora",
+                    "tiempo": "TIF",
+                    "id": "id",
+                }
+                _hidden = ("account", "conid", "del", "sub", "id_enviar")
                 for i, key in enumerate(cols):
                     width = _widths.get(key, 100)
-                    width = 0 if key in ("account", "conid", "del", "sub") else width
+                    width = 0 if key in _hidden else width
+                    lbl = _headers.get(key, key)
 
                     tree.column(key, width=width, minwidth=width, anchor=tk.E)
-                    tree.heading(key, text=cols[i])
+                    tree.heading(key, text=lbl)
 
                     heard.column(key, width=width, minwidth=width, anchor=tk.E)
-                    heard.heading(
-                        key, text=cols[i], command=lambda _k=key, _i=i: sort_children_by_col(_k, False, cols[_i])
-                    )
+                    heard.heading(key, text=lbl, command=lambda _k=key, _i=i: sort_children_by_col(_k, False, cols[_i]))
 
                 tree.tag_configure("green", background="green", foreground="white")
                 tree.tag_configure("red", background="red", foreground="white")
@@ -2787,6 +2803,7 @@ class DashMain:
         def _load_stock_orders_today() -> list:
             rows, ix = self.RepositorioOportunidades.select_order_trader_today(self.account, "Stock")
             ib_status = {}
+            ib_stop = {}
             try:
                 ib = getattr(self.stock, "IClient", None)
                 if ib:
@@ -2795,6 +2812,9 @@ class DashMain:
                         coid = str(o.get("orderId", ""))
                         if coid:
                             ib_status[coid] = o.get("status", "")
+                            aux = o.get("auxPrice")
+                            if aux:
+                                ib_stop[coid] = aux
             except Exception as e:
                 print(f"_load_stock_orders_today IB: {e}")
             result = []
@@ -2808,6 +2828,7 @@ class DashMain:
                         "symbol": r.get("symbol", ""),
                         "side": r.get("side", ""),
                         "orderType": r.get("orderType", ""),
+                        "stop_price": ib_stop.get(coid, ""),
                         "price": r.get("price", ""),
                         "quantity": r.get("quantity", ""),
                         "status": ib_status.get(coid) or r.get("status", ""),
@@ -2847,6 +2868,7 @@ class DashMain:
                             orden["symbol"],
                             orden["side"],
                             orden["orderType"],
+                            orden.get("stop_price", ""),
                             price,
                             qty,
                             _importe(price, qty),
@@ -2875,6 +2897,7 @@ class DashMain:
                             r.get("symbol", ""),
                             r.get("side", ""),
                             r.get("orderType", ""),
+                            "",
                             price,
                             qty,
                             _importe(price, qty),
@@ -2944,6 +2967,13 @@ class DashMain:
             except Exception as e:
                 print("eliminar_orden(): {}".format(e))
 
+        def _sort_tree_by_symbol(padre):
+            children = tree.get_children(padre)
+            data = [(tree.set(k, "symbol"), tree.set(k, "hora"), k) for k in children]
+            data.sort(key=lambda x: (x[0], x[1]))
+            for i, (_, _, k) in enumerate(data):
+                tree.move(k, padre, i)
+
         # sincroniza BD con IB + Binance y refresca treeview
         def update_treeview_ordenes():
             try:
@@ -2964,6 +2994,8 @@ class DashMain:
                     for hijo in tree.get_children(padre):
                         tree.delete(hijo)
                 insert_ordenes_treeview(tree)
+                for padre in tree.get_children():
+                    _sort_tree_by_symbol(padre)
             except Exception as e:
                 print("update_treeview_ordenes(): {}".format(e))
 
@@ -3028,6 +3060,7 @@ class DashMain:
                         simbolo,
                         side,
                         order_type,
+                        "",
                         precio,
                         cant,
                         _importe(precio, cant),
@@ -3066,6 +3099,7 @@ class DashMain:
                         simbolo,
                         codigo,
                         "LIMIT",
+                        "",
                         basico,
                         cant,
                         _importe(basico, cant),
@@ -3081,6 +3115,8 @@ class DashMain:
                     nro += 1
             except Exception as e:
                 print("insert_ejecutadas_treeview(): {}".format(e))
+            for padre in tree.get_children():
+                _sort_tree_by_symbol(padre)
 
         def envia_orders_stock(vehiculo, fields, values):
             try:
@@ -3130,6 +3166,7 @@ class DashMain:
                 "symbol",
                 "side",
                 "orderType",
+                "stop",
                 "price",
                 "quantity",
                 "importe",
@@ -3145,6 +3182,22 @@ class DashMain:
             tree = ttk.Treeview(win2, columns=cols, height=18, style="TFrame", show="tree")
 
             config_treeview_ordenes(tree, heard)
+
+            _display_cols = [
+                "symbol",
+                "side",
+                "orderType",
+                "stop",
+                "price",
+                "quantity",
+                "importe",
+                "status",
+                "hora",
+                "tiempo",
+                "id",
+            ]
+            tree["displaycolumns"] = _display_cols
+            heard["displaycolumns"] = _display_cols
 
             # Configurar el Treeview para usar los scrollbars
             hscroll = ttk.Scrollbar(win2, orient="horizontal", command=sync_scroll)
@@ -3945,9 +3998,9 @@ class DashMain:
                 title = "Diversificación vs Región"
 
             rnb = tk.Toplevel()
-            dimension = "%dx%d+%d+%d" % (847, 665, self.df - 240, 65)
+            dimension = "%dx%d+%d+%d" % (847, 780, self.df - 240, 65)
             rnb.geometry(dimension)
-            rnb.resizable(False, False)
+            rnb.resizable(True, True)
             rnb.attributes("-toolwindow", 1)
             rnb.config(bg=self.bgcolor)
             rnb.title(title)
