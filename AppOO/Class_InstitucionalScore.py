@@ -39,37 +39,47 @@ class InstitucionalScore:
 
     def _fetch_ownership(self, symbol) -> dict:
         """Obtiene datos institucionales vía yf.Ticker() directo."""
-        time.sleep(0.5)
-        try:
-            ticker = yf.Ticker(symbol.replace("^", "-"))
-            info = ticker.info
-            holders = ticker.institutional_holders
+        time.sleep(1.0)
+        for intento in range(3):
+            try:
+                ticker = yf.Ticker(symbol.replace("^", "-"))
+                info = ticker.info
+                holders = ticker.institutional_holders
 
-            inst_pct = _safe_float(info.get("heldPercentInstitutions"))
-            insider_pct = _safe_float(info.get("heldPercentInsiders"))
-            raw_count = info.get("institutionsCount")
-            holders_df_count = len(holders) if holders is not None and not holders.empty else 0
-            holders_count = int(raw_count) if raw_count is not None else holders_df_count
-            top_holder = str(holders.iloc[0]["Holder"]) if holders_count > 0 else None
-            top_shares = int(holders.iloc[0]["Shares"]) if holders_count > 0 else None
+                inst_pct = _safe_float(info.get("heldPercentInstitutions"))
+                insider_pct = _safe_float(info.get("heldPercentInsiders"))
+                raw_count = info.get("institutionsCount")
+                holders_df_count = len(holders) if holders is not None and not holders.empty else 0
+                holders_count = int(raw_count) if raw_count is not None else holders_df_count
+                top_holder = str(holders.iloc[0]["Holder"]) if holders_count > 0 else None
+                top_shares = int(holders.iloc[0]["Shares"]) if holders_count > 0 else None
 
-            analyst_rec = info.get("recommendationKey")
-            analyst_mean = _safe_float(info.get("recommendationMean"))
-            analyst_count = info.get("numberOfAnalystOpinions")
+                analyst_rec = info.get("recommendationKey")
+                analyst_mean = _safe_float(info.get("recommendationMean"))
+                analyst_count = info.get("numberOfAnalystOpinions")
 
-            return {
-                "inst_ownership_pct": inst_pct,
-                "insider_ownership_pct": insider_pct,
-                "inst_top_holder": top_holder[:120] if top_holder else None,
-                "inst_top_holder_shares": top_shares,
-                "inst_funds": holders_count,
-                "analyst_rec": analyst_rec[:20] if analyst_rec else None,
-                "analyst_mean": analyst_mean,
-                "analyst_count": int(analyst_count) if analyst_count else None,
-            }
-        except Exception as e:
-            _logger.warning(f"_fetch_ownership [{symbol}]: {e}")
-            return {}
+                return {
+                    "inst_ownership_pct": inst_pct,
+                    "insider_ownership_pct": insider_pct,
+                    "inst_top_holder": top_holder[:120] if top_holder else None,
+                    "inst_top_holder_shares": top_shares,
+                    "inst_funds": holders_count,
+                    "analyst_rec": analyst_rec[:20] if analyst_rec else None,
+                    "analyst_mean": analyst_mean,
+                    "analyst_count": int(analyst_count) if analyst_count else None,
+                }
+            except Exception as e:
+                msg = str(e)
+                if "Too Many Requests" in msg or "Rate limited" in msg or "429" in msg:
+                    backoff = 60 * (intento + 1)
+                    _logger.warning(
+                        f"_fetch_ownership [{symbol}]: rate limit — backoff {backoff}s (intento {intento+1}/3)"
+                    )
+                    time.sleep(backoff)
+                else:
+                    _logger.warning(f"_fetch_ownership [{symbol}]: {e}")
+                    return {}
+        return {}
 
     def score_company(self, symbol) -> dict:
         """Retorna métricas institucionales + inst_score para un símbolo."""

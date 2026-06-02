@@ -105,8 +105,7 @@ class ClassAgenteIA:
         self.preservation_config = {}  # {vehiculo: sub-dict "preservation"} — extraído de _params_cache
         self.preservation_last_run = {}  # {vehiculo: datetime} — última evaluación por vehículo
         self._params_cache = {}  # {vehiculo: full parsed parameters dict} — compartido entre agentes
-        self._preservation_dry_run = True
-        self._preservation_live_symbols = set()
+        self._preservation_dry_run = False
         # Cargar estado persistido (sobrevive reinicios — stop_prev correcto sin depender de IB)
         _saved = read_json_tmp("preservation_state.json")
         self.preservation_state = {
@@ -177,9 +176,11 @@ class ClassAgenteIA:
         # if len(self.sell_enviados) >= DataHub.max_mensajes:
         #    return False
 
-        # Gate Consenso: SELL solo pasa si los fundamentos institucionales confirman salida
+        # Gate Consenso: SELL de toma de ganancias no requiere fundamentos débiles.
+        # Solo bloquear si el consenso indica que la posición aún está sólida Y el ROI es bajo
+        # (probable señal falsa). Con ROI alto es toma de ganancias legítima sin importar el tag.
         tag = self._consenso_tag(symbol)
-        if tag and tag not in self._SELL_TAGS:
+        if tag and tag not in self._SELL_TAGS and roi < DataHub.MaxRoi:
             return False
 
         # si pasó todas las reglas → actualiza registro
@@ -439,8 +440,6 @@ class ClassAgenteIA:
 
         revisiones_dia = pconfig.get("revisiones_dia", 2)
         intervalo_min = 86400 / revisiones_dia
-        # TODO TEST: intervalo reducido para pruebas, restaurar en producción
-        intervalo_min = 600  # 10 minutos para testing
 
         # 2. Verificar intervalo por vehículo — único acceso a BD solo cuando toca
         last_run = self.preservation_last_run.get(vehiculo)
@@ -534,7 +533,7 @@ class ClassAgenteIA:
 
             order_id_prev = state.get("order_id")
 
-            is_live = (not self._preservation_dry_run) and (symbol in self._preservation_live_symbols)
+            is_live = not self._preservation_dry_run and vehiculo == "Stock"
 
             # Activa Order STOP para el symbol — también cuando no hay order_id (primera vez en live)
             if stop_final > stop_anterior or not order_id_prev:
