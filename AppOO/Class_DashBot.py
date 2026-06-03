@@ -1862,6 +1862,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
     # esto sí lanza la coroutine correctamente
     @staticmethod
     def exec_modulo_async(modulo):
+        if modulo is None:
+            return
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
