@@ -427,6 +427,108 @@ class ClassAgenteIA:
                 )
         return self._params_cache.get(vehiculo)
 
+    def _build_preservation_context(
+        self, symbol, account, roi, last, max_price, stop_calculado, stop_anterior, atr, base_limit
+    ) -> dict:
+        """Arma el dict de contexto completo para el prompt Claude de preservation."""
+        ctx = self.RepositorioOportunidades.select_preservation_context(symbol, account)
+        ctx.update(
+            {
+                "symbol": symbol,
+                "roi": roi,
+                "last": last,
+                "max_price": max_price,
+                "stop_calculado": stop_calculado,
+                "stop_anterior": stop_anterior,
+                "atr": atr,
+                "base_limit": base_limit,
+            }
+        )
+        # indicadores técnicos en tiempo real desde DataHub (actualizado por TickerInfo)
+        dt = DataHub.info.get(symbol, {}).get("datos_tecnicos", {})
+        d = dt.get("diaria", {})
+        s = dt.get("semanal", {})
+        if d:
+            ctx["rsi_d"] = round(d["rsi"], 1) if d.get("rsi") is not None else None
+            macd_val = d.get("macd")
+            if macd_val is not None:
+                ctx["macd_estado"] = "alcista" if macd_val > 0 else ("bajista" if macd_val < 0 else "neutro")
+            ema200 = (d.get("ema(20,50,100,200)") or {}).get("EMA200")
+            precio = d.get("precio_calculo")
+            if ema200 and precio:
+                ctx["ema200_rel"] = "sobre" if precio > ema200 else "bajo"
+            w13_min, w13_max = d.get("13_semanas_min"), d.get("13_semanas_max")
+            if w13_min is not None and w13_max and w13_max > w13_min and precio:
+                ctx["rango_13w_pct"] = round((precio - w13_min) / (w13_max - w13_min), 2)
+        if s:
+            ctx["rsi_w"] = round(s["rsi"], 1) if s.get("rsi") is not None else None
+            precio_s = s.get("precio_calculo")
+            w26_min, w26_max = s.get("26_semanas_min"), s.get("26_semanas_max")
+            if w26_min is not None and w26_max and w26_max > w26_min and precio_s:
+                ctx["rango_26w_pct"] = round((precio_s - w26_min) / (w26_max - w26_min), 2)
+        return ctx
+
+    def _claude_preservation_eval(self, ctx: dict, api_key: str) -> dict | None:
+        """Llama a Claude Haiku para afinar el stop. Retorna dict o None si falla."""
+
+        def _v(key, fmt=None, default="N/D"):
+            val = ctx.get(key)
+            if val is None:
+                return default
+            try:
+                return fmt.format(val) if fmt else str(val)
+            except Exception:
+                return str(val)
+
+        prompt = (
+            f"Eres un agente de preservación de ganancias para un portfolio de inversión.\n"
+            f"Las reglas fijas ya activaron la protección de esta posición (ROI >= 10%).\n"
+            f"Tu tarea es ajustar el nivel del STOP para maximizar la protección según el contexto.\n\n"
+            f"Posición: {ctx['symbol']}\n"
+            f"- ROI actual: {_v('roi', '{:.1%}')} | Precio: ${_v('last', '{:.2f}')} | Max histórico: ${_v('max_price', '{:.2f}')}\n"
+            f"- Stop base (reglas): ${_v('stop_calculado', '{:.2f}')} | Stop anterior: ${_v('stop_anterior', '{:.2f}')}\n"
+            f"- ATR(14): ${_v('atr', '{:.2f}')}\n\n"
+            f"Contexto fundamental:\n"
+            f"- Consenso: {_v('consenso_tag')} ({_v('consenso_suma')} votos)\n"
+            f"- Inst Score: {_v('inst_score')} | 13F Buy ratio: {_v('fh_buy_ratio', '{:.1%}')}\n"
+            f"- Analistas: {_v('analyst_rec')} (mean={_v('analyst_mean', '{:.1f}')})\n"
+            f"- Sentimiento: {_v('patron')} (score={_v('sentiment_score')})\n\n"
+            f"Técnico:\n"
+            f"- RSI diario: {_v('rsi_d')} | RSI semanal: {_v('rsi_w')} | MACD: {_v('macd_estado')}\n"
+            f"- EMA200: precio {_v('ema200_rel')}\n"
+            f"- Rango 13 semanas: {_v('rango_13w_pct', '{:.0%}')} | Rango 26 semanas: {_v('rango_26w_pct', '{:.0%}')}\n\n"
+            f"Podés subir el stop (más protección) o mantener el base.\n"
+            f"NUNCA sugerir un stop inferior al base calculado por reglas (${ctx['stop_calculado']:.2f}).\n"
+            f'Respondé SOLO con JSON válido: {{"stop_sugerido": float, "razon": "str max 120 chars", "urgencia": "alta"|"media"|"baja"}}'
+        )
+        try:
+            resp = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 256,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=15,
+            )
+            if not resp.ok:
+                self.logger.error(f"_claude_preservation_eval({ctx['symbol']}): HTTP {resp.status_code}")
+                return None
+            text = resp.json()["content"][0]["text"].strip()
+            start, end = text.find("{"), text.rfind("}") + 1
+            if start >= 0 and end > start:
+                result = json.loads(text[start:end])
+                if "stop_sugerido" in result:
+                    return result
+        except Exception as e:
+            self.logger.error(f"_claude_preservation_eval({ctx['symbol']}): {e}")
+        return None
+
     def _preservation_get_config(self, vehiculo):
         """
         Carga config desde BD una sola vez por vehículo (cache en self.preservation_config).
@@ -493,6 +595,13 @@ class ClassAgenteIA:
         correccion_pct = pconfig.get("correccion_pct", 0.08)
         atr_mult = pconfig.get("atr_mult", 2.0)
 
+        _claude_key = None
+        try:
+            _ses = BDsystem.get_sesion_by_vehiculo("ClaudeAPIP")
+            _claude_key = _ses["userapi"].decode("utf-8") if _ses else None
+        except Exception as e:
+            self.logger.error(f"Preservation({vehiculo}): ClaudeAPIP no disponible → {e}")
+
         # 1. Cargar posiciones activas
         positions = self.PlanInversion.select_inversion(tipoin=vehiculo, ticket="all")
         self.logger.warning(f"Preservation({vehiculo}): {len(positions)} posiciones cargadas")
@@ -543,6 +652,22 @@ class ClassAgenteIA:
             stop_anterior = state.get("stop_actual", 0)
             stop_final = max(stop_anterior, stop_calculado)
 
+            # 8b. Claude afina el stop (opcional — fallback a reglas si falla)
+            ctx = {}
+            claude_result = None
+            if _claude_key:
+                ctx = self._build_preservation_context(
+                    symbol, account, roi, last, max_price, stop_calculado, stop_anterior, atr, base_limit
+                )
+                claude_result = self._claude_preservation_eval(ctx, _claude_key)
+                if claude_result:
+                    stop_claude = claude_result.get("stop_sugerido", 0)
+                    stop_final = max(stop_final, stop_claude)
+                    self._preservation_logger.info(
+                        f"[CLAUDE] {symbol}: stop_sugerido={stop_claude:.2f} "
+                        f"urgencia={claude_result.get('urgencia')} razon={claude_result.get('razon')}"
+                    )
+
             # 9. Cantidad a proteger (DataHub — respeta lotSize en Crypto)
             qty = DataHub.preservation_calc_qty(self.account, vehiculo, symbol, last, base_limit)
             if qty <= 0:
@@ -575,6 +700,41 @@ class ClassAgenteIA:
                     order_id = DataHub.preservation_extract_order_id(response)
                     self._preservation_logger.info(f"[ENVIADA] {msg} | order_id={order_id}")
                     self.logger.warning(f"[ENVIADA] {msg} | order_id={order_id}")
+                    try:
+                        _det = {
+                            "tipo": "preservation_stop",
+                            "decision": {
+                                "roi": round(float(roi), 4),
+                                "max_price": round(float(max_price), 4),
+                                "atr": round(float(atr), 4),
+                                "stop_calculado_reglas": round(float(stop_calculado), 4),
+                                "consenso_tag": ctx.get("consenso_tag") if claude_result else None,
+                                "inst_score": ctx.get("inst_score") if claude_result else None,
+                                "fh_buy_ratio": ctx.get("fh_buy_ratio") if claude_result else None,
+                                "sentiment_patron": ctx.get("patron") if claude_result else None,
+                                "rsi_d": ctx.get("rsi_d") if claude_result else None,
+                                "macd_estado": ctx.get("macd_estado") if claude_result else None,
+                                "base_limit": round(float(base_limit), 4),
+                            },
+                            "claude": claude_result,
+                            "resultado": {
+                                "stop_final": round(float(stop_final), 4),
+                                "qty_protegida": int(qty),
+                                "ganancia_protegida_usd": round(float(base_limit), 4),
+                            },
+                        }
+                        self.RepositorioOportunidades.insert_preservation_order(
+                            account,
+                            vehiculo,
+                            symbol,
+                            str(conid),
+                            str(order_id),
+                            float(stop_final),
+                            float(qty),
+                            json.dumps(_det),
+                        )
+                    except Exception as _e:
+                        self.logger.error(f"insert_preservation_order({symbol}): {_e}")
             else:
                 order_id = order_id_prev
                 msg = (
