@@ -2211,17 +2211,16 @@ class DashMain:
         self.exit.pack(side=tk.RIGHT, fill=tk.X)
         self.cart.pack(side=tk.RIGHT, fill=tk.X)
 
-        _gc_text = "⚡" if DataHub.gains_capture_modo == "automatico" else "🔐"
+        _gc_img = BDsystem.select_image(idd=334, size=(32, 32))
         self.btn_gc_modo = tk.Button(
             lineRight,
-            text=_gc_text,
-            font=("Arial", 16),
-            bg=self.colors["bgcolor"],
-            fg="#00FF88" if DataHub.gains_capture_modo == "automatico" else "#FFA500",
+            image=_gc_img,
+            bg="#00FF88" if DataHub.gains_capture_modo == "automatico" else "#FFA500",
             relief=tk.FLAT,
             cursor="hand2",
             command=self._toggle_gains_capture_modo,
         )
+        self.btn_gc_modo.imagen = _gc_img
         self.btn_gc_modo.pack(side=tk.RIGHT, fill=tk.X, padx=(0, 4))
 
         self.line.pack(side=tk.RIGHT, fill=tk.X)
@@ -2728,10 +2727,7 @@ class DashMain:
         nuevo = "autorizado" if DataHub.gains_capture_modo == "automatico" else "automatico"
         DataHub.gains_capture_modo = nuevo
         write_json_tmp("gains_capture_config.json", {"modo": nuevo})
-        self.btn_gc_modo.configure(
-            text="⚡" if nuevo == "automatico" else "🔐",
-            fg="#00FF88" if nuevo == "automatico" else "#FFA500",
-        )
+        self.btn_gc_modo.configure(bg="#00FF88" if nuevo == "automatico" else "#FFA500")
 
     def car_ordenes_activas(self):
         _refresh_id = [None]
