@@ -62,8 +62,8 @@ AGENTES_SCHEDULE = {
         "active": True,
     },
     "Agente_Sentimiento": {
-        "intervalo": 3600,
-        "desc": "Sentimiento noticias por símbolo vía yfinance + Claude (1 hora)",
+        "intervalo": 28800,
+        "desc": "Sentimiento general de noticias por símbolo vía Claude (3 veces/día)",
         "active": True,
     },
     "Agente_InterpreteSentimiento": {
@@ -89,6 +89,11 @@ AGENTES_SCHEDULE = {
     "Agente_OrderEodCleanup": {
         "intervalo": 3600,
         "desc": "Limpieza periódica order_trader: plazos + validación API (1 hora)",
+        "active": True,
+    },
+    "Agente_GainsCapture": {
+        "intervalo": 43200,
+        "desc": "Venta parcial por niveles ROI en activos volátiles N (12h)",
         "active": True,
     },
 }

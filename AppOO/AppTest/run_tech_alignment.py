@@ -22,10 +22,10 @@ from ConvergIA.ThemeMapper import load_sentiment, load_analysis, voto_tech_align
 ACCOUNT = "U4214563"
 
 if __name__ == "__main__":
-    sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPI")
+    sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIP")
     api_key = sesion["userapi"].decode("utf-8") if sesion else ""
     if not api_key:
-        print("ADVERTENCIA: ClaudeAPI no configurada en tabla sesion")
+        print("ADVERTENCIA: ClaudeAPIP no configurada en tabla sesion")
 
     print("=== Scanner ===")
     result = scan_sentimiento(account=ACCOUNT, api_key=api_key)
