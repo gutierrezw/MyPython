@@ -74,6 +74,7 @@ from Modulos_Utilitarios import (
     is_vacio,
     is_numeric,
     str_float,
+    write_json_tmp,
 )
 from Class_customer import (
     CustomTreeview,
@@ -2209,6 +2210,20 @@ class DashMain:
         self.exit.imagen = imagen_tk
         self.exit.pack(side=tk.RIGHT, fill=tk.X)
         self.cart.pack(side=tk.RIGHT, fill=tk.X)
+
+        _gc_text = "⚡" if DataHub.gains_capture_modo == "automatico" else "🔐"
+        self.btn_gc_modo = tk.Button(
+            lineRight,
+            text=_gc_text,
+            font=("Arial", 16),
+            bg=self.colors["bgcolor"],
+            fg="#00FF88" if DataHub.gains_capture_modo == "automatico" else "#FFA500",
+            relief=tk.FLAT,
+            cursor="hand2",
+            command=self._toggle_gains_capture_modo,
+        )
+        self.btn_gc_modo.pack(side=tk.RIGHT, fill=tk.X, padx=(0, 4))
+
         self.line.pack(side=tk.RIGHT, fill=tk.X)
 
         # Progreso inversion gyp diarias ------------------------------------------------------------------------------
@@ -2708,6 +2723,15 @@ class DashMain:
             if self.is_running:
                 after_id = self.root.after(500, lambda: self.update_widget(vehiculo=vehiculo))
                 self.after_ids.append(after_id)
+
+    def _toggle_gains_capture_modo(self):
+        nuevo = "autorizado" if DataHub.gains_capture_modo == "automatico" else "automatico"
+        DataHub.gains_capture_modo = nuevo
+        write_json_tmp("gains_capture_config.json", {"modo": nuevo})
+        self.btn_gc_modo.configure(
+            text="⚡" if nuevo == "automatico" else "🔐",
+            fg="#00FF88" if nuevo == "automatico" else "#FFA500",
+        )
 
     def car_ordenes_activas(self):
         _refresh_id = [None]
