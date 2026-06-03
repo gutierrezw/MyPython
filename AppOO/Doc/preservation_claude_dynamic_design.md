@@ -228,197 +228,26 @@ ADD COLUMN json_detalle TEXT NULL AFTER hash_id_oportunidad;
 
 ---
 
-## Extensión — Escalonamiento de salida (activos volátiles)
+## Nota — Escalonamiento separado en agente propio
 
-**Estado:** Diseño completo — pendiente implementar  
-**Fecha diseño:** 2026-06-03
+El escalonamiento de salida **no forma parte de este agente**.  
+Su espíritu es especulativo (capturar máximo upside antes de caída), opuesto al espíritu
+defensivo de Preservation. Se implementa como **`Agente_GainsCapture`** independiente.
 
-### Motivación
-Stocks como SKLZ, PLUG, CRNT, CHPT pueden hacer movimientos de +50% a +150% en semanas.
-Un trailing stop solo no es suficiente — hay que vender parcialmente en el camino para
-asegurar ganancias antes de una corrección. SKLZ llegó a $20 (+79% ROI) y volvió a $9.
+Ver diseño completo en: `Doc/gains_capture_design.md`
 
-### Distinción por `categoriaActivo`
-| Valor | Tipo | Estrategia preservation |
+---
+
+## Distinción de responsabilidades
+
+| | `Agente_ManagerPreservation` | `Agente_GainsCapture` |
 |---|---|---|
-| `I` | Dividendo (CVS, BTI, AMT) | Trailing stop puro — sin escalonamiento |
-| `N` | Crecimiento/volátil (SKLZ, PLUG, CRNT) | Trailing stop + escalonamiento |
-| `X`, `T` | ETF / 13F | Sin preservation |
-
----
-
-### Config en `sesion.parameters`
-```json
-{
-  "preservation": {
-    "roi_minimo": 0.10,
-    "proteccion_base": 0.40,
-    "correccion_pct": 0.08,
-    "atr_mult": 2.0,
-    "revisiones_dia": 2,
-    "escalonamiento": [
-      {"roi": 0.50, "vender_pct": 0.25},
-      {"roi": 1.00, "vender_pct": 0.50},
-      {"roi": 1.50, "vender_pct": 0.25}
-    ]
-  }
-}
-```
-Si `escalonamiento` no está en el config → trailing stop puro (comportamiento actual).  
-`vender_pct` se aplica sobre la **posición corriente de IB** en el momento de ejecución, no sobre la qty original.
-
-### Ejemplo SKLZ (avg cost $11.18, 136 acc)
-| Precio | ROI | Acción |
-|---|---|---|
-| $12.30 | +10% | Trailing STOP activo |
-| $16.77 | +50% | Claude valida técnicos → vender 34 acc (25%) LMT $16.69 |
-| $22.36 | +100% | Claude valida técnicos → vender ~51 acc (50% de lo que queda) LMT $22.25 |
-| $27.95 | +150% | Claude valida técnicos → vender ~25 acc (25% restante) LMT $27.81 |
-
----
-
-### Validación técnica por Claude antes de cada nivel
-
-Antes de colocar la orden LMT, Claude evalúa si hay momentum restante o si el activo
-está sobrecomprado. Puede **postergar** la ejecución si las condiciones son favorables.
-
-**Señales evaluadas (DataHub tiempo real):**
-
-| Señal | "Esperar más" | "Ejecutar ahora" |
-|---|---|---|
-| RSI diario | < 65 (momentum intacto) | > 75 (sobrecomprado) |
-| RSI semanal | < 65 | > 72 |
-| Precio vs EMA50 diaria | Acelerando por encima | Tocando o debajo |
-| Precio vs EMA200 diaria | Lejos por encima | Cerca o debajo |
-
-**Respuesta Claude (JSON):**
-```json
-{"ejecutar": true, "razon": "RSI_d=78 sobrecomprado, señal de toma de ganancias", "urgencia": "alta"}
-```
-Si `ejecutar: false` → el nivel se omite en este ciclo y se re-evalúa en el próximo.  
-Si Claude falla (timeout) → se ejecuta igual usando solo las reglas de nivel ROI.
-
----
-
-### Tipo de orden — LIMIT fijo
-
-`precio_lmt = last × 0.995` (0.5% bajo precio actual).  
-Ejecuta rápido en mercado activo sin regalar precio. No se usan órdenes MKT.
-
----
-
-### Flujo de estados por símbolo
-
-```
-[normal]
-  ↓  ROI >= nivel.roi  AND  nivel no ejecutado  AND  Claude dice ejecutar
-Colocar LMT SELL parcial  →  [escalon_pendiente]
-  (guarda escalon_order_id en preservation_state)
-
-Agente_SyncOrders detecta LMT filled
-  → cancelar stop_order_id activo en IB
-  → [esperando_reset]
-
-Próximo ciclo preservation
-  → leer qty actual desde IB (posición ya reducida)
-  → recalcular stop desde cero con nueva qty
-  → colocar nuevo STOP
-  → [normal]
-  (niveles_ejecutados se mantiene: no re-dispara el nivel ya ejecutado)
-```
-
-| Estado | Qué hace el agente |
-|---|---|
-| `normal` | Evalúa trailing stop + chequea niveles de escalonamiento |
-| `escalon_pendiente` | No toca nada — espera que SyncOrders detecte el fill |
-| `esperando_reset` | Lee posición fresca de IB, recalcula todo, coloca nuevo STOP |
-
----
-
-### Modos de operación — botón en panel Agentes
-
-El panel Agentes (`agentes_system()`) tiene un botón adicional junto a "Activar todos":
-
-```
-[ Activar todos ]   [ ⚡ Modo: Automático ]   ← verde
-[ Activar todos ]   [ 🔐 Modo: Autorizado ]   ← naranja
-```
-
-**Implementación:**
-- `DataHub.preservation_modo: str` = `"automatico"` | `"autorizado"` (class var)
-- Persiste en `tmp/preservation_config.json` via `write_json_tmp`
-- En inicio de app lee el estado guardado via `read_json_tmp`
-
-**Modo `automatico`** (sin presencia del usuario):
-1. Claude valida técnicos → decide ejecutar
-2. LMT enviada a IB directamente
-3. Notificación Telegram posterior informando la acción
-
-**Modo `autorizado`** (quiero validar antes):
-1. Claude valida técnicos → prepara la orden
-2. Telegram envía propuesta:
-   ```
-   SKLZ: vender 25% (34 acc) LMT $19.50
-   RSI_d=78 sobrecomprado — urgencia: alta
-   /ok_SKLZ para confirmar | /no_SKLZ para cancelar
-   ```
-3. `preservation_state` → `estado: "pendiente_autorizacion"`
-4. `/ok_SKLZ` → coloca la orden → flujo normal de fill
-5. `/no_SKLZ` → nivel marcado como "omitido_manual", se re-evalúa en 6h
-6. **Sin respuesta en 30 minutos → propuesta cancelada** (conservador — no ejecuta sin confirmación)
-
----
-
-### Persistencia ampliada — `preservation_state.json`
-
-```json
-{
-  "SKLZ": {
-    "max_price": 20.00,
-    "stop_order_id": "IB-12345",
-    "escalon_order_id": null,
-    "estado": "normal",
-    "niveles_ejecutados": [0.50],
-    "pendiente_autorizacion": null,
-    "last_check": "2026-06-03T10:30:00"
-  }
-}
-```
-
----
-
-### `json_detalle` en `order_trader` — para aprendizaje futuro
-
-Cada orden de escalonamiento guarda el contexto técnico + decisión Claude para análisis posterior:
-
-```json
-{
-  "tipo": "escalonamiento",
-  "nivel_roi": 0.50,
-  "modo": "autorizado",
-  "tecnico": {
-    "rsi_d": 78.2,
-    "rsi_w": 71.1,
-    "ema200_rel": "sobre",
-    "macd_estado": "alcista"
-  },
-  "claude": {
-    "ejecutar": true,
-    "razon": "RSI diario sobrecomprado, señal de toma de ganancias oportuna",
-    "urgencia": "alta"
-  },
-  "orden": {
-    "qty": 34,
-    "lmt_price": 19.50
-  }
-}
-```
-
-**Valor futuro del dataset:**
-- Cruzar `tecnico` + `claude.razon` vs. precio posterior a la venta → ¿fue oportuno?
-- Detectar qué condiciones RSI/EMA predicen mejor el peak local
-- Calibrar los niveles `vender_pct` según efectividad histórica
-- Mejorar el prompt de Claude con casos reales de acierto/error
+| Espíritu | **Defensivo** — proteger lo ganado | **Especulativo** — capturar upside |
+| Activos | `I` (dividendo, estables) | `N` (volátil, crecimiento) |
+| Acción | Coloca STOP trailing | Vende parcialmente en niveles ROI |
+| Trigger | ROI >= 10%, cualquier activo estable | ROI >= 50%, solo activos volátiles |
+| Claude decide | Dónde poner el stop | Si hay más recorrido o vender ahora |
+| Nivel jerárquico | N3 — Decisiones | N3 — Decisiones |
 
 ---
 
@@ -447,43 +276,10 @@ ALTER TABLE order_trader ADD COLUMN json_detalle TEXT NULL AFTER hash_id_oportun
 
 ---
 
-### Fase 2 — Escalonamiento de salida (activos volátiles) — PENDIENTE
+### Fase 2 — Agente_GainsCapture — PENDIENTE
 
-#### Paso 1 — BD
-- Verificar que `order_trader.json_detalle` ya existe (lo tiene desde Fase 1)
-- No requiere cambios de schema adicionales
-
-#### Paso 2 — `Class_customer.py` — DataHub
-- Agregar `DataHub.preservation_modo: str = "automatico"` (class var)
-- Agregar `DataHub.preservation_build_trama_sell(vehiculo, account, symbol, conid, last, qty)` → trama LMT SELL
-- En inicio leer `preservation_config.json` para restaurar el modo guardado
-
-#### Paso 3 — `Class_DashBot.py`
-- Agregar `_escalon_claude_eval(symbol, nivel_roi, ctx)` → `{"ejecutar": bool, "razon": str, "urgencia": str}`
-  - Recibe RSI_d, RSI_w, EMA50/200 desde DataHub.info
-  - Claude decide si hay momentum restante o sobrecompra
-- Modificar `_preservation_run_vehiculo()`:
-  - Si `categoriaActivo == 'N'` y config tiene `escalonamiento`:
-    - Cargar `niveles_ejecutados` desde preservation_state
-    - Por cada nivel no ejecutado con roi alcanzado: llamar `_escalon_claude_eval`
-    - Si ejecutar: colocar LMT (`last × 0.995`), guardar escalon_order_id, estado → escalon_pendiente
-    - Si modo autorizado: enviar Telegram propuesta, estado → pendiente_autorizacion; timeout 30min → cancelar
-- Manejar estado `esperando_reset`: leer qty fresca de IB, recalcular stop, volver a normal
-
-#### Paso 4 — `Agente_SyncOrders`
-- Detectar fill de órdenes con `intent='escalon'`
-- Al fill: cancelar stop_order_id activo, actualizar preservation_state → esperando_reset
-
-#### Paso 5 — `Class_SystemStatus.py` — botón en panel Agentes
-- En `btn_frame` de `agentes_system()`, agregar botón toggle junto a "Activar todos"
-- Verde: `"⚡ Modo: Automático"` | Naranja: `"🔐 Modo: Autorizado"`
-- Click → toggle `DataHub.preservation_modo` + `write_json_tmp("preservation_config.json", {"modo": ...})`
-
-#### Paso 6 — Telegram handler
-- Comandos `/ok_<SYMBOL>` y `/no_<SYMBOL>` para modo autorizado
-- `/ok_SKLZ` → coloca la orden pendiente → flujo normal
-- `/no_SKLZ` → cancela propuesta, nivel omitido 6h
-- Sin respuesta 30min → propuesta cancelada (no ejecuta)
+Ver diseño completo en `Doc/gains_capture_design.md`.  
+Este agente es independiente: espíritu especulativo, activos `N`, implementación separada.
 
 ---
 
