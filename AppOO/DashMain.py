@@ -2184,6 +2184,18 @@ class DashMain:
         self.line.pack(side=tk.LEFT, fill=tk.X)
         self.user.pack(side=tk.LEFT, fill=tk.X)
 
+        _gc_img = BDsystem.select_image(idd=334, size=(32, 32))
+        self.btn_gc_modo = tk.Button(
+            lineLeft,
+            image=_gc_img,
+            bg="#00FF88" if DataHub.gains_capture_modo == "automatico" else "#FFA500",
+            relief=tk.FLAT,
+            cursor="hand2",
+            command=self._toggle_gains_capture_modo,
+        )
+        self.btn_gc_modo.imagen = _gc_img
+        self.btn_gc_modo.pack(side=tk.LEFT, fill=tk.X, padx=(4, 0))
+
         # órdenes y salida del sistema --------------------------------------------------------------------------------
         imagen_tk = BDsystem.select_image(idd=14, size=(32, 32))
 
@@ -2210,19 +2222,6 @@ class DashMain:
         self.exit.imagen = imagen_tk
         self.exit.pack(side=tk.RIGHT, fill=tk.X)
         self.cart.pack(side=tk.RIGHT, fill=tk.X)
-
-        _gc_img = BDsystem.select_image(idd=334, size=(32, 32))
-        self.btn_gc_modo = tk.Button(
-            lineRight,
-            image=_gc_img,
-            bg="#00FF88" if DataHub.gains_capture_modo == "automatico" else "#FFA500",
-            relief=tk.FLAT,
-            cursor="hand2",
-            command=self._toggle_gains_capture_modo,
-        )
-        self.btn_gc_modo.imagen = _gc_img
-        self.btn_gc_modo.pack(side=tk.RIGHT, fill=tk.X, padx=(0, 4))
-
         self.line.pack(side=tk.RIGHT, fill=tk.X)
 
         # Progreso inversion gyp diarias ------------------------------------------------------------------------------
