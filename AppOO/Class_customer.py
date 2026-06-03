@@ -1089,6 +1089,35 @@ class DataHub:
             pass
         return None
 
+    gains_capture_modo: str = "automatico"
+
+    @staticmethod
+    def gains_capture_build_trama_sell(vehiculo, account, symbol, conid, lmt_price, qty):
+        """Construye trama de orden LMT SELL para escalonamiento parcial de ganancias."""
+        hash_id = DataHub.RepositorioOportunidades.generar_hash_id(
+            account=account, symbol=symbol, option=vehiculo, tipo="LMT", subtipo="SELL", recomendado="GAINS_CAPTURE"
+        )
+        if vehiculo == "Stock":
+            return {
+                "account": account,
+                "vehiculo": "Stock",
+                "symbol": symbol,
+                "pedido": {
+                    "orders": [
+                        {
+                            "conid": int(conid),
+                            "orderType": "LMT",
+                            "price": float(round(lmt_price, 2)),
+                            "side": "SELL",
+                            "tif": "DAY",
+                            "quantity": float(qty),
+                        }
+                    ]
+                },
+                "hash_id_Op": hash_id,
+            }
+        return None
+
 
 #  clase para colocar ordenes desde cualquier punto de la aplicacion
 class MyOrders:

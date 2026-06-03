@@ -70,6 +70,8 @@ from Class_BrowserBridge import set_claude_contexto
 from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
 from Modulos_Utilitarios import define_FileCache, read_json_tmp, write_json_tmp, AGENTES_SCHEDULE, wait_rate
 from Class_AgentManager import AgentManager
+from ConvergIA.Scanner_Sentimiento import scan_sentimiento
+from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
 
 
 # Admistrador de Agentes IA
@@ -128,6 +130,11 @@ class ClassAgenteIA:
                     self.preservation_last_run[_veh] = datetime.fromisoformat(_lr)
                 except Exception:
                     pass
+
+        # Estado GainsCapture — escalonamiento de salida para activos volátiles (categoriaActivo='N')
+        _gc_saved = read_json_tmp("gains_capture_state.json")
+        self.gains_capture_state = {k: v for k, v in _gc_saved.items() if not k.startswith("_")}
+        DataHub.gains_capture_modo = read_json_tmp("gains_capture_config.json").get("modo", "automatico")
 
         # Logger dedicado a preservation — escribe a logs/preservation_diag.log
         self._preservation_logger = logging.getLogger("Preservation")
@@ -409,6 +416,285 @@ class ClassAgenteIA:
                     self.logger.debug(f"Agente_ManagerPreservation({vehiculo}): sesion no activa → SKIP")
             except Exception as e:
                 self.logger.error(f"Agente_ManagerPreservation({vehiculo}): {e}")
+
+    # agente especulativo: captura ganancias en activos volátiles con ventas parciales por niveles ROI
+    @wait_rate(43200, persist=True)
+    async def Agente_GainsCapture(self):
+        """Venta parcial escalonada para activos volátiles (categoriaActivo='N').
+        Espíritu especulativo — complementario a ManagerPreservation (defensivo)."""
+        try:
+            if DataHub.manager_sesion.get("Stock"):
+                self._gains_capture_run()
+            else:
+                self.logger.debug("Agente_GainsCapture: sesion Stock no activa → SKIP")
+        except Exception as e:
+            self.logger.error(f"Agente_GainsCapture(): {e}")
+
+    @wait_rate(28800, persist=True)
+    def Agente_Sentimiento(self):
+        try:
+            ses = BDsystem.get_sesion_by_vehiculo("ClaudeAPIP")
+            api_key = ses["userapi"].decode("utf-8") if ses else ""
+            result = scan_sentimiento(account=self.account, api_key=api_key)
+            self.logger.warning(
+                f"Agente_Sentimiento [iter={self.counter}]: "
+                f"simbolos={result['symbols']} noticias={result['with_news']} clasificados={result['classified']}"
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_Sentimiento(): {e}")
+
+    @wait_rate(86400, persist=True)
+    def Agente_InterpreteSentimiento(self):
+        try:
+            ses = BDsystem.get_sesion_by_vehiculo("ClaudeAPIP")
+            api_key = ses["userapi"].decode("utf-8") if ses else ""
+            result = interpretar_sentimiento(account=self.account, api_key=api_key)
+            deleted = self.Market.cleanup_sentiment(months=3)
+            self.logger.warning(
+                f"Agente_InterpreteSentimiento [iter={self.counter}]: "
+                f"{len(result)} patrones → {result} | depurados={deleted}"
+            )
+        except Exception as e:
+            self.logger.error(f"Agente_InterpreteSentimiento(): {e}")
+
+    def _gains_capture_run(self):
+        """Orquesta el escalonamiento de salida para activos volátiles Stock."""
+        _gc_logger = logging.getLogger("GainsCapture")
+
+        params = self._load_params("Stock")
+        if not params:
+            return
+        gc_config = params.get("gains_capture")
+        if not gc_config:
+            _gc_logger.debug("_gains_capture_run: gains_capture no configurado en sesion → SKIP")
+            return
+
+        niveles = sorted(gc_config.get("niveles", []), key=lambda x: x["roi"])
+        if not niveles:
+            return
+
+        _claude_key = None
+        try:
+            _ses = BDsystem.get_sesion_by_vehiculo("ClaudeAPIP")
+            _claude_key = _ses["userapi"].decode("utf-8") if _ses else None
+        except Exception as e:
+            _gc_logger.error(f"GainsCapture: ClaudeAPIP no disponible → {e}")
+
+        categories = self.Market.load_symbols(self.account)
+        positions = self.PlanInversion.select_inversion(tipoin="Stock", ticket="all")
+
+        for positio in positions:
+            symbol = positio.get("ticket")
+            if categories.get(symbol) != "N":
+                continue
+
+            costobase = positio.get("costobase", 0)
+            unrealizedpnl = positio.get("unrealizedpnl", 0)
+            position_qty = positio.get("position", 0)
+            conid = positio.get("conid")
+            account = positio.get("useraccount")
+
+            if costobase <= 0 or position_qty <= 0:
+                continue
+
+            roi = unrealizedpnl / costobase
+            primer_nivel = niveles[0]["roi"]
+            if roi < primer_nivel:
+                continue
+
+            state = self.gains_capture_state.get(symbol, {})
+            estado = state.get("estado", "normal")
+
+            # estado esperando_reset → leer qty fresca y volver a normal
+            if estado == "esperando_reset":
+                self.gains_capture_state[symbol] = {**state, "estado": "normal"}
+                write_json_tmp("gains_capture_state.json", self.gains_capture_state)
+                _gc_logger.warning(f"GainsCapture({symbol}): reset completado → normal")
+                estado = "normal"
+
+            # timeout 30 min para propuesta no respondida → cancelar sin ejecutar
+            if estado == "pendiente_autorizacion":
+                ts_raw = state.get("pendiente_ts")
+                if ts_raw:
+                    elapsed = (datetime.now() - datetime.fromisoformat(ts_raw)).total_seconds()
+                    if elapsed > 1800:
+                        self.gains_capture_state[symbol] = {**state, "estado": "normal", "pendiente": None}
+                        write_json_tmp("gains_capture_state.json", self.gains_capture_state)
+                        _gc_logger.warning(f"GainsCapture({symbol}): propuesta expirada (30 min) → cancelada")
+                        estado = "normal"
+                    else:
+                        _gc_logger.debug(
+                            f"GainsCapture({symbol}): pendiente_autorizacion → esperando ({elapsed/60:.0f}m)"
+                        )
+                        continue
+
+            # estado escalon_pendiente → esperar fill vía SyncOrders
+            if estado == "escalon_pendiente":
+                _gc_logger.debug(f"GainsCapture({symbol}): escalon_pendiente → esperando fill")
+                continue
+
+            # estado normal → evaluar niveles
+            niveles_ejecutados = state.get("niveles_ejecutados", [])
+            last = DataHub.preservation_get_price(symbol, positio)
+            if not last or last <= 0:
+                continue
+
+            for nivel in niveles:
+                nivel_roi = nivel["roi"]
+                if roi < nivel_roi or nivel_roi in niveles_ejecutados:
+                    continue
+
+                vender_qty = int(position_qty * nivel["vender_pct"])
+                if vender_qty <= 0:
+                    continue
+
+                lmt_price = round(last * 0.995, 2)
+
+                # Claude evalúa si ejecutar o esperar más
+                ejecutar = True
+                claude_result = None
+                if _claude_key:
+                    claude_result = self._gains_capture_claude_eval(symbol, nivel_roi, roi, last, _claude_key)
+                    if claude_result:
+                        ejecutar = claude_result.get("ejecutar", True)
+
+                if not ejecutar:
+                    _gc_logger.warning(
+                        f"GainsCapture({symbol}): nivel={nivel_roi:.0%} POSTERGADO — {claude_result.get('razon','')}"
+                    )
+                    continue
+
+                _det = {
+                    "tipo": "gains_capture",
+                    "nivel_roi": nivel_roi,
+                    "modo": DataHub.gains_capture_modo,
+                    "tecnico": {
+                        k: DataHub.info.get(symbol, {}).get("datos_tecnicos", {}).get("diaria", {}).get(k)
+                        for k in ("rsi", "macd")
+                    },
+                    "claude": claude_result,
+                    "orden": {"qty": vender_qty, "lmt_price": lmt_price},
+                }
+
+                if DataHub.gains_capture_modo == "autorizado":
+                    razon = claude_result.get("razon", "") if claude_result else ""
+                    msg = (
+                        f"📈 *GainsCapture — {symbol}*\n"
+                        f"Nivel ROI {nivel_roi:.0%} alcanzado (ROI actual {roi:.1%})\n"
+                        f"Vender {vender_qty} acc LMT ${lmt_price:.2f}\n"
+                        f"{razon}\n"
+                        f"/ok\\_{symbol}  |  /no\\_{symbol}"
+                    )
+                    DataHub.system_alerts.append(msg)
+                    self.gains_capture_state[symbol] = {
+                        **state,
+                        "estado": "pendiente_autorizacion",
+                        "pendiente": {
+                            "nivel_roi": nivel_roi,
+                            "qty": vender_qty,
+                            "lmt_price": lmt_price,
+                            "conid": str(conid),
+                            "account": account,
+                            "det": _det,
+                        },
+                        "pendiente_ts": datetime.now().isoformat(),
+                    }
+                    write_json_tmp("gains_capture_state.json", self.gains_capture_state)
+                    _gc_logger.warning(f"GainsCapture({symbol}): propuesta enviada a Telegram (autorizado)")
+                    break
+
+                # modo automatico → colocar orden directamente
+                trama = DataHub.gains_capture_build_trama_sell("Stock", account, symbol, conid, lmt_price, vender_qty)
+                try:
+                    response = DataHub.preservation_send_order("Stock", trama)
+                    order_id = DataHub.preservation_extract_order_id(response)
+                    self.gains_capture_state[symbol] = {
+                        **state,
+                        "estado": "escalon_pendiente",
+                        "escalon_order_id": str(order_id) if order_id else None,
+                        "niveles_ejecutados": niveles_ejecutados,
+                        "last_check": datetime.now().isoformat(),
+                    }
+                    write_json_tmp("gains_capture_state.json", self.gains_capture_state)
+                    try:
+                        self.RepositorioOportunidades.insert_preservation_order(
+                            account,
+                            "Stock",
+                            symbol,
+                            str(conid),
+                            str(order_id),
+                            lmt_price,
+                            float(vender_qty),
+                            json.dumps(_det),
+                        )
+                    except Exception as _e:
+                        _gc_logger.error(f"GainsCapture({symbol}): insert_preservation_order → {_e}")
+                    DataHub.system_alerts.append(
+                        f"📈 GainsCapture {symbol}: vendiendo {vender_qty} acc LMT ${lmt_price:.2f} "
+                        f"(nivel ROI {nivel_roi:.0%}) — order_id={order_id}"
+                    )
+                    _gc_logger.warning(
+                        f"GainsCapture({symbol}): LMT SELL {vender_qty} acc @ {lmt_price:.2f} "
+                        f"nivel={nivel_roi:.0%} order_id={order_id}"
+                    )
+                except Exception as e:
+                    _gc_logger.error(f"GainsCapture({symbol}): error enviando orden → {e}")
+                break
+
+    def _gains_capture_claude_eval(
+        self, symbol: str, nivel_roi: float, roi: float, last: float, api_key: str
+    ) -> dict | None:
+        """Claude evalúa si ejecutar la venta parcial o esperar más recorrido."""
+        dt = DataHub.info.get(symbol, {}).get("datos_tecnicos", {})
+        d = dt.get("diaria", {})
+        s = dt.get("semanal", {})
+        rsi_d = d.get("rsi")
+        rsi_w = s.get("rsi")
+        macd_val = d.get("macd")
+        macd_estado = "alcista" if macd_val and macd_val > 0 else ("bajista" if macd_val and macd_val < 0 else "neutro")
+        ema50 = (d.get("ema(20,50,100,200)") or {}).get("EMA50")
+        ema200 = (d.get("ema(20,50,100,200)") or {}).get("EMA200")
+        ema50_rel = ("sobre" if last > ema50 else "bajo") if ema50 else "N/D"
+        ema200_rel = ("sobre" if last > ema200 else "bajo") if ema200 else "N/D"
+
+        def _f(v, fmt="{:.1f}", default="N/D"):
+            return fmt.format(v) if v is not None else default
+
+        prompt = (
+            f"Eres un agente de captura de ganancias para un portfolio especulativo.\n"
+            f"El activo {symbol} alcanzó el nivel ROI {nivel_roi:.0%} (ROI actual {roi:.1%}, precio ${last:.2f}).\n"
+            f"Evaluá si conviene vender parcialmente ahora o esperar más recorrido.\n\n"
+            f"Técnico (tiempo real):\n"
+            f"- RSI diario: {_f(rsi_d)} | RSI semanal: {_f(rsi_w)} | MACD: {macd_estado}\n"
+            f"- Precio vs EMA50 diaria: {ema50_rel} | Precio vs EMA200 diaria: {ema200_rel}\n\n"
+            f"Criterios:\n"
+            f"- RSI diario > 75 o RSI semanal > 72 → sobrecomprado, ejecutar\n"
+            f"- RSI diario < 65 y tendencia alcista → momentum intacto, esperar\n"
+            f"- Precio tocando o debajo de EMA50 → debilitamiento, ejecutar\n\n"
+            f'Respondé SOLO con JSON válido: {{"ejecutar": true|false, "razon": "str max 120 chars", "urgencia": "alta"|"media"|"baja"}}'
+        )
+        try:
+            resp = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 200,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=15,
+            )
+            if not resp.ok:
+                return None
+            text = resp.json()["content"][0]["text"].strip()
+            start, end = text.find("{"), text.rfind("}") + 1
+            if start >= 0 and end > start:
+                result = json.loads(text[start:end])
+                if "ejecutar" in result:
+                    return result
+        except Exception as e:
+            logging.getLogger("GainsCapture").error(f"_gains_capture_claude_eval({symbol}): {e}")
+        return None
 
     def _load_params(self, vehiculo):
         """
@@ -855,6 +1141,8 @@ class Telegram:
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_segurity_message)
                 )
                 self.telegram_app.add_handler(CallbackQueryHandler(self.handle_callback))
+                self.telegram_app.add_handler(MessageHandler(filters.Regex(r"^/ok_\w+$"), self.handle_gains_capture_ok))
+                self.telegram_app.add_handler(MessageHandler(filters.Regex(r"^/no_\w+$"), self.handle_gains_capture_no))
 
                 # Captura errores de red dentro del loop de polling (ConnectError, NetworkError, etc.)
                 async def _telegram_error_handler(update, context):
@@ -1121,6 +1409,74 @@ class Telegram:
 
         except Exception as e:
             self.logger.error(f"handle_callback(): {e}\n{traceback.format_exc()}")
+
+    async def handle_gains_capture_ok(self, update, context):
+        """Handler /ok_SYMBOL — aprueba una propuesta GainsCapture pendiente."""
+        try:
+            text = update.message.text.strip()
+            symbol = text.replace("/ok_", "").upper()
+            state = self.gains_capture_state.get(symbol, {})
+            if state.get("estado") != "pendiente_autorizacion":
+                await update.message.reply_text(f"⚠️ {symbol}: sin propuesta GainsCapture pendiente.")
+                return
+            pendiente = state.get("pendiente", {})
+            trama = DataHub.gains_capture_build_trama_sell(
+                "Stock",
+                pendiente["account"],
+                symbol,
+                pendiente["conid"],
+                pendiente["lmt_price"],
+                pendiente["qty"],
+            )
+            response = DataHub.preservation_send_order("Stock", trama)
+            order_id = DataHub.preservation_extract_order_id(response)
+            niveles_ejecutados = state.get("niveles_ejecutados", []) + [pendiente["nivel_roi"]]
+            self.gains_capture_state[symbol] = {
+                **state,
+                "estado": "escalon_pendiente",
+                "escalon_order_id": str(order_id) if order_id else None,
+                "niveles_ejecutados": niveles_ejecutados,
+                "pendiente": None,
+                "last_check": datetime.now().isoformat(),
+            }
+            write_json_tmp("gains_capture_state.json", self.gains_capture_state)
+            try:
+                self.RepositorioOportunidades.insert_preservation_order(
+                    pendiente["account"],
+                    "Stock",
+                    symbol,
+                    pendiente["conid"],
+                    str(order_id),
+                    pendiente["lmt_price"],
+                    float(pendiente["qty"]),
+                    json.dumps(pendiente.get("det", {})),
+                )
+            except Exception as _e:
+                self.logger.error(f"handle_gains_capture_ok({symbol}): insert → {_e}")
+            await update.message.reply_text(
+                f"✅ GainsCapture {symbol}: orden enviada — {pendiente['qty']} acc LMT ${pendiente['lmt_price']:.2f}"
+            )
+            logging.getLogger("GainsCapture").warning(
+                f"GainsCapture({symbol}): aprobado por usuario → order_id={order_id}"
+            )
+        except Exception as e:
+            self.logger.error(f"handle_gains_capture_ok(): {e}")
+
+    async def handle_gains_capture_no(self, update, context):
+        """Handler /no_SYMBOL — rechaza una propuesta GainsCapture pendiente."""
+        try:
+            text = update.message.text.strip()
+            symbol = text.replace("/no_", "").upper()
+            state = self.gains_capture_state.get(symbol, {})
+            if state.get("estado") != "pendiente_autorizacion":
+                await update.message.reply_text(f"⚠️ {symbol}: sin propuesta GainsCapture pendiente.")
+                return
+            self.gains_capture_state[symbol] = {**state, "estado": "normal", "pendiente": None}
+            write_json_tmp("gains_capture_state.json", self.gains_capture_state)
+            await update.message.reply_text(f"❌ GainsCapture {symbol}: propuesta cancelada.")
+            logging.getLogger("GainsCapture").warning(f"GainsCapture({symbol}): rechazado por usuario")
+        except Exception as e:
+            self.logger.error(f"handle_gains_capture_no(): {e}")
 
     # delete message puntual
     async def _delete_message_hash(self, message):
@@ -1735,6 +2091,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     self.exec_modulo_async(self.Agente_ManagerTop10())
                     agent_mgr.run_loop()
                     self.exec_modulo_async(self.Agente_ManagerPreservation())
+                    self.exec_modulo_async(self.Agente_GainsCapture())
+                    self.Agente_Sentimiento()
+                    self.Agente_InterpreteSentimiento()
                     self.Agente_SyncOrders()
                     self.Agente_OrderEodCleanup()
                     self.exec_modulo_async(self._flush_system_alerts())

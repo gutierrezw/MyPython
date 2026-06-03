@@ -406,6 +406,14 @@ class Debugging:
         self.logger.update({"Agente.Infra": logging.getLogger("Agente.Infra")})
         self.logger["Agente.Infra"].setLevel(logging.WARNING)
 
+        # manager logging
+        self.logger.update({"GainsCapture": logging.getLogger("GainsCapture")})
+        self.logger["GainsCapture"].setLevel(logging.WARNING)
+
+        # manager logging
+        self.logger.update({"Sentimiento": logging.getLogger("Sentimiento")})
+        self.logger["Sentimiento"].setLevel(logging.WARNING)
+
         # restaurar niveles guardados por el usuario desde el panel Debugging
         self._apply_saved_levels()
         self._apply_saved_agents()

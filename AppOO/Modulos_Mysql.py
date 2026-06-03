@@ -5296,14 +5296,16 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             print("[Mysql:: select_order_trader({})]: {}".format(vehiculo, error))
 
     def select_order_trader_today(self, account: str, vehiculo: str) -> tuple:
-        """Retorna todas las órdenes de hoy para account/vehiculo desde order_trader."""
+        """Retorna órdenes de hoy + cualquier orden activa de días anteriores (ej: STOPs de preservation)."""
         conn = self._conectar(tabla="select.order_trader")
         cursor = None
         try:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT * FROM order_trader "
-                "WHERE account = %s AND vehiculo = %s AND DATE(stampPlace) = CURDATE() "
+                "WHERE account = %s AND vehiculo = %s "
+                "AND (DATE(stampPlace) = CURDATE() "
+                "     OR status IN ('New','NEW','Submitted','PreSubmitted','PendingSubmit','PARTIALLY_FILLED')) "
                 "ORDER BY stampPlace DESC",
                 (account, vehiculo),
             )
