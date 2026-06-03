@@ -2722,6 +2722,77 @@ class DashMain:
             _refresh_id[0] = rnb.after(30000, _auto_refresh)
 
         # construye treeview con todas las orders
+        def _show_claude_popup(jd_raw):
+            try:
+                jd = json.loads(jd_raw) if jd_raw else {}
+            except Exception:
+                jd = {}
+            if not jd:
+                return
+            claude = jd.get("claude") or {}
+            decision = jd.get("decision") or {}
+            resultado = jd.get("resultado") or {}
+
+            def _fmt(val, pct=False):
+                if val is None:
+                    return "N/D"
+                if pct:
+                    try:
+                        return f"{float(val):.1%}"
+                    except Exception:
+                        pass
+                return str(val)
+
+            lines = [
+                f"  Stop final:   ${_fmt(resultado.get('stop_final'))}",
+                f"  Urgencia:     {_fmt(claude.get('urgencia'))}",
+                f"",
+                f"  Razón:",
+                f"    {_fmt(claude.get('razon'))}",
+                f"",
+                f"  Contexto:",
+                f"    Consenso:   {_fmt(decision.get('consenso_tag'))}",
+                f"    Inst Score: {_fmt(decision.get('inst_score'))}",
+                f"    13F Buy%:   {_fmt(decision.get('fh_buy_ratio'), pct=True)}",
+                f"    RSI diario: {_fmt(decision.get('rsi_d'))}",
+                f"    MACD:       {_fmt(decision.get('macd_estado'))}",
+            ]
+            pop = tk.Toplevel(rnb)
+            pop.title("Análisis Claude — Preservation")
+            pop.config(bg="black")
+            pop.attributes("-toolwindow", 1)
+            pop.resizable(False, False)
+            pop.grab_set()
+            txt = tk.Text(
+                pop,
+                width=46,
+                height=len(lines) + 2,
+                bg="black",
+                fg="white",
+                font=("Consolas", 10),
+                relief="flat",
+                padx=8,
+                pady=6,
+            )
+            txt.insert("1.0", "\n".join(lines))
+            txt.config(state="disabled")
+            txt.pack(padx=4, pady=4)
+            pop.geometry(f"+{rnb.winfo_x() + 60}+{rnb.winfo_y() + 60}")
+
+        def on_claude_double_click(event):
+            item = tree.identify_row(event.y)
+            if not item or not tree.parent(item):
+                return
+            col = tree.identify_column(event.x)
+            try:
+                col_idx = int(col.replace("#", "")) - 1
+                col_name = _display_cols[col_idx] if 0 <= col_idx < len(_display_cols) else ""
+            except (ValueError, IndexError):
+                return
+            if col_name != "claude" or tree.set(item, "claude") != "🤖":
+                return
+            _show_claude_popup(tree.set(item, "json_detalle"))
+
         def config_treeview_ordenes(tree, heard):
             def sort_children_by_col(col, reverse, btn):
                 try:
@@ -2754,6 +2825,7 @@ class DashMain:
 
                 _widths = {
                     "symbol": 80,
+                    "claude": 28,
                     "side": 50,
                     "orderType": 65,
                     "stop": 70,
@@ -2767,6 +2839,7 @@ class DashMain:
                 }
                 _headers = {
                     "symbol": "symbol",
+                    "claude": "IA",
                     "side": "side",
                     "orderType": "orderType",
                     "stop": "Stop",
@@ -2778,7 +2851,7 @@ class DashMain:
                     "tiempo": "TIF",
                     "id": "id",
                 }
-                _hidden = ("account", "conid", "del", "sub", "id_enviar")
+                _hidden = ("account", "conid", "del", "sub", "id_enviar", "json_detalle")
                 for i, key in enumerate(cols):
                     width = _widths.get(key, 100)
                     width = 0 if key in _hidden else width
@@ -2836,6 +2909,7 @@ class DashMain:
                         "id_order": r.get("id_order", ""),
                         "id_enviar": coid,
                         "stampPlace": str(r.get("stampPlace", "")),
+                        "json_detalle": r.get("json_detalle") or "",
                     }
                 )
             return result
@@ -2858,6 +2932,7 @@ class DashMain:
                     tag = "green" if "fill" in st.lower() else "red" if "cancel" in st.lower() else ""
                     price = orden["price"]
                     qty = orden["quantity"]
+                    jd = orden.get("json_detalle") or ""
                     tree.insert(
                         Stock,
                         "end",
@@ -2866,6 +2941,7 @@ class DashMain:
                             orden["account"],
                             orden["conid"],
                             orden["symbol"],
+                            "🤖" if jd else "",
                             orden["side"],
                             orden["orderType"],
                             orden.get("stop_price", ""),
@@ -2877,6 +2953,9 @@ class DashMain:
                             orden["tif"],
                             orden["id_order"],
                             orden["id_enviar"],
+                            "",
+                            "",
+                            jd,
                         ],
                         tags=(tag,) if tag else (),
                     )
@@ -3164,6 +3243,7 @@ class DashMain:
                 "account",
                 "conid",
                 "symbol",
+                "claude",
                 "side",
                 "orderType",
                 "stop",
@@ -3177,6 +3257,7 @@ class DashMain:
                 "id_enviar",
                 "sub",
                 "del",
+                "json_detalle",
             ]
             heard = ttk.Treeview(win1, columns=cols, height=1, style="TFrame")
             tree = ttk.Treeview(win2, columns=cols, height=18, style="TFrame", show="tree")
@@ -3185,6 +3266,7 @@ class DashMain:
 
             _display_cols = [
                 "symbol",
+                "claude",
                 "side",
                 "orderType",
                 "stop",
@@ -3198,6 +3280,7 @@ class DashMain:
             ]
             tree["displaycolumns"] = _display_cols
             heard["displaycolumns"] = _display_cols
+            tree.bind("<Double-Button-1>", on_claude_double_click)
 
             # Configurar el Treeview para usar los scrollbars
             hscroll = ttk.Scrollbar(win2, orient="horizontal", command=sync_scroll)

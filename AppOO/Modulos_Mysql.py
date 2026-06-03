@@ -2928,6 +2928,52 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 cursor.close()
             conn.close()
 
+    def select_preservation_context(self, symbol: str, account: str) -> dict:
+        """Contexto fundamental para evaluación Claude en preservation.
+        Junta market (consenso + inst) + market_sentiment_analysis (patron).
+        Indicadores técnicos en tiempo real los agrega _build_preservation_context desde DataHub.
+        Retorna dict con todos los campos; ausentes quedan como None."""
+        conn = self._conectar(tabla="select.market")
+        cursor = None
+        ctx = {}
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT consenso_tag, consenso_suma, inst_score, inst_ownership_pct, "
+                "fh_buy_ratio, analyst_rec, analyst_mean "
+                "FROM market WHERE symbol = %s AND account = %s LIMIT 1",
+                (symbol, account),
+            )
+            row = cursor.fetchone()
+            if row:
+                keys = (
+                    "consenso_tag",
+                    "consenso_suma",
+                    "inst_score",
+                    "inst_ownership_pct",
+                    "fh_buy_ratio",
+                    "analyst_rec",
+                    "analyst_mean",
+                )
+                ctx.update(dict(zip(keys, row)))
+
+            cursor.execute(
+                "SELECT patron FROM market_sentiment_analysis msa "
+                "WHERE msa.symbol = %s ORDER BY msa.fecha DESC LIMIT 1",
+                (symbol,),
+            )
+            row = cursor.fetchone()
+            if row:
+                ctx["patron"] = row[0]
+
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::select_preservation_context({symbol})]: {error}")
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+        return ctx
+
 
 class PlanInversion(BDsystem):  # ------------------------------------------------------------------------------------
     """
@@ -5637,6 +5683,39 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             _logger.error(f"sync_splits residuos: {e}")
 
         return {"nuevos": nuevos, "aplicados": aplicados, "residuos": residuos}
+
+    def insert_preservation_order(
+        self,
+        account: str,
+        vehiculo: str,
+        symbol: str,
+        conid: str,
+        order_id: str,
+        stop_price: float,
+        qty: float,
+        json_detalle: str,
+    ) -> bool:
+        """Registra una orden STOP de preservation en order_trader con json_detalle."""
+        conn = self._conectar(tabla="insert.order_trader")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO order_trader "
+                "(account, vehiculo, symbol, conid, clientOrderId, side, orderType, "
+                "price, quantity, status, intent, json_detalle, stampPlace) "
+                "VALUES (%s, %s, %s, %s, %s, 'SELL', 'STP', %s, %s, 'New', 'preservation', %s, NOW())",
+                (account, vehiculo, symbol, conid, order_id, stop_price, qty, json_detalle),
+            )
+            conn.commit()
+            return True
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::insert_preservation_order({symbol})]: {error}")
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
 
 
 class FinanceScreen(BDsystem):  # -------------------------------------------------------------------------------------

@@ -73,7 +73,7 @@ class system_status(tk.Frame):
         self.fg.set_facecolor("DodgerBlue")
 
         self.rv.draw()
-        self.rv.get_tk_widget().pack()
+        self.rv.get_tk_widget().pack(side=tk.TOP, fill=tk.X)
         self.connect.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
         # Agregar tabs al Notebook
