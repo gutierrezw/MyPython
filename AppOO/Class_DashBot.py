@@ -420,9 +420,11 @@ class ClassAgenteIA:
         Protege ganancias acumuladas mediante órdenes STOP dinámicas.
         No optimiza ventas, no predice mercado, solo protege.
         """
+        if not _is_market_open():
+            self.logger.debug("Agente_ManagerPreservation: mercado cerrado → SKIP")
+            return
         for vehiculo in ("Stock", "Crypto"):
             try:
-                # valida conexion del vehiculo antes
                 if DataHub.manager_sesion.get(vehiculo):
                     self._preservation_run_vehiculo(vehiculo)
                 else:
