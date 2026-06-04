@@ -49,8 +49,6 @@ from Modulos_python import (
     textwrap,
     datetime,
     timedelta,
-    timezone,
-    dtime,
     Path,
     wraps,
     signal,
@@ -74,16 +72,6 @@ from Modulos_Utilitarios import define_FileCache, read_json_tmp, write_json_tmp,
 from Class_AgentManager import AgentManager
 from ConvergIA.Scanner_Sentimiento import scan_sentimiento
 from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
-
-
-def _is_market_open() -> bool:
-    now_utc = datetime.now(timezone.utc)
-    month = now_utc.month
-    offset = -4 if 3 <= month <= 11 else -5
-    now_et = now_utc + timedelta(hours=offset)
-    if now_et.weekday() >= 5:
-        return False
-    return dtime(4, 0) <= now_et.time() <= dtime(20, 0)
 
 
 # Admistrador de Agentes IA
@@ -420,9 +408,6 @@ class ClassAgenteIA:
         Protege ganancias acumuladas mediante órdenes STOP dinámicas.
         No optimiza ventas, no predice mercado, solo protege.
         """
-        if not _is_market_open():
-            self.logger.debug("Agente_ManagerPreservation: mercado cerrado → SKIP")
-            return
         for vehiculo in ("Stock", "Crypto"):
             try:
                 if DataHub.manager_sesion.get(vehiculo):
@@ -436,9 +421,6 @@ class ClassAgenteIA:
     @wait_rate(3600, persist=True)
     async def Agente_GainsCapture(self):
         try:
-            if not _is_market_open():
-                self.logger.debug("Agente_GainsCapture: mercado cerrado → SKIP")
-                return
             if DataHub.manager_sesion.get("Stock"):
                 self._gains_capture_run()
             else:
