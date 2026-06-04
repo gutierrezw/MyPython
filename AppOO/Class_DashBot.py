@@ -496,6 +496,8 @@ class ClassAgenteIA:
                 continue
 
             roi = unrealizedpnl / costobase
+            if roi < 0.20:
+                continue
             primer_nivel = niveles[0]["roi"]
             if roi < primer_nivel:
                 continue
