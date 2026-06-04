@@ -1345,6 +1345,14 @@ class Screener(tk.Frame):
                 e.insert(0, val)
                 e.pack(side=tk.LEFT)
                 entries[key] = e
+                if key == "channel_id":
+                    tk.Label(
+                        row,
+                        text='  Buscá "channelId" o "externalId" en el código fuente de la página',
+                        fg="#888888",
+                        bg=bgcolor,
+                        font=("Arial", 8),
+                    ).pack(side=tk.LEFT)
 
             row_act = tk.Frame(ed, bg=bgcolor)
             row_act.pack(fill=tk.X, padx=16, pady=5)
