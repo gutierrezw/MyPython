@@ -83,7 +83,7 @@ def _is_market_open() -> bool:
     now_et = now_utc + timedelta(hours=offset)
     if now_et.weekday() >= 5:
         return False
-    return dtime(9, 30) <= now_et.time() <= dtime(16, 0)
+    return dtime(4, 0) <= now_et.time() <= dtime(20, 0)
 
 
 # Admistrador de Agentes IA
