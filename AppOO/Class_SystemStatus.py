@@ -1541,7 +1541,14 @@ class system_status(tk.Frame):
             def _toggle_gains_modo():
                 nuevo = "autorizado" if DataHub.gains_capture_modo == "automatico" else "automatico"
                 DataHub.gains_capture_modo = nuevo
-                write_json_tmp("gains_capture_config.json", {"modo": nuevo})
+                try:
+                    ses = BDsystem.get_sesion_by_vehiculo("Stock")
+                    params_raw = ses.get("parameters") or "{}"
+                    params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
+                    params.setdefault("gains_capture", {})["modo"] = nuevo
+                    BDsystem.update_sesion_config("Stock", params)
+                except Exception as e:
+                    print(f"_toggle_gains_modo: {e}")
                 _gc_modo_var.set("⚡ Auto" if nuevo == "automatico" else "🔐 Autorizar")
 
             ttk.Button(btn_frame, textvariable=_gc_modo_var, command=_toggle_gains_modo).pack(side="left", padx=(8, 0))

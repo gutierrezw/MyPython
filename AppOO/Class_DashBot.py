@@ -134,7 +134,8 @@ class ClassAgenteIA:
         # Estado GainsCapture — escalonamiento de salida para activos volátiles (categoriaActivo='N')
         _gc_saved = read_json_tmp("gains_capture_state.json")
         self.gains_capture_state = {k: v for k, v in _gc_saved.items() if not k.startswith("_")}
-        DataHub.gains_capture_modo = read_json_tmp("gains_capture_config.json").get("modo", "automatico")
+        _gc_params = self._load_params("Stock") or {}
+        DataHub.gains_capture_modo = _gc_params.get("gains_capture", {}).get("modo", "automatico")
 
         # Logger dedicado a preservation — escribe a logs/preservation_diag.log
         self._preservation_logger = logging.getLogger("Preservation")
