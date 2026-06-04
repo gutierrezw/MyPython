@@ -2184,6 +2184,22 @@ class DashMain:
         self.line.pack(side=tk.LEFT, fill=tk.X)
         self.user.pack(side=tk.LEFT, fill=tk.X)
 
+        # botón IA ON/OFF (GainsCapture modo)
+        _gc_img_on = BDsystem.select_image(idd=23, size=(32, 32))
+        _gc_img_off = BDsystem.select_image(idd=24, size=(32, 32))
+        _gc_img_init = _gc_img_on if DataHub.gains_capture_modo == "automatico" else _gc_img_off
+        self.btn_gc_modo = tk.Button(
+            lineLeft,
+            image=_gc_img_init,
+            bg=self.colors["bgcolor"],
+            relief=tk.FLAT,
+            cursor="hand2",
+            command=self._toggle_gains_capture_modo,
+        )
+        self.btn_gc_modo.imagen_on = _gc_img_on
+        self.btn_gc_modo.imagen_off = _gc_img_off
+        self.btn_gc_modo.pack(side=tk.LEFT, fill=tk.X)
+
         # órdenes y salida del sistema --------------------------------------------------------------------------------
         imagen_tk = BDsystem.select_image(idd=14, size=(32, 32))
 
@@ -2212,19 +2228,6 @@ class DashMain:
         self.exit.pack(side=tk.RIGHT, fill=tk.X)
         self.cart.pack(side=tk.RIGHT, fill=tk.X)
         self.line.pack(side=tk.RIGHT, fill=tk.X)
-
-        # botón GainsCapture — place() para no afectar el layout de pack
-        _gc_img = BDsystem.select_image(idd=334, size=(32, 32))
-        self.btn_gc_modo = tk.Button(
-            topPn0,
-            image=_gc_img,
-            bg="#00FF88" if DataHub.gains_capture_modo == "automatico" else "#FFA500",
-            relief=tk.FLAT,
-            cursor="hand2",
-            command=self._toggle_gains_capture_modo,
-        )
-        self.btn_gc_modo.imagen = _gc_img
-        self.btn_gc_modo.place(relx=1.0, rely=0.0, x=-120, y=4, anchor="ne")
 
         # Progreso inversion gyp diarias ------------------------------------------------------------------------------
         self.GypProgress = ProgressBar(
@@ -2735,7 +2738,9 @@ class DashMain:
             BDsystem.update_sesion_config("Stock", params)
         except Exception as e:
             print(f"_toggle_gains_capture_modo: {e}")
-        self.btn_gc_modo.configure(bg="#00FF88" if nuevo == "automatico" else "#FFA500")
+        img = self.btn_gc_modo.imagen_on if nuevo == "automatico" else self.btn_gc_modo.imagen_off
+        self.btn_gc_modo.configure(image=img)
+        self.btn_gc_modo.image = img
 
     def car_ordenes_activas(self):
         _refresh_id = [None]
