@@ -2184,18 +2184,6 @@ class DashMain:
         self.line.pack(side=tk.LEFT, fill=tk.X)
         self.user.pack(side=tk.LEFT, fill=tk.X)
 
-        _gc_img = BDsystem.select_image(idd=334, size=(32, 32))
-        self.btn_gc_modo = tk.Button(
-            lineLeft,
-            image=_gc_img,
-            bg="#00FF88" if DataHub.gains_capture_modo == "automatico" else "#FFA500",
-            relief=tk.FLAT,
-            cursor="hand2",
-            command=self._toggle_gains_capture_modo,
-        )
-        self.btn_gc_modo.imagen = _gc_img
-        self.btn_gc_modo.pack(side=tk.LEFT, fill=tk.X, padx=(4, 0))
-
         # órdenes y salida del sistema --------------------------------------------------------------------------------
         imagen_tk = BDsystem.select_image(idd=14, size=(32, 32))
 
@@ -2208,8 +2196,8 @@ class DashMain:
         )
         self.cart.imagen = imagen_tk
 
-        # inserta espacios para alinear botones en la lineas
-        self.line = tk.Label(lineRight, text=spaces(125), bg=self.colors["bgcolor"])
+        # inserta espacios para alinear botones en la linea
+        self.line = tk.Label(lineRight, text=spaces(119), bg=self.colors["bgcolor"])
         imagen_tk = BDsystem.select_image(idd=12, size=(32, 32))
 
         self.exit = tk.Button(
@@ -2220,7 +2208,20 @@ class DashMain:
             command=lambda: self.eexit(),
         )
         self.exit.imagen = imagen_tk
+
+        _gc_img = BDsystem.select_image(idd=334, size=(32, 32))
+        self.btn_gc_modo = tk.Button(
+            lineRight,
+            image=_gc_img,
+            bg="#00FF88" if DataHub.gains_capture_modo == "automatico" else "#FFA500",
+            relief=tk.FLAT,
+            cursor="hand2",
+            command=self._toggle_gains_capture_modo,
+        )
+        self.btn_gc_modo.imagen = _gc_img
+
         self.exit.pack(side=tk.RIGHT, fill=tk.X)
+        self.btn_gc_modo.pack(side=tk.RIGHT, fill=tk.X, padx=(0, 4))
         self.cart.pack(side=tk.RIGHT, fill=tk.X)
         self.line.pack(side=tk.RIGHT, fill=tk.X)
 
