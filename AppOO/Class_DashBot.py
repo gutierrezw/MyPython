@@ -456,7 +456,6 @@ class ClassAgenteIA:
             self.logger.error(f"Agente_InterpreteSentimiento(): {e}")
 
     def _gains_capture_run(self):
-        """Orquesta el escalonamiento de salida para activos volátiles Stock."""
         _gc_logger = logging.getLogger("GainsCapture")
 
         params = self._load_params("Stock")
@@ -467,9 +466,8 @@ class ClassAgenteIA:
             _gc_logger.debug("_gains_capture_run: gains_capture no configurado en sesion → SKIP")
             return
 
-        niveles = sorted(gc_config.get("niveles", []), key=lambda x: x["roi"])
-        if not niveles:
-            return
+        min_roi = gc_config.get("min_roi", 0.20)
+        min_ganancia = float(gc_config.get("min_ganancia", 100.0))
 
         _claude_key = None
         try:
@@ -480,39 +478,48 @@ class ClassAgenteIA:
 
         categories = self.Market.load_symbols(self.account)
         positions = self.PlanInversion.select_inversion(tipoin="Stock", ticket="all")
+        conid_map = {p.get("ticket"): (p.get("conid"), p.get("useraccount")) for p in positions}
+        symbols_gain = DataHub.get_info_symbols_gain()
 
-        for positio in positions:
-            symbol = positio.get("ticket")
+        for sym_data in symbols_gain:
+            symbol = sym_data.get("symbol")
             if categories.get(symbol) != "N":
                 continue
 
-            costobase = positio.get("costobase", 0)
-            unrealizedpnl = positio.get("unrealizedpnl", 0)
-            position_qty = positio.get("position", 0)
-            conid = positio.get("conid")
-            account = positio.get("useraccount")
-
-            if costobase <= 0 or position_qty <= 0:
+            list_gain = sym_data.get("list_gain", [])
+            if not list_gain:
                 continue
 
-            roi = unrealizedpnl / costobase
-            if roi < 0.20:
+            lotes_validos = []
+            for lote in list_gain:
+                last_l = lote.get("last", 0)
+                cantidad = lote.get("cantidad", 0)
+                costo_lote = lote.get("costo lote", 0)
+                if costo_lote <= 0:
+                    continue
+                ganancia_lote = last_l * cantidad - costo_lote
+                roi_lote = ganancia_lote / costo_lote
+                if roi_lote >= min_roi and ganancia_lote >= min_ganancia:
+                    lotes_validos.append({**lote, "ganancia": ganancia_lote, "roi": roi_lote})
+
+            if not lotes_validos:
                 continue
-            primer_nivel = niveles[0]["roi"]
-            if roi < primer_nivel:
-                continue
+
+            mejor_lote = max(lotes_validos, key=lambda x: x["roi"])
+            roi_ref = mejor_lote["roi"]
+            ganancia_ref = mejor_lote["ganancia"]
+            last = sym_data.get("last", 0)
+            conid, account = conid_map.get(symbol, (None, None))
 
             state = self.gains_capture_state.get(symbol, {})
             estado = state.get("estado", "normal")
 
-            # estado esperando_reset → leer qty fresca y volver a normal
             if estado == "esperando_reset":
                 self.gains_capture_state[symbol] = {**state, "estado": "normal"}
                 write_json_tmp("gains_capture_state.json", self.gains_capture_state)
                 _gc_logger.warning(f"GainsCapture({symbol}): reset completado → normal")
                 estado = "normal"
 
-            # timeout 30 min para propuesta no respondida → cancelar sin ejecutar
             if estado == "pendiente_autorizacion":
                 ts_raw = state.get("pendiente_ts")
                 if ts_raw:
@@ -528,126 +535,115 @@ class ClassAgenteIA:
                         )
                         continue
 
-            # estado escalon_pendiente → esperar fill vía SyncOrders
             if estado == "escalon_pendiente":
                 _gc_logger.debug(f"GainsCapture({symbol}): escalon_pendiente → esperando fill")
                 continue
 
-            # estado normal → evaluar niveles
-            niveles_ejecutados = state.get("niveles_ejecutados", [])
-            last = DataHub.preservation_get_price(symbol, positio)
-            if not last or last <= 0:
+            datos_tecnicos = DataHub.info.get(symbol, {}).get("datos_tecnicos", {})
+            claude_result = None
+            if _claude_key:
+                claude_result = self._gains_capture_claude_eval(
+                    symbol, roi_ref, ganancia_ref, last, datos_tecnicos, _claude_key
+                )
+
+            if not claude_result or claude_result.get("accion") != "vender":
+                razon = claude_result.get("razon", "") if claude_result else "sin evaluación"
+                _gc_logger.warning(
+                    f"GainsCapture({symbol}): roi={roi_ref:.1%} gain=${ganancia_ref:.0f} → ESPERAR — {razon}"
+                )
                 continue
 
-            for nivel in niveles:
-                nivel_roi = nivel["roi"]
-                if roi < nivel_roi or nivel_roi in niveles_ejecutados:
-                    continue
+            escenario_key = {" 25%": " 25%", "25%": " 25%", " 33%": " 33%", "33%": " 33%", "100%": "100%"}.get(
+                claude_result.get("escenario", "25%"), " 25%"
+            )
+            ventas = DataHub.maximiza_sell_lotes(
+                list_gain=list_gain,
+                position=sym_data.get("position"),
+                costobase=sym_data.get("costobase"),
+            )
+            sell_data = ventas.get(escenario_key, ventas.get(" 25%", {}))
+            vender_qty = int(sell_data.get("cantidad sell", 0))
+            if vender_qty <= 0:
+                continue
 
-                vender_qty = int(position_qty * nivel["vender_pct"])
-                if vender_qty <= 0:
-                    continue
+            lmt_price = round(last * 0.995, 2)
+            _det = {
+                "tipo": "gains_capture",
+                "roi_lote": roi_ref,
+                "ganancia_lote": ganancia_ref,
+                "escenario": escenario_key.strip(),
+                "modo": DataHub.gains_capture_modo,
+                "claude": claude_result,
+                "orden": {"qty": vender_qty, "lmt_price": lmt_price},
+            }
 
-                lmt_price = round(last * 0.995, 2)
-
-                # Claude evalúa si ejecutar o esperar más
-                ejecutar = True
-                claude_result = None
-                if _claude_key:
-                    claude_result = self._gains_capture_claude_eval(symbol, nivel_roi, roi, last, _claude_key)
-                    if claude_result:
-                        ejecutar = claude_result.get("ejecutar", True)
-
-                if not ejecutar:
-                    _gc_logger.warning(
-                        f"GainsCapture({symbol}): nivel={nivel_roi:.0%} POSTERGADO — {claude_result.get('razon','')}"
-                    )
-                    continue
-
-                _det = {
-                    "tipo": "gains_capture",
-                    "nivel_roi": nivel_roi,
-                    "modo": DataHub.gains_capture_modo,
-                    "tecnico": {
-                        k: DataHub.info.get(symbol, {}).get("datos_tecnicos", {}).get("diaria", {}).get(k)
-                        for k in ("rsi", "macd")
+            if DataHub.gains_capture_modo == "autorizado":
+                razon = claude_result.get("razon", "")
+                msg = (
+                    f"📈 *GainsCapture — {symbol}*\n"
+                    f"ROI lote: {roi_ref:.1%} | Ganancia: ${ganancia_ref:.0f}\n"
+                    f"Escenario: {escenario_key.strip()} | Vender {vender_qty} acc LMT ${lmt_price:.2f}\n"
+                    f"{razon}\n"
+                    f"/ok\\_{symbol}  |  /no\\_{symbol}"
+                )
+                DataHub.system_alerts.append(msg)
+                self.gains_capture_state[symbol] = {
+                    **state,
+                    "estado": "pendiente_autorizacion",
+                    "pendiente": {
+                        "escenario": escenario_key.strip(),
+                        "qty": vender_qty,
+                        "lmt_price": lmt_price,
+                        "conid": str(conid) if conid else None,
+                        "account": account,
+                        "det": _det,
                     },
-                    "claude": claude_result,
-                    "orden": {"qty": vender_qty, "lmt_price": lmt_price},
+                    "pendiente_ts": datetime.now().isoformat(),
                 }
+                write_json_tmp("gains_capture_state.json", self.gains_capture_state)
+                _gc_logger.warning(f"GainsCapture({symbol}): propuesta enviada a Telegram (autorizado)")
+                continue
 
-                if DataHub.gains_capture_modo == "autorizado":
-                    razon = claude_result.get("razon", "") if claude_result else ""
-                    msg = (
-                        f"📈 *GainsCapture — {symbol}*\n"
-                        f"Nivel ROI {nivel_roi:.0%} alcanzado (ROI actual {roi:.1%})\n"
-                        f"Vender {vender_qty} acc LMT ${lmt_price:.2f}\n"
-                        f"{razon}\n"
-                        f"/ok\\_{symbol}  |  /no\\_{symbol}"
-                    )
-                    DataHub.system_alerts.append(msg)
-                    self.gains_capture_state[symbol] = {
-                        **state,
-                        "estado": "pendiente_autorizacion",
-                        "pendiente": {
-                            "nivel_roi": nivel_roi,
-                            "qty": vender_qty,
-                            "lmt_price": lmt_price,
-                            "conid": str(conid),
-                            "account": account,
-                            "det": _det,
-                        },
-                        "pendiente_ts": datetime.now().isoformat(),
-                    }
-                    write_json_tmp("gains_capture_state.json", self.gains_capture_state)
-                    _gc_logger.warning(f"GainsCapture({symbol}): propuesta enviada a Telegram (autorizado)")
-                    break
-
-                # modo automatico → colocar orden directamente
-                trama = DataHub.gains_capture_build_trama_sell("Stock", account, symbol, conid, lmt_price, vender_qty)
+            trama = DataHub.gains_capture_build_trama_sell("Stock", account, symbol, conid, lmt_price, vender_qty)
+            try:
+                response = DataHub.preservation_send_order("Stock", trama)
+                order_id = DataHub.preservation_extract_order_id(response)
+                self.gains_capture_state[symbol] = {
+                    **state,
+                    "estado": "escalon_pendiente",
+                    "escalon_order_id": str(order_id) if order_id else None,
+                    "last_check": datetime.now().isoformat(),
+                }
+                write_json_tmp("gains_capture_state.json", self.gains_capture_state)
                 try:
-                    response = DataHub.preservation_send_order("Stock", trama)
-                    order_id = DataHub.preservation_extract_order_id(response)
-                    self.gains_capture_state[symbol] = {
-                        **state,
-                        "estado": "escalon_pendiente",
-                        "escalon_order_id": str(order_id) if order_id else None,
-                        "niveles_ejecutados": niveles_ejecutados,
-                        "last_check": datetime.now().isoformat(),
-                    }
-                    write_json_tmp("gains_capture_state.json", self.gains_capture_state)
-                    try:
-                        self.RepositorioOportunidades.insert_preservation_order(
-                            account,
-                            "Stock",
-                            symbol,
-                            str(conid),
-                            str(order_id),
-                            lmt_price,
-                            float(vender_qty),
-                            json.dumps(_det),
-                        )
-                    except Exception as _e:
-                        _gc_logger.error(f"GainsCapture({symbol}): insert_preservation_order → {_e}")
-                    DataHub.system_alerts.append(
-                        f"📈 GainsCapture {symbol}: vendiendo {vender_qty} acc LMT ${lmt_price:.2f} "
-                        f"(nivel ROI {nivel_roi:.0%}) — order_id={order_id}"
+                    self.RepositorioOportunidades.insert_preservation_order(
+                        account,
+                        "Stock",
+                        symbol,
+                        str(conid),
+                        str(order_id),
+                        lmt_price,
+                        float(vender_qty),
+                        json.dumps(_det),
                     )
-                    _gc_logger.warning(
-                        f"GainsCapture({symbol}): LMT SELL {vender_qty} acc @ {lmt_price:.2f} "
-                        f"nivel={nivel_roi:.0%} order_id={order_id}"
-                    )
-                except Exception as e:
-                    _gc_logger.error(f"GainsCapture({symbol}): error enviando orden → {e}")
-                break
+                except Exception as _e:
+                    _gc_logger.error(f"GainsCapture({symbol}): insert_preservation_order → {_e}")
+                DataHub.system_alerts.append(
+                    f"📈 GainsCapture {symbol}: vendiendo {vender_qty} acc LMT ${lmt_price:.2f} "
+                    f"escenario={escenario_key.strip()} — order_id={order_id}"
+                )
+                _gc_logger.warning(
+                    f"GainsCapture({symbol}): LMT SELL {vender_qty} acc @ {lmt_price:.2f} "
+                    f"escenario={escenario_key.strip()} roi_lote={roi_ref:.1%} order_id={order_id}"
+                )
+            except Exception as e:
+                _gc_logger.error(f"GainsCapture({symbol}): error enviando orden → {e}")
 
     def _gains_capture_claude_eval(
-        self, symbol: str, nivel_roi: float, roi: float, last: float, api_key: str
+        self, symbol: str, roi_lote: float, ganancia_lote: float, last: float, datos_tecnicos: dict, api_key: str
     ) -> dict | None:
-        """Claude evalúa si ejecutar la venta parcial o esperar más recorrido."""
-        dt = DataHub.info.get(symbol, {}).get("datos_tecnicos", {})
-        d = dt.get("diaria", {})
-        s = dt.get("semanal", {})
+        d = datos_tecnicos.get("diaria", {})
+        s = datos_tecnicos.get("semanal", {})
         rsi_d = d.get("rsi")
         rsi_w = s.get("rsi")
         macd_val = d.get("macd")
@@ -661,17 +657,17 @@ class ClassAgenteIA:
             return fmt.format(v) if v is not None else default
 
         prompt = (
-            f"Eres un agente de captura de ganancias para un portfolio especulativo.\n"
-            f"El activo {symbol} alcanzó el nivel ROI {nivel_roi:.0%} (ROI actual {roi:.1%}, precio ${last:.2f}).\n"
-            f"Evaluá si conviene vender parcialmente ahora o esperar más recorrido.\n\n"
-            f"Técnico (tiempo real):\n"
+            f"Eres un agente de captura de ganancias para un portfolio especulativo de acciones volátiles.\n"
+            f"El activo {symbol} tiene un lote con ROI={roi_lote:.1%} y ganancia=${ganancia_lote:.0f}. Precio actual: ${last:.2f}.\n\n"
+            f"Técnico:\n"
             f"- RSI diario: {_f(rsi_d)} | RSI semanal: {_f(rsi_w)} | MACD: {macd_estado}\n"
-            f"- Precio vs EMA50 diaria: {ema50_rel} | Precio vs EMA200 diaria: {ema200_rel}\n\n"
-            f"Criterios:\n"
-            f"- RSI diario > 75 o RSI semanal > 72 → sobrecomprado, ejecutar\n"
-            f"- RSI diario < 65 y tendencia alcista → momentum intacto, esperar\n"
-            f"- Precio tocando o debajo de EMA50 → debilitamiento, ejecutar\n\n"
-            f'Respondé SOLO con JSON válido: {{"ejecutar": true|false, "razon": "str max 120 chars", "urgencia": "alta"|"media"|"baja"}}'
+            f"- Precio vs EMA50: {ema50_rel} | vs EMA200: {ema200_rel}\n\n"
+            f"Determiná si el precio está en un SPIKE/TECHO (vender) o en TENDENCIA ALCISTA sostenida (esperar).\n"
+            f"Si vendés, elegí el escenario según convicción:\n"
+            f"- '25%': momentum presente, asegurar algo conservador\n"
+            f"- '33%': señales mixtas, venta moderada\n"
+            f"- '100%': spike claro o sobrecompra extrema, salida total del lote\n\n"
+            f'Respondé SOLO con JSON: {{"accion": "vender"|"esperar", "escenario": "25%"|"33%"|"100%", "razon": "max 120 chars"}}'
         )
         try:
             resp = requests.post(
@@ -690,7 +686,7 @@ class ClassAgenteIA:
             start, end = text.find("{"), text.rfind("}") + 1
             if start >= 0 and end > start:
                 result = json.loads(text[start:end])
-                if "ejecutar" in result:
+                if "accion" in result:
                     return result
         except Exception as e:
             logging.getLogger("GainsCapture").error(f"_gains_capture_claude_eval({symbol}): {e}")
