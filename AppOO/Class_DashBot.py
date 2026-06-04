@@ -49,6 +49,8 @@ from Modulos_python import (
     textwrap,
     datetime,
     timedelta,
+    timezone,
+    dtime,
     Path,
     wraps,
     signal,
@@ -72,6 +74,16 @@ from Modulos_Utilitarios import define_FileCache, read_json_tmp, write_json_tmp,
 from Class_AgentManager import AgentManager
 from ConvergIA.Scanner_Sentimiento import scan_sentimiento
 from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
+
+
+def _is_market_open() -> bool:
+    now_utc = datetime.now(timezone.utc)
+    month = now_utc.month
+    offset = -4 if 3 <= month <= 11 else -5
+    now_et = now_utc + timedelta(hours=offset)
+    if now_et.weekday() >= 5:
+        return False
+    return dtime(9, 30) <= now_et.time() <= dtime(16, 0)
 
 
 # Admistrador de Agentes IA
@@ -419,11 +431,12 @@ class ClassAgenteIA:
                 self.logger.error(f"Agente_ManagerPreservation({vehiculo}): {e}")
 
     # agente especulativo: captura ganancias en activos volátiles con ventas parciales por niveles ROI
-    @wait_rate(43200, persist=True)
+    @wait_rate(3600, persist=True)
     async def Agente_GainsCapture(self):
-        """Venta parcial escalonada para activos volátiles (categoriaActivo='N').
-        Espíritu especulativo — complementario a ManagerPreservation (defensivo)."""
         try:
+            if not _is_market_open():
+                self.logger.debug("Agente_GainsCapture: mercado cerrado → SKIP")
+                return
             if DataHub.manager_sesion.get("Stock"):
                 self._gains_capture_run()
             else:

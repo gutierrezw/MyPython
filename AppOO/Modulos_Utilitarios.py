@@ -92,8 +92,8 @@ AGENTES_SCHEDULE = {
         "active": True,
     },
     "Agente_GainsCapture": {
-        "intervalo": 43200,
-        "desc": "Venta parcial por niveles ROI en activos volátiles N (12h)",
+        "intervalo": 3600,
+        "desc": "Venta parcial por niveles ROI en activos volátiles N — solo mercado abierto NY (1h)",
         "active": True,
     },
 }
