@@ -2184,9 +2184,16 @@ class DashMain:
         self.line.pack(side=tk.LEFT, fill=tk.X)
         self.user.pack(side=tk.LEFT, fill=tk.X)
 
-        # botón IA ON/OFF (GainsCapture modo)
+        # botón IA ON/OFF (GainsCapture modo) — lee BD para no depender del orden de init
         _gc_img_on = BDsystem.select_image(idd=23, size=(32, 32))
         _gc_img_off = BDsystem.select_image(idd=24, size=(32, 32))
+        try:
+            _ses_gc = BDsystem.get_sesion_by_vehiculo("Stock")
+            _params_raw = _ses_gc.get("parameters") or "{}"
+            _params_gc = json.loads(_params_raw.decode("utf-8") if isinstance(_params_raw, bytes) else _params_raw)
+            DataHub.gains_capture_modo = _params_gc.get("gains_capture", {}).get("modo", "automatico")
+        except Exception:
+            pass
         _gc_img_init = _gc_img_on if DataHub.gains_capture_modo == "automatico" else _gc_img_off
         self.btn_gc_modo = tk.Button(
             lineLeft,
@@ -2213,7 +2220,7 @@ class DashMain:
         self.cart.imagen = imagen_tk
 
         # inserta espacios para alinear botones en la lineas
-        self.line = tk.Label(lineRight, text=spaces(125), bg=self.colors["bgcolor"])
+        self.line = tk.Label(lineRight, text=spaces(110), bg=self.colors["bgcolor"])
         imagen_tk = BDsystem.select_image(idd=12, size=(32, 32))
 
         self.exit = tk.Button(
