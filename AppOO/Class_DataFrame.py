@@ -2600,7 +2600,7 @@ def show_strategy_chart(
         "1m": {"period": "1mo", "high_label": "Máx 1 mes", "n_tail": 21},
         "1s": {"period": "1mo", "high_label": "Máx 1 sem", "n_tail": 21, "n_high": 7},
     }
-    _current_period = ["5d"]  # yfinance period code activo
+    _current_period = ["1y"]  # yfinance period code activo
     _btn_refs = {}  # {btn_label: Button widget}
 
     # ----- Helpers de datos -----
