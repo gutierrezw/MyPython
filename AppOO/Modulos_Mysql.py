@@ -5708,8 +5708,8 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             cursor.execute(
                 "INSERT INTO order_trader "
                 "(account, vehiculo, symbol, conid, clientOrderId, side, orderType, "
-                "price, quantity, status, intent, json_detalle, stampPlace) "
-                "VALUES (%s, %s, %s, %s, %s, 'SELL', 'STP', %s, %s, 'New', 'preservation', %s, NOW())",
+                "price, quantity, status, json_detalle, stampPlace) "
+                "VALUES (%s, %s, %s, %s, %s, 'SELL', 'STP LMT', %s, %s, 'New', %s, NOW())",
                 (account, vehiculo, symbol, conid, order_id, stop_price, qty, json_detalle),
             )
             conn.commit()
