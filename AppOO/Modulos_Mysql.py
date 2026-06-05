@@ -5468,7 +5468,8 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 "AND status IN ('NEW', 'New', 'Submitted') "
                 "AND DATE(stampPlace) <= DATE_SUB(CURDATE(), INTERVAL %s DAY) "
                 "AND DATE(stampPlace) > DATE_SUB(CURDATE(), INTERVAL %s DAY) "
-                "AND id_order IS NOT NULL AND id_order != ''",
+                "AND id_order IS NOT NULL AND id_order != '' "
+                "AND (intent IS NULL OR intent NOT IN ('preservation', 'gains_capture'))",
                 (account, vehiculo, days_min, days_max),
             )
             cols = [d[0] for d in cursor.description]
