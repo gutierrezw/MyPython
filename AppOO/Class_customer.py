@@ -3,6 +3,7 @@ from Modulos_python import (
     ttk,
     datetime,
     threading,
+    requests,
     Figure,
     FigureCanvasTkAgg,
     Image,
@@ -1220,6 +1221,9 @@ class MyOrders:
                     if not isinstance(items, dict):
                         self.logger.error(f"place_OrderStock: item no es dict: {items}")
                         continue
+                    _jd = {}
+                    if orden.get("orderType") == "STP LMT" and orden.get("auxPrice"):
+                        _jd = {"auxPrice": orden["auxPrice"], "lmtPrice": orden["price"]}
                     values.update(
                         {
                             "account": account,
@@ -1236,6 +1240,7 @@ class MyOrders:
                             "stampPlace": datetime.now(),
                             "stampSubmit": stampSubmit,
                             "hash_id_oportunidad": hash_id_Op,
+                            **({"json_detalle": json.dumps(_jd)} if _jd else {}),
                         }
                     )
                     self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
@@ -1615,7 +1620,7 @@ class MyOrders:
     def params_order(vehiculo=None, elementos=None):
         if vehiculo == "Stock":
             qtys = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 100, 150, 200, 300]
-            items = ["LMT", "MKT", "STP", "TRAIL", "REL", "RPI", "MOC", "LOC"]
+            items = ["LMT", "MKT", "STP", "STP LMT", "TRAIL", "REL", "RPI", "MOC", "LOC"]
             tif = ["DAY", "GTC"]
 
         elif vehiculo == "Crypto":
@@ -1641,19 +1646,26 @@ class MyOrders:
 
         if vehiculo == "Stock":
             cantidad = self.stock_free_operar(symbol=symbol)
-            orden = {
-                "orders": [
-                    {
-                        "conid": idd,
-                        "orderType": tip,
-                        "price": round(prc, 2),
-                        "side": opt,
-                        "tif": tim,
-                        "quantity": qty,
-                        "outsideRTH": True,
-                    }
-                ]
+            if tip == "STP LMT":
+                try:
+                    buf = float(getattr(self, "stp_buf", None).get()) / 100
+                except Exception:
+                    buf = 0.02
+                lmt_price = round(prc * (1 - buf), 2)
+            else:
+                lmt_price = round(prc, 2)
+            order_fields = {
+                "conid": idd,
+                "orderType": tip,
+                "price": lmt_price,
+                "side": opt,
+                "tif": tim,
+                "quantity": qty,
+                "outsideRTH": True,
             }
+            if tip == "STP LMT":
+                order_fields["auxPrice"] = round(prc, 2)
+            orden = {"orders": [order_fields]}
 
         elif vehiculo == "Crypto":
             if opt in ("BUY", "Buy"):
@@ -1690,9 +1702,22 @@ class MyOrders:
         # Cierra la entrada de texto y asigna el valor seleccionado tipo
         def on_select_tip(event):
             try:
-                selected_item = lbx.get(lbx.curselection())
+                sel = lbx.curselection()
+                if not sel:
+                    return
+                selected_item = lbx.get(sel[0])
                 self.entry_tip.set(selected_item)
                 lbx.grid_forget()
+                if selected_item == "STP LMT":
+                    btn_claude.grid(row=2, column=5, padx=4)
+                    ent_buf.grid(row=2, column=6, padx=2, ipadx=2)
+                    self.entry_tim = "GTC"
+                    bt6.config(text="GTC%")
+                else:
+                    btn_claude.grid_remove()
+                    ent_buf.grid_remove()
+                    self.entry_tim = "DAY"
+                    bt6.config(text="DAY")
             except (Exception, ValueError) as e:
                 print("on_select_tip({}): {}".format(self.vehiculo, e))
 
@@ -1846,6 +1871,22 @@ class MyOrders:
             except (Exception, ValueError) as e:
                 print("update_windows({}): {}".format(self.vehiculo, e))
 
+        def _on_claude_stop():
+            btn_claude.config(state="disabled", text="...")
+
+            def _run():
+                result = self._claude_suggest_stop(symbol, last_fallback=parm.get("mkPrice", 0))
+
+                def _update():
+                    btn_claude.config(state="normal", text="Claude ✦")
+                    if result and result.get("stop_price"):
+                        self.entry_prc.set(str(result["stop_price"]))
+                        btn_claude.config(text=f"✦ {result['stop_price']}")
+
+                win1.after(0, _update)
+
+            threading.Thread(target=_run, daemon=True).start()
+
         def on_swicth_sumit(estado):
             if estado:
                 self.simulation = True
@@ -1950,7 +1991,7 @@ class MyOrders:
             self.entry_tip = tk.StringVar(value=s_tip)
             self.entry_prc = tk.StringVar(value=str(parm["mkPrice"]))
 
-            bt4 = tk.Entry(win1, width=5, textvariable=self.entry_tip)
+            bt4 = tk.Entry(win1, width=8, textvariable=self.entry_tip)
             bt5 = tk.Entry(win1, width=15, textvariable=self.entry_prc)
             bt4.bind("<Button-1>", on_click_tip)
 
@@ -1958,6 +1999,10 @@ class MyOrders:
             for item in items:
                 lbx.insert(tk.END, item)
             lbx.bind("<<ListboxSelect>>", on_select_tip)
+
+            btn_claude = tk.Button(win1, text="Claude ✦", bg="#4a1a7a", fg="white", width=12, command=_on_claude_stop)
+            self.stp_buf = tk.StringVar(value="2.0")
+            ent_buf = tk.Entry(win1, width=4, textvariable=self.stp_buf)
 
             self.bid.grid(row=1, column=2, sticky=E)
             btn_medio.grid(row=1, column=3, padx=2)
@@ -1991,7 +2036,7 @@ class MyOrders:
                 command=lambda: eexit(),
             )
 
-            bt6.grid(row=2, column=5, padx=20)
+            bt6.grid(row=2, column=7, padx=8)
 
             simula.pack(side=tk.LEFT, padx=5)
             bt7.pack(side=tk.LEFT, padx=1)
@@ -2007,6 +2052,83 @@ class MyOrders:
         except (TypeError, Exception, ValueError) as e:
             print(f"WindowsBuySell_trader({self.vehiculo}): {e}")
             traceback.print_exc()
+
+    def _claude_suggest_stop(self, symbol: str, last_fallback: float = 0) -> dict | None:
+        try:
+            ses = BDsystem.get_sesion_by_vehiculo("ClaudeAPIP")
+            api_key = ses["userapi"].decode("utf-8") if ses else ""
+        except Exception:
+            api_key = ""
+        if not api_key:
+            return None
+
+        with DataHub.lockInfo:
+            info = DataHub.info.get(symbol, {})
+
+        sell_data = info.get("sell", {})
+        datos_tecnicos = info.get("datos_tecnicos", {})
+        last = sell_data.get("last", 0) or last_fallback
+        list_gain = sell_data.get("list_gain", [])
+
+        if not last:
+            return None
+
+        d = datos_tecnicos.get("diaria", {})
+        s = datos_tecnicos.get("semanal", {})
+        rsi_d = d.get("rsi")
+        rsi_w = s.get("rsi")
+        macd_val = d.get("macd")
+        macd_estado = "alcista" if macd_val and macd_val > 0 else ("bajista" if macd_val and macd_val < 0 else "neutro")
+        ema50 = (d.get("ema(20,50,100,200)") or {}).get("EMA50")
+        ema200 = (d.get("ema(20,50,100,200)") or {}).get("EMA200")
+        atr = d.get("atr")
+
+        def _f(v, fmt="{:.2f}", default="N/D"):
+            return fmt.format(v) if v is not None else default
+
+        lotes_txt = ""
+        for i, lot in enumerate(list_gain[:5], 1):
+            qty = lot.get("cantidad", 0)
+            costo = lot.get("costo lote", 0)
+            precio_lote = round(costo / qty, 2) if qty > 0 else 0
+            gyp = lot.get("gyp", 0)
+            roi_lot = round(gyp / costo, 3) if costo > 0 else 0
+            lotes_txt += f"  Lote {i}: {qty} @ ${precio_lote:.2f} (ROI {roi_lot:.1%})\n"
+
+        prompt = (
+            f"Eres un asesor de stop-loss para {symbol}. Precio actual: ${last:.2f}.\n\n"
+            f"Lotes:\n{lotes_txt}\n"
+            f"Técnico:\n"
+            f"- RSI diario: {_f(rsi_d, '{:.1f}')} | RSI semanal: {_f(rsi_w, '{:.1f}')} | MACD: {macd_estado}\n"
+            f"- EMA50: {_f(ema50)} | EMA200: {_f(ema200)} | ATR: {_f(atr)}\n\n"
+            f"Sugerí un precio de stop-loss (STP LMT) para proteger esta posición. "
+            f"Considerá soporte técnico (EMAs), volatilidad (ATR) y ROI por lote.\n"
+            f'Respondé SOLO con JSON: {{"stop_price": <float>, "razon": "<max 120 chars>"}}'
+        )
+
+        try:
+            resp = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 200,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=15,
+            )
+            if not resp.ok:
+                return None
+            text = resp.json()["content"][0]["text"].strip()
+            start, end = text.find("{"), text.rfind("}") + 1
+            if start >= 0 and end > start:
+                result = json.loads(text[start:end])
+                if "stop_price" in result:
+                    result["stop_price"] = round(float(result["stop_price"]), 2)
+                    return result
+        except Exception as e:
+            logging.getLogger("ClassMyOrders").error(f"_claude_suggest_stop({symbol}): {e}")
+        return None
 
     # verificar parameters order vehiculo ---------------------------------------------------------------------------
     def valida_orden_vehiculo(self, option=None):
