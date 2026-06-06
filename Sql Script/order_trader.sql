@@ -1,10 +1,9 @@
 SELECT * FROM bdinv.order_trader
-Where stampPlace > '2026-05-27 00:24:24.747000'
--- and  vehiculo = 'Stock'
+ORDER BY stampPlace DESC
 ;
 
+SELECT *
+FROM bdinv.order_trader 
+WHERE orderType = 'STP LMT' AND side = 'SELL'
+ORDER BY stampPlace DESC;
 
-SELECT vehiculo, date(stampPlace), status 
-FROM bdinv.order_trader
-group by vehiculo, date(stampPlace), status
-;

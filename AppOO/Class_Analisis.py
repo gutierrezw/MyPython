@@ -312,7 +312,9 @@ class AnalisisBase:
                     labelcolor="black",
                     framealpha=1.0,
                 )
-                fg.suptitle(f"Cartera vs {symbol}", fontsize=10, color="white")
+                _DIAS_LABEL = {30: "1m", 90: "3m", 180: "6m", 365: "1y", 1825: "5y"}
+                periodo = _DIAS_LABEL.get(dias, f"{dias}d")
+                fg.suptitle(f"Cartera vs {symbol} — {periodo}", fontsize=10, color="white")
                 fg.subplots_adjust(left=0.05, right=0.90, top=0.85, bottom=0.20)
                 canvas.draw()
 
@@ -332,7 +334,7 @@ class AnalisisBase:
                 ).pack(side="left")
 
             # Dibujo inicial: 1 año
-            _draw(365)
+            _draw(90)
 
             return row + 1
 
@@ -383,76 +385,80 @@ class AnalisisBase:
     _EQUITY_COLORES = ["#2ecc71", "#e74c3c", "#3498db"]
 
     def crear_grafico_evolucion_combinado(self, parent, df_historico, fondos_mejores, fondos_peores, row):
-        """Un único gráfico: banda o estimador sintético + líneas renta variable. Botones Banda/Estimador."""
+        """Un único gráfico: banda o estimador sintético + líneas renta variable. Botones Banda/Estimador + temporalidad."""
         if df_historico.empty:
             return row
         try:
             frame_g = tk.Frame(parent, bg=self.CG_COLOR)
             frame_g.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
 
-            df = df_historico.copy()
-            df["fecha"] = pd.to_datetime(df["fecha"])
-            df = df.sort_values(["fondo", "fecha"])
-            df["rend"] = df.groupby("fondo")["valorActual"].transform(lambda x: (x / x.iloc[0] - 1) * 100)
-
-            def _serie(nombre):
-                s = df[df["fondo"] == nombre][["fecha", "rend"]].dropna()
-                return s["fecha"].values, s["rend"].values
-
-            # Precalcular series de referencia y estimador
-            fechas_piso, vals_piso = _serie(self._BANDA_PISO)
-            fechas_techo, vals_techo = _serie(self._BANDA_TECHO)
-            piso_s = pd.Series(vals_piso, index=pd.to_datetime(fechas_piso))
-            techo_s = pd.Series(vals_techo, index=pd.to_datetime(fechas_techo))
-            idx_comun = piso_s.index.intersection(techo_s.index)
-            estimador_s = ((piso_s[idx_comun] + techo_s[idx_comun]) / 2) if len(idx_comun) else pd.Series()
-
-            fondos_equity = [f for f in self._EQUITY_FONDOS if f in df["fondo"].values]
-
-            # Precomputar bloques de señal: spread avg_equity vs piso
-            def _compute_señales():
-                if piso_s.empty or not fondos_equity:
-                    return []
-                eq_series = []
-                for fondo in fondos_equity:
-                    fechas_e, vals_e = _serie(fondo)
-                    if len(fechas_e):
-                        eq_series.append(pd.Series(vals_e, index=pd.to_datetime(fechas_e)))
-                if not eq_series:
-                    return []
-                eq_avg = pd.DataFrame(eq_series).T.sort_index().mean(axis=1)
-                common = piso_s.index.intersection(eq_avg.index)
-                if common.empty:
-                    return []
-                spread = eq_avg[common] - piso_s[common]
-                bloques, prev_tipo, bloque_ini, fecha_prev = [], None, None, None
-                for fecha in spread.index:
-                    s = spread[fecha]
-                    tipo = "COMPRA" if s < -10 else ("CAUTELA" if s > 10 else None)
-                    if tipo != prev_tipo:
-                        if prev_tipo and bloque_ini:
-                            bloques.append((bloque_ini, fecha_prev, prev_tipo))
-                        bloque_ini = fecha if tipo else None
-                        prev_tipo = tipo
-                    if tipo:
-                        fecha_prev = fecha
-                if prev_tipo and bloque_ini:
-                    bloques.append((bloque_ini, fecha_prev, prev_tipo))
-                return bloques
-
-            señales_bloques = _compute_señales()
-
             fg = Figure(figsize=(5.4, 3.2), dpi=100)
             fg.patch.set_facecolor(self.CG_COLOR)
             canvas = FigureCanvasTkAgg(fg, master=frame_g)
             canvas.get_tk_widget().pack(fill="x", expand=True, pady=2)
 
-            def _dibujar(modo="banda"):
+            _estado = {"modo": "banda", "dias": 90}
+
+            def _dibujar(modo=None, dias=None):
+                if modo is not None:
+                    _estado["modo"] = modo
+                if dias is not None:
+                    _estado["dias"] = dias
+
+                df = df_historico.copy()
+                df["fecha"] = pd.to_datetime(df["fecha"])
+                df = df.sort_values(["fondo", "fecha"])
+                fecha_desde = pd.Timestamp.now() - pd.Timedelta(days=_estado["dias"])
+                df = df[df["fecha"] >= fecha_desde]
+                if df.empty:
+                    return
+                df["rend"] = df.groupby("fondo")["valorActual"].transform(lambda x: (x / x.iloc[0] - 1) * 100)
+
+                def _serie(nombre):
+                    s = df[df["fondo"] == nombre][["fecha", "rend"]].dropna()
+                    return s["fecha"].values, s["rend"].values
+
+                fechas_piso, vals_piso = _serie(self._BANDA_PISO)
+                fechas_techo, vals_techo = _serie(self._BANDA_TECHO)
+                piso_s = pd.Series(vals_piso, index=pd.to_datetime(fechas_piso))
+                techo_s = pd.Series(vals_techo, index=pd.to_datetime(fechas_techo))
+                idx_comun = piso_s.index.intersection(techo_s.index)
+                estimador_s = ((piso_s[idx_comun] + techo_s[idx_comun]) / 2) if len(idx_comun) else pd.Series()
+                fondos_equity = [f for f in self._EQUITY_FONDOS if f in df["fondo"].values]
+
+                señales_bloques = []
+                if not piso_s.empty and fondos_equity:
+                    eq_series = []
+                    for fondo in fondos_equity:
+                        fechas_e, vals_e = _serie(fondo)
+                        if len(fechas_e):
+                            eq_series.append(pd.Series(vals_e, index=pd.to_datetime(fechas_e)))
+                    if eq_series:
+                        eq_avg = pd.DataFrame(eq_series).T.sort_index().mean(axis=1)
+                        common = piso_s.index.intersection(eq_avg.index)
+                        if not common.empty:
+                            spread = eq_avg[common] - piso_s[common]
+                            bloques, prev_tipo, bloque_ini, fecha_prev = [], None, None, None
+                            for fecha in spread.index:
+                                s_val = spread[fecha]
+                                tipo = "COMPRA" if s_val < -10 else ("CAUTELA" if s_val > 10 else None)
+                                if tipo != prev_tipo:
+                                    if prev_tipo and bloque_ini:
+                                        bloques.append((bloque_ini, fecha_prev, prev_tipo))
+                                    bloque_ini = fecha if tipo else None
+                                    prev_tipo = tipo
+                                if tipo:
+                                    fecha_prev = fecha
+                            if prev_tipo and bloque_ini:
+                                bloques.append((bloque_ini, fecha_prev, prev_tipo))
+                            señales_bloques = bloques
+
                 fg.clear()
                 ax = fg.add_subplot(111)
                 ax.set_facecolor(self.CG_COLOR)
 
-                if modo == "banda":
+                modo_actual = _estado["modo"]
+                if modo_actual == "banda":
                     if len(idx_comun):
                         ax.fill_between(
                             idx_comun,
@@ -524,37 +530,70 @@ class AnalisisBase:
                     sp.set_color("gray")
 
                 handles, labels = ax.get_legend_handles_labels()
-                handles = [h for h, l in zip(handles, labels) if not l.startswith("_")]
-                labels = [l for l in labels if not l.startswith("_")]
-                fg.legend(
-                    handles=handles,
-                    labels=labels,
-                    loc="outside upper left",
-                    fontsize=6,
-                    facecolor="white",
-                    labelcolor="black",
-                    framealpha=1.0,
-                )
-                titulo = "Renta Variable vs Banda" if modo == "banda" else "Renta Variable vs Estimador"
-                fg.suptitle(titulo, fontsize=9, color="white", y=0.98)
+                lineas_h = [
+                    h
+                    for h, l in zip(handles, labels)
+                    if not l.startswith("_") and not l.startswith("▲") and not l.startswith("▼")
+                ]
+                lineas_l = [
+                    l for l in labels if not l.startswith("_") and not l.startswith("▲") and not l.startswith("▼")
+                ]
+                señales_h = [h for h, l in zip(handles, labels) if l.startswith("▲") or l.startswith("▼")]
+                señales_l = [l for l in labels if l.startswith("▲") or l.startswith("▼")]
+                if lineas_h:
+                    fg.legend(
+                        handles=lineas_h,
+                        labels=lineas_l,
+                        loc="outside upper left",
+                        fontsize=6,
+                        facecolor="white",
+                        labelcolor="black",
+                        framealpha=0.9,
+                    )
+                if señales_h:
+                    fg.legend(
+                        handles=señales_h,
+                        labels=señales_l,
+                        loc="outside upper right",
+                        fontsize=6,
+                        facecolor="white",
+                        labelcolor="black",
+                        framealpha=0.9,
+                    )
+                _DIAS_LABEL = {30: "1m", 90: "3m", 180: "6m", 365: "1y", 1825: "5y"}
+                periodo = _DIAS_LABEL.get(_estado["dias"], f"{_estado['dias']}d")
+                base = "Renta Variable vs Banda" if modo_actual == "banda" else "Renta Variable vs Estimador"
+                fg.suptitle(f"{base} — {periodo}", fontsize=9, color="white", y=0.98)
                 fg.subplots_adjust(left=0.05, right=0.88, top=0.88, bottom=0.18)
                 canvas.draw()
 
+            INTERVALOS = {"1m": 30, "3m": 90, "6m": 180, "1y": 365, "5y": 1825}
             frame_btns = tk.Frame(frame_g, bg=self.CG_COLOR)
             frame_btns.pack(anchor="e", padx=4)
-            for label, modo in (("Banda", "banda"), ("Estimador", "estimador")):
-                m = modo
+            for label, dias in INTERVALOS.items():
+                d = dias
                 tk.Button(
                     frame_btns,
                     text=label,
-                    width=8,
+                    width=2,
                     bg=self.CG_COLOR,
                     fg=self.BG_COLOR,
                     relief=tk.FLAT,
-                    command=lambda m=m: _dibujar(m),
+                    command=lambda d=d: _dibujar(dias=d),
+                ).pack(side="left")
+            for emoji, modo in (("〰", "banda"), ("≈", "estimador")):
+                m = modo
+                tk.Button(
+                    frame_btns,
+                    text=emoji,
+                    width=3,
+                    bg=self.CG_COLOR,
+                    fg=self.BG_COLOR,
+                    relief=tk.FLAT,
+                    command=lambda m=m: _dibujar(modo=m),
                 ).pack(side="left")
 
-            _dibujar("banda")
+            _dibujar()
             return row + 1
         except Exception as e:
             _logger.error(f"[crear_grafico_evolucion_combinado]: {e}")

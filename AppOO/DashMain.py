@@ -2934,6 +2934,14 @@ class DashMain:
             for row in rows:
                 r = dict(zip(ix, row))
                 coid = str(r.get("clientOrderId") or "")
+                stop = ib_stop.get(coid, "")
+                if not stop and r.get("orderType") == "STP LMT":
+                    try:
+                        jd = r.get("json_detalle") or ""
+                        jd_dict = json.loads(jd) if isinstance(jd, str) and jd else (jd if isinstance(jd, dict) else {})
+                        stop = jd_dict.get("auxPrice", "")
+                    except Exception:
+                        pass
                 result.append(
                     {
                         "account": r.get("account", ""),
@@ -2941,7 +2949,7 @@ class DashMain:
                         "symbol": r.get("symbol", ""),
                         "side": r.get("side", ""),
                         "orderType": r.get("orderType", ""),
-                        "stop_price": ib_stop.get(coid, ""),
+                        "stop_price": stop,
                         "price": r.get("price", ""),
                         "quantity": r.get("quantity", ""),
                         "status": ib_status.get(coid) or r.get("status", ""),
@@ -3014,6 +3022,7 @@ class DashMain:
                             r.get("account", ""),
                             r.get("conid", ""),
                             r.get("symbol", ""),
+                            "",
                             r.get("side", ""),
                             r.get("orderType", ""),
                             "",
@@ -3025,6 +3034,9 @@ class DashMain:
                             r.get("tif", ""),
                             r.get("id_order", ""),
                             str(r.get("clientOrderId") or ""),
+                            "",
+                            "",
+                            "",
                         ],
                         tags=(tag,) if tag else (),
                     )
