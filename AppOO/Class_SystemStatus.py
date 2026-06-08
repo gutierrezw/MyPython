@@ -87,7 +87,8 @@ class system_status(tk.Frame):
         self.bottom.add(self.agentes, text="Agentes")
         self.bottom.add(self.apicost, text="IA Cost")
 
-        self.bottom.pack(side=tk.BOTTOM, fill=tk.BOTH)
+        self.bottom.pack(side=tk.BOTTOM, fill=tk.BOTH, ipady=0)
+        self.bottom.configure(height=340)
         self.right.pack(side=tk.RIGHT, fill=tk.BOTH)
         self.process.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
@@ -1441,6 +1442,15 @@ class system_status(tk.Frame):
                     return "Pendiente"
                 return datetime.fromtimestamp(next_ts).strftime("%m-%d %H:%M")
 
+            def _tag_for(active, run_count, proxima):
+                if not active:
+                    return "Inactivo"
+                if proxima == "Pendiente":
+                    return "Pendiente"
+                if run_count == 0:
+                    return "SinActividad"
+                return "Activo"
+
             def _refresh():
                 schedule_data = read_json_tmp("agents_schedule.json")
                 for iid in tree.get_children():
@@ -1448,8 +1458,12 @@ class system_status(tk.Frame):
                     cfg = AGENTES_SCHEDULE.get(name, {})
                     intervalo = cfg.get("intervalo", 0)
                     last_run = schedule_data.get(name, 0)
-                    tree.set(iid, "Run", _get_run_count(name))
-                    tree.set(iid, "Próxima", _get_proxima(last_run, intervalo))
+                    run_count = _get_run_count(name)
+                    proxima = _get_proxima(last_run, intervalo)
+                    tree.set(iid, "Run", run_count)
+                    tree.set(iid, "Próxima", proxima)
+                    tag = _tag_for(cfg.get("active", True), run_count, proxima)
+                    tree.item(iid, tags=(tag,))
                 tree.after(10000, _refresh)
 
             def _save_agents():
@@ -1464,7 +1478,9 @@ class system_status(tk.Frame):
                 cfg["active"] = not cfg["active"]
                 estado = "Activo" if cfg["active"] else "Inactivo"
                 tree.set(iid, "Estado", estado)
-                tree.item(iid, tags=(estado,))
+                run_count = int(tree.set(iid, "Run") or 0)
+                proxima = tree.set(iid, "Próxima")
+                tree.item(iid, tags=(_tag_for(cfg["active"], run_count, proxima),))
                 _save_agents()
 
             def _on_double_click(event):
@@ -1502,26 +1518,30 @@ class system_status(tk.Frame):
                 cfg["active"] = active
                 estado = "Activo" if active else "Inactivo"
                 tree.set(iid, "Estado", estado)
-                tree.item(iid, tags=(estado,))
+                run_count = int(tree.set(iid, "Run") or 0)
+                proxima = tree.set(iid, "Próxima")
+                tree.item(iid, tags=(_tag_for(active, run_count, proxima),))
                 _save_agents()
 
             frame = ttk.Frame(self.agentes, style="C.TFrame")
             frame.pack(expand=True, fill="both", padx=5, pady=(5, 0))
 
-            cols = ["Intervalo", "Estado", "Run", "Próxima", "Descripción"]
-            tree = ttk.Treeview(frame, columns=cols, height=15, show="tree headings")
+            cols = ["Nivel", "Intervalo", "Estado", "Run", "Próxima", "Descripción"]
+            tree = ttk.Treeview(frame, columns=cols, height=8, show="tree headings")
             tree.heading("#0", text="Agente")
+            tree.heading("Nivel", text="Nv")
             tree.heading("Intervalo", text="Intervalo")
             tree.heading("Estado", text="Estado")
             tree.heading("Run", text="Run")
             tree.heading("Próxima", text="Próxima")
             tree.heading("Descripción", text="Descripción")
-            tree.column("#0", width=220, minwidth=180)
-            tree.column("Intervalo", width=70, minwidth=60, anchor="center")
-            tree.column("Estado", width=80, minwidth=70, anchor="center")
-            tree.column("Run", width=55, minwidth=45, anchor="center")
-            tree.column("Próxima", width=90, minwidth=80, anchor="center")
-            tree.column("Descripción", width=310, minwidth=200)
+            tree.column("#0", width=210, minwidth=180)
+            tree.column("Nivel", width=35, minwidth=30, anchor="center")
+            tree.column("Intervalo", width=65, minwidth=55, anchor="center")
+            tree.column("Estado", width=70, minwidth=60, anchor="center")
+            tree.column("Run", width=45, minwidth=35, anchor="center")
+            tree.column("Próxima", width=95, minwidth=80, anchor="center")
+            tree.column("Descripción", width=480, minwidth=300)
 
             scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
             scroll.pack(side="right", fill="y")
@@ -1529,6 +1549,8 @@ class system_status(tk.Frame):
 
             tree.tag_configure("Activo", foreground=COLOR_ACTIVE)
             tree.tag_configure("Inactivo", foreground=COLOR_INACTIVE)
+            tree.tag_configure("Pendiente", foreground="#F5A623")
+            tree.tag_configure("SinActividad", foreground="#4A90D9")
 
             btn_frame = ttk.Frame(self.agentes, style="C.TFrame")
             btn_frame.pack(fill="x", padx=5, pady=(2, 5))
@@ -1563,20 +1585,24 @@ class system_status(tk.Frame):
             schedule_data = read_json_tmp("agents_schedule.json")
             for name, cfg in AGENTES_SCHEDULE.items():
                 active = cfg.get("active", True)
-                estado = "Activo" if active else "Inactivo"
                 intervalo = cfg.get("intervalo", 0)
+                run_count = _get_run_count(name)
+                proxima = _get_proxima(schedule_data.get(name, 0), intervalo)
+                estado = "Activo" if active else "Inactivo"
+                tag = _tag_for(active, run_count, proxima)
                 tree.insert(
                     "",
                     "end",
                     text=name,
                     values=(
+                        cfg.get("nivel", 1),
                         _fmt_intervalo(intervalo),
                         estado,
-                        _get_run_count(name),
-                        _get_proxima(schedule_data.get(name, 0), intervalo),
+                        run_count,
+                        proxima,
                         cfg.get("desc", ""),
                     ),
-                    tags=(estado,),
+                    tags=(tag,),
                 )
 
             tree.after(10000, _refresh)

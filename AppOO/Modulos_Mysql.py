@@ -709,18 +709,21 @@ class IPerformance(BDsystem):  # -----------------------------------------------
         try:
             cursor = conn.cursor()
 
-            # exclusivo para sumar valores por vehiculo (caso: BBVA.ARS)
+            # consolida múltiples cuentas por vehículo (FCI: BBVA.ARS = BBVA0001 + SANT0001)
             if is_none(account):
-                qry = """SELECT fechaclose, p_referencia, 
-                                sum(p_vehiculo) p_vehiculo, 
-                                sum(nr_gyp) nr_gyp, 
-                                sum(value) value, 
-                                sum(costo_base) 
-                         FROM performa_inversion 
-                        WHERE vehiculo = '%s' 
-                        GROUP BY fechaclose, p_referencia
-                        ORDER by fechaclose ASC;"""
-                cursor.execute(qry % (vehiculo))
+                qry = """SELECT fechaclose,
+                                sum(p_referencia) / COUNT(DISTINCT idcuenta) AS p_referencia,
+                                sum(p_vehiculo)                               AS p_vehiculo,
+                                sum(gyp_dia)                                  AS gyp_dia,
+                                sum(nr_gyp)                                   AS nr_gyp,
+                                sum(value)                                    AS value,
+                                sum(costo_base)                               AS costo_base,
+                                sum(dividends)                                AS dividends
+                         FROM performa_inversion
+                        WHERE vehiculo = '%s'
+                        GROUP BY fechaclose
+                        ORDER BY fechaclose ASC;"""
+                cursor.execute(qry % vehiculo)
                 sql = cursor.fetchall()
 
             # uso mas frecuente para sumar valores por account y vehiculo
