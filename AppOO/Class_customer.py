@@ -1025,6 +1025,7 @@ class DataHub:
                     ]
                 },
                 "hash_id_Op": hash_id,
+                "intent": "PRESERV",
             }
 
         if vehiculo == "Crypto":
@@ -1116,6 +1117,7 @@ class DataHub:
                     ]
                 },
                 "hash_id_Op": hash_id,
+                "intent": "GAINS",
             }
         return None
 
@@ -1158,11 +1160,13 @@ class MyOrders:
         hash_id_Op=None,
         remote=False,
         origen="UI",
+        intent="",
     ):
         # place order Stock
         def place_OrderStock(account, pedido):
             try:
                 response, enviada, values = {}, {}, {}
+                _intent = intent or ("MANUAL" if origen == "UI" else "")
 
                 # Rectifica types de los parametros
                 for keys in pedido["orders"]:
@@ -1172,6 +1176,8 @@ class MyOrders:
                         keys["price"] = float(keys["price"])
                     if "quantity" in keys:
                         keys["quantity"] = float(keys["quantity"])
+                    if _intent:
+                        keys["orderRef"] = _intent
                 orden = {"orders": [keys]}
 
                 self.logger.warning(
@@ -1240,6 +1246,7 @@ class MyOrders:
                             "stampPlace": datetime.now(),
                             "stampSubmit": stampSubmit,
                             "hash_id_oportunidad": hash_id_Op,
+                            **({"intent": _intent} if _intent else {}),
                             **({"json_detalle": json.dumps(_jd)} if _jd else {}),
                         }
                     )
@@ -2880,6 +2887,7 @@ class TickerInfo(MyOrders):
                 symbol = trama.get("symbol")
                 account = trama.get("account")
                 hash_id = trama.get("hash_id_Op")
+                trama_intent = trama.get("intent", "")
 
                 if vehiculo == "Stock":
 
@@ -2904,6 +2912,7 @@ class TickerInfo(MyOrders):
                             hash_id_Op=hash_id,
                             remote=True,
                             origen="Telegram",
+                            intent=trama_intent,
                         )
                         resp = {
                             "values": response,
@@ -2920,6 +2929,7 @@ class TickerInfo(MyOrders):
                         hash_id_Op=hash_id,
                         remote=True,
                         origen="Telegram",
+                        intent=trama_intent,
                     )
                     resp = {
                         "values": response,
@@ -6143,7 +6153,7 @@ class WidgetVehiculo(TickerInfo):
             self.graph[1][0].draw()
 
             # ajusta gráfico performance portafolio i setea a 1
-            self.setup_graph_performace(tipo="1Y")
+            self.setup_graph_performace(tipo="6M")
 
         except Exception as e:
             print(f"[run_gráficos()]: {e}")

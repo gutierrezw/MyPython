@@ -145,6 +145,13 @@ from finvizfinance.group.performance import Performance
 import anthropic
 import feedparser
 
+try:
+    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import TimeoutError as PlaywrightTimeout
+except ImportError:
+    sync_playwright = None
+    PlaywrightTimeout = Exception
+
 # modulos IA
 from sklearn.exceptions import UndefinedMetricWarning
 from sklearn.ensemble import RandomForestClassifier

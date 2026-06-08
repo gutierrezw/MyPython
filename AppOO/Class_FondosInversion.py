@@ -546,6 +546,27 @@ class ArsFondosInversion(tk.Frame):
             print("update_FCI_en_positions(): {}".format(e))
             traceback.print_exc()
 
+    def sync_extracto_browser(self) -> list:
+        from Class_BrowserFCI import BrowserFCI  # import diferido — evita ciclo con Modulos_Mysql
+
+        browser = BrowserFCI()
+
+        last, _ = self.RepositorioOportunidades.select_booktrading(
+            accion="last", account=self.account_bbva, idivisa="ARS"
+        )
+        desde = last[0]["fechahora"].date() if last else date.today() - timedelta(days=90)
+
+        procesados = []
+        if browser.download_bbva(desde=desde, destino=self.path, prefijo=self.aliasExcel["BBVA"]):
+            self.load_positions_FCI()
+            procesados.append("BBVA")
+
+        if browser.download_santander(desde=desde, destino=self.path, prefijo=self.aliasExcel["SANT"]):
+            self.load_positions_FCI()
+            procesados.append("SANT")
+
+        return procesados
+
     # carga en booktrading operaciones de FCI
     def load_positions_FCI(self):
         def insert_values_in_booktrading(trader):
@@ -614,7 +635,16 @@ class ArsFondosInversion(tk.Frame):
 
                     if rows["Moneda"] == "$":
                         values = {}
-                        codigo = "O" if rows["Tipo"] == "Suscripción" else "C"
+                        if rows["Tipo"] == "Suscripción":
+                            codigo = "O"
+                        elif rows["Tipo"] == "Rescate":
+                            codigo = "C"
+                        else:
+                            continue
+                        if self.string_float(s=rows.get("Cantidad (VN)", 0)) <= 0:
+                            continue
+                        if self.string_float(s=rows.get("Precio", 0)) <= 0:
+                            continue
                         activo, found = self.RepositorioOportunidades.select_otros_activos(
                             account=self.account_bbva, symbol=rows["Descripción de Especie"]
                         )
@@ -694,7 +724,7 @@ class ArsFondosInversion(tk.Frame):
                     values = {}
                     ValorCuotaParte = self.string_float(s=rows["Valor_cuotaparte"], tipo="$.,")
                     CuotaParte = self.string_float(s=rows["Cantidad_cuotapartes"], tipo=".,")
-                    if ValorCuotaParte > 0:
+                    if ValorCuotaParte > 0 and CuotaParte > 0:
 
                         # Evalua tipos de movimientos espardos
                         if rows["Movimiento"] == "Inversión":

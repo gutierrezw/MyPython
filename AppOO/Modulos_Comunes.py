@@ -57,46 +57,47 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
     try:
         symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=vehiculo)
 
-        # obtiene DataFrame para portafolios — recalcula desde diaria_performance
-        if tipo in ("Stock", "Crypto", "BBVA.ARS"):
-            # Descubrir cuentas: para FCI combina BBVA + SANT, para el resto usa account
-            accounts = []
-            if vehiculo == "BBVA.ARS":
-                for veh in ("BBVA.ARS", "SANT.ARS"):
-                    try:
-                        ses = BDsystem.get_sesion_by_vehiculo(vehiculo=veh)
-                        if ses and ses.get("idcuenta"):
-                            accounts.append(ses["idcuenta"])
-                    except Exception:
-                        pass
-            else:
-                # Auto-descubrir account si no se pasó
-                if account is None:
-                    try:
-                        ses = BDsystem.get_sesion_by_vehiculo(vehiculo=vehiculo)
-                        if ses and ses.get("idcuenta"):
-                            account = ses["idcuenta"]
-                    except Exception:
-                        pass
-                accounts = [account]
+        # FCI (BBVA.ARS): usa performa_inversion consolidada — recalcula retorno desde value/costo_base sumados
+        if tipo == "BBVA.ARS":
+            sql, iy = Performa.select_performa_inversion(account=None, vehiculo=vehiculo)
+            if sql and iy:
+                df = pd.DataFrame(sql, columns=iy)
+                df["fechaclose"] = pd.to_datetime(df["fechaclose"])
+                df.set_index("fechaclose", inplace=True)
+                df.sort_index(inplace=True)
+                for col in ["p_referencia", "value", "costo_base", "gyp_dia", "dividends"]:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+                # Replica crea_dataframe_diaria: ratio portfolio consolidado → retorno diario → acumulado
+                df["performa"] = (df["value"] + df["dividends"] + df["gyp_dia"]) / df["costo_base"]
+                df["CumPort"] = (1 + df["performa"].pct_change()).cumprod() - 1
+                df[cum_index] = (1 + df["p_referencia"]).cumprod() - 1
+                datos = df[["CumPort"] + [c for c in ("value", "costo_base") if c in df.columns] + [cum_index]].copy()
+                datos[index_ref] = datos[cum_index]
+                datos["++ Portafolio"] = datos["CumPort"]
 
-            # Consolidar diaria_performance de todas las cuentas
+        # Stock / Crypto: recalcula desde diaria_performance
+        elif tipo in ("Stock", "Crypto"):
+            if account is None:
+                try:
+                    ses = BDsystem.get_sesion_by_vehiculo(vehiculo=vehiculo)
+                    if ses and ses.get("idcuenta"):
+                        account = ses["idcuenta"]
+                except Exception:
+                    pass
+
             diaria_all, ix = [], []
-            for acc in accounts:
-                sql, iy = Performa.select_diaria_performance(account=acc)
-                if sql:
-                    if not ix:
-                        ix = iy
-                    diaria_all.extend(sql)
+            sql, iy = Performa.select_diaria_performance(account=account)
+            if sql:
+                diaria_all.extend(sql)
+                ix = iy
 
             if diaria_all and ix:
                 pdatos = crea_dataframe_diaria(diaria=diaria_all, ix=ix)
                 if pdatos is not None and not pdatos.empty:
-                    # Normalizar desde raíz: ambas curvas arrancan en 0%
                     raiz = pdatos["performa"].iloc[0]
                     pdatos["CumPort"] = (pdatos["performa"] / raiz) - 1
 
-                    # Índice desde la primera fecha de la diaria
                     first_date = pdatos.index[0]
                     result = crea_dataframe_index(vehiculo=vehiculo, desde=first_date)
                     if result is not None:
@@ -109,7 +110,6 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
                             .join(indice[[cum_index]], how="inner")
                             .dropna(subset=["CumPort", cum_index])
                         )
-                        # Alias para compatibilidad con graph_performace_portafolio
                         datos[index_ref] = datos[cum_index]
                         datos["++ Portafolio"] = datos["CumPort"]
 
