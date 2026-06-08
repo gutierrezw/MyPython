@@ -2957,6 +2957,7 @@ class DashMain:
                         "id_order": r.get("id_order", ""),
                         "id_enviar": coid,
                         "stampPlace": str(r.get("stampPlace", "")),
+                        "intent": r.get("intent") or "",
                         "json_detalle": r.get("json_detalle") or "",
                     }
                 )
@@ -2981,6 +2982,8 @@ class DashMain:
                     price = orden["price"]
                     qty = orden["quantity"]
                     jd = orden.get("json_detalle") or ""
+                    _intent = orden.get("intent") or ""
+                    _label = _intent if _intent else ("🤖" if jd else "")
                     tree.insert(
                         Stock,
                         "end",
@@ -2989,7 +2992,7 @@ class DashMain:
                             orden["account"],
                             orden["conid"],
                             orden["symbol"],
-                            "🤖" if jd else "",
+                            _label,
                             orden["side"],
                             orden["orderType"],
                             orden.get("stop_price", ""),

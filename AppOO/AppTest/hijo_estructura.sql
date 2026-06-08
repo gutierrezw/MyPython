@@ -148,7 +148,7 @@ CREATE TABLE `order_trader` (
   `orderType` char(10) DEFAULT NULL,
   `price` float DEFAULT NULL,
   `side` char(4) DEFAULT NULL,
-  `intent` char(10) DEFAULT NULL COMMENT 'Intent	Significado\n\n==========================\nENTRY	Apertura de posición\n\nTP1	Toma de ganancia parcial 1\n\nTP2	Toma de ganancia parcial 2\n\nEXIT	Cierre total de posición',
+  `intent` char(20) DEFAULT NULL COMMENT 'Intent	Significado\n\n==========================\nENTRY	Apertura de posición\nTP1	Toma de ganancia parcial 1\nTP2	Toma de ganancia parcial 2\nEXIT	Cierre total de posición\nPRESERV	Preservation automático\nGAINS	GainsCapture automático\nIA_SELL	Aprobado Telegram - Venta IA\nIA_BUY	Aprobado Telegram - Compra IA',
   `tif` char(4) DEFAULT NULL,
   `quantity` float DEFAULT NULL,
   `status` char(30) DEFAULT NULL,

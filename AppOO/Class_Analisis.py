@@ -392,12 +392,12 @@ class AnalisisBase:
             frame_g = tk.Frame(parent, bg=self.CG_COLOR)
             frame_g.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
 
-            fg = Figure(figsize=(5.4, 3.2), dpi=100)
+            fg = Figure(figsize=(5.4, 3.8), dpi=100)
             fg.patch.set_facecolor(self.CG_COLOR)
             canvas = FigureCanvasTkAgg(fg, master=frame_g)
             canvas.get_tk_widget().pack(fill="x", expand=True, pady=2)
 
-            _estado = {"modo": "banda", "dias": 90}
+            _estado = {"modo": "banda", "dias": 180}
 
             def _dibujar(modo=None, dias=None):
                 if modo is not None:
@@ -426,6 +426,7 @@ class AnalisisBase:
                 estimador_s = ((piso_s[idx_comun] + techo_s[idx_comun]) / 2) if len(idx_comun) else pd.Series()
                 fondos_equity = [f for f in self._EQUITY_FONDOS if f in df["fondo"].values]
 
+                spread = pd.Series()
                 señales_bloques = []
                 if not piso_s.empty and fondos_equity:
                     eq_series = []
@@ -454,7 +455,8 @@ class AnalisisBase:
                             señales_bloques = bloques
 
                 fg.clear()
-                ax = fg.add_subplot(111)
+                gs = fg.add_gridspec(2, 1, height_ratios=[5, 1], hspace=0.08)
+                ax = fg.add_subplot(gs[0])
                 ax.set_facecolor(self.CG_COLOR)
 
                 modo_actual = _estado["modo"]
@@ -516,6 +518,28 @@ class AnalisisBase:
                     ax.axvspan(ini, fin, color=color, alpha=0.18, zorder=0, label=lbl)
                     _señal_added.add(tipo)
 
+                # Marcadores explícitos en puntos de quiebre (cruce del spread por 0)
+                # ▼ RF en la parte superior, ▲ RV en la inferior — evita solapamiento
+                if not spread.empty and len(spread) > 1:
+                    sign = spread >= 0
+                    cruces = sign[sign != sign.shift(1)].iloc[1:]
+                    for fecha, hacia_pos in cruces.items():
+                        tag = "▼ RF" if hacia_pos else "▲ RV"
+                        col_tag = "#e74c3c" if hacia_pos else "#27ae60"
+                        y_pos = 0.98 if hacia_pos else 0.04
+                        v_align = "top" if hacia_pos else "bottom"
+                        ax.axvline(x=fecha, color=col_tag, linewidth=1.0, linestyle=":", alpha=0.85, zorder=5)
+                        ax.annotate(
+                            tag,
+                            xy=(fecha, y_pos),
+                            xycoords=("data", "axes fraction"),
+                            fontsize=6,
+                            color=col_tag,
+                            ha="center",
+                            va=v_align,
+                            fontweight="bold",
+                        )
+
                 ax.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
                 ax.set_ylabel("Rend. Acum. (%)", fontsize=6, color="white")
                 ax.yaxis.set_label_position("right")
@@ -529,42 +553,69 @@ class AnalisisBase:
                 for sp in ax.spines.values():
                     sp.set_color("gray")
 
-                handles, labels = ax.get_legend_handles_labels()
-                lineas_h = [
-                    h
-                    for h, l in zip(handles, labels)
-                    if not l.startswith("_") and not l.startswith("▲") and not l.startswith("▼")
-                ]
-                lineas_l = [
-                    l for l in labels if not l.startswith("_") and not l.startswith("▲") and not l.startswith("▼")
-                ]
-                señales_h = [h for h, l in zip(handles, labels) if l.startswith("▲") or l.startswith("▼")]
-                señales_l = [l for l in labels if l.startswith("▲") or l.startswith("▼")]
-                if lineas_h:
-                    fg.legend(
-                        handles=lineas_h,
-                        labels=lineas_l,
-                        loc="outside upper left",
-                        fontsize=6,
-                        facecolor="white",
-                        labelcolor="black",
-                        framealpha=0.9,
+                # --- Panel Rotación FCI ---
+                ax2 = fg.add_subplot(gs[1])
+                ax2.set_facecolor(self.CG_COLOR)
+                # En modo estimador usa el punto medio como referencia del spread
+                rot_ref = estimador_s if (modo_actual == "estimador" and not estimador_s.empty) else piso_s
+                if not spread.empty and not rot_ref.empty:
+                    common_rot = spread.index.intersection(rot_ref.index)
+                    spread_rot = (
+                        (spread[common_rot] - rot_ref[common_rot]) if modo_actual == "estimador" else spread[common_rot]
                     )
-                if señales_h:
+                    if not spread_rot.empty:
+                        ventana = min(10, max(3, len(spread_rot) // 6))
+                        ma_rot = spread_rot.rolling(ventana, min_periods=1).mean()
+                        ax2.fill_between(
+                            spread_rot.index,
+                            spread_rot.values,
+                            0,
+                            where=(spread_rot.values >= 0),
+                            color="#e74c3c",
+                            alpha=0.35,
+                            interpolate=True,
+                        )
+                        ax2.fill_between(
+                            spread_rot.index,
+                            spread_rot.values,
+                            0,
+                            where=(spread_rot.values < 0),
+                            color="#27ae60",
+                            alpha=0.35,
+                            interpolate=True,
+                        )
+                        ax2.plot(ma_rot.index, ma_rot.values, color="white", linewidth=0.9, alpha=0.9)
+                        ax2.axhline(0, color="#aaaaaa", linewidth=0.5)
+                        ax2.set_xlim(ax.get_xlim())
+                ax2.set_ylabel("Rot", fontsize=5, color="white", rotation=0, labelpad=14)
+                ax2.yaxis.set_label_position("right")
+                ax2.yaxis.tick_right()
+                ax2.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
+                ax2.tick_params(colors="white", labelsize=5)
+                ax2.tick_params(axis="x", rotation=30, labelsize=5)
+                ax2.spines[["top", "left"]].set_visible(False)
+                ax2.spines["right"].set_color("gray")
+                ax2.grid(False)
+
+                handles, labels = ax.get_legend_handles_labels()
+                all_h = [h for h, l in zip(handles, labels) if not l.startswith("_")]
+                all_l = [l for l in labels if not l.startswith("_")]
+                if all_h:
                     fg.legend(
-                        handles=señales_h,
-                        labels=señales_l,
-                        loc="outside upper right",
+                        handles=all_h,
+                        labels=all_l,
+                        loc="outside lower left",
                         fontsize=6,
                         facecolor="white",
                         labelcolor="black",
                         framealpha=0.9,
+                        ncols=2,
                     )
                 _DIAS_LABEL = {30: "1m", 90: "3m", 180: "6m", 365: "1y", 1825: "5y"}
                 periodo = _DIAS_LABEL.get(_estado["dias"], f"{_estado['dias']}d")
                 base = "Renta Variable vs Banda" if modo_actual == "banda" else "Renta Variable vs Estimador"
                 fg.suptitle(f"{base} — {periodo}", fontsize=9, color="white", y=0.98)
-                fg.subplots_adjust(left=0.05, right=0.88, top=0.88, bottom=0.18)
+                fg.subplots_adjust(left=0.05, right=0.88, top=0.88, bottom=0.24)
                 canvas.draw()
 
             INTERVALOS = {"1m": 30, "3m": 90, "6m": 180, "1y": 365, "5y": 1825}
@@ -593,7 +644,7 @@ class AnalisisBase:
                     command=lambda m=m: _dibujar(modo=m),
                 ).pack(side="left")
 
-            _dibujar()
+            _dibujar(dias=180)
             return row + 1
         except Exception as e:
             _logger.error(f"[crear_grafico_evolucion_combinado]: {e}")

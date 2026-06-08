@@ -409,6 +409,8 @@ class Debugging:
         # manager logging
         self.logger.update({"GainsCapture": logging.getLogger("GainsCapture")})
         self.logger["GainsCapture"].setLevel(logging.WARNING)
+        self.logger.update({"BrowserFCI": logging.getLogger("BrowserFCI")})
+        self.logger["BrowserFCI"].setLevel(logging.WARNING)
 
         # manager logging
         self.logger.update({"Sentimiento": logging.getLogger("Sentimiento")})

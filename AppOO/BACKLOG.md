@@ -1,4 +1,4 @@
-﻿# BACKLOG — AppOO Trading Platform
+# BACKLOG — AppOO Trading Platform
 
 Historial de versiones al final del archivo.
 
@@ -18,7 +18,9 @@ Historial de versiones al final del archivo.
 | ~~11~~ | ~~**Finanzas — UI**~~ | ~~Dashboard Finance — gráfico evolución mensual ingresos/gastos~~ | ~~Media~~ |
 | ~~12~~ | ~~**Stock/Cartera**~~ | ~~PHYS (ETF oro físico) — verificar categoriaActivo, decidir si participa en Consenso~~ | ~~Media~~ |
 | ~~13~~ | ~~**Stock/Cartera**~~ | ~~ETFs `categoriaActivo='T'` descubiertos vía 13F — evaluar limpieza de market~~ | ~~Media~~ |
-| 14 | **Stock/Cartera** | Señal Net — validar distribución real p33/p67 | Media |
+| ~~14~~ | ~~**Stock/Cartera**~~ | ~~Señal Net — validar distribución real p33/p67~~ | ~~Media~~ |
+| ~~47~~ | ~~**Pipeline/13F**~~ | ~~`sync_fund_filings` Opción B — corrió 2026-05-21 05:47, confirmado OK~~ | ~~Media~~ |
+| ~~46~~ | ~~**Stock/Consenso**~~ | ~~CUSIP mismatch — BABA/BTG/VST: CUSIPs poblados manualmente (TradingView). PHYS: eliminado de market (quoteType='EQUITY' en Yahoo → no detectado como ETF). Fix: `_resolve_cusip_from_edgar` usa CIK lookup vía `company_tickers.json`; `audit_portfolio` agrega detección por nombre (`_ETF_NAME_KEYWORDS`) para trusts que Yahoo reporta como EQUITY~~ | ~~Baja~~ |
 | ~~15~~ | ~~**Integración**~~ | ~~Integrar Claude en ClassChatbot — consultar Claude desde chatbot interno~~ | ~~Media~~ |
 | ~~25~~ | ~~**Integración**~~ | ~~claude.ai en browser vía Violentmonkey — endpoint `/contexto` en TV server + userscript inyecta cartera~~ | ~~Media~~ |
 | ~~16~~ | ~~**TradingView**~~ | ~~Toggle "Controlar TV web" en la app~~ | ~~Media~~ |
@@ -30,24 +32,153 @@ Historial de versiones al final del archivo.
 | ~~23~~ | ~~**IA/Datos**~~ | ~~LLM local (Ollama) — clasificar ETFs por tipo diversificación~~ | ~~Baja~~ |
 | ~~24~~ | ~~**Finanzas — Gmail**~~ | ~~Gmail/Finanzas Personales Fase 0: setup OAuth + limpieza bandeja~~ | ~~Baja~~ |
 | 21 | **Mantenimiento** | Depuración imports — `Modulos_python.py` (vulture 63 hallazgos) | Baja |
-| 39 | **Mantenimiento** | Unificar `insert_booktrading` + `insert_booktrading_bottrader` en `Modulos_Mysql.py` — misma lógica core duplicada, difieren en cálculo de `basico` y helpers; requiere testing antes de tocar | Baja |
 | ~~26~~ | ~~**Stock/IB**~~ | ~~Fallback yfinance cuando IB offline — precios + dGyP header no actualizaban~~ | ~~Media~~ |
 | ~~27~~ | ~~**Stock/Gráficos**~~ | ~~`grupo_sector()` infla "Consumer Cyclical" — sector preservation en `update_inversion_stock()` + fallback `sectores()` → `""`~~ | ~~Media~~ |
-| 🧪 37 | **FCI/Selenium** | `download_cnv_selenium.py` — Safe Browsing Chrome bloquea descarga Excel de CNV → `.crdownload` huérfanos en `tmp/`; fix: `safebrowsing.enabled=False` + `--safebrowsing-disable-download-protection` + poll hasta `.xlsx` disponible (max 90s) | Media |
+| ~~37~~ | ~~**FCI/Selenium**~~ | ~~`download_cnv_selenium.py` — Safe Browsing Chrome bloquea descarga Excel de CNV → `.crdownload` huérfanos en `tmp/`; fix: `safebrowsing.enabled=False` + `--safebrowsing-disable-download-protection` + poll hasta `.xlsx` disponible (max 90s)~~ | ~~Media~~ |
 | 28 | **Infraestructura** | Proceso de mantenimiento del sistema vía Claude scheduled: check NTP con `ntplib` (alerta si deriva >500ms), limpieza logs rotativos, verificación servicios críticos (IB, Binance, MySQL). Sin elevar la app a admin. | Media |
 | ~~29~~ | ~~**TradingView**~~ | ~~Órdenes desde TV — handler `POST /order` en servidor TV conecta con broker: IB (`place_order` vía IBroks_Client) + Binance (`create_order` vía BinanceSpot); confirmación de ejecución devuelta al userscript TV~~ | ~~Alta~~ |
 | ~~30~~ | ~~**Stock/Mantenimiento**~~ | ~~Correr `run_mark_delisted.py` (17 símbolos) + `run_rebuild_diaria_cartera.py`~~ | ~~Alta~~ |
-| 🧪 31 | **Stock/IB** | Verificar header tras reconexión IB: Mrg/Risk, Cash y label "IB OFFLINE" deben recuperarse con fix `self.summary = {}` en `schedule_ib_offline_sync` (DashMainV9_ia.py) | Media |
-| 🧪 32 | **Stock/yfinance** | Verificar que rebuild genera precios ABX correctos (~$53 CAD vía ABX.TO) — `convierte_ticket_stock` mapea CAD→.TO en `Modulos_Utilitarios.py` | Media |
+| ~~31~~ | ~~**Stock/IB**~~ | ~~Reconexión IB sin reinicio — `_ib_on_reconnect` verifica si `run_websocket_stream(Stock)` está vivo; si arrancó offline (ws nunca iniciado) llama `stock_ts.run()` completo en vez de solo refresh. Probado: gateway offline al arrancar → login → ws aparece solo~~ | ~~Alta~~ |
+| ~~🧪 32~~ | ~~**Stock/yfinance**~~ | ~~Verificar que rebuild genera precios ABX correctos (~$53 CAD vía ABX.TO) — `convierte_ticket_stock` mapea CAD→.TO en `Modulos_Utilitarios.py`~~ | ~~Media~~ |
 | ~~33~~ | ~~**Stock/Mantenimiento**~~ | ~~`fecha_deliste` en booktrading: 1) ALTER TABLE, 2) `run_mark_delisted.py` (con fechas), 3) `run_balance_booktrading.py` (stock residual→0), 4) rebuild completo → cierra gap nr_gyp vs IB~~ | ~~Alta~~ |
-| 🧪 34 | **Stock/Mantenimiento** | Agente Splits: detectar splits vía `yf.splits`, ajustar `basico` y `stock` en booktrading — fuente principal del gap restante ~$2K vs IB | Media |
-| 35 | **Stock/Mantenimiento** | Completar `fecha_deliste` para 12 símbolos con `None` (ETM, GHSI, GPS, NYMT, PBPB, PLM, SSUP, STON, ZY…) — buscar fechas exactas de fusión/privada | Baja |
+| ~~34~~ | ~~**Stock/Mantenimiento**~~ | ~~Agente Splits: detectar splits vía `yf.splits`, ajustar `basico` y `stock` en booktrading — fuente principal del gap restante ~$2K vs IB~~ | ~~Media~~ |
+| ~~35~~ | ~~**Stock/Mantenimiento**~~ | ~~Completar `fecha_deliste` para 12 símbolos con `None` (ETM, GHSI, GPS, NYMT, PBPB, PLM, SSUP, STON, ZY…) — buscar fechas exactas de fusión/privada~~ | ~~Baja~~ |
 | ~~36~~ | ~~**Telegram/Órdenes**~~ | ~~Guard anti doble-tap en botón Aprobar — `handle_callback` + `put_order_aprovate_telegram`~~ | ~~Alta~~ |
 | 38 | **Gmail/Productividad** | Depuración bandeja Gmail con Claude Desktop: clasificar, etiquetar y archivar correos masivos; definir reglas de limpieza recurrente; usar MCP Gmail tools de Claude Desktop | Media |
+| 39 | **BotCrypto/Analytics** | `run_bot_analytics.py`: parsear JSON técnico en `booktrading` (RSI/MACD/ATR/Fibonacci × 3 timeframes diaria/semanal/mensual) de trades cerrados → tabla correlación condición→WR; identificar patrones de entrada ganadores/perdedores para mejorar reglas del scoring | Media |
+| 40 | **BotCrypto/Analytics** | Panel Analytics en tab BotCrypto: WR por símbolo, WR por condición (RSI range, MACD estado, ATR%), filtro por período — alimentado por `booktrading` sin nueva infraestructura | Baja |
+| ~~42~~ | ~~**Stock/Preservation**~~ | ~~Activar `Agente_ManagerPreservation` — actualmente comentado en `agentesIA()` (`Class_DashBot.py:1983`) con nota "No activar en prueba". Revisar `_preservation_run_vehiculo()`, validar con IB conectado, y habilitar para Stock + Crypto~~ | ~~Alta~~ |
+| ~~43~~ | ~~**UI/BUY Dialog**~~ | ~~Modo "importe a invertir": en diálogo BUY agregar selector QTY ↔ USD (Listbox estilo LMT/MKT/STP); QTY se calcula automático — Stock: `floor(importe/precio)` entero; Crypto: respeta lotSize decimales. Sin perder modo cantidad actual~~ | ~~Media~~ |
+| ~~44~~ | ~~**TradingView/BUY**~~ | ~~Integrar modo "importe a invertir" en órdenes desde TV panel — especificar monto $ en vez de cantidad; misma lógica conversión que ítem 43~~ | ~~Baja~~ |
+| ~~41~~ | ~~**Distribución**~~ | ~~Ejecutable para hijo: PyInstaller → `.exe` standalone + config JSON que activa solo las pestañas deseadas (tabs son parámetro — mismo binario, distinta config); credenciales propias (Binance account); publicar en GitHub Releases~~ | ~~Media~~ |
+| 45 | **Infraestructura/Releases** | Renombrar `DashMainV9_ia.py` → `DashMain.py` + crear `version.py` (APP_NAME, VERSION, RELEASE_DATE) + git tags semánticos por release + separar DEV/PROD en máquinas físicas distintas | Alta |
+
+| 51 | **IA/Investigación** | Revisar agentes financieros que ofrece Claude (Managed Agents API) y evaluar integración al proyecto de inversiones — análisis de portafolio, señales, alertas u otros casos de uso relevantes | Media |
+
+| 🧪 48 | **IA/Modelos** | Módulo Sentimiento general de noticias por símbolo (no orientado a temas tech). `Agente_Sentimiento` @8h (3×/día) + `Agente_InterpreteSentimiento` @24h — conectados en `Class_DashBot.py`. Lógica `inflexion` corregida: vota +1 solo si sentimiento≥0, abstiene si negativo. Depuración automática: retiene últimos 3 meses (`cleanup_sentiment(months=3)`). Voto `Sent` activo en Consenso. Key: `ClaudeAPIP`. **En prueba en producción** | Media |
+| ~~49~~ | ~~**Infraestructura/Agentes**~~ | ~~Administrador de agentes — panel UI para activar/desactivar agentes en tiempo real sin reiniciar la app. Flag `active` en `AGENTES_SCHEDULE` + pestaña similar al panel Debugging (toggle por fila, doble-click activa/desactiva, persistido en `tmp/agents_config.json`). Permite controlar qué agentes corren sin modificar código~~ | ~~Media~~ |
+| 🧪 50 | **IA/Modelos** | Integrar sentimiento como feature en modelos BUY/SELL — agregar `sentiment_score` (última lectura), `sentiment_3d_avg`, `sentiment_7d_avg`, `sentiment_patron` (encoded: acumulacion=1, neutro=0, distribucion=-1) en `aplanar_datos_tecnicos()` y `cargar_datos()`; reentrenar modelos. **Prerequisito:** ~1 mes de histórico en `market_sentiment` para que la señal sea estadísticamente válida | Media |
+| ~~✅ 51~~ | ~~**IA/Descubrimiento**~~ | ~~Scanner YouTube RSS — `ConvergIA/Scanner_YouTube.py`: 6 canales hispanos de inversión, RSS feedparser, Claude Haiku extrae nombres de empresas → `yf.Search()` resuelve ticker. Tablas: `youtube_canales` + `youtube_candidatos`. `Agente_YouTubeScanner` @wait_rate(86400). Popup "Candidatos" en Screener con filtros País/Sector/Canal al estilo Screener.~~ | ~~Media~~ |
+| 52 | **Infraestructura/Agentes** | Panel Agentes — niveles jerárquicos: N1 Datos (MarketScreener, EdgarFunds, FundFilings, 13FHoldings, Sentimiento, YouTubeScanner), N2 Señales (13FScores, InstitucionalScore, ConsensoCache, InterpreteSentimiento, ClasificadorETF, StockBeta), N3 Decisiones (ManagerPreservation, SyncOrders, LtvControl, OrderEodCleanup), N4 Soporte (PriceSync, PerformaValidator, SplitsControl, ExtractosWatcher, AuditPortfolio, ApiCostTracker). Agregar campo `nivel` en `AGENTES_SCHEDULE`, agrupar por nivel en treeview con separador visual, ajustar columnas del panel (ancho + orden). | Media |
+| 53 | **Stock/GainsCapture** | `Agente_GainsCapture` — espíritu especulativo (distinto a Preservation que es defensivo). Opera sobre `categoriaActivo='N'` (volátiles): venta parcial por niveles de ROI (50%/100%/150%), validación Claude de técnicos (RSI_d/RSI_w/EMA) antes de cada nivel. Dos modos: `automatico` (LMT directo a IB + notif Telegram) y `autorizado` (propuesta Telegram /ok /no, timeout 30min → cancela sin ejecutar). Botón toggle en panel Agentes, persiste en `tmp/gains_capture_config.json`. Precio LMT = `last×0.995`. Estados: `normal` / `escalon_pendiente` / `esperando_reset` / `pendiente_autorizacion`. `json_detalle` en order_trader para aprendizaje futuro. Ver `Doc/gains_capture_design.md`. | Alta |
+| 54 | **Stock/Preservation** | Bug escenario borde: si IB está offline cuando el agente corre, `preservation_get_price` retorna None → todos los símbolos se saltean → `preservation_state.json` no registra `order_id`. Al volver IB, el agente no encuentra `order_id_prev` y puede crear órdenes duplicadas sobre STOPs que ya existen en IB. Fix sugerido: antes de enviar nueva orden, consultar `select_pending_orders` en `order_trader` para verificar si ya existe una STP LMT activa para ese símbolo/account. | Media |
 
 ---
 
 ## Historial
+
+### v3.4 — 2026-06-03
+**Escalonamiento de salida — diseño completo:**
+- 📋 ítem 53 anotado — escalonamiento activos volátiles (categoriaActivo='N')
+- ✅ Fix `otros_activos.symbol` CHAR(25) → VARCHAR(100) + `descripcion` CHAR(80) → VARCHAR(120) — evita error 1406 en insert_otros_activos con nombres de fondos FCI
+- ✅ `Doc/preservation_claude_dynamic_design.md` — Fase 2 diseñada: tipo orden LMT (last×0.995), validación Claude técnicos (RSI_d/RSI_w/EMA), modos automatico/autorizado, estados normal/escalon_pendiente/esperando_reset, botón toggle panel Agentes, timeout autorizado 30min → cancela sin ejecutar, json_detalle para aprendizaje futuro
+
+### v3.3 — 2026-06-02
+**Preservation activo + fixes Lista de Ordenes + alertas IB Gateway:**
+- ✅ ítem 42 — `Agente_ManagerPreservation` activo y validado: 5 STOPs colocados en primera corrida
+- ✅ Fix preservation first-run skip — `_preservation_get_config` ya no retorna `False` en primera llamada; evalúa inmediatamente
+- ✅ Fix duplicate STOP orders — `preservation_last_run` ahora persiste como `_last_run_{vehiculo}` en `preservation_state.json`; sobrevive cierre/reapertura del Chatbot
+- ✅ Fix ventana Diversificación — tamaño ampliado `847×780` + `resizable(True,True)`; botón Cancel ya no queda cortado
+- ✅ Lista de Ordenes — columna `Stop` (auxPrice de IB) para órdenes STP LMT; columna `id_enviar` eliminada de la vista; `displaycolumns` para ocultar columnas internas sin líneas separadoras fantasma; sort automático por symbol dentro de cada grupo vehiculo
+- ✅ Alerta IB Gateway caído → Telegram vía `DataHub.system_alerts` (class-level queue); `_flush_system_alerts()` async en loop agentesIA; alerta reconexión exitosa en `_ib_on_reconnect`
+- ✅ Preservation dinámica con Claude Haiku — `_claude_preservation_eval` + `_build_preservation_context` (DataHub tiempo real) + `insert_preservation_order`; key `ClaudeAPIP` separada; `json_detalle` en `order_trader`; `select_preservation_context` (market + sentiment, sin oportunidades)
+- ✅ Lista de Ordenes — columna `IA` (🤖) con doble-click abre popup análisis Claude: stop_final, urgencia, razón, consenso, inst_score, RSI, MACD
+- ✅ `Class_SystemStatus.py` — fix canvas matplotlib `fill=tk.X` para que `self.connect` (panel API) sea visible debajo del área de recursos
+- ✅ `AppTest/run_preservation_eval.py` — script standalone de validación preservation con Claude; validado contra TradingView (BP, CVS, CRNT, PLUG, UUUU, VALE)
+- 📋 ítem 52 anotado — niveles jerárquicos en panel Agentes + ajuste columnas
+
+### v3.2 — 2026-05-25
+**YouTube Scanner + AgentManager + Cache tab:**
+- ✅ `ConvergIA/Scanner_YouTube.py` — RSS 6 canales hispanos → Claude extrae nombres → `yf.Search()` ticker → `yf.fast_info` valida → `youtube_candidatos` BD
+- ✅ Tablas `youtube_canales` (score, detecciones, validados, last_scan) + `youtube_candidatos` (apariciones, confidence, canales, status: pending/approved/rejected)
+- ✅ `Agente_YouTubeScanner` @wait_rate(86400) registrado en `AgentManager.register_threads()`
+- ✅ Popup "Candidatos" en Screener: tabla con En Market / En Cartera; colores verde=cartera / gris=market; Comprar → market(T) + status=approved; Rechazar → status=rejected
+- ✅ Deduplicación `seen_ids` = solo IDs del RSS actual (máx ~90), no acumulado histórico
+- ✅ Cleanup automático cada scan: rechaza candidatos expirados (apariciones=1 AND >15d ó <3 AND >30d)
+- ✅ `ApiCostTracker` filtrado por `workspace_id` — muestra costos del workspace AppOO, no org total
+- ✅ Cache tab rediseñado: árbol agrupado por vehiculo (Stock/Crypto/Referencia), collapsed por defecto, OHLCV últimas 15 filas, preserva selección en refresh
+- ✅ `AgentManager` 4 domain loggers (Agente.Stock/Crypto/IA/Infra) + `YouTubeScanner` registrado en `Class_debugging.py`
+- ✅ `version.py` → 10.3.0 / 2026-05-25
+- ✅ ítem 51 — fixes producción: `date` → `datetime.now().date()`, rate-limit Yahoo (`time.sleep(0.3)` + eliminar `yf.fast_info`), `canal_origen` busca por nombre empresa en lugar de ticker, filtra símbolos >10 chars. Pendiente: `market_cap` (Yahoo Search no lo devuelve).
+
+### v3.1 — 2026-05-23
+**Panel Agentes + fixes:**
+- ✅ ítem 49 — Panel "Agentes" en SystemStatus: treeview con Intervalo/Estado/Run/Próxima/Descripción; doble-click toggle activo/inactivo; clic derecho Activar/Desactivar; "Activar todos"; persistencia en `tmp/agents_config.json`; auto-refresh cada 10s (una sola lectura de `agents_schedule.json` por tick)
+- ✅ Fix Run(0): `task_name = name` alineado con nombre de hilo — contadores ahora muestran iteraciones reales
+- ✅ `Agente_ManagerPreservation`: SKIP por IB offline bajado de WARNING → DEBUG (estado normal, no error)
+- ✅ Docs branch limpiada: eliminados 142 archivos `.py/.bat` — `docs` ahora solo contiene `.md` y `Doc/`; resuelve conflictos al cambiar de rama
+- ✅ ítem 48 fixes: voto `Sent` como columna explícita en popup Consenso; weekend guard en `Agente_Sentimiento` e `Agente_InterpreteSentimiento` (sáb/dom = SKIP)
+- 🧪 ítem 50 infra: `load_sentiment_features` en `MarketScreen` + `enriquecer_con_sentimiento` en modelos sell/buy — retrain pendiente ~1 mes de histórico
+
+### v3.0 — 2026-05-22
+**Módulo Sentimiento + Keys Claude por módulo:**
+- ✅ ítem 48 — `ConvergIA/Scanner_Sentimiento.py`: fetch noticias por símbolo vía `yf.Ticker.news` + clasificación Claude Haiku en batches → {sym: +1/0/-1} → `market_sentiment` BD
+- ✅ `ConvergIA/Interprete_Sentimiento.py`: análisis histórico 7 días por símbolo → patrón (acumulacion/distribucion/neutro/inflexion) + interpretación en español → `market_sentiment_analysis` BD
+- ✅ `ConvergIA/ThemeMapper.py`: lee BD → `voto_tech_alignment(sym, sentiment, analysis)` → prioridad patrón histórico > sentimiento puntual
+- ✅ 7 métodos nuevos en `MarketScreen`: `bulk_save_sentiment`, `load_latest_sentiment`, `load_sentiment_history`, `save_sentiment_analysis`, `load_sentiment_analysis`, `sentiment_already_run_today`, `cleanup_sentiment`
+- ✅ `SchemasSQL/market_sentiment.sql` — DDL tablas `market_sentiment` + `market_sentiment_analysis` (creadas en BD)
+- ✅ `Agente_Sentimiento` @wait_rate(3600) + `Agente_InterpreteSentimiento` @wait_rate(86400) registrados en loop agentes
+- ✅ Voto `"Sent"` agregado al Consenso en `Class_Screener.py` (logger: `Sentimiento`)
+- ✅ Keys Claude separadas por módulo en tabla `sesion`: `ClaudeAPIS` (Sentimiento), `ClaudeAPIE` (ETF), `ClaudeAPIC` (Chat) — permite monitorear consumo por módulo en console.anthropic.com
+- ✅ `AppTest/run_claude_api_test.py` — valida las 3 keys en una sola corrida
+- ✅ `AppTest/run_tech_alignment.py` — prueba end-to-end: Scanner + Intérprete + votos resultantes
+- ✅ `AGENTES_SCHEDULE` — `Agente_Sentimiento` + `Agente_InterpreteSentimiento` agregados al dashboard
+- ✅ `version.py` — `10.1.0` → `10.2.0`
+
+### v2.9 — 2026-05-21
+**Infraestructura + Pipeline 13F + Modelos IA:**
+- ✅ ítem 47 — `sync_fund_filings` Opción B corrió 2026-05-21 05:47, OK
+- ✅ `load_screener_health` — `pendientes` y `por_renovar` filtrados por account (antes contaban universo global 98K → ahora solo ~7.7K fondos relevantes); números correctos: 389 por_renovar / 4910 pendientes
+- ✅ `profiles/main.json` — `tmp_path` absoluto `deploy\tmp` (relativo `"..\tmp"` daba `MyPython\tmp` desde VS Code → log en lugar equivocado)
+- ✅ VS Code terminal — venv activo automáticamente + `APPOO_TMP` inyectado vía `terminal.integrated.env.windows`; log siempre en `deploy\logs\`
+- ✅ `register_thread` — agrega thread a `DataHub.procesos` e incrementa `Run(N)` en cada iteración del wrapper; todos los agentes muestran contador real
+- ✅ `sync_fund_filings` — parámetro `progress_cb` opcional; `Agente_FundFilings` pasa callback que actualiza `Run(i)` cada 100 fondos
+- ✅ Modelos BUY/SELL — `rango_13w_pct`, `rango_26w_pct`, `rango_52w_pct` agregados como features en `aplanar_datos_tecnicos()` y `cargar_datos()`; reentrenamiento ejecutado sin novedad
+
+### v2.8 — 2026-05-13
+**TV Panel + Consenso + Infraestructura:**
+- ✅ ítem 44 — TV panel v2: toggle QTY/USD con estado persistente entre redraws; equivalente siempre visible en ambas direcciones; Crypto usa `toFixed(4)` (no `Math.floor`); minimize no se pierde en el redraw 3s; Crypto incluido en chips cartera
+- ✅ `stop_tv_server()` — `shutdown()` antes de `server_close()`: elimina `WinError 10038` al cerrar la app
+- ✅ `refresh_consenso_tags` — incluye voto Mod (7 votos unificados con panel Consenso); `_load_csv_signals()` extraída como función de módulo
+- ✅ Notificación Telegram: denominador corregido `/6` → `/7`
+- ✅ `Panel Crypto mrg (FALLBACK equity)` — bajado de WARNING → DEBUG (no ensucia log mientras LtvControl no corrió)
+- ✅ `profiles/main.json` + `profiles/hijo.json` — `tmp_path` corregido a `AppOO\tmp` (era `dist\AppOO\tmp`)
+- ✅ `edgar_13f.py` — `_13F_SAVE_DIR` usa `APPOO_TMP` env var (fix path en build PyInstaller)
+- ✅ `Class_debugging.py` — log path derivado de `APPOO_TMP` (unifica logs en `MyPython\logs\` siempre)
+- ✅ `buildExe.bat` — `%~dp0` + backup/restore `tmp/` antes/después del build
+
+### v2.7 — 2026-05-12
+**Releases + UI + Infraestructura:**
+- ✅ ítem 45 — `DashMainV9_ia.py` → `DashMain.py`; `version.py` con `APP_NAME="DashMain"`, `VERSION="10.0.0"`, `RELEASE_DATE`; splash y título de ventana leen de `version.py`; `DashMain_hijo.py` y `buildExe.bat` actualizados
+- ✅ Splash screen: barra de progreso `ttk.Progressbar` 12 pasos — muestra avance módulo a módulo al iniciar
+- ✅ Fix ventana vacía al arrancar: `self.root.withdraw()` en `__init__` justo después de `tk.Tk()`; `state("zoomed")` movido a después de `deiconify()` en `run()` — eliminado el flash de ventana en blanco
+- ✅ Fix `Class_FondosInversion` — `self.path` usa `APPOO_TMP` env var con fallback `os.getcwd()/tmp` + `makedirs(exist_ok=True)` — resuelve `WinError 3` al correr desde VS Code
+- ✅ Fix `tmp_old/` en git status — agregado a `.gitignore`
+- ✅ BUY dialog — "Importe" renombrado a "USD"; `lbl_calc` reubicado en misma fila que entry (column=2) — recupera botón Cancel que quedaba desplazado
+- ✅ ítem 43 — Modo "importe USD" implementado: `bt2` readonly Entry (QTY/USD), `lbm` Listbox, `lbl_calc` muestra qty calculado en tiempo real, `_get_qty_final()` calcula qty correcta al enviar; `_get_lot_exp()` nuevo método privado respeta decimales lotSize Crypto
+
+### v2.6 — 2026-05-11
+**FCI extractos — corrección NAV real + distribución hijo:**
+- ✅ ítem 41 — Ejecutable hijo: `buildExe_hijo.bat` → `dist/AppOO_hijo.exe` onefile; `profiles/hijo.json` (Crypto, Ars, BotCrypto, Finance); tag `v9.1.0-hijo` publicado en GitHub Releases; `AppTest/export_hijo.bat` exporta schema + datos de referencia para setup BD hijo
+- ✅ Fix tabs en blanco (`DashMainV9_ia.py`): eliminadas 10 llamadas `.pack()` en frames hijos del Notebook — conflicto con geometry manager de `ttk.Notebook` hacía desaparecer todas las tabs
+- ✅ Splash screen minimalista al arranque: `_splash_open()` / `_splash_step()` — ventana borderless centrada, actualiza estado por módulo hasta `mainloop()`
+- ✅ `tmp_path` absoluto en `profiles/main.json` — evita que el tmp se cree en `AppOO/` en vez de `dist/AppOO/tmp`
+- ✅ `construir_extracto_fci` — parámetro `vehiculo` explícito; SANT0001 pasa `vehiculo="BBVA.ARS"` (único vehiculo en `performa_inversion` para ambas cuentas)
+- ✅ `construir_extracto_fci` — `is_month_end` reemplazado por `groupby(to_period("M")).last()` — captura último día de mercado del mes aunque no sea fin de mes calendario; extracto siempre graba fecha fin de mes calendario
+- ✅ UPDATE extractos BD — 25 registros: BBVA0001 (Nov-2024→Abr-2026) + SANT0001 (Oct-2025→Abr-2026) actualizados con `navcierre` y `costobase` reales desde `performa_inversion`
+
+### v2.5 — 2026-05-06
+**Defensa multicapa precios yfinance + Agente Splits:**
+- ✅ ítem 34 — `Agente_SplitsControl` + `sync_splits()`: ya implementado y activo; fix bug timezone `datetime64[ns, America/New_York]` vs Timestamp naive en comparación de índice — `tz_localize` al timezone del índice antes de filtrar
+- ✅ fix `auto_adjust=False` en `get_yfinance(vehiculo=Dividends)` — elimina corrupción de precios ADR (ABEV, BP) en raíz
+- ✅ Cache quirúrgica: `DataFrameCache.add_bypass(symbol)` — invalida solo el símbolo corrupto, no todo el caché
+- ✅ Cuarentena automática: 3+ purgas en 6h → `quarantine_symbols.json` → `detalle_book` saltea símbolo 24h (rompe loop infinito)
+- ✅ `Agente_PerformaValidator`: log cache stats + `add_bypass` por anomalía + CRITICAL si cuarentena
+- ✅ Guardian `close > basic*200` eliminado de `write_csv` — creaba gaps silenciosos incompatibles con validator
+- ✅ `DataFrameCache.stats()`: size, maxsize, ttl, hits, misses, clears, bypass, symbols
+- ✅ Decorator no cachea DataFrames vacíos (evita cachear errores transitorios de yfinance)
+- ✅ fix `sync_splits` timezone: `pd.Timestamp(primera_compra).tz_localize(splits.index.tz)` cuando índice es tz-aware
+- ✅ `AppTest/run_diag_abev_yfinance.py` — script diagnóstico reproducción exacta de detalle_book
 
 ### v2.4 — 2026-05-05
 **Booktrading monitor + corrección cantidades:**

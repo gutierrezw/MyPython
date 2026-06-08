@@ -455,6 +455,22 @@ class ClassAgenteIA:
         except Exception as e:
             self.logger.error(f"Agente_InterpreteSentimiento(): {e}")
 
+    @wait_rate(86400, persist=True)
+    def Agente_ExtractoBBVA(self):
+        try:
+            from Class_BrowserFCI import BrowserFCI  # import diferido — evita ciclo con Modulos_Mysql
+
+            browser = BrowserFCI()
+            path = os.environ.get("APPOO_TMP") or os.path.join(os.getcwd(), "tmp")
+            descargados = []
+            if browser.download_bbva(desde=None, destino=path, prefijo="BBVA_Comprobante_"):
+                descargados.append("BBVA")
+            if browser.download_santander(desde=None, destino=path, prefijo="movimientos-de-superfondos-"):
+                descargados.append("SANT")
+            self.logger.warning(f"Agente_ExtractoBBVA: descargados={descargados}")
+        except Exception as e:
+            self.logger.error(f"Agente_ExtractoBBVA(): {e}")
+
     def _gains_capture_run(self):
         _gc_logger = logging.getLogger("GainsCapture")
 
@@ -1243,6 +1259,7 @@ class Telegram:
                 "symbol": symbol,
                 "pedido": order,
                 "hash_id_Op": hash_id,
+                "intent": f"IA_{opt}",
             }
             response = DataHub.QremoteOrder[vehiculo]._request(trama)
             if hash_id and response.get("status") in ("Submitted", "PreSubmitted", "FILLED"):
@@ -2092,6 +2109,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     self.exec_modulo_async(self.Agente_GainsCapture())
                     self.Agente_Sentimiento()
                     self.Agente_InterpreteSentimiento()
+                    self.Agente_ExtractoBBVA()
                     self.Agente_SyncOrders()
                     self.Agente_OrderEodCleanup()
                     self.exec_modulo_async(self._flush_system_alerts())
