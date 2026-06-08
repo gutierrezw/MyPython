@@ -1,4 +1,5 @@
 from Modulos_Mysql import MarketScreen, BDsystem
+from Class_DataFrame import set_yf_rate_limited, get_yf_status
 from Modulos_Utilitarios import (
     style_app,
     is_null,
@@ -305,6 +306,7 @@ def _yahoo_session():
             _logger.warning(f"[yahoo_session] intento {attempt + 1} error: {e}")
     session.headers.update({"Accept": "application/json"})
     if not crumb:
+        set_yf_rate_limited(600)  # 10 min — bloqueo al no obtener crumb
         _logger.error("[yahoo_session] crumb no obtenido — las requests pueden devolver 401")
     return session, crumb
 

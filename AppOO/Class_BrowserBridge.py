@@ -197,6 +197,15 @@ def stop_tv_server():
         _logger.warning("TradingView server detenido")
 
 
+def is_tv_server_running() -> bool:
+    return _tv_server is not None
+
+
+def restart_tv_server():
+    stop_tv_server()
+    start_tv_server()
+
+
 def set_order_callback(fn):
     """Registra el callable que ejecuta órdenes. Firma: fn(symbol, vehiculo, account, opt, qty, price, conid, razon)."""
     global _order_callback

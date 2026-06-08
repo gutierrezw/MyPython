@@ -27,6 +27,8 @@ from Class_customer import (
 )
 from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
 from Class_DashBot import Chatbot
+from Class_BrowserBridge import is_tv_server_running, restart_tv_server
+from Class_DataFrame import get_yf_status
 
 
 # clase paar monitorear el estado del sistema
@@ -1024,15 +1026,27 @@ class system_status(tk.Frame):
 
                 # Yahoo Finance
                 try:
-                    yfinance = DataHub.SessionYfinance is not None
+                    yf_st = get_yf_status()
+                    yf_session = DataHub.SessionYfinance is not None
+                    if yf_st["blocked"]:
+                        mins = yf_st["remaining_sec"] // 60
+                        secs = yf_st["remaining_sec"] % 60
+                        yf_status_txt = f"🔴 Bloqueado ({mins}m {secs}s)"
+                        yf_connected = False
+                    elif yf_session:
+                        yf_status_txt = "🟢 Activo"
+                        yf_connected = True
+                    else:
+                        yf_status_txt = "🟡 Sin sesión"
+                        yf_connected = False
                     apis["Yahoo Finance"] = {
-                        "status": "🟢 Activo" if yfinance else "🔴 Inactivo",
+                        "status": yf_status_txt,
                         "type": "HTTP REST API",
                         "endpoint": "https://query1.finance.yahoo.com",
-                        "connected": yfinance,
+                        "connected": yf_connected,
                         "description": "Datos de mercado y fundamentales",
                     }
-                except:
+                except Exception:
                     apis["Yahoo Finance"] = {
                         "status": "⚪ No Disponible",
                         "type": "HTTP REST API",
@@ -1041,22 +1055,78 @@ class system_status(tk.Frame):
                         "description": "Datos de mercado y fundamentales",
                     }
 
+                # Claude API
+                try:
+                    sesion_claude = BDsystem.get_sesion_by_vehiculo("ClaudeAPIA")
+                    _key = sesion_claude.get("userapi") if sesion_claude else None
+                    _key = _key.decode("utf-8") if isinstance(_key, bytes) else (_key or "")
+                    claude_ok = bool(_key and len(_key) > 10)
+                    apis["Claude API"] = {
+                        "status": "🟢 Configurado" if claude_ok else "🔴 Sin configurar",
+                        "type": "HTTP REST API",
+                        "endpoint": "https://api.anthropic.com",
+                        "connected": claude_ok,
+                        "description": "IA generativa — agentes, sentimiento, análisis",
+                    }
+                except Exception:
+                    apis["Claude API"] = {
+                        "status": "⚪ No Disponible",
+                        "type": "HTTP REST API",
+                        "endpoint": "N/A",
+                        "connected": False,
+                        "description": "IA generativa — agentes, sentimiento, análisis",
+                    }
+
                 # Interactive Brokers
+                ws_iter = DataHub.ws_stock_iter
+                ws_conn = DataHub.ws_stock_connected
+                if ws_iter == 0:
+                    ib_status = "🟡 Configurado"
+                    ib_ok = True
+                elif ws_conn and ws_iter <= 2:
+                    ib_status = "🟢 Activo"
+                    ib_ok = True
+                elif ws_conn:
+                    ib_status = f"🟡 Reconectando (iter={ws_iter})"
+                    ib_ok = False
+                else:
+                    ib_status = f"🔴 WS caído (iter={ws_iter})"
+                    ib_ok = False
                 apis["Interactive Brokers"] = {
-                    "status": "🟡 Configurado",
+                    "status": ib_status,
                     "type": "TWS API",
-                    "endpoint": "localhost:7497",
-                    "connected": True,  # Asumir configurado
-                    "description": "Trading y datos de mercado",
+                    "endpoint": f"localhost:{DataHub.ib_gateway_port}",
+                    "connected": ib_ok,
+                    "description": "Trading y datos de mercado — WebSocket en tiempo real",
                 }
 
-                # Finviz
+                # Finviz — proxy: si Yahoo está activo hay internet; si está bloqueado, probable bloqueo también
+                yf_st_fv = get_yf_status()
+                if yf_st_fv["blocked"]:
+                    fv_status = "🟡 Sin verificar (Yahoo bloqueado)"
+                    fv_ok = False
+                elif DataHub.SessionYfinance is not None:
+                    fv_status = "🟢 Disponible"
+                    fv_ok = True
+                else:
+                    fv_status = "🟡 Sin verificar"
+                    fv_ok = False
                 apis["Finviz"] = {
-                    "status": "🟢 Disponible",
+                    "status": fv_status,
                     "type": "Web Scraping",
                     "endpoint": "https://finviz.com",
-                    "connected": True,  # Siempre disponible si hay internet
+                    "connected": fv_ok,
                     "description": "Análisis técnico y fundamentales",
+                }
+
+                # TradingView Server
+                tv_running = is_tv_server_running()
+                apis["TradingView Server"] = {
+                    "status": "🟢 Activo" if tv_running else "🔴 Detenido",
+                    "type": "HTTP Local",
+                    "endpoint": "localhost:5050",
+                    "connected": tv_running,
+                    "description": "Servidor local para TradingView bridge",
                 }
 
             except Exception as e:
@@ -1270,6 +1340,45 @@ class system_status(tk.Frame):
                 api_name = lista.item(selected[0], "text")
                 show_api_detail_window(api_name)
 
+        def _force_reconnect(api_name):
+            def _run():
+                try:
+                    if api_name == "TradingView Server":
+                        restart_tv_server()
+                    elif api_name == "Binance WebSocket":
+                        if DataHub.WStreams:
+                            DataHub.WStreams.stop()
+                    elif api_name == "Binance API":
+                        if DataHub.WsClient:
+                            DataHub.WsClient.stop()
+                    elif api_name == "Interactive Brokers":
+                        ib = DataHub.clients.get("Stock")
+                        if ib:
+                            ib.create_session()
+                    self.system.after(1500, refresh_api_list)
+                except Exception as e:
+                    print(f"[_force_reconnect({api_name})]: {e}")
+
+            threading.Thread(target=_run, daemon=True, name=f"Reconnect_{api_name}").start()
+
+        _RESTARTABLE = {"TradingView Server", "Binance WebSocket", "Binance API", "Interactive Brokers"}
+
+        def on_right_click(event):
+            selected = lista.identify_row(event.y)
+            if not selected:
+                return
+            lista.selection_set(selected)
+            api_name = lista.item(selected, "text")
+            menu = tk.Menu(lista, tearoff=0, bg="black", fg="lightgreen")
+            menu.add_command(label="ℹ️ Ver detalle", command=lambda: show_api_detail_window(api_name))
+            if api_name in _RESTARTABLE:
+                menu.add_separator()
+                menu.add_command(
+                    label="🔄 Forzar reconexión",
+                    command=lambda n=api_name: _force_reconnect(n),
+                )
+            menu.tk_popup(event.x_root, event.y_root)
+
         def auto_refresh():
             """Auto-actualiza la lista cada 30 segundos"""
             # Verificar si debemos continuar ejecutando
@@ -1290,8 +1399,15 @@ class system_status(tk.Frame):
             info_frame = ttk.Frame(main_frame)
             info_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
-            # Crear TreeView solo para lista (más espacio)
-            lista = ttk.Treeview(main_frame, columns=("tipo", "estado"), style="TFrame")
+            # Frame para treeview + scrollbar
+            tree_frame = ttk.Frame(main_frame)
+            tree_frame.pack(fill=tk.BOTH, expand=True)
+
+            vsb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL)
+            vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+            lista = ttk.Treeview(tree_frame, columns=("tipo", "estado"), style="TFrame", yscrollcommand=vsb.set)
+            vsb.configure(command=lista.yview)
 
             # Configurar headers y columnas
             lista.heading("#0", text="API")
@@ -1302,19 +1418,14 @@ class system_status(tk.Frame):
             lista.column("tipo", width=150, minwidth=120)
             lista.column("estado", width=120, minwidth=100)
 
-            # Pack lista con scrollbar
-            lista.pack(fill=tk.BOTH, expand=True)
+            lista.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
             # Configurar colores
             lista.tag_configure("item", foreground="lightgreen")
 
-            # --- Scrollbars ---
-            # vsb = ttk.Scrollbar(lista, orient=tk.VERTICAL, command=lista.yview)
-            # lista.configure(yscroll=vsb.set)
-            # vsb.pack(side=tk.RIGHT, fill=tk.Y)
-
-            # --- Bind evento doble click ---
+            # --- Bind eventos ---
             lista.bind("<Double-Button-1>", on_double_click)
+            lista.bind("<Button-3>", on_right_click)
 
             # --- Carga inicial y auto-refresh ---
             refresh_api_list()

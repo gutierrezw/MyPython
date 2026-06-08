@@ -229,6 +229,12 @@ class DataHub:
     procesos = []
     logger = {}
     orders = {}
+    WStreams = None  # BinanceStreamClient activo — actualizado por schedule_WebsocketBinanceStream
+    WsClient = None  # BinanceWSApiClient activo — actualizado por schedule_WebsocketBinanceApiClient
+    WsStock = None  # MyWebsocket activo para IB — actualizado por run_stock.websocket_stream
+    ws_stock_connected = False  # True mientras websocket_loop() está corriendo
+    ws_stock_iter = 0  # iteraStream actual (>2 = ha reconectado al menos una vez)
+    yf_rate_limit_until = None  # timestamp hasta cuando Yahoo Finance está bloqueado (set al detectar 429)
     info = {
         "TimeDataHub": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -3136,7 +3142,7 @@ class TickerInfo(MyOrders):
         if self.WStreams:
             self.WStreams.stop()
 
-        self.WStreams = BinanceStreamClient(
+        self.WStreams = DataHub.WStreams = BinanceStreamClient(
             env="PRODUCTION",
             assets=self.activos,
             mensaje_callback=self.on_message_binance_websocket,
@@ -3151,7 +3157,7 @@ class TickerInfo(MyOrders):
         if self.WsClient:
             self.WsClient.stop()
 
-        self.WsClient = BinanceWSApiClient(
+        self.WsClient = DataHub.WsClient = BinanceWSApiClient(
             env="PRODUCTION",
             vehiculo="Crypto",
             mensaje_callback=self.on_message_binance_websocket,

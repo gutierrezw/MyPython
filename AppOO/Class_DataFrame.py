@@ -314,6 +314,24 @@ class InfoYfinance:
 # Símbolos que fallaron get_info() por timeout — se omiten por 30 min
 _info_timeout_cache = TTLCache(maxsize=200, ttl=1800)
 
+# Timestamp hasta cuando Yahoo Finance está rate-limited (None = sin bloqueo activo)
+_yf_rate_limit_until: float = 0.0
+
+
+def set_yf_rate_limited(seconds: int = 1800):
+    global _yf_rate_limit_until
+    _yf_rate_limit_until = time.time() + seconds
+
+
+def get_yf_status() -> dict:
+    """Retorna estado actual de Yahoo Finance para el panel de APIs."""
+    remaining = _yf_rate_limit_until - time.time() if _yf_rate_limit_until else 0
+    blocked = remaining > 0
+    return {
+        "blocked": blocked,
+        "remaining_sec": int(remaining) if blocked else 0,
+    }
+
 
 # 📊 Función principal get_yfinance: encapsula llamados a yfinance
 # =================================================================
@@ -347,6 +365,8 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
             msg = str(e)
             if "Too Many Requests" in msg or "Rate limited" in msg or "429" in msg:
                 _info_timeout_cache[key] = True
+                global _yf_rate_limit_until
+                _yf_rate_limit_until = time.time() + 1800
                 CacheHut.logger.warning(f"safe_get_info({key}) :: rate-limited — bloqueado 30 min")
             else:
                 CacheHut.logger.error(f"safe_get_info({key}) :: {e}")

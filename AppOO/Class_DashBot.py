@@ -83,6 +83,7 @@ class ClassAgenteIA:
         self.positions = []
         self.NotFound = []
         self.PlanInversion = PlanInversion()
+        self.Market = MarketScreen()
         self.sesion = self.PlanInversion.get_sesion_by_vehiculo(self.vehiculo)
         self.account = self.sesion["idcuenta"]
         _sesion_crypto = self.PlanInversion.get_sesion_by_vehiculo("Crypto")
@@ -729,7 +730,7 @@ class ClassAgenteIA:
         self, symbol, account, roi, last, max_price, stop_calculado, stop_anterior, atr, base_limit
     ) -> dict:
         """Arma el dict de contexto completo para el prompt Claude de preservation."""
-        ctx = self.RepositorioOportunidades.select_preservation_context(symbol, account)
+        ctx = self.Market.select_preservation_context(symbol, account)
         ctx.update(
             {
                 "symbol": symbol,
@@ -907,19 +908,26 @@ class ClassAgenteIA:
         for positio in positions:
             symbol = positio.get("ticket")
             costobase = positio.get("costobase", 0)
-            unrealizedpnl = positio.get("unrealizedpnl", 0)
             position_qty = positio.get("position", 0)
             conid = positio.get("conid")
             account = positio.get("useraccount")
-            base_limit = unrealizedpnl * proteccion_base
 
             if costobase <= 0 or position_qty <= 0:
                 continue
 
+            # unrealizedpnl desde mktvalue (mrkprice×position) — más fresco que el campo guardado en DB
+            mktvalue = positio.get("mktvalue") or 0
+            unrealizedpnl = (mktvalue - costobase) if mktvalue else positio.get("unrealizedpnl", 0)
+
             # 2. Verificar ROI >= roi_minimo
             roi = unrealizedpnl / costobase
             if roi < roi_minimo:
+                self._preservation_logger.debug(
+                    f"[SKIP] {symbol}: ROI={roi:.1%} < {roi_minimo:.0%} | unrealizedpnl={unrealizedpnl:.2f} mktvalue={mktvalue:.2f} costobase={costobase:.2f}"
+                )
                 continue
+
+            base_limit = unrealizedpnl * proteccion_base
 
             self.logger.warning(f"Preservation({vehiculo}/{symbol}): ROI={roi:.1%} ≥ {roi_minimo:.0%} → evaluando")
 

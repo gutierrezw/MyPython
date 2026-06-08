@@ -1965,8 +1965,12 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                         iteraStream += 1
                         self.WsStock.my_message = self.on_message_IBrks_websocket
+                        DataHub.WsStock = self.WsStock
+                        DataHub.ws_stock_iter = iteraStream
                         DataHub.update_self_procesos(proces="thread", tarea=task, itera=iteraStream)
+                        DataHub.ws_stock_connected = True
                         self.WsStock.websocket_loop(limit=limit)
+                        DataHub.ws_stock_connected = False
                         _log.error(
                             f"websocket_stream(Stock): websocket_loop() terminó, esperando 30s antes de reconectar"
                         )
