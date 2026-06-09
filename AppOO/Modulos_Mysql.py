@@ -5003,6 +5003,10 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 print("[Mysql:: update_codigo_sell()]: {}".format(e))
 
         try:
+            if len(symbol) > 100:
+                print(f"[Mysql:: insert_booktrading()]: símbolo demasiado largo ({len(symbol)} chars) → {symbol[:60]}…")
+                return
+
             conn = self._conectar(tabla="insert.booktrading")
             cursor = conn.cursor()
             valuesins = []
@@ -5025,6 +5029,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             # ubica último trader del symbol para obtener basico
             nw_producto, ubasico, ustock = 0.0, 0.0, 0.0
             usec, uid, position = 0.0, 0.0, 0.0
+            costo_avg = 0.0
 
             utrading, ix = self.select_booktrading(accion="last", account=account, idivisa=idivisa, symbol=symbol)
             if utrading:

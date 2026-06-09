@@ -72,7 +72,10 @@ class _TVRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (ConnectionAbortedError, BrokenPipeError):
+            pass
 
     def do_OPTIONS(self):
         origin = self.headers.get("Origin", "https://www.tradingview.com")

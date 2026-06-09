@@ -18,6 +18,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import hashlib
 import textwrap
+import webbrowser
 import random
 import shutil
 import string

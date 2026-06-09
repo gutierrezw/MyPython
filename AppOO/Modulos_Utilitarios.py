@@ -939,6 +939,7 @@ def style_app(main=None) -> object:
     )
 
     style.configure("Custom.TNotebook.Tab", background="lightblue", font=("Arial", 10, "bold"))
+    style.configure("IB_OFFLINE.TNotebook.Tab", background="darkorange", foreground="white")
 
     # TLabel
     style.configure("TLabel", font=("Courier", 8), foreground="white", background="black")

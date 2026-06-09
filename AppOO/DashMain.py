@@ -93,6 +93,7 @@ from Modulos_python import (
     os,
     datetime,
     threading,
+    webbrowser,
     Figure,
     FigureCanvasTkAgg,
     time,
@@ -1878,10 +1879,16 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 while True:
                     try:
                         DataHub.update_self_procesos(proces="thread", tarea=task, itera=iteraStream)
+                        if hasattr(self, "win1") and hasattr(self, "nb"):
+                            self.root.after(0, lambda: self.nb.tab(self.win1, style="TNotebook.Tab"))
                         self.schedule_WebsocketBinanceStream(limit=limit)
                         iteraStream += 1
+                        if hasattr(self, "win1") and hasattr(self, "nb"):
+                            self.root.after(0, lambda: self.nb.tab(self.win1, style="IB_OFFLINE.TNotebook.Tab"))
                     except Exception as e:
                         self.logger.error(f"websocket_stream(): {e}")
+                        if hasattr(self, "win1") and hasattr(self, "nb"):
+                            self.root.after(0, lambda: self.nb.tab(self.win1, style="IB_OFFLINE.TNotebook.Tab"))
                         time.sleep(30)
 
             def websocket_client(limit, task):
@@ -1969,11 +1976,21 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         DataHub.ws_stock_iter = iteraStream
                         DataHub.update_self_procesos(proces="thread", tarea=task, itera=iteraStream)
                         DataHub.ws_stock_connected = True
+                        if hasattr(self, "win0") and hasattr(self, "nb"):
+                            self.root.after(0, lambda: self.nb.tab(self.win0, style="TNotebook.Tab"))
                         self.WsStock.websocket_loop(limit=limit)
                         DataHub.ws_stock_connected = False
+                        if hasattr(self, "win0") and hasattr(self, "nb"):
+                            self.root.after(0, lambda: self.nb.tab(self.win0, style="IB_OFFLINE.TNotebook.Tab"))
                         _log.error(
-                            f"websocket_stream(Stock): websocket_loop() terminó, esperando 30s antes de reconectar"
+                            f"websocket_stream(Stock): websocket_loop() terminó (iter={iteraStream}), esperando 30s antes de reconectar"
                         )
+                        if iteraStream > 3:
+                            _ib_auth_url = (
+                                f"https://localhost:{DataHub.ib_gateway_port}/sso/Login?forwardTo=22&RL=1&ip2loc=on"
+                            )
+                            _log.error(f"websocket_stream(Stock): IB Gateway requiere reautenticación — {_ib_auth_url}")
+                            webbrowser.open(_ib_auth_url)
                         DataHub.system_alerts.append("⚠️ IB Gateway caído — reconectando en 30s")
                         time.sleep(30)
 
