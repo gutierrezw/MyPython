@@ -108,7 +108,7 @@ class ClassAgenteIA:
         self.preservation_config = {}  # {vehiculo: sub-dict "preservation"} — extraído de _params_cache
         self.preservation_last_run = {}  # {vehiculo: datetime} — última evaluación por vehículo
         self._params_cache = {}  # {vehiculo: full parsed parameters dict} — compartido entre agentes
-        self._preservation_dry_run = False
+        self._preservation_dry_run = True  # DRY RUN — validando SMA20 + fix limit price
         # Cargar estado persistido (sobrevive reinicios — stop_prev correcto sin depender de IB)
         _saved = read_json_tmp("preservation_state.json")
         self.preservation_state = {
@@ -727,7 +727,7 @@ class ClassAgenteIA:
         return self._params_cache.get(vehiculo)
 
     def _build_preservation_context(
-        self, symbol, account, roi, last, max_price, stop_calculado, stop_anterior, atr, base_limit
+        self, symbol, account, roi, last, sma_base, max_price, stop_calculado, stop_anterior, atr, base_limit
     ) -> dict:
         """Arma el dict de contexto completo para el prompt Claude de preservation."""
         ctx = self.Market.select_preservation_context(symbol, account)
@@ -736,6 +736,7 @@ class ClassAgenteIA:
                 "symbol": symbol,
                 "roi": roi,
                 "last": last,
+                "sma_base": sma_base,
                 "max_price": max_price,
                 "stop_calculado": stop_calculado,
                 "stop_anterior": stop_anterior,
@@ -784,8 +785,8 @@ class ClassAgenteIA:
             f"Las reglas fijas ya activaron la protección de esta posición (ROI >= 10%).\n"
             f"Tu tarea es ajustar el nivel del STOP para maximizar la protección según el contexto.\n\n"
             f"Posición: {ctx['symbol']}\n"
-            f"- ROI actual: {_v('roi', '{:.1%}')} | Precio: ${_v('last', '{:.2f}')} | Max histórico: ${_v('max_price', '{:.2f}')}\n"
-            f"- Stop base (reglas): ${_v('stop_calculado', '{:.2f}')} | Stop anterior: ${_v('stop_anterior', '{:.2f}')}\n"
+            f"- ROI actual: {_v('roi', '{:.1%}')} | Precio: ${_v('last', '{:.2f}')} | SMA20: ${_v('sma_base', '{:.2f}')} | Max reciente: ${_v('max_price', '{:.2f}')}\n"
+            f"- Stop base (SMA20): ${_v('stop_calculado', '{:.2f}')} | Stop anterior: ${_v('stop_anterior', '{:.2f}')}\n"
             f"- ATR(14): ${_v('atr', '{:.2f}')}\n\n"
             f"Contexto fundamental:\n"
             f"- Consenso: {_v('consenso_tag')} ({_v('consenso_suma')} votos)\n"
@@ -946,13 +947,21 @@ class ClassAgenteIA:
                 self.logger.warning(f"Preservation({vehiculo}/{symbol}): {atr_error} → SKIP")
                 continue
 
-            # 6. Actualizar max_price
+            # 5b. SMA20 — base suavizada para stop (activos long-term encima de EMAs)
+            sma_base, sma_error = DataHub.preservation_get_sma(symbol, vehiculo)
+            if sma_base is None:
+                sma_base = last
+                self.logger.warning(
+                    f"Preservation({vehiculo}/{symbol}): SMA20 no disponible ({sma_error}) → usando last={last:.2f}"
+                )
+
+            # 6. Actualizar max_price (solo para limit price de la orden STP LMT)
             max_price_prev = state.get("max_price", last)
             max_price = max(max_price_prev, last)
 
-            # 7. Calcular stop
-            stop_distance = max(correccion_pct * max_price, atr_mult * atr)
-            stop_calculado = max_price - stop_distance
+            # 7. Calcular stop desde SMA20 (no persigue picos intradiarios)
+            stop_distance = max(correccion_pct * sma_base, atr_mult * atr)
+            stop_calculado = sma_base - stop_distance
 
             # 8. Regla de oro: nunca bajar el stop
             stop_anterior = state.get("stop_actual", 0)
@@ -963,7 +972,7 @@ class ClassAgenteIA:
             claude_result = None
             if _claude_key:
                 ctx = self._build_preservation_context(
-                    symbol, account, roi, last, max_price, stop_calculado, stop_anterior, atr, base_limit
+                    symbol, account, roi, last, sma_base, max_price, stop_calculado, stop_anterior, atr, base_limit
                 )
                 claude_result = self._claude_preservation_eval(ctx, _claude_key)
                 if claude_result:
@@ -991,7 +1000,7 @@ class ClassAgenteIA:
                 accion = "NUEVA" if not order_id_prev else "MODIFICADA (cancel+new)"
                 msg = (
                     f"Preservation({vehiculo}/{symbol}): "
-                    f"ROI={roi:.1%} | last={last:.2f} | max={max_price:.2f} | "
+                    f"ROI={roi:.1%} | last={last:.2f} | sma20={sma_base:.2f} | max={max_price:.2f} | "
                     f"ATR={atr:.2f} | stop_prev={stop_anterior:.2f} → stop_new={stop_final:.2f} | "
                     f"qty={qty} | base_limit={base_limit:.2f} | trama={trama} | {accion}"
                 )
@@ -1011,6 +1020,7 @@ class ClassAgenteIA:
                             "tipo": "preservation_stop",
                             "decision": {
                                 "roi": round(float(roi), 4),
+                                "sma_base": round(float(sma_base), 4),
                                 "max_price": round(float(max_price), 4),
                                 "atr": round(float(atr), 4),
                                 "stop_calculado_reglas": round(float(stop_calculado), 4),
@@ -1045,7 +1055,7 @@ class ClassAgenteIA:
                 order_id = order_id_prev
                 msg = (
                     f"Preservation({vehiculo}/{symbol}): "
-                    f"ROI={roi:.1%} | last={last:.2f} | max={max_price:.2f} | "
+                    f"ROI={roi:.1%} | last={last:.2f} | sma20={sma_base:.2f} | "
                     f"stop={stop_final:.2f} (sin cambio)"
                 )
                 self._preservation_logger.info(msg)

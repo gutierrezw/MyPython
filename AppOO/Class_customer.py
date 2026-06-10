@@ -979,6 +979,30 @@ class DataHub:
         return calcular_atr(datos), None
 
     @staticmethod
+    def preservation_get_sma(symbol, vehiculo="Stock", period=20):
+        """Calcula SMA de cierres (base suavizada para stop long-term). Retorna (sma, error_msg)."""
+        info_symbol = DataHub.info.get(symbol, {})
+        datos_fn = info_symbol.get("datos")
+        datos = datos_fn() if datos_fn else None
+
+        if datos is None or datos.empty or len(datos) < period:
+            try:
+                ticket = convierte_ticket_crypto(symbol) if vehiculo == "Crypto" else symbol
+                result = get_yfinance(ticket=ticket, vehiculo=vehiculo, period="6mo", interval="1d")
+                if result:
+                    _, datos = result
+            except Exception:
+                pass
+
+        if datos is None or datos.empty or len(datos) < period:
+            n = 0 if datos is None else len(datos)
+            return None, f"datos insuficientes ({n} rows, SMA{period})"
+        close_col = next((c for c in datos.columns if "close" in c.lower()), None)
+        if close_col is None:
+            return None, "columna close no encontrada"
+        return float(datos[close_col].tail(period).mean()), None
+
+    @staticmethod
     def preservation_calc_qty(account, vehiculo, symbol, last, base_limit):
         """Calcula qty a proteger, respetando lotSize en Crypto."""
 
@@ -1013,6 +1037,7 @@ class DataHub:
             account=account, symbol=symbol, option=vehiculo, tipo="STP", subtipo="LMT", recomendado="PRESERVATION_STOP"
         )
         if vehiculo == "Stock":
+            limit_price = float(round(stop_price * 0.99, 2))
             return {
                 "account": account,
                 "vehiculo": "Stock",
@@ -1023,7 +1048,7 @@ class DataHub:
                             "conid": int(conid),
                             "orderType": "STP LMT",
                             "auxPrice": float(round(stop_price, 2)),
-                            "price": float(round(max_price, 2)),
+                            "price": limit_price,
                             "side": "SELL",
                             "tif": "GTC",
                             "quantity": float(qty),
