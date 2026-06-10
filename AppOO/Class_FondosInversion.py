@@ -16,7 +16,7 @@ from Modulos_python import (
 )
 
 _logger = logging.getLogger("FondosInversion")
-from Modulos_Mysql import RepositorioOportunidadesBuySell, DiariaCNV
+from Modulos_Mysql import RepositorioOportunidadesBuySell, DiariaCNV, IPerformance
 from Class_customer import WidgetVehiculo, TickerInfo, DataHub
 from Modulos_Utilitarios import delete_file, buscar_ticker, define_FileCache, is_numeric
 from Modulos_Comunes import diaria_book_performance, proceso_update_performance
@@ -878,21 +878,42 @@ class ArsFondosInversion(tk.Frame):
 
         update = False
         if account:
-            # for account in self.account_fci:
+            # solo procesar cuando CNV ya publicó precios de ayer — valida fecha en diaria_cnv
+            ayer = (datetime.now() - timedelta(days=1)).date()
+            ultima_cnv = self.ClassCNV.last_insert_CNV()
+            if ultima_cnv == "0001-01-01" or datetime.strptime(ultima_cnv, "%Y-%m-%d").date() < ayer:
+                _logger.warning(
+                    f"schedule_diaria_performace({account}): CNV gate bloqueado — ultima_cnv={ultima_cnv} ayer={ayer}"
+                )
+                return update
+
             t_wait, update = DataHub.last_process[self.vehiculo], False
             update = diaria_book_performance(account=account, vehiculo=self.vehiculo, proces=t_wait)
 
-            # si actualizó tabla diaria, calcula proxima fecha de update
             if update:
-                # agrega performance a la tabla
                 proceso_update_performance(account=account, vehiculo=self.vehiculo)
 
-        # if update:
-        #    # eof() programa próxima ejecución
-        #    hoy = datetime.now().replace(hour=23, minute=0, second=0, microsecond=0)
-        #    wait = hoy + timedelta(days=1)
-        #    DataHub.last_process[self.vehiculo]["diaria_book_performance"] = wait
-        #    DataHub.last_process["graph_performace_portafolio"] = False
+    def _purgar_diaria_si_nueva_operacion(self, account):
+        try:
+            Performa = IPerformance()
+            sql, ix = Performa.select_diaria_performance(account=account)
+            if not sql:
+                return
+            ultima_diaria = max(row[ix.index("Date")] for row in sql)
+
+            book, bix = self.RepositorioOportunidades.select_booktrading(accion="diaria_app", account=account)
+            if not book:
+                return
+            ops_nuevas = [r for r in book if r[bix.index("fechahora")].date() > ultima_diaria]
+            if not ops_nuevas:
+                return
+
+            desde = min(r[bix.index("fechahora")].date() for r in ops_nuevas)
+            result = Performa.purgar_desde(account=account, vehiculo=self.vehiculo, desde=desde)
+            DataHub.last_process[self.vehiculo]["diaria_book_performance"] = None
+            _logger.warning(f"_purgar_diaria ({account}): purga desde {desde} → {result}")
+        except Exception as e:
+            _logger.error(f"_purgar_diaria_si_nueva_operacion({account}): {e}")
 
     # descarga EXCEl de la WEB
     def downdload_CNV_diaria(self):
@@ -924,8 +945,20 @@ class ArsFondosInversion(tk.Frame):
                     self.update_panel_fci()
                     self.ars.update_panelVehiculo(orden=self.ars.orden)
 
-                    # actualiza diaria y performance
-                    self.schedule_diaria_performace(account)
+                    # si hay operaciones nuevas después de la última diaria → purga para regenerar limpio
+                    if account:
+                        self._purgar_diaria_si_nueva_operacion(account)
+
+                # actualiza diaria y performance siempre — independiente de carga de archivo
+                # (gprealizadas de ventas se capturan aunque no haya extracto nuevo ese día)
+                ran = False
+                for _acc in self.account_fci:
+                    ran = self.schedule_diaria_performace(_acc) or ran
+                if ran:
+                    DataHub.last_process[self.vehiculo]["diaria_book_performance"] = (
+                        datetime.now() + timedelta(days=1)
+                    ).date()
+                    DataHub.last_process["graph_performace_portafolio"] = False
 
                 self.counter += 1
                 DataHub.update_self_procesos(proces="thread", tarea=task, itera=self.counter)

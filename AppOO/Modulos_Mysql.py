@@ -873,7 +873,10 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                 valuesins.append(vals)
 
             valuesins.append(symbol)
-            qry += "symbol) VALUES ({});".format(",".join("%s" for _ in range(len(valuesins))))
+            placeholders = ",".join("%s" for _ in range(len(valuesins)))
+            cols = [k for k in values.keys()] + ["symbol"]
+            update_clause = ", ".join(f"{c}=VALUES({c})" for c in cols)
+            qry += f"symbol) VALUES ({placeholders}) ON DUPLICATE KEY UPDATE {update_clause};"
             cursor.execute(qry, tuple(valuesins))
         except (Exception, EncodingWarning, connect.Error) as error:
             print(f"Mysql:: insert_diaria_performance()]: {error} {qry}={tuple(valuesins)}")
@@ -4602,14 +4605,14 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                         SELECT X.cuenta, X.simbolo,  X.fechahora, sum(cantidad) as cantidad
                         FROM
                         (SELECT a.* from (SELECT cuenta, simbolo,  max(fechahora) fechahora, sum(cantidad) cantidad
-                                        FROM bdinv.booktrading  WHERE cuenta = '{account}' and date(fechahora) < '{f_hasta}'
-                                        GROUP by cuenta, simbolo) as a  
-                        UNION 
+                                        FROM bdinv.booktrading  WHERE cuenta = '{account}' and date(fechahora) <= '{f_hasta}'
+                                        GROUP by cuenta, simbolo) as a
+                        UNION
                         SELECT a.* from (SELECT cuenta, simbolo,  fechahora, sum(cantidad) cantidad
-                                        FROM bdinv.booktrading  WHERE cuenta = '{account}' and date(fechahora) < '{f_hasta}' 
+                                        FROM bdinv.booktrading  WHERE cuenta = '{account}' and date(fechahora) <= '{f_hasta}'
                                                                   and month(fechahora) = {hasta_mes} and year(fechahora) = {hasta_año}
                                         GROUP by cuenta, simbolo, fechahora) as a) as X
-                        GROUP by X.cuenta, X.simbolo, X.fechahora 
+                        GROUP by X.cuenta, X.simbolo, X.fechahora
                         ORDER by simbolo, fechahora ASC;
                       """
                 cursor.execute(qrq)
