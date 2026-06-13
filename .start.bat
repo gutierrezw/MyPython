@@ -11,7 +11,7 @@ echo ------------------------------------------------------------
 
 :: Cerrar procesos en puerto 6000
 echo Cerrando procesos en puerto 5501...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5501') do (
+for /f "tokens=5" %%a in ('') do (
     taskkill /PID %%a /F 2>nul
 )
 timeout /t 2 >nul
@@ -48,4 +48,5 @@ java -server -Dvertx.disableDnsResolver=true -Djava.net.preferIPv4Stack=true -Dv
 rem optional arguments
 rem -conf conf.beta.yaml --nossl
 
+cd /d "C:\Users\InversionesWildaga\Documents\Mypython
 :END

@@ -66,6 +66,7 @@ class ArsFondosInversion(tk.Frame):
         self.cus = TickerInfo(account="BBVA0001", vehiculo=self.vehiculo)
 
         self.ars.carga_inversion_en_positions()
+        self.update_FCI_en_positions()
         self.update_panel_fci()
 
         self.ars.inicio_widget_treeview(self.ars.positions)
@@ -892,6 +893,8 @@ class ArsFondosInversion(tk.Frame):
 
             if update:
                 proceso_update_performance(account=account, vehiculo=self.vehiculo)
+
+        return update
 
     def _purgar_diaria_si_nueva_operacion(self, account):
         try:

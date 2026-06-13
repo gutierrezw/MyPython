@@ -136,12 +136,22 @@ AGENTES_SCHEDULE = {
 }
 
 
-def wait_rate(intervalo_segundos: int, persist: bool = False, initial_delay: int = 0):
+def wait_rate(intervalo_segundos: int, persist: bool = False, initial_delay: int = 0, desc: str = "", nivel: int = 1):
     """Decorador: restringe la ejecución a una vez por intervalo. persist=True sobrevive reinicios.
-    initial_delay: segundos a esperar en el primer arranque antes de ejecutar por primera vez."""
+    initial_delay: segundos a esperar en el primer arranque antes de ejecutar por primera vez.
+    desc/nivel: si se pasan, registra el agente en AGENTES_SCHEDULE automáticamente."""
     _FILE = "agents_schedule.json"
 
     def decorator(func):
+        if desc and func.__name__ not in AGENTES_SCHEDULE:
+            AGENTES_SCHEDULE[func.__name__] = {
+                "intervalo": intervalo_segundos,
+                "desc": desc,
+                "active": True,
+                "nivel": nivel,
+            }
+        if func.__name__ in AGENTES_SCHEDULE:
+            AGENTES_SCHEDULE[func.__name__].setdefault("run_count", 0)
         func.last_run = 0
 
         @wraps(func)
@@ -162,6 +172,8 @@ def wait_rate(intervalo_segundos: int, persist: bool = False, initial_delay: int
             wrapper._overdue = transcurrido > intervalo_segundos * 1.5
             resultado = func(*args, **kwargs)
             func.last_run = ahora
+            if func.__name__ in AGENTES_SCHEDULE:
+                AGENTES_SCHEDULE[func.__name__]["run_count"] = AGENTES_SCHEDULE[func.__name__].get("run_count", 0) + 1
             if persist:
                 data = read_json_tmp(_FILE)
                 data[func.__name__] = ahora
@@ -172,6 +184,16 @@ def wait_rate(intervalo_segundos: int, persist: bool = False, initial_delay: int
         return wrapper
 
     return decorator
+
+
+def track_claude_usage(vehiculo: str, tokens_in: int, tokens_out: int):
+    """Acumula calls + tokens por clave API en tmp/claude_usage_by_key.json."""
+    data = read_json_tmp("claude_usage_by_key.json")
+    entry = data.setdefault(vehiculo, {"calls": 0, "tokens_in": 0, "tokens_out": 0})
+    entry["calls"] += 1
+    entry["tokens_in"] += tokens_in
+    entry["tokens_out"] += tokens_out
+    write_json_tmp("claude_usage_by_key.json", data)
 
 
 def format_financiero(width=0, importe=0, divisa="USD"):

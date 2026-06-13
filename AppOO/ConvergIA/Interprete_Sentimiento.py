@@ -1,5 +1,6 @@
-from Modulos_python import anthropic, logging, json, date
+from Modulos_python import anthropic, logging, json, date, time
 from Modulos_Mysql import MarketScreen
+from Modulos_Utilitarios import track_claude_usage
 
 _logger = logging.getLogger("Sentimiento")
 _MODEL = "claude-haiku-4-5-20251001"
@@ -48,6 +49,8 @@ def interpretar_sentimiento(account: str, api_key: str = None) -> dict:
                 max_tokens=150,
                 messages=[{"role": "user", "content": prompt}],
             )
+            track_claude_usage("ClaudeAPIS", msg.usage.input_tokens, msg.usage.output_tokens)
+            time.sleep(1)
             text = msg.content[0].text.strip()
             start, end = text.find("{"), text.rfind("}") + 1
             if start >= 0 and end > start:

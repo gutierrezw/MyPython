@@ -1954,6 +1954,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                 try:
                     url = f"wss://localhost:{DataHub.ib_gateway_port}/v1/api/ws"
+                    _gw_down_alerted = False
                     while True:
 
                         if iteraStream > 1:
@@ -1975,6 +1976,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         DataHub.WsStock = self.WsStock
                         DataHub.ws_stock_iter = iteraStream
                         DataHub.update_self_procesos(proces="thread", tarea=task, itera=iteraStream)
+                        _gw_down_alerted = False
                         DataHub.ws_stock_connected = True
                         if hasattr(self, "win0") and hasattr(self, "nb"):
                             self.root.after(0, lambda: self.nb.tab(self.win0, style="TNotebook.Tab"))
@@ -1985,13 +1987,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         _log.error(
                             f"websocket_stream(Stock): websocket_loop() terminó (iter={iteraStream}), esperando 30s antes de reconectar"
                         )
-                        if iteraStream > 3:
-                            _ib_auth_url = (
-                                f"https://localhost:{DataHub.ib_gateway_port}/sso/Login?forwardTo=22&RL=1&ip2loc=on"
-                            )
-                            _log.error(f"websocket_stream(Stock): IB Gateway requiere reautenticación — {_ib_auth_url}")
-                            webbrowser.open(_ib_auth_url)
-                        DataHub.system_alerts.append("⚠️ IB Gateway caído — reconectando en 30s")
+                        if not _gw_down_alerted:
+                            DataHub.system_alerts.append("⚠️ IB Gateway caído — reconectando en 30s")
+                            _gw_down_alerted = True
                         time.sleep(30)
 
                 except Exception as e:

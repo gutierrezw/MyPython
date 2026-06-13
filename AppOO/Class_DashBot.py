@@ -68,7 +68,14 @@ from Modulos_Mysql import (
 from Class_customer import DataHub, TickerInfo
 from Class_BrowserBridge import set_claude_contexto
 from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
-from Modulos_Utilitarios import define_FileCache, read_json_tmp, write_json_tmp, AGENTES_SCHEDULE, wait_rate
+from Modulos_Utilitarios import (
+    define_FileCache,
+    read_json_tmp,
+    write_json_tmp,
+    AGENTES_SCHEDULE,
+    wait_rate,
+    track_claude_usage,
+)
 from Class_AgentManager import AgentManager
 from ConvergIA.Scanner_Sentimiento import scan_sentimiento
 from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
@@ -108,7 +115,7 @@ class ClassAgenteIA:
         self.preservation_config = {}  # {vehiculo: sub-dict "preservation"} — extraído de _params_cache
         self.preservation_last_run = {}  # {vehiculo: datetime} — última evaluación por vehículo
         self._params_cache = {}  # {vehiculo: full parsed parameters dict} — compartido entre agentes
-        self._preservation_dry_run = True  # DRY RUN — validando SMA20 + fix limit price
+        self._preservation_dry_run = False
         # Cargar estado persistido (sobrevive reinicios — stop_prev correcto sin depender de IB)
         _saved = read_json_tmp("preservation_state.json")
         self.preservation_state = {
@@ -359,6 +366,8 @@ class ClassAgenteIA:
         )
         if not resp.ok:
             raise RuntimeError(f"{resp.status_code} — {resp.json()}")
+        usage = resp.json().get("usage", {})
+        track_claude_usage("ClaudeAPIC", usage.get("input_tokens", 0), usage.get("output_tokens", 0))
         return resp.json()["content"][0]["text"].strip()
 
     @wait_rate(300, persist=True)
@@ -699,6 +708,8 @@ class ClassAgenteIA:
             )
             if not resp.ok:
                 return None
+            usage = resp.json().get("usage", {})
+            track_claude_usage("ClaudeAPIP", usage.get("input_tokens", 0), usage.get("output_tokens", 0))
             text = resp.json()["content"][0]["text"].strip()
             start, end = text.find("{"), text.rfind("}") + 1
             if start >= 0 and end > start:
@@ -819,6 +830,8 @@ class ClassAgenteIA:
             if not resp.ok:
                 self.logger.error(f"_claude_preservation_eval({ctx['symbol']}): HTTP {resp.status_code}")
                 return None
+            usage = resp.json().get("usage", {})
+            track_claude_usage("ClaudeAPIP", usage.get("input_tokens", 0), usage.get("output_tokens", 0))
             text = resp.json()["content"][0]["text"].strip()
             start, end = text.find("{"), text.rfind("}") + 1
             if start >= 0 and end > start:
@@ -923,9 +936,6 @@ class ClassAgenteIA:
             # 2. Verificar ROI >= roi_minimo
             roi = unrealizedpnl / costobase
             if roi < roi_minimo:
-                self._preservation_logger.debug(
-                    f"[SKIP] {symbol}: ROI={roi:.1%} < {roi_minimo:.0%} | unrealizedpnl={unrealizedpnl:.2f} mktvalue={mktvalue:.2f} costobase={costobase:.2f}"
-                )
                 continue
 
             base_limit = unrealizedpnl * proteccion_base

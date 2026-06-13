@@ -56,6 +56,7 @@ class IB(IBClient):
         self.task = "IBKR-Tickle(On)"
         self.logger = logging.getLogger("IBroks_Client")
         self._network_error_logged = False  # guard: loguea NETWORK EXCEPTION solo una vez por período de caída
+        self._browser_opened = False  # guard: abre browser IB solo una vez hasta autenticación exitosa
 
     # valida conexión al localHost
     def is_localhost(self):
@@ -64,15 +65,23 @@ class IB(IBClient):
             # response = requests.get(url, verify=True)
 
             auth = self.is_authenticated(True)
+            if not auth:
+                print("is_localhost(Stock): gateway inalcanzable (sin respuesta)")
+                return ilog
             if "authenticated" in auth:
                 if auth["authenticated"] and auth["connected"]:
                     ilog = True
+                    self._browser_opened = False
                 else:
-                    webbrowser.open(self.ib_gateway_path)
+                    if not self._browser_opened:
+                        webbrowser.open(self.login_gateway_path)
+                        self._browser_opened = True
                     time.sleep(20)
             else:
                 print(f"is_localhost(Stock): Error usuario no authenticated")
-                webbrowser.open(self.ib_gateway_path)
+                if not self._browser_opened:
+                    webbrowser.open(self.login_gateway_path)
+                    self._browser_opened = True
 
             return ilog
         except Exception as error:
@@ -157,11 +166,9 @@ class IB(IBClient):
                     datahub.update_self_procesos(proces="thread", tarea=self.task, itera=counter)
                 counter += 1
 
-                # sesión SSO viva pero brokerage desconectado → validate + reauthenticate proactivo
+                # sesión SSO viva pero brokerage desconectado — IB lo recupera solo, no intervenir
                 if auth and not connected:
-                    self.validate()
-                    reauth_resp = self.reauthenticate()
-                    self.logger.warning(f"⚠️ IB connected=False — validate+reauthenticate(): {reauth_resp}")
+                    self.logger.warning("⚠️ IB connected=False — esperando recuperación automática")
 
                 if auth:
                     if was_disconnected:

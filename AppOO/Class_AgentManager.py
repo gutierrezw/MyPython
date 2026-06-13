@@ -4,7 +4,7 @@ Dominios: Stock | Crypto | IA | Infra
 """
 
 from Modulos_python import logging, json, datetime, yf, requests, textwrap, Path
-from Modulos_Utilitarios import wait_rate, read_json_tmp, write_json_tmp
+from Modulos_Utilitarios import wait_rate, read_json_tmp, write_json_tmp, track_claude_usage
 from Modulos_Mysql import (
     RepositorioOportunidadesBuySell,
     BDsystem,
@@ -86,6 +86,8 @@ class AgentManager:
             timeout=15,
         )
         resp.raise_for_status()
+        usage = resp.json().get("usage", {})
+        track_claude_usage("ClaudeAPIE", usage.get("input_tokens", 0), usage.get("output_tokens", 0))
         codigo = resp.json()["content"][0]["text"].strip()
         return codigo if codigo in {o["estrategia"] for o in opciones} else None
 
@@ -495,6 +497,31 @@ class AgentManager:
 
     # ── registro ──────────────────────────────────────────────────────────────
 
+    @wait_rate(86400, persist=True, desc="Detecta posiciones residuales/fantasma en booktrading (diario)", nivel=1)
+    def Agente_MonitorBooktrading(self):
+        try:
+            alertas = self.PlanInversion.monitor_residual_positions()
+            if not alertas:
+                self._log_infra.warning("Agente_MonitorBooktrading: OK — sin posiciones residuales")
+                return
+            resumen = "; ".join(
+                f"{a['symbol']}({a['account']}) stock={a['book_stock']:.4f} [{a['motivo']}]" for a in alertas
+            )
+            self._log_infra.warning(f"Agente_MonitorBooktrading: {len(alertas)} residuales → {resumen}")
+            DataHub.system_alerts.append(
+                "⚠️ Monitor Booktrading: {} residuales\n{}".format(
+                    len(alertas),
+                    "\n".join(
+                        "  • {} [{}] stock={:.4f} mktval=${:.2f} — {}".format(
+                            a["symbol"], a["account"], a["book_stock"], a["mktvalue"], a["motivo"]
+                        )
+                        for a in alertas
+                    ),
+                )
+            )
+        except Exception as e:
+            self._log_infra.error(f"Agente_MonitorBooktrading(): {e}")
+
     def run_loop(self):
         """Agentes ejecutados en el loop principal cada 15s (throttleados por wait_rate)."""
         self.Agente_LtvControl()
@@ -523,6 +550,7 @@ class AgentManager:
             ("Agente_ApiCostTracker", self.Agente_ApiCostTracker, 300),
             ("Agente_YouTubeScanner", self.Agente_YouTubeScanner, 300),
             ("Agente_YouTubeBackfill", self.Agente_YouTubeBackfill, 60),
+            ("Agente_MonitorBooktrading", self.Agente_MonitorBooktrading, 300),
         ]
         for name, target, sleep in _threads:
             DataHub.procesos.append({"thread": {name: 1}})

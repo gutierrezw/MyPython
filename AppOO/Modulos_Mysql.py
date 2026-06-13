@@ -3505,6 +3505,12 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                     insert(new_position, new_position["ticket"])
                     eof_new, new_position = next(new, (None, None))
 
+            # posiciones viejas que ya no están en la nueva cartera — dar de baja
+            while eof_old is not None:
+                if old_position["iactiva"] == "Y":
+                    baja(old_position["ticket"])
+                eof_old, old_position = next(old, (None, None))
+
             conn.commit()
             cursor.close()
             conn.close()
@@ -3956,6 +3962,67 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         found = cursor.fetchall()
         ix = [columna[0] for columna in cursor.description]
         return found, ix
+
+    def monitor_residual_positions(self) -> list:
+        UMBRAL_STOCK = 0.01
+        UMBRAL_VALOR_FCI = 5.0
+
+        conn = self._conectar(tabla="monitor_residual_positions")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT i.ticket, i.useraccount, i.tipoinv,
+                       COALESCE(i.position, 0)          AS position,
+                       COALESCE(i.mrkprice * i.position, 0) AS mktvalue,
+                       COALESCE(b.book_stock, 0)        AS book_stock
+                FROM inversion i
+                LEFT JOIN (
+                    SELECT b1.simbolo, b1.cuenta, b1.stock AS book_stock
+                    FROM booktrading b1
+                    INNER JOIN (
+                        SELECT simbolo, cuenta, MAX(fechahora) AS max_fh
+                        FROM booktrading WHERE delisted = 0
+                        GROUP BY simbolo, cuenta
+                    ) b2 ON b1.simbolo = b2.simbolo
+                         AND b1.cuenta  = b2.cuenta
+                         AND b1.fechahora = b2.max_fh
+                ) b ON i.ticket = b.simbolo AND i.useraccount = b.cuenta
+                WHERE i.iactiva = 'Y'
+            """)
+            rows = cursor.fetchall()
+        finally:
+            cursor.close()
+            conn.close()
+
+        alertas = []
+        for ticket, account, tipoin, position, mktvalue, book_stock in rows:
+            book_stock = float(book_stock or 0)
+            mktvalue = float(mktvalue or 0)
+            es_fci = tipoin not in ("Stock", "Crypto", "BotCrypto")
+
+            if abs(book_stock) < UMBRAL_STOCK:
+                alertas.append(
+                    {
+                        "symbol": ticket,
+                        "account": account,
+                        "tipoin": tipoin,
+                        "book_stock": book_stock,
+                        "mktvalue": mktvalue,
+                        "motivo": "book_stock≈0",
+                    }
+                )
+            elif es_fci and 0 < mktvalue < UMBRAL_VALOR_FCI:
+                alertas.append(
+                    {
+                        "symbol": ticket,
+                        "account": account,
+                        "tipoin": tipoin,
+                        "book_stock": book_stock,
+                        "mktvalue": mktvalue,
+                        "motivo": f"residual_fci ${mktvalue:.2f}",
+                    }
+                )
+        return alertas
 
 
 class RepositorioOportunidadesBuySell(PlanInversion):  # -------------------------------------------------------------

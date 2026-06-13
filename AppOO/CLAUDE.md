@@ -68,6 +68,40 @@ Patrón implementado en `debugging_system()`:
 
 **Objetivo de uso:** elevar loggers ruidosos a ERROR para que no ensucien el log rotativo; bajar a DEBUG para diagnóstico puntual.
 
+## Patrón para agregar un nuevo agente
+
+Un agente vive en `Class_AgentManager.py` (si es infraestructura/lento) o en `Class_DashBot.py` (si es trading/mercado).
+
+### Checklist — 3 pasos mínimos
+
+**1. Lógica de negocio** → en la clase dueña del dominio (no en el agente).
+
+**2. Método agente** — con `desc` y `nivel` en el decorador para auto-registro:
+```python
+@wait_rate(86400, persist=True, desc="Descripción corta (intervalo)", nivel=1)
+def Agente_NombreNuevo(self):
+    try:
+        result = self.ClaseDominio.metodo_logica()
+        self._log_infra.warning(f"Agente_NombreNuevo: {result}")
+    except Exception as e:
+        self._log_infra.error(f"Agente_NombreNuevo(): {e}")
+```
+`desc` + `nivel` → `wait_rate` auto-registra en `AGENTES_SCHEDULE`. **No tocar `Modulos_Utilitarios.py`.**
+
+**3. Si es en AgentManager** → agregar a `register_threads()`:
+```python
+("Agente_NombreNuevo", self.Agente_NombreNuevo, 300),
+```
+
+**4. Logger** (si emite logs propios) → registrar en `Class_debugging.py` junto a los otros loggers.
+
+### Lo que hace `wait_rate` automáticamente
+- `persist=True` → sobrevive reinicios (guarda último run en `../tmp/agents_schedule.json`)
+- `desc` presente → se auto-registra en `AGENTES_SCHEDULE` al importar el módulo
+- Sin `desc` → no aparece en el panel de schedule (invisible)
+
+---
+
 ## Base de datos — MySQL 8.x (schema: bdinv)
 
 ### Configuración optimizada (my.ini — aplicada 2026-03-30)

@@ -13,11 +13,7 @@ _API_BASE = "https://api.anthropic.com"
 _API_VER = "2023-06-01"
 _TMP_FILE = "api_costs.json"
 
-# Fragmentos que aparecen en el campo description para cada tipo de token
-_INPUT_KEYWORDS = ("input token", "cache creation", "cache read")
-_OUTPUT_KEYWORDS = ("output token",)
-
-# Precio por 1M tokens (USD) — para estimar tokens a partir del costo
+# Precio por 1M tokens (USD) — para calcular tokens a partir del costo
 _PRECIO_INPUT = {
     "claude-opus-4": 5.00,
     "claude-opus-4-5": 5.00,
@@ -42,16 +38,22 @@ _DEFAULT_INPUT = 3.00
 _DEFAULT_OUTPUT = 15.00
 
 
+def _normalize(model: str) -> str:
+    return model.lower().replace(" ", "-")
+
+
 def _precio_input(model: str) -> float:
+    norm = _normalize(model)
     for k, v in _PRECIO_INPUT.items():
-        if k in model:
+        if k in norm:
             return v
     return _DEFAULT_INPUT
 
 
 def _precio_output(model: str) -> float:
+    norm = _normalize(model)
     for k, v in _PRECIO_OUTPUT.items():
-        if k in model:
+        if k in norm:
             return v
     return _DEFAULT_OUTPUT
 
@@ -66,13 +68,18 @@ class ApiCostTracker:
         }
         self._workspace_id = workspace_id
 
-    def _fetch_pages(self, start: str, end: str) -> list:
+    def _fetch_pages(self, start: str, end: str, group_by: list = None) -> list:
         all_data = []
         next_page = None
+        group_by = group_by or ["description"]
         while True:
-            params = {"starting_at": start, "ending_at": end, "group_by[]": "description", "bucket_width": "1d"}
+            params = [
+                ("starting_at", start),
+                ("ending_at", end),
+                ("bucket_width", "1d"),
+            ] + [("group_by[]", g) for g in group_by]
             if next_page:
-                params["page"] = next_page
+                params.append(("page", next_page))
             r = requests.get(
                 f"{_API_BASE}/v1/organizations/cost_report", headers=self._headers, params=params, timeout=15
             )
@@ -86,6 +93,33 @@ class ApiCostTracker:
             next_page = page.get("next_page")
         return all_data
 
+    def _fetch_api_keys(self) -> dict:
+        """Retorna dict {workspace_id: key_name} — una key por workspace."""
+        try:
+            r = requests.get(f"{_API_BASE}/v1/organizations/api_keys", headers=self._headers, timeout=15)
+            if not r.ok:
+                return {}
+            ws_to_key = {}
+            for k in r.json().get("data", []):
+                ws_id = k.get("workspace_id", "")
+                if ws_id and ws_id not in ws_to_key:
+                    ws_to_key[ws_id] = k.get("name", k["id"])
+            return ws_to_key
+        except Exception as e:
+            _logger.warning(f"[ApiCosts._fetch_api_keys]: {e}")
+            return {}
+
+    def _fetch_workspaces(self) -> dict:
+        """Retorna dict {workspace_id: workspace_name} consultando /v1/organizations/workspaces."""
+        try:
+            r = requests.get(f"{_API_BASE}/v1/organizations/workspaces", headers=self._headers, timeout=15)
+            if not r.ok:
+                return {}
+            return {w["id"]: w.get("name", w["id"]) for w in r.json().get("data", [])}
+        except Exception as e:
+            _logger.warning(f"[ApiCosts._fetch_workspaces]: {e}")
+            return {}
+
     def get_monthly_summary(self) -> dict:
         """Retorna dict con costos y tokens estimados del mes actual. Guarda en tmp/api_costs.json."""
         hoy = date.today()
@@ -94,24 +128,25 @@ class ApiCostTracker:
         hoy_str = hoy.strftime("%Y-%m-%d")
 
         buckets = self._fetch_pages(inicio, fin)
+        ws_buckets = self._fetch_pages(inicio, fin, group_by=["workspace_id"])
+        ws_to_key = self._fetch_api_keys()  # {workspace_id: key_name}
+        ws_names = self._fetch_workspaces()  # {workspace_id: workspace_name}
 
         total_cost = today_cost = 0.0
         total_input_tokens = total_output_tokens = 0
         by_model: dict = {}
         daily_map: dict = {}
+        by_workspace: dict = {}
+
+        _INPUT_TYPES = ("uncached_input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+        _OUTPUT_TYPES = ("output_tokens",)
 
         for bucket in buckets:
             day = bucket["starting_at"][:10]
             for r in bucket.get("results", []):
-                desc = r.get("description", "").lower()
                 amount = float(r.get("amount", 0))
-
-                # description: "claude-haiku-4-5-20251001 - Input tokens"
-                # extraer el modelo como la parte antes del " - "
-                if " - " in desc:
-                    model = r.get("description", "unknown").split(" - ")[0].strip()
-                else:
-                    model = r.get("description", "unknown").strip() or "unknown"
+                model = r.get("model") or r.get("description", "unknown") or "unknown"
+                token_type = r.get("token_type") or ""
 
                 total_cost += amount
                 if day == hoy_str:
@@ -128,15 +163,12 @@ class ApiCostTracker:
 
                 by_model[model]["cost"] += amount
 
-                is_input = any(kw in desc for kw in _INPUT_KEYWORDS)
-                is_output = any(kw in desc for kw in _OUTPUT_KEYWORDS)
-
-                if is_input:
+                if token_type in _INPUT_TYPES:
                     by_model[model]["input_cost"] += amount
                     tokens = int(amount / _precio_input(model) * 1_000_000)
                     by_model[model]["input_tokens"] += tokens
                     total_input_tokens += tokens
-                elif is_output:
+                elif token_type in _OUTPUT_TYPES:
                     by_model[model]["output_cost"] += amount
                     tokens = int(amount / _precio_output(model) * 1_000_000)
                     by_model[model]["output_tokens"] += tokens
@@ -145,6 +177,15 @@ class ApiCostTracker:
                 if day not in daily_map:
                     daily_map[day] = 0.0
                 daily_map[day] += amount
+
+        for bucket in ws_buckets:
+            for r in bucket.get("results", []):
+                ws_id = r.get("workspace_id") or "default"
+                label = ws_to_key.get(ws_id) or ws_names.get(ws_id) or ws_id
+                amount = float(r.get("amount", 0))
+                if label not in by_workspace:
+                    by_workspace[label] = {"cost": 0.0}
+                by_workspace[label]["cost"] += amount
 
         daily = [{"date": k, "cost": round(v, 4)} for k, v in sorted(daily_map.items()) if v > 0]
 
@@ -164,6 +205,7 @@ class ApiCostTracker:
             "total_input_tokens": total_input_tokens,
             "total_output_tokens": total_output_tokens,
             "by_model": {k: _round_model(v) for k, v in by_model.items()},
+            "by_workspace": {k: {"cost": round(v["cost"], 4)} for k, v in by_workspace.items()},
             "daily": daily,
         }
 

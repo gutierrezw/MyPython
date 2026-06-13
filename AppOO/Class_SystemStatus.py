@@ -1540,6 +1540,9 @@ class system_status(tk.Frame):
                 return f"{secs // 60}m"
 
             def _get_run_count(name):
+                cfg = AGENTES_SCHEDULE.get(name)
+                if cfg is not None:
+                    return cfg.get("run_count", 0)
                 for row in DataHub.procesos:
                     if "thread" in row and name in row["thread"]:
                         return row["thread"][name]
@@ -1768,6 +1771,21 @@ class system_status(tk.Frame):
                         ),
                     )
 
+                for iid in tree_key.get_children():
+                    tree_key.delete(iid)
+                usage_by_key = read_json_tmp("claude_usage_by_key.json")
+                for key_name, ku in sorted(usage_by_key.items(), key=lambda x: x[1].get("tokens_in", 0), reverse=True):
+                    tree_key.insert(
+                        "",
+                        "end",
+                        values=(
+                            key_name,
+                            ku.get("calls", 0),
+                            _fmt(ku.get("tokens_in", 0)),
+                            _fmt(ku.get("tokens_out", 0)),
+                        ),
+                    )
+
                 for iid in tree_daily.get_children():
                     tree_daily.delete(iid)
                 for d in data.get("daily", [])[-7:]:
@@ -1811,6 +1829,18 @@ class system_status(tk.Frame):
                 tree.column(c, width=80, anchor="e")
             tree.column("Modelo", width=160, anchor="w")
             tree.pack(fill="x", pady=2)
+
+            # ── tabla por clave API (auto-tracking) ───────────────────────
+            ttk.Label(
+                frm, text="Por clave API (self-tracked)", foreground="#aaaaaa", font=("Consolas", 8), style="C.TLabel"
+            ).pack(anchor="w", pady=(6, 0))
+            cols_k = ("Clave", "Calls", "Tok In", "Tok Out")
+            tree_key = ttk.Treeview(frm, columns=cols_k, show="headings", height=4)
+            for c in cols_k:
+                tree_key.heading(c, text=c)
+                tree_key.column(c, width=90, anchor="e")
+            tree_key.column("Clave", width=120, anchor="w")
+            tree_key.pack(fill="x", pady=2)
 
             # ── historial diario ──────────────────────────────────────────
             ttk.Label(frm, text="Últimos 7 días", foreground="#aaaaaa", font=("Consolas", 8), style="C.TLabel").pack(

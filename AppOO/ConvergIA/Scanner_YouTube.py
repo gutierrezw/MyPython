@@ -1,6 +1,6 @@
 from Modulos_python import feedparser, anthropic, logging, json, re, yf, time, os
 from Modulos_Mysql import MarketScreen
-from Modulos_Utilitarios import read_json_tmp, write_json_tmp
+from Modulos_Utilitarios import read_json_tmp, write_json_tmp, track_claude_usage
 
 _logger = logging.getLogger("YouTubeScanner")
 _MODEL = "claude-haiku-4-5-20251001"
@@ -119,6 +119,7 @@ def _classify(videos: list, api_key: str) -> tuple:
             max_tokens=400,
             messages=[{"role": "user", "content": prompt}],
         )
+        track_claude_usage("ClaudeAPIS", msg.usage.input_tokens, msg.usage.output_tokens)
         text = msg.content[0].text.strip()
         start, end = text.find("["), text.rfind("]") + 1
         if start >= 0 and end > start:

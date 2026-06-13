@@ -56,6 +56,7 @@ from Modulos_Utilitarios import (
     define_FileCache,
     read_json_tmp,
     write_json_tmp,
+    track_claude_usage,
 )
 from Modulos_Comunes import (
     diaria_book_performance,
@@ -2157,6 +2158,8 @@ class MyOrders:
             )
             if not resp.ok:
                 return None
+            usage = resp.json().get("usage", {})
+            track_claude_usage("ClaudeAPIP", usage.get("input_tokens", 0), usage.get("output_tokens", 0))
             text = resp.json()["content"][0]["text"].strip()
             start, end = text.find("{"), text.rfind("}") + 1
             if start >= 0 and end > start:
