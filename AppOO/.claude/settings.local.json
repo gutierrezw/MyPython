@@ -3,7 +3,9 @@
     "allow": [
       "Bash(python -c \":*)",
       "Bash(find C:UsersInversionesWildagaDocumentsMyPythonEDGAR13F -name *.xml -path *0000102909*)",
-      "Bash(python Ajuste_lote_sell.py)"
+      "Bash(python Ajuste_lote_sell.py)",
+      "mcp__appoo-github__list_docs",
+      "mcp__appoo-github__read_doc"
     ]
   },
   "hooks": {
