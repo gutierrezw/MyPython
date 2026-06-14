@@ -10,6 +10,7 @@ Genera:
     reports/YYYY-WNN_report.txt     — reporte legible
     reports/latest_report.txt       — siempre apunta al último
 """
+
 import ast
 import glob
 import json
@@ -21,7 +22,7 @@ from datetime import date, datetime
 # ---------------------------------------------------------------------------
 # Configuración
 # ---------------------------------------------------------------------------
-APP_DIR     = os.path.join(os.path.dirname(__file__), "..", "AppOO")
+APP_DIR = os.path.join(os.path.dirname(__file__), "..", "AppOO")
 REPORTS_DIR = os.path.join(os.path.dirname(__file__), "reports")
 EXCLUDE_DIRS = {".idea", "__pycache__", ".git", "venv", ".venv", "AppTest"}
 
@@ -30,6 +31,7 @@ os.makedirs(REPORTS_DIR, exist_ok=True)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _week_label() -> str:
     """Retorna etiqueta tipo 2026-W12."""
@@ -56,7 +58,7 @@ def _scan_files() -> dict:
         try:
             src = open(filepath, encoding="utf-8", errors="ignore").read()
             lines = src.count("\n")
-            tree  = ast.parse(src)
+            tree = ast.parse(src)
             classes = sum(1 for n in ast.walk(tree) if isinstance(n, ast.ClassDef))
             methods = sum(1 for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
             results[rel] = {"lines": lines, "classes": classes, "methods": methods}
@@ -67,10 +69,10 @@ def _scan_files() -> dict:
 
 def _totals(files: dict) -> dict:
     return {
-        "lines"  : sum(f["lines"]   for f in files.values()),
+        "lines": sum(f["lines"] for f in files.values()),
         "classes": sum(f["classes"] for f in files.values()),
         "methods": sum(f["methods"] for f in files.values()),
-        "files"  : len(files),
+        "files": len(files),
     }
 
 
@@ -80,11 +82,18 @@ def _run_vulture() -> list:
     try:
         r = subprocess.run(
             [
-                sys.executable, "-m", "vulture", APP_DIR,
-                "--min-confidence", "80",
-                "--exclude", exclude_patterns,
+                sys.executable,
+                "-m",
+                "vulture",
+                APP_DIR,
+                "--min-confidence",
+                "80",
+                "--exclude",
+                exclude_patterns,
             ],
-            capture_output=True, text=True, timeout=180,
+            capture_output=True,
+            text=True,
+            timeout=180,
         )
         lines = [l.strip() for l in r.stdout.splitlines() if l.strip()]
         return lines
@@ -99,17 +108,25 @@ def _git_stats_week() -> dict:
     try:
         log = subprocess.run(
             ["git", "log", "--oneline", "--since=7 days ago"],
-            capture_output=True, text=True, cwd=APP_DIR,
+            capture_output=True,
+            text=True,
+            cwd=APP_DIR,
         ).stdout.strip()
         commits = [l for l in log.splitlines() if l]
 
         stat = subprocess.run(
             ["git", "diff", "--stat", "HEAD~" + str(max(len(commits), 1)), "HEAD"],
-            capture_output=True, text=True, cwd=APP_DIR,
+            capture_output=True,
+            text=True,
+            cwd=APP_DIR,
         ).stdout.strip()
 
         last_line = stat.splitlines()[-1] if stat else ""
-        return {"commits": len(commits), "commit_list": commits, "diff_summary": last_line}
+        return {
+            "commits": len(commits),
+            "commit_list": commits,
+            "diff_summary": last_line,
+        }
     except Exception as e:
         return {"commits": 0, "commit_list": [], "diff_summary": str(e)}
 
@@ -117,7 +134,7 @@ def _git_stats_week() -> dict:
 def _load_previous() -> dict | None:
     """Carga el JSON del reporte anterior (si existe)."""
     jsons = sorted(glob.glob(os.path.join(REPORTS_DIR, "*_metrics.json")))
-    week  = _week_label()
+    week = _week_label()
     # Excluir el de la semana actual si ya existiera
     prev = [f for f in jsons if week not in os.path.basename(f)]
     if not prev:
@@ -139,24 +156,25 @@ def _delta(current: int, previous: int | None) -> str:
 # Generar reporte
 # ---------------------------------------------------------------------------
 
+
 def generate():
-    week   = _week_label()
-    now    = datetime.now().strftime("%Y-%m-%d %H:%M")
-    files  = _scan_files()
+    week = _week_label()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    files = _scan_files()
     totals = _totals(files)
     vulture_hits = _run_vulture()
-    git    = _git_stats_week()
-    prev   = _load_previous()
+    git = _git_stats_week()
+    prev = _load_previous()
     prev_t = prev["totals"] if prev else None
 
     # --- JSON ---
     data = {
-        "week"   : week,
-        "date"   : now,
-        "totals" : totals,
-        "files"  : files,
+        "week": week,
+        "date": now,
+        "totals": totals,
+        "files": files,
         "vulture": vulture_hits,
-        "git"    : git,
+        "git": git,
     }
     json_path = os.path.join(REPORTS_DIR, f"{week}_metrics.json")
     with open(json_path, "w", encoding="utf-8") as f:
@@ -199,10 +217,10 @@ def generate():
     a("")
 
     # Vulture
-    dead_imports  = [v for v in vulture_hits if "unused import"    in v]
-    dead_vars     = [v for v in vulture_hits if "unused variable"  in v]
-    dead_code     = [v for v in vulture_hits if "unreachable code" in v]
-    dead_methods  = [v for v in vulture_hits if "unused method"    in v or "unused function" in v]
+    dead_imports = [v for v in vulture_hits if "unused import" in v]
+    dead_vars = [v for v in vulture_hits if "unused variable" in v]
+    dead_code = [v for v in vulture_hits if "unreachable code" in v]
+    dead_methods = [v for v in vulture_hits if "unused method" in v or "unused function" in v]
 
     a("CÓDIGO MUERTO — vulture (≥80% confianza)")
     a(sep)
@@ -229,9 +247,13 @@ def generate():
     if prev:
         a(f"COMPARACIÓN VS SEMANA ANTERIOR ({prev['week']})")
         a(sep)
-        for key, label in [("lines", "Líneas"), ("methods", "Métodos"), ("classes", "Clases")]:
+        for key, label in [
+            ("lines", "Líneas"),
+            ("methods", "Métodos"),
+            ("classes", "Clases"),
+        ]:
             delta = totals[key] - prev_t[key]
-            sign  = "+" if delta >= 0 else ""
+            sign = "+" if delta >= 0 else ""
             a(f"  {label:<12}: {prev_t[key]:>6,} → {totals[key]:>6,}  ({sign}{delta:,})")
         prev_vulture = len(prev.get("vulture", []))
         delta_v = len(vulture_hits) - prev_vulture

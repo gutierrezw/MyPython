@@ -211,6 +211,7 @@ def bind_tv_web_menu(tree, win, colors=None, col_symbol="#1", get_url=None):
         tk.Label(menu, text=f"  {symbol}", bg=bgcolor, fg=cgcolor, font=("Arial", 10, "bold"), anchor="w").pack(
             fill=tk.X
         )
+        tk.Frame(menu, bg="white", height=1).pack(fill=tk.X, padx=2)
         tk.Button(
             menu,
             text="TradingView",
@@ -229,6 +230,7 @@ def bind_tv_web_menu(tree, win, colors=None, col_symbol="#1", get_url=None):
             if url:
                 webbrowser.open(str(url))
 
+        tk.Frame(menu, bg="white", height=1).pack(fill=tk.X, padx=2)
         tk.Button(menu, text="Web", command=_web, **btn_cfg).pack(fill=tk.X, padx=1, pady=(0, 1))
 
         menu.geometry(f"+{win.winfo_pointerx() + 5}+{win.winfo_pointery()}")

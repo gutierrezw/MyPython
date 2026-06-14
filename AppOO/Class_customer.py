@@ -3867,17 +3867,41 @@ class WidgetVehiculo(TickerInfo):
             menu, text=f"  {symbol}", bg=self.bgcolor, fg=self.cgcolor, font=("Arial", 10, "bold"), anchor="w"
         ).pack(fill=tk.X)
 
+        tk.Frame(menu, bg="white", height=1).pack(fill=tk.X, padx=2)
         tk.Button(menu, text="Análisis", command=lambda: (menu.destroy(), self.window_estrategia()), **btn_cfg).pack(
             fill=tk.X, padx=1, pady=(0, 1)
         )
 
+        tk.Frame(menu, bg="white", height=1).pack(fill=tk.X, padx=2)
         tk.Button(
             menu, text="TradingView", command=lambda: (menu.destroy(), self._abrir_tradingview(symbol)), **btn_cfg
         ).pack(fill=tk.X, padx=1, pady=(0, 1))
 
+        tk.Frame(menu, bg="white", height=1).pack(fill=tk.X, padx=2)
         tk.Button(
             menu, text="Strategy", command=lambda: (menu.destroy(), self._abrir_grafico_estrategia(symbol)), **btn_cfg
         ).pack(fill=tk.X, padx=1, pady=(0, 1))
+
+        def _open_web(sym=symbol, account=self.account):
+            menu.destroy()
+
+            def _fetch():
+                url = ""
+                try:
+                    rows, cols = MarketScreen().select(account=account, symbol=sym)
+                    if rows and cols:
+                        row = dict(zip(cols, rows[0]))
+                        url = row.get("website") or ""
+                except Exception:
+                    pass
+                if not url:
+                    url = f"https://finance.yahoo.com/quote/{sym}"
+                webbrowser.open(url)
+
+            threading.Thread(target=_fetch, daemon=True).start()
+
+        tk.Frame(menu, bg="white", height=1).pack(fill=tk.X, padx=2)
+        tk.Button(menu, text="Web", command=_open_web, **btn_cfg).pack(fill=tk.X, padx=1, pady=(0, 1))
 
         # Posicionar junto al cursorcls
         x, y = pyautogui.position()
