@@ -5813,6 +5813,25 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
     def _conectar(self, tabla=None):
         return BDsystem.connect_dbase(tabla, display=self.display)
 
+    def get_bank_credentials(self, bank_name: str) -> dict | None:
+        """Retorna {login_user, login_pass} para el banco indicado (ej: 'BBVA', 'Santander')."""
+        conn = self._conectar("fin_banks.select")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT login_user, login_pass FROM fin_banks WHERE name = %s AND is_active = 1",
+                (bank_name,),
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return {"login_user": row[0], "login_pass": row[1] or ""}
+            return None
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.get_bank_credentials({bank_name})]: {e}")
+            return None
+        finally:
+            conn.close()
+
     def get_accounts(self) -> list[tuple]:
         """Retorna lista de cuentas activas: (label, account_id, bank_name, account_name, short_name)."""
         conn = self._conectar("fin_accounts.select")
