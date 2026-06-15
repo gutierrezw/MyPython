@@ -532,6 +532,21 @@ class AgentManager:
         self.Agente_PerformaValidator()
         self.Agente_downloads_filings_EDGAR()
 
+    @wait_rate(3600, persist=True, desc="BrowserFCI descarga FCI BBVA+Santander (L-V 8:30)", nivel=2)
+    def Agente_BrowserFCI(self):
+        now = datetime.now()
+        if now.weekday() >= 5:  # sábado=5, domingo=6
+            return
+        if not (now.hour == 8 and now.minute >= 30) and not (now.hour == 9):
+            return
+        try:
+            from Class_FondosInversion import FondosInversion  # import diferido — evita ciclo
+
+            result = FondosInversion(account=self.account).sync_extracto_browser()
+            self._log_infra.warning(f"Agente_BrowserFCI: procesados={result}")
+        except Exception as e:
+            self._log_infra.error(f"Agente_BrowserFCI(): {e}")
+
     def register_threads(self):
         """Registra agentes de larga duración como threads independientes."""
         _threads = [
@@ -551,6 +566,7 @@ class AgentManager:
             ("Agente_YouTubeScanner", self.Agente_YouTubeScanner, 300),
             ("Agente_YouTubeBackfill", self.Agente_YouTubeBackfill, 60),
             ("Agente_MonitorBooktrading", self.Agente_MonitorBooktrading, 300),
+            ("Agente_BrowserFCI", self.Agente_BrowserFCI, 300),
         ]
         for name, target, sleep in _threads:
             DataHub.procesos.append({"thread": {name: 1}})

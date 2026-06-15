@@ -2,30 +2,55 @@ import asyncio
 import os
 import logging
 
-from datetime import date
+from datetime import date, datetime
 
 from Modulos_Mysql import FinanceScreen
+from Modulos_Utilitarios import read_json_tmp, write_json_tmp
 
 _logger = logging.getLogger("BrowserFCI")
 
 _TIMEOUT = 30_000
 _MODAL_WAIT = 5_000
+_BLOCKED_FILE = "browser_fci_blocked.json"
 
 
 class BrowserFCI:
+
+    def _check_blocked(self) -> bool:
+        data = read_json_tmp(_BLOCKED_FILE)
+        if data.get("blocked"):
+            _logger.error(
+                f"BrowserFCI bloqueado desde {data.get('timestamp')} — razón: {data.get('reason')}. "
+                "Ejecutá BrowserFCI().reset_blocked() para liberar."
+            )
+            return True
+        return False
+
+    def _set_blocked(self, reason: str):
+        write_json_tmp(
+            _BLOCKED_FILE,
+            {
+                "blocked": True,
+                "reason": reason,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            },
+        )
+        _logger.error(f"BrowserFCI — BLOQUEADO: {reason}")
+
+    def reset_blocked(self):
+        write_json_tmp(_BLOCKED_FILE, {"blocked": False})
+        _logger.warning("BrowserFCI — bloqueo liberado manualmente")
 
     # ── BBVA Argentina ────────────────────────────────────────────────────
     _BBVA_URL_LOGIN = "https://online.bbva.com.ar/fnetcore/login/index.html"
     _BBVA_BTN_LOGIN = "Ingresar"
 
-    # ── Santander Argentina — pendiente ───────────────────────────────────
-    _SANT_URL_LOGIN = "https://www.santander.com.ar"
-    _SANT_SEL_USER = "#SELECTOR_TODO"
-    _SANT_SEL_PASS = "#SELECTOR_TODO"
-    _SANT_SEL_OK = "#SELECTOR_TODO"
-    _SANT_URL_MOV = "#URL_TODO"
-    _SANT_SEL_DESDE = "#SELECTOR_TODO"
-    _SANT_SEL_HASTA = "#SELECTOR_TODO"
+    # ── Santander Argentina ───────────────────────────────────────────────
+    _SANT_URL_LOGIN = "https://www2.personas.santander.com.ar/obp-webapp/angular/#!/login"
+    _SANT_SEL_USER = "#datosusuario"
+    _SANT_SEL_PASS = "#clave"
+    _SANT_BTN_LOGIN = "Ingresar"
+    # Navegación FCI → pendiente inspección post-login
     _SANT_SEL_DL = "#SELECTOR_TODO"
 
     # ── Helpers async BBVA ────────────────────────────────────────────────
@@ -119,15 +144,17 @@ class BrowserFCI:
                 _logger.warning(f"download_bbva: guardado en {ruta}")
                 return ruta
         except AsyncTimeout as e:
-            _logger.error(f"download_bbva timeout: {e}")
+            self._set_blocked(f"BBVA timeout: {e}")
         except Exception as e:
-            _logger.error(f"download_bbva: {e}")
+            self._set_blocked(f"BBVA: {e}")
         return None
 
     # ── Métodos públicos ──────────────────────────────────────────────────
 
     def download_bbva(self, desde: date, destino: str, prefijo: str) -> str | None:
         """Descarga el Excel de movimientos FCI desde BBVA Argentina."""
+        if self._check_blocked():
+            return None
         creds = FinanceScreen().get_bank_credentials("BBVA")
         if not creds:
             _logger.error("download_bbva: credenciales BBVA no configuradas en fin_banks")
@@ -142,9 +169,64 @@ class BrowserFCI:
 
         return asyncio.run(self._bbva_async(profile_dir, nro_doc, usuario, clave, destino, prefijo))
 
-    def download_santander(self, desde: date, destino: str, prefijo: str) -> str | None:
-        from Modulos_python import sync_playwright, PlaywrightTimeout
+    async def _sant_login(self, page, usuario: str, clave: str):
+        """Login Santander — HTML estándar AngularJS, sin shadow DOM."""
+        await page.goto(self._SANT_URL_LOGIN, wait_until="domcontentloaded", timeout=_TIMEOUT)
+        await page.locator(self._SANT_SEL_USER).wait_for(state="visible", timeout=_TIMEOUT)
+        await page.locator(self._SANT_SEL_USER).fill(usuario)
+        await page.locator(self._SANT_SEL_PASS).fill(clave)
+        await page.locator("button.button-login").click()
+        await self._wait_nav(page)
 
+    async def _sant_navegar_descarga(self, page):
+        """Dashboard → Superfondos → tab Operaciones → espera botón Descargar."""
+        await page.locator("#plazos-fijos").wait_for(state="visible", timeout=_TIMEOUT)
+        await page.locator("#plazos-fijos").click()
+        await self._wait_nav(page)
+
+        await page.locator("#tab-3").wait_for(state="visible", timeout=_TIMEOUT)
+        await page.locator("#tab-3").click()
+        await self._wait_nav(page)
+
+        await page.locator('[data-testid="downloadLink"]').wait_for(state="visible", timeout=_TIMEOUT)
+
+    async def _sant_async(
+        self, profile_dir: str, usuario: str, clave: str, desde: date, destino: str, prefijo: str
+    ) -> str | None:
+        from playwright.async_api import async_playwright, TimeoutError as AsyncTimeout
+
+        try:
+            async with async_playwright() as pw:
+                ctx = await pw.chromium.launch_persistent_context(
+                    profile_dir,
+                    headless=False,
+                    accept_downloads=True,
+                )
+                page = await ctx.new_page()
+                await self._sant_login(page, usuario, clave)
+                await self._sant_navegar_descarga(page)
+                nombre = f"{prefijo}{date.today().strftime('%Y%m%d')}.xlsx"
+                ruta = os.path.join(destino, nombre)
+                async with page.expect_download(timeout=_TIMEOUT) as dl_info:
+                    await page.locator('[data-testid="downloadLink"]').click()
+                download = await dl_info.value
+                # Conservar nombre original de Santander (movimientos-de-superfondos-*.xlsx)
+                nombre = download.suggested_filename or f"{prefijo}{date.today().strftime('%Y-%m-%d')}.xlsx"
+                ruta = os.path.join(destino, nombre)
+                await download.save_as(ruta)
+                await ctx.close()
+                _logger.warning(f"download_santander: guardado en {ruta}")
+                return ruta
+        except AsyncTimeout as e:
+            self._set_blocked(f"Santander timeout: {e}")
+        except Exception as e:
+            self._set_blocked(f"Santander: {e}")
+        return None
+
+    def download_santander(self, desde: date, destino: str, prefijo: str) -> str | None:
+        """Descarga el Excel de movimientos FCI desde Santander Argentina."""
+        if self._check_blocked():
+            return None
         creds = FinanceScreen().get_bank_credentials("Santander")
         if not creds:
             _logger.error("download_santander: credenciales Santander no configuradas en fin_banks")
@@ -152,38 +234,8 @@ class BrowserFCI:
 
         usuario = creds["login_user"]
         clave = creds["login_pass"]
-        hasta = date.today()
 
-        try:
-            with sync_playwright() as pw:
-                browser = pw.chromium.launch(headless=False)
-                ctx = browser.new_context(accept_downloads=True)
-                page = ctx.new_page()
+        profile_dir = os.path.join(os.environ.get("APPOO_TMP", "tmp"), "santander_profile")
+        os.makedirs(profile_dir, exist_ok=True)
 
-                page.goto(self._SANT_URL_LOGIN, timeout=_TIMEOUT)
-                page.fill(self._SANT_SEL_USER, usuario)
-                page.fill(self._SANT_SEL_PASS, clave)
-                page.click(self._SANT_SEL_OK)
-                page.wait_for_load_state("networkidle", timeout=_TIMEOUT)
-
-                page.goto(self._SANT_URL_MOV, timeout=_TIMEOUT)
-                page.wait_for_load_state("networkidle", timeout=_TIMEOUT)
-
-                page.fill(self._SANT_SEL_DESDE, desde.strftime("%d/%m/%Y"))
-                page.fill(self._SANT_SEL_HASTA, hasta.strftime("%d/%m/%Y"))
-
-                nombre = f"{prefijo}{date.today().strftime('%Y%m%d')}.xlsx"
-                ruta = os.path.join(destino, nombre)
-                with page.expect_download(timeout=_TIMEOUT) as dl_info:
-                    page.click(self._SANT_SEL_DL)
-                dl_info.value.save_as(ruta)
-                browser.close()
-
-                _logger.warning(f"download_santander: guardado en {ruta}")
-                return ruta
-
-        except PlaywrightTimeout as e:
-            _logger.error(f"download_santander timeout: {e}")
-        except Exception as e:
-            _logger.error(f"download_santander: {e}")
-        return None
+        return asyncio.run(self._sant_async(profile_dir, usuario, clave, desde, destino, prefijo))

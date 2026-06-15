@@ -359,6 +359,10 @@ class Debugging:
         self.logger["FondosInversion"].setLevel(logging.WARNING)
 
         # manager logging
+        self.logger.update({"BrowserFCI": logging.getLogger("BrowserFCI")})
+        self.logger["BrowserFCI"].setLevel(logging.WARNING)
+
+        # manager logging
         self.logger.update({"Screener": logging.getLogger("Screener")})
         self.logger["Screener"].setLevel(logging.WARNING)
         self.logger.update({"TradingView": logging.getLogger("TradingView")})
