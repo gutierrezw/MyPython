@@ -2234,32 +2234,31 @@ class DashMain:
         self.btn_agente_modo._modos = _AGENTE_MODOS
         self.btn_agente_modo.pack(side=tk.LEFT, padx=(8, 0))
 
-        # órdenes y salida del sistema --------------------------------------------------------------------------------
-        imagen_tk = BDsystem.select_image(idd=14, size=(32, 32))
-
-        self.cart = tk.Button(
-            lineRight,
-            image=imagen_tk,
-            bg=self.colors["bgcolor"],
-            relief=tk.FLAT,
-            command=lambda: self.car_ordenes_activas(),
-        )
-        self.cart.imagen = imagen_tk
+        # órdenes y salida del sistema — anclados al extremo derecho de la ventana raíz
+        _btn_right = tk.Frame(self.root, bg=self.colors["bgcolor"])
+        _btn_right.place(relx=1.0, y=5, anchor="ne")
 
         imagen_tk = BDsystem.select_image(idd=12, size=(32, 32))
-
         self.exit = tk.Button(
-            lineRight,
+            _btn_right,
             image=imagen_tk,
             bg=self.colors["bgcolor"],
             relief=tk.FLAT,
             command=lambda: self.eexit(),
         )
         self.exit.imagen = imagen_tk
-
         self.exit.pack(side=tk.RIGHT, padx=(0, 4))
+
+        imagen_tk = BDsystem.select_image(idd=14, size=(32, 32))
+        self.cart = tk.Button(
+            _btn_right,
+            image=imagen_tk,
+            bg=self.colors["bgcolor"],
+            relief=tk.FLAT,
+            command=lambda: self.car_ordenes_activas(),
+        )
+        self.cart.imagen = imagen_tk
         self.cart.pack(side=tk.RIGHT, padx=(0, 4))
-        tk.Label(lineRight, text="", bg=self.colors["bgcolor"]).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # Progreso inversion gyp diarias ------------------------------------------------------------------------------
         self.GypProgress = ProgressBar(
