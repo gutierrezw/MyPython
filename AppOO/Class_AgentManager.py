@@ -504,21 +504,35 @@ class AgentManager:
             if not alertas:
                 self._log_infra.warning("Agente_MonitorBooktrading: OK — sin posiciones residuales")
                 return
-            resumen = "; ".join(
-                f"{a['symbol']}({a['account']}) stock={a['book_stock']:.4f} [{a['motivo']}]" for a in alertas
-            )
-            self._log_infra.warning(f"Agente_MonitorBooktrading: {len(alertas)} residuales → {resumen}")
-            DataHub.system_alerts.append(
-                "⚠️ Monitor Booktrading: {} residuales\n{}".format(
-                    len(alertas),
-                    "\n".join(
-                        "  • {} [{}] stock={:.4f} mktval=${:.2f} — {}".format(
-                            a["symbol"], a["account"], a["book_stock"], a["mktvalue"], a["motivo"]
+
+            cerrados = []
+            for a in alertas:
+                if a["motivo"].startswith("residual_fci"):
+                    ok = self.PlanInversion.close_residual_fci(account=a["account"], symbol=a["symbol"])
+                    if ok:
+                        cerrados.append(a["symbol"])
+                        self._log_infra.warning(
+                            f"Agente_MonitorBooktrading: FCI cerrado — {a['symbol']}({a['account']}) "
+                            f"mktval=${a['mktvalue']:.2f} → activa=N stock=0 iactiva=N"
                         )
-                        for a in alertas
-                    ),
+
+            pendientes = [a for a in alertas if a["motivo"] != "residual_fci" or a["symbol"] not in cerrados]
+            if pendientes:
+                resumen = "; ".join(
+                    f"{a['symbol']}({a['account']}) stock={a['book_stock']:.4f} [{a['motivo']}]" for a in pendientes
                 )
-            )
+                self._log_infra.warning(f"Agente_MonitorBooktrading: {len(pendientes)} residuales manuales → {resumen}")
+                DataHub.system_alerts.append(
+                    "⚠️ Monitor Booktrading: {} residuales\n{}".format(
+                        len(pendientes),
+                        "\n".join(
+                            "  • {} [{}] stock={:.4f} mktval=${:.2f} — {}".format(
+                                a["symbol"], a["account"], a["book_stock"], a["mktvalue"], a["motivo"]
+                            )
+                            for a in pendientes
+                        ),
+                    )
+                )
         except Exception as e:
             self._log_infra.error(f"Agente_MonitorBooktrading(): {e}")
 
@@ -532,17 +546,38 @@ class AgentManager:
         self.Agente_PerformaValidator()
         self.Agente_downloads_filings_EDGAR()
 
+    def _browser_fci_notify_blocked(self, data: dict):
+        alerta = (
+            f"⚠️ BrowserFCI BLOQUEADO\n"
+            f"Razón: {data.get('reason', '?')}\n"
+            f"Desde: {data.get('timestamp', '?')}\n"
+            f"FCI desactualizado — ejecutá BrowserFCI().reset_blocked() para liberar."
+        )
+        if alerta not in DataHub.system_alerts:
+            DataHub.system_alerts.append(alerta)
+
     @wait_rate(3600, persist=True, desc="BrowserFCI descarga FCI BBVA+Santander (L-V 8:30)", nivel=2)
     def Agente_BrowserFCI(self):
+        from Class_BrowserFCI import BrowserFCI  # import diferido — evita ciclo
+
+        # Siempre verificar bloqueo — notificar aunque sea fuera del horario
+        blocked_data = read_json_tmp("browser_fci_blocked.json")
+        if blocked_data.get("blocked"):
+            self._log_infra.error(
+                f"Agente_BrowserFCI: BLOQUEADO desde {blocked_data.get('timestamp')} — {blocked_data.get('reason')}"
+            )
+            self._browser_fci_notify_blocked(blocked_data)
+            return
+
         now = datetime.now()
         if now.weekday() >= 5:  # sábado=5, domingo=6
             return
         if not (now.hour == 8 and now.minute >= 30) and not (now.hour == 9):
             return
         try:
-            from Class_FondosInversion import FondosInversion  # import diferido — evita ciclo
+            from Class_FondosInversion import sync_fci_browser  # import diferido — evita ciclo
 
-            result = FondosInversion(account=self.account).sync_extracto_browser()
+            result = sync_fci_browser()
             self._log_infra.warning(f"Agente_BrowserFCI: procesados={result}")
         except Exception as e:
             self._log_infra.error(f"Agente_BrowserFCI(): {e}")

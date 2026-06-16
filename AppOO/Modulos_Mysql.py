@@ -4024,6 +4024,30 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 )
         return alertas
 
+    def close_residual_fci(self, account: str, symbol: str) -> bool:
+        """Cierra una posición residual de FCI: activa='N' + stock=0 en booktrading, iactiva='N' en inversion."""
+        conn = self._conectar(tabla="close_residual_fci")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE booktrading SET activa = 'N', stock = 0 "
+                "WHERE cuenta = %s AND simbolo = %s AND divisa = 'ARS' AND delisted = 0",
+                (account, symbol),
+            )
+            cursor.execute(
+                "UPDATE inversion SET iactiva = 'N', position = 0, timestamp = %s "
+                "WHERE useraccount = %s AND ticket = %s",
+                (datetime.now(), account, symbol),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"[Mysql:: close_residual_fci({symbol}, {account})]: {e}")
+            return False
+        finally:
+            cursor.close()
+            conn.close()
+
 
 class RepositorioOportunidadesBuySell(PlanInversion):  # -------------------------------------------------------------
     """
@@ -6391,5 +6415,139 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         except (Exception, connect.Error) as e:
             print(f"[Mysql:: FinanceScreen.save_rule_count_retro()]: {e}")
             return 0
+        finally:
+            conn.close()
+
+
+class IaTraceScreen(BDsystem):  # ---------------------------------------------------------------------------------
+
+    def __init__(self):
+        self.display = False
+
+    def _conectar(self, tabla=None):
+        return BDsystem.connect_dbase(tabla, display=self.display)
+
+    def insert_trace(
+        self, vehiculo: str, simbolo: str, decision: str, monto: float, motivo: str, gates_ok: dict
+    ) -> int | None:
+        conn = self._conectar(tabla="ia_trace.insert")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO ia_trace (vehiculo, simbolo, decision, monto, motivo, gates_ok) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (vehiculo, simbolo or "", decision, monto or 0, motivo or "", json.dumps(gates_ok or {})),
+            )
+            conn.commit()
+            return cursor.lastrowid
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: IaTraceScreen.insert_trace()]: {e}")
+            return None
+        finally:
+            cursor.close()
+            conn.close()
+
+    def update_trace_estado(self, trace_id: int, estado: str, telegram_id: str = None):
+        conn = self._conectar(tabla="ia_trace.update")
+        try:
+            cursor = conn.cursor()
+            if telegram_id:
+                cursor.execute(
+                    "UPDATE ia_trace SET estado = %s, telegram_id = %s WHERE id = %s",
+                    (estado, telegram_id, trace_id),
+                )
+            else:
+                cursor.execute(
+                    "UPDATE ia_trace SET estado = %s WHERE id = %s",
+                    (estado, trace_id),
+                )
+            conn.commit()
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: IaTraceScreen.update_trace_estado()]: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+
+    def select_trace(self, limit: int = 100) -> list:
+        conn = self._conectar(tabla="ia_trace.select")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, timestamp, vehiculo, simbolo, decision, monto, motivo, estado "
+                "FROM ia_trace ORDER BY timestamp DESC LIMIT %s",
+                (limit,),
+            )
+            cols = [c[0] for c in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: IaTraceScreen.select_trace()]: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def insert_mejora(
+        self, categoria: str, titulo: str, descripcion: str, impacto: str = "medio", origen: str = None
+    ) -> bool:
+        conn = self._conectar(tabla="ia_mejoras.insert")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM ia_mejoras WHERE titulo = %s AND estado = 'pendiente' LIMIT 1",
+                (titulo,),
+            )
+            if cursor.fetchone():
+                return False
+            cursor.execute(
+                "INSERT INTO ia_mejoras (categoria, titulo, descripcion, impacto, origen) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (categoria, titulo, descripcion or "", impacto, origen or ""),
+            )
+            conn.commit()
+            return True
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: IaTraceScreen.insert_mejora()]: {e}")
+            return False
+        finally:
+            cursor.close()
+            conn.close()
+
+    def select_mejoras(self, estado: str = "pendiente") -> list:
+        conn = self._conectar(tabla="ia_mejoras.select")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, timestamp, categoria, titulo, descripcion, impacto, estado "
+                "FROM ia_mejoras WHERE estado = %s ORDER BY timestamp DESC",
+                (estado,),
+            )
+            cols = [c[0] for c in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: IaTraceScreen.select_mejoras()]: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def select_candidatos_ia(self, account: str, consenso_min: int = 4) -> list:
+        """Activos con buen consenso que NO están en cartera — candidatos de entrada."""
+        conn = self._conectar(tabla="ia_trace.candidatos")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT symbol, shortName, lastPrice, consenso_tag, consenso_suma, "
+                "inst_score, inst_ownership_pct, dividendYield, categoriaActivo "
+                "FROM market "
+                "WHERE account = %s AND consenso_suma >= %s "
+                "AND (encartera IS NULL OR encartera != 'Y') "
+                "AND categoriaActivo NOT IN ('X') "
+                "ORDER BY consenso_suma DESC, inst_score DESC "
+                "LIMIT 10",
+                (account, consenso_min),
+            )
+            cols = [c[0] for c in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: IaTraceScreen.select_candidatos_ia()]: {e}")
+            return []
         finally:
             conn.close()

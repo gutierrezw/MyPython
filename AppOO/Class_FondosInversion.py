@@ -23,6 +23,34 @@ from Modulos_Comunes import diaria_book_performance, proceso_update_performance
 from download_cnv_selenium import descargar_cnv_hoy
 
 
+def sync_fci_browser(account_bbva: str = None) -> list:
+    """Descarga extractos FCI de BBVA y Santander y los procesa en booktrading.
+    Función standalone para uso desde agentes (sin UI).
+    """
+    from Class_BrowserFCI import BrowserFCI  # import diferido — evita ciclo con Modulos_Mysql
+
+    repo = RepositorioOportunidadesBuySell()
+    cnv = DiariaCNV()
+
+    ses_bbva = cnv.get_sesion_by_vehiculo("BBVA.ARS")
+    acc_bbva = account_bbva or ses_bbva["idcuenta"]
+
+    path = (os.environ.get("APPOO_TMP") or os.path.join(os.getcwd(), "tmp")).rstrip("\\/") + os.sep
+    os.makedirs(path, exist_ok=True)
+
+    last, _ = repo.select_booktrading(accion="last", account=acc_bbva, idivisa="ARS")
+    desde = last[0]["fechahora"].date() if last else date.today() - timedelta(days=90)
+
+    browser = BrowserFCI()
+    procesados = []
+    if browser.download_bbva(desde=desde, destino=path, prefijo="BBVA_Comprobante_"):
+        procesados.append("BBVA")
+    if browser.download_santander(desde=desde, destino=path, prefijo="movimientos-de-superfondos-"):
+        procesados.append("SANT")
+
+    return procesados
+
+
 class ArsFondosInversion(tk.Frame):
     def __init__(self, parent=None, master=None, colores=None):
         super().__init__(parent)
@@ -542,7 +570,9 @@ class ArsFondosInversion(tk.Frame):
 
             # re-escribe self.position en moneda base para que se muestre en widget
             out_positions = self.RepositorioOportunidades.select_inversion(tipoin=self.vehiculo, ticket="all")
-            self.ars.positions = copy.deepcopy(out_positions)
+            self.ars.positions = [
+                p for p in copy.deepcopy(out_positions) if p.get("costobase", 0) > 5 and p.get("position", 0) > 0
+            ]
         except Exception as e:
             print("update_FCI_en_positions(): {}".format(e))
             traceback.print_exc()
@@ -883,7 +913,7 @@ class ArsFondosInversion(tk.Frame):
             ayer = (datetime.now() - timedelta(days=1)).date()
             ultima_cnv = self.ClassCNV.last_insert_CNV()
             if ultima_cnv == "0001-01-01" or datetime.strptime(ultima_cnv, "%Y-%m-%d").date() < ayer:
-                _logger.warning(
+                _logger.debug(
                     f"schedule_diaria_performace({account}): CNV gate bloqueado — ultima_cnv={ultima_cnv} ayer={ayer}"
                 )
                 return update
