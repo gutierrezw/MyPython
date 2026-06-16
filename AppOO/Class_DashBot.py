@@ -64,6 +64,7 @@ from Modulos_Mysql import (
     BDsystem,
     PlanInversion,
     MarketScreen,
+    IaTraceScreen,
 )
 from Class_customer import DataHub, TickerInfo
 from Class_BrowserBridge import set_claude_contexto
@@ -91,6 +92,7 @@ class ClassAgenteIA:
         self.NotFound = []
         self.PlanInversion = PlanInversion()
         self.Market = MarketScreen()
+        self.IaTrace = IaTraceScreen()
         self.sesion = self.PlanInversion.get_sesion_by_vehiculo(self.vehiculo)
         self.account = self.sesion["idcuenta"]
         _sesion_crypto = self.PlanInversion.get_sesion_by_vehiculo("Crypto")
@@ -144,6 +146,7 @@ class ClassAgenteIA:
         self.gains_capture_state = {k: v for k, v in _gc_saved.items() if not k.startswith("_")}
         _gc_params = self._load_params("Stock") or {}
         DataHub.gains_capture_modo = _gc_params.get("gains_capture", {}).get("modo", "automatico")
+        DataHub.modo_operacion = _gc_params.get("agente_ia", {}).get("modo", "OBSERVACION")
 
         # Logger dedicado a preservation — escribe a logs/preservation_diag.log
         self._preservation_logger = logging.getLogger("Preservation")
@@ -336,8 +339,8 @@ class ClassAgenteIA:
         except Exception as e:
             self.logger.error(f"Agente_ManagerTop10(): {e}")
 
-    def _consultar_claude(self, mensaje_usuario, contexto=""):
-        """Llamada general a Claude API para el chatbot. Retorna respuesta en texto."""
+    def _consultar_claude(self, mensaje_usuario, contexto="", messages=None):
+        """Llamada a Claude API. Si messages se provee, usa conversación multi-turno con historial."""
         sesion_claude = BDsystem.get_sesion_by_vehiculo("ClaudeAPIC")
         api_key = sesion_claude["userapi"].decode("utf-8")
 
@@ -349,6 +352,7 @@ class ClassAgenteIA:
         if contexto:
             sistema += f"\n\nContexto actual:\n{contexto}"
 
+        msgs = messages[-20:] if messages else [{"role": "user", "content": mensaje_usuario}]
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
             headers={
@@ -360,7 +364,7 @@ class ClassAgenteIA:
                 "model": "claude-haiku-4-5-20251001",
                 "max_tokens": 512,
                 "system": sistema,
-                "messages": [{"role": "user", "content": mensaje_usuario}],
+                "messages": msgs,
             },
             timeout=30,
         )
@@ -480,6 +484,305 @@ class ClassAgenteIA:
             self.logger.warning(f"Agente_ExtractoBBVA: descargados={descargados}")
         except Exception as e:
             self.logger.error(f"Agente_ExtractoBBVA(): {e}")
+
+    @wait_rate(86400, persist=True, desc="AgIA — análisis diario portfolio + candidatos (Fase 1: observación)", nivel=2)
+    def Agente_ClaudeIA(self):
+        try:
+            params = self._load_params("Stock")
+            if not params:
+                return
+            ia_config = params.get("agente_ia", {})
+            if not ia_config.get("activo", False):
+                self.logger.debug("Agente_ClaudeIA: inactivo en configuración → SKIP")
+                return
+            try:
+                ses = BDsystem.get_sesion_by_vehiculo("ClaudeAPIP")
+                api_key = ses["userapi"].decode("utf-8") if ses else ""
+            except Exception as _e:
+                self.logger.error(f"Agente_ClaudeIA: ClaudeAPIP no disponible → {_e}")
+                return
+            ctx = self._armar_contexto_ia(params)
+            decision = self._claude_ia_eval(ctx, ia_config, api_key)
+            if decision:
+                trace_id = self.IaTrace.insert_trace(
+                    vehiculo="Stock",
+                    simbolo=decision.get("simbolo", ""),
+                    decision=decision.get("decision", "HOLD"),
+                    monto=decision.get("monto", 0),
+                    motivo=decision.get("motivo", ""),
+                    gates_ok={},
+                )
+                self.logger.warning(
+                    f"Agente_ClaudeIA [Fase1]: decision={decision.get('decision')} "
+                    f"simbolo={decision.get('simbolo','—')} "
+                    f"motivo={str(decision.get('motivo',''))[:80]} trace_id={trace_id}"
+                )
+                modo = DataHub.modo_operacion
+                accion = decision.get("decision", "HOLD")
+                if modo == "SUPERVISADO" and accion in ("BUY", "SELL") and trace_id:
+                    self._propuesta_supervisado(decision, trace_id)
+        except Exception as e:
+            self.logger.error(f"Agente_ClaudeIA(): {e}")
+
+    def _propuesta_supervisado(self, decision: dict, trace_id: int):
+        simbolo = decision.get("simbolo", "—")
+        accion = decision.get("decision", "—")
+        monto = decision.get("monto", 0)
+        motivo = str(decision.get("motivo", ""))[:300]
+        emoji = "🟢" if accion == "BUY" else "🔴"
+        texto = (
+            f"{emoji} *Propuesta IA — {accion} {simbolo}*\n"
+            f"Monto: ${monto:,.0f}\n\n"
+            f"_{motivo}_\n\n"
+            f"⚙ Modo: SUPERVISADO — esperando aprobación"
+        )
+        botones = [
+            [
+                InlineKeyboardButton("✅ Ejecutar", callback_data=f"ia_ejecutar|{trace_id}"),
+                InlineKeyboardButton("⏸ Diferir", callback_data=f"ia_diferir|{trace_id}"),
+            ]
+        ]
+        markup = InlineKeyboardMarkup(botones)
+        self.exec_modulo_async(self.send_Telegram(texto, reply_markup=markup))
+
+    def _armar_contexto_ia(self, params: dict) -> dict:
+        ia_config = params.get("agente_ia", {})
+        gc_config = params.get("gains_capture", {})
+        pinvertir = float(ia_config.get("monto_por_trade", 170))
+        min_ganancia = float(gc_config.get("min_ganancia", 100.0))
+
+        positions = DataHub.manager_positions.get("Stock", [])
+        portfolio = []
+        for p in positions:
+            if not p.get("ticket"):
+                continue
+            gain_usd = round(float(p.get("unrealizedpnl", 0) or 0), 2)
+            portfolio.append(
+                {
+                    "symbol": p.get("ticket"),
+                    "roi_pct": round(float(p.get("roi", 0) or 0) * 100, 2),
+                    "valor_mkt": round(float(p.get("valuemkt", 0) or 0), 2),
+                    "gain_usd": gain_usd,
+                    "gains_candidate": gain_usd >= min_ganancia,
+                    "consenso": p.get("consenso_tag", ""),
+                    "dividends": round(float(p.get("dividends", 0) or 0), 2),
+                }
+            )
+        candidatos = self.IaTrace.select_candidatos_ia(self.account, consenso_min=ia_config.get("gate_consenso_min", 4))
+        for c in candidatos:
+            last = float(c.get("lastPrice") or 0)
+            c["monto_sugerido"] = max(pinvertir, last) if last > 0 else pinvertir
+
+        rebalanceo = {}
+        mb = getattr(DataHub, "manager_buysell", {})
+        for dim in ("sector", "region", "activos"):
+            dim_data = mb.get(dim, {})
+            summary = dim_data.get("summary", {})
+            names = summary.get("Name", [])
+            pesos = summary.get("Peso", [])
+            total = dim_data.get("total_valor_market", 0)
+            if names and pesos and total > 0:
+                n = len(names)
+                objetivo = 1 / n if n > 0 else 0
+                items = [
+                    {"name": nm, "peso": round(ps, 3), "gap": round(objetivo - ps, 3)} for nm, ps in zip(names, pesos)
+                ]
+                rebalanceo[dim] = {"items": items, "total_usd": round(total, 0)}
+        div_data = mb.get("dividends", {})
+        div_summary = div_data.get("summary", {})
+        if div_summary:
+            rebalanceo["dividends"] = {"meses": div_summary, "total_usd": div_data.get("total_valor_market", 0)}
+
+        rebalanceo_ranking = []
+        rb_engine = getattr(DataHub, "rebalanceo", {}).get("Stock", {})
+        for item in rb_engine.get("ranking", [])[:5]:
+            rebalanceo_ranking.append(
+                {
+                    "symbol": item.get("symbol"),
+                    "score": round(item.get("score", 0), 3),
+                    "dimension": item.get("dimension", ""),
+                    "monto": round(item.get("monto_sugerido", 0), 0),
+                }
+            )
+
+        info = getattr(DataHub, "info", {})
+        oport_buy = []
+        oport_sell = []
+        for sym, data in info.items():
+            buy_key = "dividends" if "dividends" in data else ("buy" if "buy" in data else None)
+            if buy_key:
+                b = data[buy_key]
+                oport_buy.append(
+                    {
+                        "symbol": sym,
+                        "tipo": buy_key,
+                        "gain_inversion": round(float(b.get("ganancia inversión", 0)), 3),
+                        "qty": int(b.get("cantidad buy", 0)),
+                        "yield": round(float(b.get("dividendYield", 0)) * 100, 2),
+                        "avgcost_post": round(float(b.get("avgCost post", 0)), 2),
+                    }
+                )
+            if "sell" in data:
+                s = data["sell"]
+                profit = float(s.get("profit", 0))
+                if profit > 0:
+                    oport_sell.append(
+                        {
+                            "symbol": sym,
+                            "profit": round(profit, 2),
+                            "roi": round(float(s.get("roi", 0)) * 100, 2),
+                            "qty": round(float(s.get("cantidad sell", 0)), 4),
+                            "lotes": int(s.get("cantidad lotes", 0)),
+                        }
+                    )
+
+        oport_buy.sort(key=lambda x: x["gain_inversion"])
+        oport_sell.sort(key=lambda x: -x["profit"])
+
+        return {
+            "portfolio": portfolio,
+            "candidatos": candidatos,
+            "rebalanceo": rebalanceo,
+            "rebalanceo_ranking": rebalanceo_ranking,
+            "oport_buy": oport_buy[:8],
+            "oport_sell": oport_sell[:5],
+            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "pinvertir": pinvertir,
+            "min_ganancia": min_ganancia,
+        }
+
+    def _claude_ia_eval(self, ctx: dict, ia_config: dict, api_key: str) -> dict | None:
+        def _portfolio_txt():
+            rows = ctx.get("portfolio", [])
+            if not rows:
+                return "  (sin posiciones)"
+            return "\n".join(
+                f"  {p['symbol']}: ROI={p['roi_pct']:+.1f}% | mkt=${p['valor_mkt']:.0f} | "
+                f"gain=${p['gain_usd']:.0f}"
+                + (" [GAINS?]" if p.get("gains_candidate") else "")
+                + f" | consenso={p['consenso']}"
+                for p in rows
+            )
+
+        def _candidatos_txt():
+            rows = ctx.get("candidatos", [])
+            if not rows:
+                return "  (sin candidatos con consenso suficiente)"
+            return "\n".join(
+                f"  {c['symbol']} ({(c.get('shortName') or '')[:20]}): "
+                f"consenso_suma={c.get('consenso_suma')} "
+                f"inst_score={c.get('inst_score') or '-'} "
+                f"yield={c.get('dividendYield') or '-'} "
+                f"monto_sugerido=${c.get('monto_sugerido', 0):.0f}"
+                for c in rows
+            )
+
+        def _rebalanceo_txt():
+            rb = ctx.get("rebalanceo", {})
+            if not rb:
+                return "  (sin datos — manager_buysell vacío)"
+            dim_labels = {"sector": "Sectores", "region": "Regiones", "activos": "Tipos de activo"}
+            lines = []
+            for dim, label in dim_labels.items():
+                data = rb.get(dim)
+                if not data:
+                    continue
+                items = sorted(data.get("items", []), key=lambda x: -x["gap"])
+                parts = " | ".join(
+                    f"{it['name']}={it['peso']*100:.0f}%"
+                    + ("▼" if it["gap"] > 0.03 else "▲" if it["gap"] < -0.03 else "✓")
+                    for it in items[:6]
+                )
+                total = data.get("total_usd", 0)
+                lines.append(f"  {label} (total ${total:.0f}): {parts}")
+            div = rb.get("dividends", {})
+            if div and div.get("total_usd", 0) > 0:
+                lines.append(f"  Dividendos: ingreso total portafolio ${div['total_usd']:.0f}/año")
+            return "\n".join(lines) if lines else "  (sin datos de dimensiones)"
+
+        def _oport_buy_txt():
+            rows = ctx.get("oport_buy", [])
+            if not rows:
+                return "  (ninguna)"
+            return "\n".join(
+                f"  {r['symbol']}: tipo={r['tipo']} qty={r['qty']} "
+                f"yield={r['yield']:.1f}% gain_inv={r['gain_inversion']:+.3f} avgcost_post=${r['avgcost_post']:.2f}"
+                for r in rows
+            )
+
+        def _oport_sell_txt():
+            rows = ctx.get("oport_sell", [])
+            if not rows:
+                return "  (ninguna)"
+            return "\n".join(
+                f"  {r['symbol']}: profit=${r['profit']:.0f} ROI={r['roi']:+.1f}% qty={r['qty']} lotes={r['lotes']}"
+                for r in rows
+            )
+
+        def _ranking_txt():
+            rows = ctx.get("rebalanceo_ranking", [])
+            if not rows:
+                return "  (sin ranking — RebalanceEngine no ejecutó aún)"
+            return "\n".join(
+                f"  {r['symbol']}: score={r['score']} dim={r['dimension']} monto=${r['monto']:.0f}" for r in rows
+            )
+
+        gains_symbols = [p["symbol"] for p in ctx.get("portfolio", []) if p.get("gains_candidate")]
+        gains_txt = f"Posiciones con ganancia ≥${ctx.get('min_ganancia', 100):.0f} (candidatas a captura): " + (
+            ", ".join(gains_symbols) if gains_symbols else "(ninguna)"
+        )
+        prompt = (
+            "Sos el agente de inversión autónomo. Misión: acumular capital hacia 1.2M USD en 2030 "
+            "generando ingresos pasivos ≥3%/año. Foco en dividendos, uso moderado de apalancamiento IB. "
+            "En crisis → Hold o sumar posiciones, nunca vender por pánico.\n\n"
+            f"Fecha: {ctx.get('fecha')}\n\n"
+            f"Portfolio actual (Stock):\n{_portfolio_txt()}\n\n"
+            f"{gains_txt}\n\n"
+            f"Rebalanceo — diversificación actual (▼=subponderado, ▲=sobreponderado, ✓=equilibrado):\n"
+            f"{_rebalanceo_txt()}\n\n"
+            f"Ranking rebalanceo (top 5 por motor estructural):\n{_ranking_txt()}\n\n"
+            f"Oportunidades BUY detectadas por el sistema:\n{_oport_buy_txt()}\n\n"
+            f"Oportunidades SELL detectadas por el sistema:\n{_oport_sell_txt()}\n\n"
+            f"Candidatos externos (consenso ≥ {ia_config.get('gate_consenso_min', 4)}):\n{_candidatos_txt()}\n\n"
+            f"Límites: monto_base=${ctx.get('pinvertir', 170):.0f} (se ajusta al precio del activo) | "
+            f"leverage_max={ia_config.get('leverage_max', 1.8)}x | "
+            f"inst_score_min={ia_config.get('gate_inst_score_min', 0.5)}\n\n"
+            "Para BUY: cruzar oportunidades BUY del sistema con candidatos externos y ranking rebalanceo. "
+            "Priorizar los que aparecen en más de una fuente y alineen con dimensiones subponderadas (▼). "
+            "Para posiciones [GAINS?] o SELL del sistema: evaluá si el contexto justifica captura (SELL) u HOLD.\n\n"
+            "Producí UNA decisión con formato JSON exacto:\n"
+            '{"decision": "BUY|SELL|HOLD|ALERTA", "simbolo": "TICKER_O_VACIO", '
+            '"monto": 0, "motivo": "max 150 chars"}'
+        )
+        try:
+            resp = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 300,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=20,
+            )
+            if not resp.ok:
+                self.logger.error(f"_claude_ia_eval: HTTP {resp.status_code} — {resp.text[:200]}")
+                return None
+            usage = resp.json().get("usage", {})
+            track_claude_usage("ClaudeAPIP", usage.get("input_tokens", 0), usage.get("output_tokens", 0))
+            text = resp.json()["content"][0]["text"].strip()
+            start, end = text.find("{"), text.rfind("}") + 1
+            if start >= 0 and end > start:
+                result = json.loads(text[start:end])
+                if "decision" in result:
+                    return result
+        except Exception as e:
+            self.logger.error(f"_claude_ia_eval(): {e}")
+        return None
 
     def _gains_capture_run(self):
         _gc_logger = logging.getLogger("GainsCapture")
@@ -1138,32 +1441,33 @@ class Telegram:
 
     # Método para enviar menú principal
     async def handle_menu(self, update=None, context=None):
+        CHAT_ID = [update.effective_chat.id] if update else self.userAuth
 
-        # 🔑 Si el update existe, envía solo al usuario que hizo la solicitud
-        CHAT_ID = [update.effective_chat.id] if update else None
+        await self.clear_bot_chat(CHAT_ID)
 
-        # elimina del chat los mensajes anteriores
-        if CHAT_ID:
-            await self.clear_bot_chat(CHAT_ID)
+        n_alertas = len(DataHub.system_alerts)
+        lbl_alertas = f"🚨 Alertas ({n_alertas})" if n_alertas else "🔕 Alertas"
+        botones = [
+            [
+                InlineKeyboardButton("⬇️⬆️ Top(10)", callback_data="menu_top"),
+                InlineKeyboardButton("⬇️ Sell", callback_data="menu_sell"),
+                InlineKeyboardButton("⬆️ Buy", callback_data="menu_buy"),
+            ],
+            [
+                InlineKeyboardButton("🎯 Performan", callback_data="performan"),
+                InlineKeyboardButton("🟢🔴 Orders", callback_data="OrdersExec"),
+                InlineKeyboardButton("🤖 BotTrader", callback_data="botrtrader"),
+            ],
+            [
+                InlineKeyboardButton(lbl_alertas, callback_data="alertas"),
+            ],
+        ]
+        menu_markup = InlineKeyboardMarkup(botones)
 
-            botones = [
-                [
-                    InlineKeyboardButton("⬇️⬆️ Top(10)", callback_data="menu_top"),
-                    InlineKeyboardButton("⬇️ Sell", callback_data="menu_sell"),
-                    InlineKeyboardButton("⬆️ Buy", callback_data="menu_buy"),
-                ],
-                [
-                    InlineKeyboardButton("🎯 Performan", callback_data="performan"),
-                    InlineKeyboardButton("🟢🔴 Orders", callback_data="OrdersExec"),
-                    InlineKeyboardButton("🤖 BotTrader", callback_data="botrtrader"),
-                ],
-            ]
-            menu_markup = InlineKeyboardMarkup(botones)
-
-            await self.send_Telegram(
-                texto="☰ Selecciona la categoría de mensajes que quieres recibir:",
-                reply_markup=menu_markup,
-            )
+        await self.send_Telegram(
+            texto="☰ Selecciona la categoría de mensajes que quieres recibir:",
+            reply_markup=menu_markup,
+        )
 
     # Aquí podrías iniciar/parar Telegram ------------------------------------------------------------------------
     async def toggle_telegram(self):
@@ -1176,7 +1480,7 @@ class Telegram:
                 self.telegram_app = ApplicationBuilder().token(self.TOKEN).connect_timeout(30).read_timeout(30).build()
 
                 self.telegram_app.add_handler(CommandHandler("menu", self.handle_menu))
-                self.telegram_app.add_handler(CommandHandler("start", self.handle_segurity_message))
+                self.telegram_app.add_handler(CommandHandler("start", self.handle_menu))
                 self.telegram_app.add_handler(
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_segurity_message)
                 )
@@ -1194,7 +1498,12 @@ class Telegram:
                 async def _send_welcome():
                     await self.telegram_app.initialize()
                     self.bot = self.telegram_app.bot
-                    await self.send_Telegram(f"🏁 Bot interno iniciado session: {datetime.now()}")
+                    modo = DataHub.modo_operacion
+                    _emoji_modo = {"OBSERVACION": "🔴", "SUPERVISADO": "🟡", "AUTONOMO": "🟢"}
+                    await self.send_Telegram(
+                        f"🏁 Bot iniciado — {datetime.now().strftime('%d/%m %H:%M')}\n"
+                        f"{_emoji_modo.get(modo, '⚪')} Modo operación: *{modo}*"
+                    )
                     await self.handle_menu()
                     await self.telegram_app.shutdown()
 
@@ -1448,6 +1757,36 @@ class Telegram:
             elif accion == "botrtrader":
                 await self.list_positions_BotCrypto(chat_id=update.effective_chat.id)
 
+            elif accion == "alertas":
+                alertas = DataHub.system_alerts[:]
+                DataHub.system_alerts.clear()
+                if not alertas:
+                    await query.edit_message_text("🔕 Sin alertas pendientes.")
+                else:
+                    texto = "\n\n".join(alertas)
+                    await query.edit_message_text(
+                        f"🚨 *{len(alertas)} Alertas*\n\n{texto}",
+                        parse_mode="Markdown",
+                    )
+
+            elif accion == "ia_ejecutar":
+                trace_id = int(args[0])
+                self.IaTrace.update_trace_estado(trace_id, estado="APROBADO")
+                await query.edit_message_reply_markup(reply_markup=None)
+                await query.edit_message_text(
+                    f"✅ Propuesta IA aprobada (trace #{trace_id})\n_Ejecución manual por ahora — AUTONOMO pendiente._",
+                    parse_mode="Markdown",
+                )
+
+            elif accion == "ia_diferir":
+                trace_id = int(args[0])
+                self.IaTrace.update_trace_estado(trace_id, estado="DIFERIDO")
+                await query.edit_message_reply_markup(reply_markup=None)
+                await query.edit_message_text(
+                    f"⏸ Propuesta diferida (trace #{trace_id})",
+                    parse_mode="Markdown",
+                )
+
         except Exception as e:
             self.logger.error(f"handle_callback(): {e}\n{traceback.format_exc()}")
 
@@ -1629,7 +1968,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self.fgcolor = "#cdd6f4"
 
         self.title("🤖 Asistente de Inversión")
-        self.geometry("600x780+1200+100")
+        self.geometry("920x740+1000+100")
         self.configure(bg=self.bgcolor)
         self.resizable(True, True)
         self.attributes("-topmost", True)
@@ -1678,9 +2017,52 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self.iconos = barra
         self.chat = self
 
-        # ── AREA CHAT ───────────────────────────────────────────────────────
+        # ── CONTENEDOR PRINCIPAL — dos columnas ──────────────────────────────
+        main = tk.Frame(self, bg=self.bgcolor)
+        main.pack(fill=tk.BOTH, expand=True, padx=10, pady=(4, 0))
+
+        # ── COLUMNA IZQUIERDA — teletipo decisiones autónomas ────────────────
+        left = tk.Frame(main, bg="#0d0d1a", width=300)
+        left.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 4))
+        left.pack_propagate(False)
+
+        tk.Label(
+            left,
+            text="🤖 Decisiones Autónomas",
+            bg="#0d0d1a",
+            fg="#00BFFF",
+            font=("Consolas", 8, "bold"),
+            anchor="w",
+        ).pack(fill=tk.X, padx=6, pady=(4, 2))
+
+        self._feed_txt = tk.Text(
+            left,
+            bg="#0d0d1a",
+            fg="#aaaaaa",
+            font=("Consolas", 9),
+            relief=tk.FLAT,
+            wrap=tk.WORD,
+            state="disabled",
+            padx=6,
+            pady=2,
+        )
+        self._feed_txt.tag_configure("BUY", foreground="#00FF66")
+        self._feed_txt.tag_configure("SELL", foreground="#FF6B6B")
+        self._feed_txt.tag_configure("HOLD", foreground="#AAAAAA")
+        self._feed_txt.tag_configure("ALERTA", foreground="#FFB347")
+        self._feed_txt.tag_configure("meta", foreground="#444466")
+        self._feed_txt.pack(fill=tk.BOTH, expand=True)
+
+        # separador vertical
+        tk.Frame(main, bg="#2a2a3a", width=1).pack(side=tk.LEFT, fill=tk.Y)
+
+        # ── COLUMNA DERECHA — chat ────────────────────────────────────────────
+        right = tk.Frame(main, bg=self.bgcolor)
+        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # ── AREA CHAT ────────────────────────────────────────────────────────
         self.area_mensaje = scrolledtext.ScrolledText(
-            self,
+            right,
             wrap=tk.WORD,
             bg="#181825",
             fg=self.fgcolor,
@@ -1690,18 +2072,29 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             pady=12,
             selectbackground="#45475a",
         )
-        self.area_mensaje.pack(fill=tk.BOTH, expand=True, padx=10, pady=(4, 0))
+        self.area_mensaje.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
 
         self.area_mensaje.tag_configure("usuario", foreground=self.usercolor, font=("Segoe UI", 11, "bold"))
         self.area_mensaje.tag_configure("asistente", foreground=self.botcolor, font=("Segoe UI", 11))
         self.area_mensaje.tag_configure("thinking", foreground="#6c7086", font=("Segoe UI", 11, "italic"))
 
-        self.area_mensaje.insert(tk.END, "🤖  ¿En qué puedo ayudarte?\n\n", "asistente")
+        self._chat_messages = []
+        self._chat_display = []
+        _hist = read_json_tmp("chatbot_history.json")
+        if _hist:
+            self._chat_messages = _hist.get("messages", [])[-40:]
+            self._chat_display = _hist.get("display", [])[-40:]
+            self.area_mensaje.configure(state="normal")
+            for _item in self._chat_display:
+                self.area_mensaje.insert(tk.END, _item["text"] + "\n\n", _item["tag"])
+        else:
+            self.area_mensaje.insert(tk.END, "🤖  ¿En qué puedo ayudarte?\n\n", "asistente")
         self.area_mensaje.configure(state="disabled")
+        self.area_mensaje.yview(tk.END)
 
-        # ── INPUT ───────────────────────────────────────────────────────────
-        footer = tk.Frame(self, bg=self.bgcolor)
-        footer.pack(fill=tk.X, padx=10, pady=10)
+        # ── INPUT ────────────────────────────────────────────────────────────
+        footer = tk.Frame(right, bg=self.bgcolor)
+        footer.pack(fill=tk.X, pady=(0, 4))
 
         self.entrada = tk.Entry(
             footer,
@@ -1741,6 +2134,32 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self.umbralObserv = modelo_config.get("umbral_observacion", 0.35)
 
         self._activar_telegram()
+        self.after(400, self._ia_feed_refresh)
+
+    def _ia_feed_refresh(self):
+        try:
+            ia_db = IaTraceScreen()
+            rows = ia_db.select_trace(limit=20)
+            self._feed_txt.configure(state="normal")
+            self._feed_txt.delete("1.0", tk.END)
+            if not rows:
+                self._feed_txt.insert(tk.END, "  (sin decisiones aún)\n", "meta")
+            for r in rows:
+                ts = str(r.get("fecha_hora", ""))[:16]
+                dec = r.get("decision", "HOLD")
+                sym = r.get("simbolo", "") or ""
+                monto = r.get("monto", 0) or 0
+                motivo = r.get("motivo", "") or ""
+                linea1 = f"{ts}  [{dec}] {sym}  ${monto:.0f}\n"
+                linea2 = f"  {motivo[:70]}\n\n"
+                tag = dec if dec in ("BUY", "SELL", "HOLD", "ALERTA") else "meta"
+                self._feed_txt.insert(tk.END, linea1, tag)
+                self._feed_txt.insert(tk.END, linea2, "meta")
+            self._feed_txt.configure(state="disabled")
+            self._feed_txt.yview(tk.END)
+        except Exception as e:
+            self.logger.error(f"_ia_feed_refresh: {e}")
+        self.after(60_000, self._ia_feed_refresh)
 
     def _enviar(self, event=None):
         texto = self.entrada.get().strip()
@@ -1752,9 +2171,21 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self.entrada.config(state="disabled")
 
         def _worker():
+            respuesta = ""
             try:
                 contexto = self._build_contexto()
-                respuesta = self._consultar_claude(texto, contexto)
+                self._chat_messages.append({"role": "user", "content": texto})
+                respuesta = self._consultar_claude(texto, contexto, messages=self._chat_messages)
+                self._chat_messages.append({"role": "assistant", "content": respuesta})
+                self._chat_display.append({"text": f"👤  {texto}", "tag": "usuario"})
+                self._chat_display.append({"text": f"🤖  {respuesta}", "tag": "asistente"})
+                write_json_tmp(
+                    "chatbot_history.json",
+                    {
+                        "messages": self._chat_messages[-40:],
+                        "display": self._chat_display[-40:],
+                    },
+                )
             except Exception as e:
                 respuesta = f"Error al consultar Claude: {e}"
             self.after(0, lambda: self._reemplazar_ultimo(f"🤖  {respuesta}", tag="asistente"))
@@ -2138,6 +2569,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     self.Agente_Sentimiento()
                     self.Agente_InterpreteSentimiento()
                     self.Agente_ExtractoBBVA()
+                    self.Agente_ClaudeIA()
                     self.Agente_SyncOrders()
                     self.Agente_OrderEodCleanup()
                     self.exec_modulo_async(self._flush_system_alerts())

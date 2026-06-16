@@ -2152,7 +2152,7 @@ class DashMain:
         pn5 = tk.Frame(self.root, bg="white", border=2)  # frame Diversificacion por tipo de activo
         pn6 = tk.Frame(self.root, bg="white", border=2)  # frame Diversificacion por region
 
-        pn0.place(x=self.df + 5, y=10)
+        pn0.place(x=self.df + 5, y=10, width=self.max_dw - self.df - 10)
         pn1.place(x=self.df + 5, y=190)
         pn2.place(x=self.df + 310, y=190)
         pn3.place(x=self.df + 5, y=470)
@@ -2171,10 +2171,10 @@ class DashMain:
         InvBottom = ttk.Frame(leftBotPn0, style="C.TFrame")
         DebtBottom = ttk.Frame(rightBotPn0, style="C.TFrame")
 
-        topPn0.pack(side=tk.TOP)
+        topPn0.pack(side=tk.TOP, fill=tk.X, expand=True)
         botPn0.pack(side=tk.BOTTOM)
         lineLeft.pack(side=tk.LEFT, fill=tk.X)
-        lineRight.pack(side=tk.RIGHT, fill=tk.X)
+        lineRight.pack(side=tk.RIGHT, fill=tk.X, expand=True)
         leftBotPn0.pack(side=tk.LEFT)
         rightBotPn0.pack(side=tk.LEFT)
         gypBottom.pack(side=tk.TOP)
@@ -2203,28 +2203,36 @@ class DashMain:
         self.line.pack(side=tk.LEFT, fill=tk.X)
         self.user.pack(side=tk.LEFT, fill=tk.X)
 
-        # botón IA ON/OFF (GainsCapture modo) — lee BD para no depender del orden de init
-        _gc_img_on = BDsystem.select_image(idd=23, size=(32, 32))
-        _gc_img_off = BDsystem.select_image(idd=24, size=(32, 32))
+        # botón semáforo — modo operación (OBSERVACION / SUPERVISADO / AUTONOMO)
+        # absorbe GainsCapture: OBSERVACION/SUPERVISADO→autorizado, AUTONOMO→automatico
+        _AGENTE_MODOS = {
+            "OBSERVACION": {"bg": "#CC3333", "fg": "white"},
+            "SUPERVISADO": {"bg": "#CC9900", "fg": "white"},
+            "AUTONOMO": {"bg": "#33AA44", "fg": "white"},
+        }
         try:
-            _ses_gc = BDsystem.get_sesion_by_vehiculo("Stock")
-            _params_raw = _ses_gc.get("parameters") or "{}"
-            _params_gc = json.loads(_params_raw.decode("utf-8") if isinstance(_params_raw, bytes) else _params_raw)
-            DataHub.gains_capture_modo = _params_gc.get("gains_capture", {}).get("modo", "automatico")
+            _ses_ia = BDsystem.get_sesion_by_vehiculo("Stock")
+            _lp_raw = _ses_ia.get("llave_privada") or "{}"
+            _lp = json.loads(_lp_raw.decode("utf-8") if isinstance(_lp_raw, bytes) else _lp_raw)
+            DataHub.modo_operacion = _lp.get("agente_ia", {}).get("modo", "OBSERVACION")
         except Exception:
-            pass
-        _gc_img_init = _gc_img_on if DataHub.gains_capture_modo == "automatico" else _gc_img_off
-        self.btn_gc_modo = tk.Button(
+            DataHub.modo_operacion = "OBSERVACION"
+        _modo_init = DataHub.modo_operacion if DataHub.modo_operacion in _AGENTE_MODOS else "OBSERVACION"
+        self.btn_agente_modo = tk.Button(
             lineLeft,
-            image=_gc_img_init,
-            bg=self.colors["bgcolor"],
+            text=f"⚙ {_modo_init}",
+            bg=_AGENTE_MODOS[_modo_init]["bg"],
+            fg=_AGENTE_MODOS[_modo_init]["fg"],
+            font=("Segoe UI", 8, "bold"),
             relief=tk.FLAT,
             cursor="hand2",
-            command=self._toggle_gains_capture_modo,
+            width=14,
+            padx=4,
+            pady=2,
+            command=self._toggle_modo_operacion,
         )
-        self.btn_gc_modo.imagen_on = _gc_img_on
-        self.btn_gc_modo.imagen_off = _gc_img_off
-        self.btn_gc_modo.pack(side=tk.LEFT, fill=tk.X)
+        self.btn_agente_modo._modos = _AGENTE_MODOS
+        self.btn_agente_modo.pack(side=tk.LEFT, padx=(8, 0))
 
         # órdenes y salida del sistema --------------------------------------------------------------------------------
         imagen_tk = BDsystem.select_image(idd=14, size=(32, 32))
@@ -2238,8 +2246,6 @@ class DashMain:
         )
         self.cart.imagen = imagen_tk
 
-        # inserta espacios para alinear botones en la lineas
-        self.line = tk.Label(lineRight, text=spaces(110), bg=self.colors["bgcolor"])
         imagen_tk = BDsystem.select_image(idd=12, size=(32, 32))
 
         self.exit = tk.Button(
@@ -2251,9 +2257,9 @@ class DashMain:
         )
         self.exit.imagen = imagen_tk
 
-        self.exit.pack(side=tk.RIGHT, fill=tk.X)
-        self.cart.pack(side=tk.RIGHT, fill=tk.X)
-        self.line.pack(side=tk.RIGHT, fill=tk.X)
+        self.exit.pack(side=tk.RIGHT, padx=(0, 4))
+        self.cart.pack(side=tk.RIGHT, padx=(0, 4))
+        tk.Label(lineRight, text="", bg=self.colors["bgcolor"]).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # Progreso inversion gyp diarias ------------------------------------------------------------------------------
         self.GypProgress = ProgressBar(
@@ -2753,20 +2759,24 @@ class DashMain:
                 after_id = self.root.after(500, lambda: self.update_widget(vehiculo=vehiculo))
                 self.after_ids.append(after_id)
 
-    def _toggle_gains_capture_modo(self):
-        nuevo = "autorizado" if DataHub.gains_capture_modo == "automatico" else "automatico"
-        DataHub.gains_capture_modo = nuevo
+    def _toggle_modo_operacion(self):
+        _GC_MAP = {"OBSERVACION": "autorizado", "SUPERVISADO": "autorizado", "AUTONOMO": "automatico"}
+        ciclo = ["OBSERVACION", "SUPERVISADO", "AUTONOMO"]
+        actual = DataHub.modo_operacion if DataHub.modo_operacion in ciclo else "OBSERVACION"
+        nuevo = ciclo[(ciclo.index(actual) + 1) % len(ciclo)]
+        DataHub.modo_operacion = nuevo
+        DataHub.gains_capture_modo = _GC_MAP[nuevo]
         try:
             ses = BDsystem.get_sesion_by_vehiculo("Stock")
             params_raw = ses.get("parameters") or "{}"
             params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
-            params.setdefault("gains_capture", {})["modo"] = nuevo
+            params.setdefault("agente_ia", {})["modo"] = nuevo
+            params.setdefault("gains_capture", {})["modo"] = _GC_MAP[nuevo]
             BDsystem.update_sesion_config("Stock", params)
         except Exception as e:
-            print(f"_toggle_gains_capture_modo: {e}")
-        img = self.btn_gc_modo.imagen_on if nuevo == "automatico" else self.btn_gc_modo.imagen_off
-        self.btn_gc_modo.configure(image=img)
-        self.btn_gc_modo.image = img
+            print(f"_toggle_modo_operacion: {e}")
+        estilos = self.btn_agente_modo._modos[nuevo]
+        self.btn_agente_modo.configure(text=f"⚙ {nuevo}", bg=estilos["bg"], fg=estilos["fg"])
 
     def car_ordenes_activas(self):
         _refresh_id = [None]
