@@ -2212,9 +2212,9 @@ class DashMain:
         }
         try:
             _ses_ia = BDsystem.get_sesion_by_vehiculo("Stock")
-            _lp_raw = _ses_ia.get("llave_privada") or "{}"
-            _lp = json.loads(_lp_raw.decode("utf-8") if isinstance(_lp_raw, bytes) else _lp_raw)
-            DataHub.modo_operacion = _lp.get("agente_ia", {}).get("modo", "OBSERVACION")
+            _params_raw = _ses_ia.get("parameters") or "{}"
+            _params = json.loads(_params_raw.decode("utf-8") if isinstance(_params_raw, bytes) else _params_raw)
+            DataHub.modo_operacion = _params.get("agente_ia", {}).get("modo", "OBSERVACION")
         except Exception:
             DataHub.modo_operacion = "OBSERVACION"
         _modo_init = DataHub.modo_operacion if DataHub.modo_operacion in _AGENTE_MODOS else "OBSERVACION"
