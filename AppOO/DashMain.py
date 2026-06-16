@@ -2152,7 +2152,7 @@ class DashMain:
         pn5 = tk.Frame(self.root, bg="white", border=2)  # frame Diversificacion por tipo de activo
         pn6 = tk.Frame(self.root, bg="white", border=2)  # frame Diversificacion por region
 
-        pn0.place(x=self.df + 5, y=10, width=self.max_dw - self.df - 10)
+        pn0.place(x=self.df + 5, y=10)
         pn1.place(x=self.df + 5, y=190)
         pn2.place(x=self.df + 310, y=190)
         pn3.place(x=self.df + 5, y=470)
