@@ -18,7 +18,7 @@ from Modulos_python import (
     mpatches,
     filedialog,
 )
-from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem
+from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, IaTraceScreen
 from Modulos_Utilitarios import AGENTES_SCHEDULE, documentar_estructura, read_json_tmp, write_json_tmp
 from Class_customer import (
     MyMessageBox,
@@ -65,6 +65,7 @@ class system_status(tk.Frame):
         self.debugging = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.agentes = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.apicost = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
+        self.iatrace = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
 
         # Frames para la derecha
         self.connect = ttk.Frame(self.right, padding=(1, 1, 1, 1), style="C.TFrame")
@@ -88,6 +89,7 @@ class system_status(tk.Frame):
         self.bottom.add(self.debugging, text="Debugging")
         self.bottom.add(self.agentes, text="Agentes")
         self.bottom.add(self.apicost, text="IA Cost")
+        self.bottom.add(self.iatrace, text="IA Trace")
 
         self.bottom.pack(side=tk.BOTTOM, fill=tk.BOTH, ipady=0)
         self.bottom.configure(height=340)
@@ -98,6 +100,7 @@ class system_status(tk.Frame):
         self.system.bind("<Destroy>", self._on_destroy)
 
         self.process_system()
+        self.ia_trace_system()
         # NOTA: sell_ia_monitor() se llama desde start_chatbot() después de inicializar chatbot
 
     def _on_destroy(self, event):
@@ -2779,6 +2782,147 @@ class system_status(tk.Frame):
         ttk.Button(btn_frame, text="Cancel", command=cancelar, width=10).pack(side=tk.LEFT)
 
         config_window.protocol("WM_DELETE_WINDOW", on_close)
+
+    def _ia_feed_refresh(self):
+        """Actualiza el teletipo IA (panel derecho) con las últimas decisiones de ia_trace."""
+        _COLORS = {"BUY": "BUY", "SELL": "SELL", "HOLD": "HOLD", "ALERTA": "ALERTA"}
+        try:
+            ia_db = IaTraceScreen()
+            rows = ia_db.select_trace(limit=15)
+            self._ia_feed.configure(state="normal")
+            self._ia_feed.delete("1.0", tk.END)
+            self._ia_feed.insert(tk.END, "  🤖 Agente IA — últimas decisiones\n", "header")
+            self._ia_feed.insert(tk.END, "  " + "─" * 44 + "\n", "meta")
+            if not rows:
+                self._ia_feed.insert(tk.END, "  (sin registros aún)\n", "meta")
+            else:
+                for r in rows:
+                    ts = str(r.get("timestamp", ""))[:16]
+                    dec = str(r.get("decision", ""))
+                    sym = str(r.get("simbolo", "") or "—")
+                    monto = r.get("monto", 0)
+                    motivo = str(r.get("motivo", ""))[:80]
+                    monto_txt = f"${monto:.0f}" if monto else ""
+                    tag = _COLORS.get(dec, "meta")
+                    self._ia_feed.insert(tk.END, f"  {ts}  ", "meta")
+                    self._ia_feed.insert(tk.END, f"{dec:<6}", tag)
+                    self._ia_feed.insert(tk.END, f" {sym:<6} {monto_txt:<8}", "meta")
+                    self._ia_feed.insert(tk.END, f"{motivo}\n", tag)
+            self._ia_feed.configure(state="disabled")
+            self._ia_feed.yview(tk.END)
+        except Exception as e:
+            print(f"_ia_feed_refresh: {e}")
+        self.system.after(60_000, self._ia_feed_refresh)
+
+    def ia_trace_system(self):
+        try:
+            from Modulos_Utilitarios import read_json_tmp
+
+            ia_db = IaTraceScreen()
+
+            COLS = ("ID", "Fecha", "Vehículo", "Símbolo", "Decisión", "Monto", "Motivo", "Estado")
+            COL_W = (40, 110, 70, 70, 70, 70, 320, 80)
+            DECISION_COLORS = {
+                "BUY": "#00FF66",
+                "SELL": "#FF6B6B",
+                "HOLD": "#AAAAAA",
+                "ALERTA": "#FFB347",
+            }
+            _INTERVALO_AGENTE = 86400
+            _AUTO_REFRESH_MS = 60_000
+
+            frame = self.iatrace
+            top = tk.Frame(frame, bg="black")
+            top.pack(fill=tk.X, pady=(2, 0))
+
+            lbl_status = tk.Label(
+                top, text="IA Trace — cargando...", bg="black", fg="cyan", font=("Consolas", 9, "bold")
+            )
+            lbl_status.pack(side=tk.LEFT, padx=6)
+
+            lbl_prox = tk.Label(top, text="", bg="black", fg="#888888", font=("Consolas", 8))
+            lbl_prox.pack(side=tk.LEFT, padx=12)
+
+            btn_refresh = ttk.Button(top, text="↺ Refrescar", width=10)
+            btn_refresh.pack(side=tk.RIGHT, padx=4)
+
+            tree_frame = tk.Frame(frame, bg="black")
+            tree_frame.pack(fill=tk.BOTH, expand=True)
+
+            vsb = ttk.Scrollbar(tree_frame, orient="vertical")
+            vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+            tree = ttk.Treeview(tree_frame, columns=COLS, show="headings", yscrollcommand=vsb.set, height=10)
+            vsb.configure(command=tree.yview)
+
+            for col, w in zip(COLS, COL_W):
+                tree.heading(col, text=col)
+                tree.column(col, width=w, anchor="w", stretch=(col == "Motivo"))
+
+            tree.pack(fill=tk.BOTH, expand=True)
+
+            BG_COLORS = {"BUY": "#002210", "SELL": "#2a0a0a", "HOLD": "#111111", "ALERTA": "#1f1400"}
+            for dec, color in DECISION_COLORS.items():
+                tree.tag_configure(dec, foreground=color, background=BG_COLORS.get(dec, "black"))
+            tree.tag_configure("PENDIENTE_tag", foreground="#AAAAAA")
+
+            def _prox_run_txt():
+                try:
+                    import time as _time
+
+                    last = read_json_tmp("agents_schedule.json").get("Agente_ClaudeIA", 0)
+                    if not last:
+                        return "Agente_ClaudeIA: aún no corrió"
+                    prox = last + _INTERVALO_AGENTE
+                    resta = int(prox - _time.time())
+                    if resta <= 0:
+                        return "Agente_ClaudeIA: listo para correr"
+                    h, m = divmod(resta // 60, 60)
+                    return f"Agente_ClaudeIA: próximo en {h}h {m:02d}m"
+                except Exception:
+                    return ""
+
+            def _load():
+                for row in tree.get_children():
+                    tree.delete(row)
+                rows = ia_db.select_trace(limit=100)
+                for r in rows:
+                    ts = str(r.get("timestamp", ""))[:16]
+                    dec = str(r.get("decision", ""))
+                    monto = r.get("monto", 0)
+                    monto_txt = f"${monto:.0f}" if monto else "—"
+                    motivo = str(r.get("motivo", ""))[:120]
+                    estado = str(r.get("estado", ""))
+                    tag = dec if dec in DECISION_COLORS else ""
+                    tree.insert(
+                        "",
+                        "end",
+                        values=(
+                            r.get("id", ""),
+                            ts,
+                            r.get("vehiculo", ""),
+                            r.get("simbolo", "") or "—",
+                            dec,
+                            monto_txt,
+                            motivo,
+                            estado,
+                        ),
+                        tags=(tag,),
+                    )
+                lbl_status.config(text=f"IA Trace — {len(rows)} registros")
+                lbl_prox.config(text=_prox_run_txt())
+
+            def _auto_refresh():
+                _load()
+                frame.after(_AUTO_REFRESH_MS, _auto_refresh)
+
+            btn_refresh.configure(command=_load)
+            _load()
+            frame.after(_AUTO_REFRESH_MS, _auto_refresh)
+
+        except Exception as e:
+            traceback.print_exc()
+            print(f"ia_trace_system(): {e}")
 
     def sell_ia_monitor(self, chatbot=None):
         """
