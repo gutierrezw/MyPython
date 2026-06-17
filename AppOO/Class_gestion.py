@@ -816,59 +816,147 @@ class GestionInversion(tk.Frame):
                 chart_trazaplan(fg=self.fg0, traza=traz, cchart=self.colors["cchart"])
                 self.cv0.draw()
 
+    def _make_editable_list(self, parent, grid_row, items, cols, max_filas=10):
+        """Treeview editable reutilizable. Grida frame en grid_row y botones en grid_row+1."""
+        frame = tk.Frame(parent, bg=self.bgcolor)
+        frame.grid(row=grid_row, column=0, columnspan=2, sticky="ew", padx=8, pady=(2, 0))
+
+        col_ids = [c[0] for c in cols]
+        h = min(max(len(items), 2), 6)
+        tree = ttk.Treeview(frame, columns=col_ids, show="headings", height=h)
+        for col_id, col_title, col_w in cols:
+            tree.heading(col_id, text=col_title, anchor="w")
+            tree.column(col_id, width=col_w, anchor="w", stretch=True)
+
+        _rows = {}
+        for item in items:
+            vals = tuple(item.get(c[0], "") for c in cols)
+            iid = tree.insert("", "end", values=vals)
+            rd = {"id": item.get("id"), "deleted": False}
+            for c in cols:
+                rd[c[0]] = item.get(c[0], "")
+            _rows[iid] = rd
+
+        _active = [None]
+
+        def _edit_cell(event):
+            if _active[0] and _active[0].winfo_exists():
+                _active[0].destroy()
+                _active[0] = None
+            iid = tree.identify_row(event.y)
+            col = tree.identify_column(event.x)
+            if not iid or not col:
+                return
+            ci = int(col.lstrip("#")) - 1
+            if ci >= len(col_ids):
+                return
+            try:
+                x, y, w, h = tree.bbox(iid, col)
+            except Exception:
+                return
+            ent = tk.Entry(
+                tree, bg="#1e1e2e", fg="white", insertbackground="white", font=("Segoe UI", 8), relief=tk.FLAT
+            )
+            ent.place(x=x, y=y, width=w, height=h)
+            ent.insert(0, tree.set(iid, col_ids[ci]))
+            ent.select_range(0, tk.END)
+            ent.focus_set()
+            _active[0] = ent
+
+            def _commit(ev=None):
+                if not ent.winfo_exists():
+                    return
+                val = ent.get()
+                tree.set(iid, col_ids[ci], val)
+                if iid in _rows:
+                    _rows[iid][col_ids[ci]] = val
+                if _active[0] is ent:
+                    ent.destroy()
+                    _active[0] = None
+
+            def _cancel(ev=None):
+                if ent.winfo_exists():
+                    ent.destroy()
+                if _active[0] is ent:
+                    _active[0] = None
+
+            ent.bind("<Return>", _commit)
+            ent.bind("<Tab>", _commit)
+            ent.bind("<FocusOut>", _commit)
+            ent.bind("<Escape>", _cancel)
+
+        tree.bind("<Double-1>", _edit_cell)
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side=tk.LEFT, fill="both", expand=True)
+        vsb.pack(side=tk.RIGHT, fill="y")
+
+        btn_frame = tk.Frame(parent, bg=self.bgcolor)
+        btn_frame.grid(row=grid_row + 1, column=0, columnspan=2, sticky="w", padx=8, pady=(1, 4))
+
+        def _add():
+            if sum(1 for v in _rows.values() if not v["deleted"]) >= max_filas:
+                return
+            rd = {"id": None, "deleted": False}
+            for c in cols:
+                rd[c[0]] = ""
+            iid = tree.insert("", "end", values=("",) * len(cols))
+            _rows[iid] = rd
+
+        def _delete():
+            for iid in tree.selection():
+                if iid in _rows:
+                    _rows[iid]["deleted"] = True
+                tree.delete(iid)
+
+        tk.Button(
+            btn_frame, text="+ Agregar", width=9, bg="#37474f", fg="white", font=("Segoe UI", 8), command=_add
+        ).pack(side=tk.LEFT, padx=(0, 4))
+        tk.Button(
+            btn_frame, text="✕ Eliminar", width=9, bg="#37474f", fg="white", font=("Segoe UI", 8), command=_delete
+        ).pack(side=tk.LEFT)
+
+        return lambda: list(_rows.values())
+
     # despliega los riesgos y otras variables a considerar en plan de inversión
-    def _edit_riesgos(self, vari, plan_rows):
+    def _edit_riesgos(self, vari, plan_rows, anchor_x=None):
+        MAX_FILAS = 10
+
         def eexit():
             dlg.destroy()
 
         def _seccion(parent, titulo, color, row):
-            btn = tk.Button(
+            tk.Button(
                 parent,
                 text=titulo,
-                width=74,
                 height=1,
                 state="disabled",
                 font=("Segoe UI", 9, "bold"),
                 fg="white",
+                disabledforeground="white",
                 bg=color,
                 relief=tk.FLAT,
-            )
-            btn.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 2))
+            ).grid(row=row, column=0, columnspan=2, sticky="ew", pady=(8, 2))
 
-        def _fila_riesgo(parent, row, num, item):
-            tk.Label(parent, text=f"{num}.", bg=self.bgcolor, fg="white", width=2).grid(
-                row=row, column=0, padx=(8, 2), pady=2, sticky="e"
-            )
-            e_ditem = tk.Entry(parent, width=32, bg=self.bgcolor, fg="white", insertbackground="white")
-            e_ditem.insert(0, item.get("ditem", ""))
-            e_ditem.grid(row=row, column=1, padx=4, pady=2, sticky="w")
-            e_obs = tk.Entry(parent, width=32, bg=self.bgcolor, fg="white", insertbackground="white")
-            e_obs.insert(0, item.get("observaciones", ""))
-            e_obs.grid(row=row, column=2, padx=4, pady=2, sticky="w")
-            return e_ditem, e_obs
-
-        def _fila_item(parent, row, num, item):
-            tk.Label(parent, text=f"{num}.", bg=self.bgcolor, fg="white", width=2).grid(
-                row=row, column=0, padx=(8, 2), pady=2, sticky="e"
-            )
-            e = tk.Entry(parent, width=60, bg=self.bgcolor, fg="white", insertbackground="white")
-            e.insert(0, item.get("ditem", ""))
-            e.grid(row=row, column=1, columnspan=2, padx=4, pady=2, sticky="w")
-            return e
+        def _make_list(parent, grid_row, items, cols):
+            return self._make_editable_list(parent, grid_row, items, cols, max_filas=MAX_FILAS)
 
         def guardar():
-            # guardar riesgos
-            for item, (e_d, e_o) in zip(riesgos_items, riesgos_entries):
-                self.PlaInversion.update_variablesplan_item(item["id"], e_d.get().strip(), e_o.get().strip())
-            # guardar esfuerzo/economico/personal
-            for item, e in zip(esfuerzo_items, esfuerzo_entries):
-                self.PlaInversion.update_variablesplan_item(item["id"], e.get().strip())
-            for item, e in zip(economico_items, economico_entries):
-                self.PlaInversion.update_variablesplan_item(item["id"], e.get().strip())
-            for item, e in zip(personal_items, personal_entries):
-                self.PlaInversion.update_variablesplan_item(item["id"], e.get().strip())
-            # guardar plan.proyecto (objetivo)
-            for item, e in zip(plan_rows, objetivo_entries):
+            idcuenta = self.datsess["idcuenta"]
+            for tipo, get_fn in _secciones:
+                for row in get_fn():
+                    db_id = row.get("id")
+                    ditem = row.get("ditem", "").strip()
+                    obs = row.get("observaciones", "").strip()
+                    if row["deleted"]:
+                        if db_id:
+                            self.PlaInversion.delete_variablesplan_item(db_id)
+                    else:
+                        if db_id:
+                            self.PlaInversion.update_variablesplan_item(db_id, ditem, obs)
+                        elif ditem:
+                            self.PlaInversion.insert_variablesplan_item(idcuenta, tipo, ditem, obs)
+            for item, e in zip(plan_rows or [], objetivo_entries):
                 self.PlaInversion.update_plan_proyecto(item["id"], e.get().strip())
             eexit()
 
@@ -883,11 +971,11 @@ class GestionInversion(tk.Frame):
             dlg.resizable(False, True)
             dlg.attributes("-toolwindow", 1)
             dlg.config(bg=self.bgcolor)
-            dlg.geometry("780x640+%d+%d" % (self.tree_plan.winfo_rootx(), 65))
+            _edit_x = max(0, (anchor_x - 800) if anchor_x is not None else self.tree_plan.winfo_rootx())
+            dlg.geometry("780x680+%d+%d" % (_edit_x, 65))
             dlg.grab_set()
             dlg.protocol("WM_DELETE_WINDOW", eexit)
 
-            # canvas + scrollbar para contenido largo
             canvas = tk.Canvas(dlg, bg=self.bgcolor, highlightthickness=0)
             sb = ttk.Scrollbar(dlg, orient="vertical", command=canvas.yview)
             canvas.configure(yscrollcommand=sb.set)
@@ -902,7 +990,7 @@ class GestionInversion(tk.Frame):
             _lbl = {"bg": self.bgcolor, "fg": "white", "font": ("Segoe UI", 8)}
             r = 0
 
-            # ── Objetivo (plan.proyecto) ──────────────────────────────────────
+            # ── Objetivo ──────────────────────────────────────────────────────
             _seccion(body, "Objetivo (texto por visión)", "#37474f", r)
             r += 1
             objetivo_entries = []
@@ -912,57 +1000,50 @@ class GestionInversion(tk.Frame):
                 )
                 e = tk.Entry(body, width=62, bg=self.bgcolor, fg="white", insertbackground="white")
                 e.insert(0, pr.get("proyecto", ""))
-                e.grid(row=r, column=1, columnspan=2, padx=4, pady=2, sticky="w")
+                e.grid(row=r, column=1, padx=4, pady=2, sticky="w")
                 objetivo_entries.append(e)
                 r += 1
 
             # ── Riesgos ───────────────────────────────────────────────────────
-            _seccion(body, "Riesgos  /  Solución Potencial", "#c0392b", r)
+            _seccion(body, "Riesgos  /  Solución Potencial  (doble-click para editar)", "#c0392b", r)
             r += 1
-            tk.Label(body, text="Riesgo", bg=self.bgcolor, fg="white", font=("Segoe UI", 8, "bold")).grid(
-                row=r, column=1, padx=4, sticky="w"
-            )
-            tk.Label(body, text="Solución Potencial", bg=self.bgcolor, fg="white", font=("Segoe UI", 8, "bold")).grid(
-                row=r, column=2, padx=4, sticky="w"
-            )
-            r += 1
-            riesgos_entries = []
-            for i, item in enumerate(riesgos_items, 1):
-                e_d, e_o = _fila_riesgo(body, r, i, item)
-                riesgos_entries.append((e_d, e_o))
-                r += 1
+            cols_rsg = [("ditem", "Riesgo", 340), ("observaciones", "Solución Potencial", 360)]
+            fn_rsg = _make_list(body, r, riesgos_items, cols_rsg)
+            r += 2
 
             # ── Tiempo/Energía ────────────────────────────────────────────────
-            _seccion(body, "Tiempo / Energía", "#37474f", r)
+            _seccion(body, "Tiempo / Energía  (doble-click para editar)", "#37474f", r)
             r += 1
-            esfuerzo_entries = []
-            for i, item in enumerate(esfuerzo_items, 1):
-                esfuerzo_entries.append(_fila_item(body, r, i, item))
-                r += 1
+            cols_1 = [("ditem", "Descripción", 710)]
+            fn_esf = _make_list(body, r, esfuerzo_items, cols_1)
+            r += 2
 
             # ── Económicos ────────────────────────────────────────────────────
-            _seccion(body, "Económicos", "#37474f", r)
+            _seccion(body, "Económicos  (doble-click para editar)", "#37474f", r)
             r += 1
-            economico_entries = []
-            for i, item in enumerate(economico_items, 1):
-                economico_entries.append(_fila_item(body, r, i, item))
-                r += 1
+            fn_eco = _make_list(body, r, economico_items, cols_1)
+            r += 2
 
             # ── Personales ────────────────────────────────────────────────────
-            _seccion(body, "Personales", "#37474f", r)
+            _seccion(body, "Personales  (doble-click para editar)", "#37474f", r)
             r += 1
-            personal_entries = []
-            for i, item in enumerate(personal_items, 1):
-                personal_entries.append(_fila_item(body, r, i, item))
-                r += 1
+            fn_per = _make_list(body, r, personal_items, cols_1)
+            r += 2
+
+            _secciones = [
+                ("riesgos", fn_rsg),
+                ("esfuerzo", fn_esf),
+                ("economico", fn_eco),
+                ("personal", fn_per),
+            ]
 
             # ── Botones ───────────────────────────────────────────────────────
             bot = tk.Frame(body, bg=self.bgcolor)
-            bot.grid(row=r, column=0, columnspan=3, pady=12)
-            tk.Button(bot, text="Guardar", width=10, bg="gray", fg="white", command=guardar).pack(
+            bot.grid(row=r, column=0, columnspan=2, pady=12)
+            tk.Button(bot, text="Guardar", width=8, bg="gray", fg="white", command=guardar).pack(
                 side=tk.LEFT, padx=(20, 8)
             )
-            tk.Button(bot, text="Cancel", width=10, bg="gray", fg="white", command=eexit).pack(side=tk.LEFT, padx=8)
+            tk.Button(bot, text="Cancel", width=8, bg="gray", fg="white", command=eexit).pack(side=tk.LEFT, padx=8)
 
         except Exception as e:
             print(f"_edit_riesgos(): {e}")
@@ -1095,9 +1176,9 @@ class GestionInversion(tk.Frame):
                 win4,
                 text="Editar",
                 width=8,
-                bg="#1565c0",
+                bg="gray",
                 fg="white",
-                command=lambda: self._edit_riesgos(vari, plan_rows),
+                command=lambda: self._edit_riesgos(vari, plan_rows, anchor_x=rnb.winfo_rootx()),
             )
             edit_btn.grid(row=1, column=0, pady=2, padx=13)
             if vari:
@@ -1727,9 +1808,9 @@ class GestionInversion(tk.Frame):
                 ses = BDsystem.get_sesion_by_vehiculo("Stock")
                 raw = ses.get("parameters") or "{}"
                 params = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
-                return params.get("agente_ia", {}).get("plan", {})
+                return params.get("agente_ia", {}).get("plan", {}), params.get("agente_ia", {})
             except Exception:
-                return {}
+                return {}, {}
 
         def submit_values():
             try:
@@ -1760,14 +1841,36 @@ class GestionInversion(tk.Frame):
                 ses = BDsystem.get_sesion_by_vehiculo("Stock")
                 raw = ses.get("parameters") or "{}"
                 params = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
-                params.setdefault("agente_ia", {})["plan"] = {
+                agente_ia = params.setdefault("agente_ia", {})
+                agente_ia["plan"] = {
                     "meta_capital": meta_cap,
                     "meta_año": meta_year,
                     "ingreso_pasivo_pct": ingreso_pct,
                     "perdida_max_pct": perdida_pct,
                     "mision": mision_txt,
                 }
+                try:
+                    agente_ia["leverage_max"] = float(entry_leverage.get().strip() or "1.8")
+                    agente_ia["deuda_max_pct"] = int(float(entry_deuda.get().strip() or "35"))
+                    agente_ia["risk_real_max"] = float(entry_risk.get().strip() or "2.0")
+                    agente_ia["concentracion_sector_max"] = int(float(entry_conc_sector.get().strip() or "30"))
+                    agente_ia["concentracion_region_max"] = int(float(entry_conc_region.get().strip() or "40"))
+                except ValueError:
+                    pass
                 BDsystem.update_sesion_parameters("Stock", params)
+
+                idcuenta = self.datsess["idcuenta"]
+                for row in _fn_criterios[0]():
+                    db_id = row.get("id")
+                    ditem = row.get("ditem", "").strip()
+                    if row["deleted"]:
+                        if db_id:
+                            self.PlaInversion.delete_variablesplan_item(db_id)
+                    else:
+                        if db_id:
+                            self.PlaInversion.update_variablesplan_item(db_id, ditem)
+                        elif ditem:
+                            self.PlaInversion.insert_variablesplan_item(idcuenta, "salida_emergencia", ditem)
 
                 eexit()
                 self.widgets_plan()
@@ -1776,12 +1879,15 @@ class GestionInversion(tk.Frame):
                 MyMessageBox(self.root).showerror("Error", "Todos los valores deben ser números enteros válidos.")
 
         try:
-            ia_plan = _load_ia_plan()
+            ia_plan, ia_config = _load_ia_plan()
+            vari_all = self.PlaInversion.select_variablesplan(self.datsess["idcuenta"]) or []
+            criterios_items = [v for v in vari_all if v["tipo"] == "salida_emergencia"]
+            _fn_criterios = [None]
 
             rnb = tk.Toplevel()
-            marco = "%dx%d+%d+%d" % (680, 440, 650, 320)
+            marco = "%dx%d+%d+%d" % (680, 680, 650, 80)
             rnb.geometry(marco)
-            rnb.resizable(False, False)
+            rnb.resizable(False, True)
             rnb.attributes("-toolwindow", 1)
             rnb.config(bg=self.bgcolor)
             rnb.title("Editar Plan")
@@ -1884,6 +1990,64 @@ class GestionInversion(tk.Frame):
                 "1.0", ia_plan.get("mision", "En crisis → Hold o sumar posiciones, nunca vender por pánico.")
             )
             txt_mision.grid(row=5, column=1, padx=10, pady=3, sticky=W)
+
+            # ── sección Restricciones de cartera ─────────────────────────────
+            rst = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")
+            rst.pack(fill=tk.X, pady=(0, 1))
+
+            tk.Button(
+                rst,
+                text="Restricciones de cartera",
+                height=1,
+                state="disabled",
+                font=("Segoe UI", 9, "bold"),
+                fg="white",
+                disabledforeground="white",
+                bg="#37474f",
+                relief=tk.FLAT,
+            ).grid(row=0, column=0, columnspan=2, padx=2, pady=(4, 2), sticky="ew")
+
+            _rst_lbl = {"bg": self.bgcolor, "fg": "white", "font": ("Segoe UI", 9)}
+            _rst_ent = {"width": 10, "bg": self.bgcolor, "fg": "white", "insertbackground": "white"}
+
+            tk.Label(rst, text="Leverage máximo:", **_rst_lbl).grid(row=1, column=0, padx=20, pady=3, sticky=E)
+            entry_leverage = tk.Entry(rst, **_rst_ent)
+            entry_leverage.insert(0, str(ia_config.get("leverage_max", 1.8)))
+            entry_leverage.grid(row=1, column=1, padx=10, pady=3, sticky=W)
+
+            tk.Label(rst, text="Deuda máxima %:", **_rst_lbl).grid(row=2, column=0, padx=20, pady=3, sticky=E)
+            entry_deuda = tk.Entry(rst, **_rst_ent)
+            entry_deuda.insert(0, str(ia_config.get("deuda_max_pct", 35)))
+            entry_deuda.grid(row=2, column=1, padx=10, pady=3, sticky=W)
+
+            tk.Label(rst, text="Risk real máximo:", **_rst_lbl).grid(row=3, column=0, padx=20, pady=3, sticky=E)
+            entry_risk = tk.Entry(rst, **_rst_ent)
+            entry_risk.insert(0, str(ia_config.get("risk_real_max", 2.0)))
+            entry_risk.grid(row=3, column=1, padx=10, pady=3, sticky=W)
+
+            tk.Label(rst, text="Concentración sector %:", **_rst_lbl).grid(row=4, column=0, padx=20, pady=3, sticky=E)
+            entry_conc_sector = tk.Entry(rst, **_rst_ent)
+            entry_conc_sector.insert(0, str(ia_config.get("concentracion_sector_max", 30)))
+            entry_conc_sector.grid(row=4, column=1, padx=10, pady=3, sticky=W)
+
+            tk.Label(rst, text="Concentración región %:", **_rst_lbl).grid(row=5, column=0, padx=20, pady=3, sticky=E)
+            entry_conc_region = tk.Entry(rst, **_rst_ent)
+            entry_conc_region.insert(0, str(ia_config.get("concentracion_region_max", 40)))
+            entry_conc_region.grid(row=5, column=1, padx=10, pady=3, sticky=W)
+
+            tk.Button(
+                rst,
+                text="Criterios de salida de emergencia  (doble-click para editar)",
+                height=1,
+                state="disabled",
+                font=("Segoe UI", 8, "bold"),
+                fg="white",
+                disabledforeground="white",
+                bg="#c0392b",
+                relief=tk.FLAT,
+            ).grid(row=6, column=0, columnspan=2, padx=2, pady=(8, 2), sticky="ew")
+
+            _fn_criterios[0] = self._make_editable_list(rst, 7, criterios_items, [("ditem", "Criterio", 610)])
 
             # botones al fondo
             bot = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="B.TFrame")

@@ -3171,6 +3171,38 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             if conn:
                 conn.close()
 
+    def insert_variablesplan_item(self, idcuenta, tipo, ditem, observaciones=""):
+        try:
+            conn = self._conectar(tabla="insert.variablesplan")
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO variablesplan (idcuenta, tipo, codigo, ditem, valor, unidad, observaciones) "
+                "VALUES (%s, %s, %s, %s, 0, '', %s)",
+                (idcuenta, tipo, tipo[:3].upper(), ditem[:50], observaciones[:50]),
+            )
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql:: insert_variablesplan_item()]: {error}")
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    def delete_variablesplan_item(self, id):
+        try:
+            conn = self._conectar(tabla="delete.variablesplan")
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM variablesplan WHERE id=%s", (id,))
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql:: delete_variablesplan_item()]: {error}")
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
     def update_plan_proyecto(self, id, proyecto):
         try:
             conn = self._conectar(tabla="update.plan")

@@ -2467,6 +2467,8 @@ class DashMain:
             self.procesos.append({"widget": {"update_widget(Crypto)": self.it_crypto}})
             self.crypto.positions = self.crypto_ts.positions
             self.crypto.resumen = self.crypto_ts.resumen
+            for tree in self.crypto.m_heard + self.crypto.m_tree:
+                tree.delete(*tree.get_children())
             self.crypto.inicio_widget_treeview(self.crypto.positions)
             self.crypto.run_graficos()
             self.update_widget(vehiculo=vehiculo)
@@ -2481,6 +2483,8 @@ class DashMain:
 
             if cb.check_binance_connection():
                 DataHub.manager_sesion.update({"Crypto": True})
+                self.crypto.carga_inversion_en_positions()
+                self.crypto.inicio_widget_treeview(self.crypto.positions)
                 self.crypto_ts = DatosVehivulo(account=account, vehiculo=vehiculo)
                 threading.Thread(target=_init_crypto_bg, daemon=True).start()
 

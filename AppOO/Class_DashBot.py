@@ -502,6 +502,14 @@ class ClassAgenteIA:
                 self.logger.error(f"Agente_ClaudeIA: ClaudeAPIP no disponible → {_e}")
                 return
             ctx = self._armar_contexto_ia(params)
+            if (
+                not ctx.get("portfolio")
+                and not ctx.get("candidatos")
+                and not ctx.get("oport_buy")
+                and not ctx.get("oport_sell")
+            ):
+                self.logger.warning("Agente_ClaudeIA: sin posiciones ni oportunidades → SKIP (sin llamada API)")
+                return
             decision = self._claude_ia_eval(ctx, ia_config, api_key)
             if decision:
                 trace_id = self.IaTrace.insert_trace(
