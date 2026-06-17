@@ -224,6 +224,29 @@ class BDsystem:  # -------------------------------------------------------------
                 conn.close()
 
     @staticmethod
+    def update_sesion_parameters(vehiculo: str, config: dict) -> bool:
+        import json
+
+        sql = "UPDATE sesion SET parameters=%s WHERE vehiculo=%s"
+        conn = BDsystem.connect_dbase("Config.Update", False)
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            config_json = json.dumps(config)
+            cursor.execute(sql, (config_json, vehiculo))
+            conn.commit()
+            return True
+        except Exception as error:
+            print(f"[Mysql::update_sesion_parameters()]: {error}")
+            conn.rollback()
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    @staticmethod
     def update_sesion_fecha_fund(vehiculo: str, fecha_fund) -> bool:
         """
         Actualiza fechaFund de una sesión.
@@ -3130,6 +3153,40 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             return xlis
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: select_variablesplan()]: {}".format(error))
+
+    def update_variablesplan_item(self, id, ditem, observaciones=""):
+        try:
+            conn = self._conectar(tabla="update.variablesplan")
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE variablesplan SET ditem=%s, observaciones=%s WHERE id=%s",
+                (ditem[:50], observaciones[:50], id),
+            )
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql:: update_variablesplan_item()]: {error}")
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    def update_plan_proyecto(self, id, proyecto):
+        try:
+            conn = self._conectar(tabla="update.plan")
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE plan SET proyecto=%s WHERE id=%s",
+                (proyecto[:200], id),
+            )
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql:: update_plan_proyecto()]: {error}")
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
     def select_extracto(self, account=None, extract="last") -> dict:
         """

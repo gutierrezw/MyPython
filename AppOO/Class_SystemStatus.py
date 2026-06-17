@@ -1685,7 +1685,7 @@ class system_status(tk.Frame):
                     params_raw = ses.get("parameters") or "{}"
                     params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
                     params.setdefault("gains_capture", {})["modo"] = nuevo
-                    BDsystem.update_sesion_config("Stock", params)
+                    BDsystem.update_sesion_parameters("Stock", params)
                 except Exception as e:
                     print(f"_toggle_gains_modo: {e}")
                 _gc_modo_var.set("⚡ Auto" if nuevo == "automatico" else "🔐 Autorizar")

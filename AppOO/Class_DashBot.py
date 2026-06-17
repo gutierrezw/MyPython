@@ -731,10 +731,15 @@ class ClassAgenteIA:
         gains_txt = f"Posiciones con ganancia ≥${ctx.get('min_ganancia', 100):.0f} (candidatas a captura): " + (
             ", ".join(gains_symbols) if gains_symbols else "(ninguna)"
         )
+        _plan = ia_config.get("plan", {})
+        _meta_capital = _plan.get("meta_capital", "1.2M USD")
+        _meta_año = _plan.get("meta_año", "2030")
+        _ingreso_pct = _plan.get("ingreso_pasivo_pct", "≥3%")
+        _mision_extra = _plan.get("mision", "En crisis → Hold o sumar posiciones, nunca vender por pánico.")
         prompt = (
-            "Sos el agente de inversión autónomo. Misión: acumular capital hacia 1.2M USD en 2030 "
-            "generando ingresos pasivos ≥3%/año. Foco en dividendos, uso moderado de apalancamiento IB. "
-            "En crisis → Hold o sumar posiciones, nunca vender por pánico.\n\n"
+            f"Sos el agente de inversión autónomo. Misión: acumular capital hacia {_meta_capital} en {_meta_año} "
+            f"generando ingresos pasivos {_ingreso_pct}/año. Foco en dividendos, uso moderado de apalancamiento IB. "
+            f"{_mision_extra}\n\n"
             f"Fecha: {ctx.get('fecha')}\n\n"
             f"Portfolio actual (Stock):\n{_portfolio_txt()}\n\n"
             f"{gains_txt}\n\n"
@@ -1546,40 +1551,46 @@ class Telegram:
 
     # envio de mensaje a Telegram
     async def send_Telegram(self, texto, hash_id=None, reply_markup=None):
+        async def _send(bot, chat_id, text, markup, h_id):
+            """Intenta con Markdown; si falla por parse error, reintenta sin parse_mode."""
+            kwargs = {"chat_id": chat_id, "text": text}
+            if markup is not None:
+                kwargs["reply_markup"] = markup
+            for mode in ("Markdown", None):
+                try:
+                    if mode:
+                        kwargs["parse_mode"] = mode
+                    else:
+                        kwargs.pop("parse_mode", None)
+                    msg = await bot.send_message(**kwargs)
+                    return msg
+                except BadRequest as e:
+                    if mode and "parse" in str(e).lower():
+                        continue
+                    raise
+
         try:
             async with Bot(token=self.TOKEN) as bot:
                 for CHAT_ID in self.userAuth:
                     if reply_markup is not None:
-                        sent_message = await bot.send_message(
-                            chat_id=CHAT_ID,
-                            text=texto,
-                            reply_markup=reply_markup,
-                            parse_mode="Markdown",
-                        )
+                        sent_message = await _send(bot, CHAT_ID, texto, reply_markup, None)
                         await self._save_message(sent_message, CHAT_ID)
                         return
 
-                    # si hash_id no es proporcionado, envía mensaje simple
                     elif hash_id is None:
-                        sent_message = await bot.send_message(chat_id=CHAT_ID, text=texto, parse_mode="Markdown")
+                        sent_message = await _send(bot, CHAT_ID, texto, None, None)
                         await self._save_message(sent_message, CHAT_ID)
                         return
 
-                    # si hash_id es proporcionado, crea botones de aprobación/rechazo
-                    elif hash_id is not None:
+                    else:
                         botones = [
                             [
                                 InlineKeyboardButton("✅ Aprobar", callback_data=f"aprobar|{hash_id}"),
                                 InlineKeyboardButton("❌ Rechazar", callback_data=f"rechazar|{hash_id}"),
                             ]
                         ]
-                        reply_markup = InlineKeyboardMarkup(botones)
-                        sent_message = await bot.send_message(
-                            chat_id=CHAT_ID,
-                            text=texto,
-                            reply_markup=reply_markup,
-                            parse_mode="Markdown",
-                        )
+                        markup = InlineKeyboardMarkup(botones)
+                        sent_message = await _send(bot, CHAT_ID, texto, markup, hash_id)
                         await self._save_message(sent_message, CHAT_ID, hash_id=hash_id)
                         return
         except Exception as e:

@@ -19,6 +19,7 @@ from Modulos_python import (
     timedelta,
     traceback,
     calendar,
+    json,
 )
 from Class_customer import MyMessageBox, CustomTreeview, DataHub
 
@@ -127,7 +128,7 @@ class GestionInversion(tk.Frame):
         self.otro = tk.Button(
             wr11,
             image=imagen_tk,
-            text="Detalle Plan",
+            text="Riesgos",
             bg=self.colors["bgcolor"],
             relief=tk.FLAT,
             command=self.detalle_plan,
@@ -799,11 +800,173 @@ class GestionInversion(tk.Frame):
                         ),
                     )
 
+                # actualiza Ingresos con dividendo real del año en Ejecucion (trazaplan)
+                _meta_activa = next(
+                    (t for t in traz if t.get("status") == "Ejecucion" and t.get("dividendo", 0) > 0),
+                    None,
+                )
+                if _meta_activa:
+                    _div = _meta_activa["dividendo"]
+                    _inv = _meta_activa["tinversion"] or 1
+                    self.mpl[5][6].config(
+                        text="{:>6.0f} de Ingresos ({:>5.2%} visión actual)".format(_div, _div / _inv)
+                    )
+
                 # redibuja gráfico de plan trazado Neto
                 chart_trazaplan(fg=self.fg0, traza=traz, cchart=self.colors["cchart"])
                 self.cv0.draw()
 
     # despliega los riesgos y otras variables a considerar en plan de inversión
+    def _edit_riesgos(self, vari, plan_rows):
+        def eexit():
+            dlg.destroy()
+
+        def _seccion(parent, titulo, color, row):
+            btn = tk.Button(
+                parent,
+                text=titulo,
+                width=74,
+                height=1,
+                state="disabled",
+                font=("Segoe UI", 9, "bold"),
+                fg="white",
+                bg=color,
+                relief=tk.FLAT,
+            )
+            btn.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 2))
+
+        def _fila_riesgo(parent, row, num, item):
+            tk.Label(parent, text=f"{num}.", bg=self.bgcolor, fg="white", width=2).grid(
+                row=row, column=0, padx=(8, 2), pady=2, sticky="e"
+            )
+            e_ditem = tk.Entry(parent, width=32, bg=self.bgcolor, fg="white", insertbackground="white")
+            e_ditem.insert(0, item.get("ditem", ""))
+            e_ditem.grid(row=row, column=1, padx=4, pady=2, sticky="w")
+            e_obs = tk.Entry(parent, width=32, bg=self.bgcolor, fg="white", insertbackground="white")
+            e_obs.insert(0, item.get("observaciones", ""))
+            e_obs.grid(row=row, column=2, padx=4, pady=2, sticky="w")
+            return e_ditem, e_obs
+
+        def _fila_item(parent, row, num, item):
+            tk.Label(parent, text=f"{num}.", bg=self.bgcolor, fg="white", width=2).grid(
+                row=row, column=0, padx=(8, 2), pady=2, sticky="e"
+            )
+            e = tk.Entry(parent, width=60, bg=self.bgcolor, fg="white", insertbackground="white")
+            e.insert(0, item.get("ditem", ""))
+            e.grid(row=row, column=1, columnspan=2, padx=4, pady=2, sticky="w")
+            return e
+
+        def guardar():
+            # guardar riesgos
+            for item, (e_d, e_o) in zip(riesgos_items, riesgos_entries):
+                self.PlaInversion.update_variablesplan_item(item["id"], e_d.get().strip(), e_o.get().strip())
+            # guardar esfuerzo/economico/personal
+            for item, e in zip(esfuerzo_items, esfuerzo_entries):
+                self.PlaInversion.update_variablesplan_item(item["id"], e.get().strip())
+            for item, e in zip(economico_items, economico_entries):
+                self.PlaInversion.update_variablesplan_item(item["id"], e.get().strip())
+            for item, e in zip(personal_items, personal_entries):
+                self.PlaInversion.update_variablesplan_item(item["id"], e.get().strip())
+            # guardar plan.proyecto (objetivo)
+            for item, e in zip(plan_rows, objetivo_entries):
+                self.PlaInversion.update_plan_proyecto(item["id"], e.get().strip())
+            eexit()
+
+        try:
+            riesgos_items = [v for v in (vari or []) if v["tipo"] == "riesgos"]
+            esfuerzo_items = [v for v in (vari or []) if v["tipo"] == "esfuerzo"]
+            economico_items = [v for v in (vari or []) if v["tipo"] == "economico"]
+            personal_items = [v for v in (vari or []) if v["tipo"] == "personal"]
+
+            dlg = tk.Toplevel()
+            dlg.title("Editar Riesgos y Objetivos")
+            dlg.resizable(False, True)
+            dlg.attributes("-toolwindow", 1)
+            dlg.config(bg=self.bgcolor)
+            dlg.geometry("780x640+%d+%d" % (self.tree_plan.winfo_rootx(), 65))
+            dlg.grab_set()
+            dlg.protocol("WM_DELETE_WINDOW", eexit)
+
+            # canvas + scrollbar para contenido largo
+            canvas = tk.Canvas(dlg, bg=self.bgcolor, highlightthickness=0)
+            sb = ttk.Scrollbar(dlg, orient="vertical", command=canvas.yview)
+            canvas.configure(yscrollcommand=sb.set)
+            sb.pack(side=tk.RIGHT, fill=tk.Y)
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+            body = tk.Frame(canvas, bg=self.bgcolor)
+            body_id = canvas.create_window((0, 0), window=body, anchor="nw")
+            body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+            canvas.bind("<Configure>", lambda e: canvas.itemconfig(body_id, width=e.width))
+
+            _lbl = {"bg": self.bgcolor, "fg": "white", "font": ("Segoe UI", 8)}
+            r = 0
+
+            # ── Objetivo (plan.proyecto) ──────────────────────────────────────
+            _seccion(body, "Objetivo (texto por visión)", "#37474f", r)
+            r += 1
+            objetivo_entries = []
+            for pr in plan_rows or []:
+                tk.Label(body, text=pr.get("vision", ""), width=14, anchor="e", **_lbl).grid(
+                    row=r, column=0, padx=(8, 2), pady=2, sticky="e"
+                )
+                e = tk.Entry(body, width=62, bg=self.bgcolor, fg="white", insertbackground="white")
+                e.insert(0, pr.get("proyecto", ""))
+                e.grid(row=r, column=1, columnspan=2, padx=4, pady=2, sticky="w")
+                objetivo_entries.append(e)
+                r += 1
+
+            # ── Riesgos ───────────────────────────────────────────────────────
+            _seccion(body, "Riesgos  /  Solución Potencial", "#c0392b", r)
+            r += 1
+            tk.Label(body, text="Riesgo", bg=self.bgcolor, fg="white", font=("Segoe UI", 8, "bold")).grid(
+                row=r, column=1, padx=4, sticky="w"
+            )
+            tk.Label(body, text="Solución Potencial", bg=self.bgcolor, fg="white", font=("Segoe UI", 8, "bold")).grid(
+                row=r, column=2, padx=4, sticky="w"
+            )
+            r += 1
+            riesgos_entries = []
+            for i, item in enumerate(riesgos_items, 1):
+                e_d, e_o = _fila_riesgo(body, r, i, item)
+                riesgos_entries.append((e_d, e_o))
+                r += 1
+
+            # ── Tiempo/Energía ────────────────────────────────────────────────
+            _seccion(body, "Tiempo / Energía", "#37474f", r)
+            r += 1
+            esfuerzo_entries = []
+            for i, item in enumerate(esfuerzo_items, 1):
+                esfuerzo_entries.append(_fila_item(body, r, i, item))
+                r += 1
+
+            # ── Económicos ────────────────────────────────────────────────────
+            _seccion(body, "Económicos", "#37474f", r)
+            r += 1
+            economico_entries = []
+            for i, item in enumerate(economico_items, 1):
+                economico_entries.append(_fila_item(body, r, i, item))
+                r += 1
+
+            # ── Personales ────────────────────────────────────────────────────
+            _seccion(body, "Personales", "#37474f", r)
+            r += 1
+            personal_entries = []
+            for i, item in enumerate(personal_items, 1):
+                personal_entries.append(_fila_item(body, r, i, item))
+                r += 1
+
+            # ── Botones ───────────────────────────────────────────────────────
+            bot = tk.Frame(body, bg=self.bgcolor)
+            bot.grid(row=r, column=0, columnspan=3, pady=12)
+            tk.Button(bot, text="Guardar", width=10, bg="gray", fg="white", command=guardar).pack(
+                side=tk.LEFT, padx=(20, 8)
+            )
+            tk.Button(bot, text="Cancel", width=10, bg="gray", fg="white", command=eexit).pack(side=tk.LEFT, padx=8)
+
+        except Exception as e:
+            print(f"_edit_riesgos(): {e}")
+
     def detalle_plan(self):
         # controla salida de window_estrategia()
         def eexit():
@@ -812,8 +975,9 @@ class GestionInversion(tk.Frame):
         try:
             # define windows de detalle plan
             rnb = tk.Toplevel()
-            title = "Detalle Plan"
-            x_dimension = "%dx%d+%d+%d" % (620, 665, self.df - 5, 65)
+            title = "Riesgos"
+            _x = self.tree_plan.winfo_rootx() + self.tree_plan.winfo_width() + 5
+            x_dimension = "%dx%d+%d+%d" % (620, 665, _x, 65)
             rnb.geometry(x_dimension)
             rnb.resizable(False, False)
             rnb.attributes("-toolwindow", 1)
@@ -837,30 +1001,32 @@ class GestionInversion(tk.Frame):
             win4.pack(fill=tk.X, pady=5)
 
             rsg = ["Riesgos", "Solución Potencial"]
+            win1.grid_columnconfigure(0, minsize=250, weight=0)
+            win1.grid_columnconfigure(1, minsize=350, weight=1)
             self.mpl[14][8] = tk.Button(
                 win1,
                 text=rsg[0],
-                width=27,
                 height=2,
                 state="disabled",
-                font=("Segoe UI", 10),
+                font=("Segoe UI", 10, "bold"),
                 fg="white",
-                bg="firebrick4",
+                disabledforeground="white",
+                bg="#c0392b",
                 relief=tk.FLAT,
             )
             self.mpl[14][9] = tk.Button(
                 win1,
                 text=rsg[1],
-                width=39,
                 height=2,
                 state="disabled",
-                font=("Segoe UI", 10),
+                font=("Segoe UI", 10, "bold"),
                 fg="white",
-                bg="firebrick4",
+                disabledforeground="white",
+                bg="#1565c0",
                 relief=tk.FLAT,
             )
-            self.mpl[14][8].pack(side=tk.LEFT)
-            self.mpl[14][9].pack(side=tk.LEFT)
+            self.mpl[14][8].grid(row=0, column=0, sticky="ew")
+            self.mpl[14][9].grid(row=0, column=1, sticky="ew")
 
             # Configurar el Treeview para usar los scrollbars
             columns = []
@@ -889,9 +1055,9 @@ class GestionInversion(tk.Frame):
                 width=10,
                 height=23,
                 state="disabled",
-                font=("Segoe UI", 10),
+                font=("Segoe UI", 10, "bold"),
                 fg="white",
-                bg="firebrick4",
+                bg="#37474f",
                 relief=tk.FLAT,
             )
             tiempo = ttk.Treeview(wi31, columns=prc[1], show="headings", height=5, style="TFrame")
@@ -923,6 +1089,17 @@ class GestionInversion(tk.Frame):
 
             # volcado de información de variables del plan
             vari = self.PlaInversion.select_variablesplan(self.datsess["idcuenta"])
+            plan_rows = self.PlaInversion.select_plan(self.datsess["idcuenta"])
+
+            edit_btn = tk.Button(
+                win4,
+                text="Editar",
+                width=8,
+                bg="#1565c0",
+                fg="white",
+                command=lambda: self._edit_riesgos(vari, plan_rows),
+            )
+            edit_btn.grid(row=1, column=0, pady=2, padx=13)
             if vari:
                 i, j, k, l = 1, 1, 1, 1
                 for tkey in vari:
@@ -1541,101 +1718,186 @@ class GestionInversion(tk.Frame):
             print(f"update_plan(): {e} {traceback.print_exc()}")
 
     def edit_plan(self):
-        # controla salida de window_estrategia()
         def eexit():
             if not (rnb is None):
                 rnb.destroy()
 
+        def _load_ia_plan():
+            try:
+                ses = BDsystem.get_sesion_by_vehiculo("Stock")
+                raw = ses.get("parameters") or "{}"
+                params = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+                return params.get("agente_ia", {}).get("plan", {})
+            except Exception:
+                return {}
+
         def submit_values():
             try:
-                # Obtener valores de las entradas
                 vision_financiera = int(entry_vision.get())
                 estilo_vida = int(entry_estilo.get())
                 contribucion = int(entry_contribucion.get())
 
-                # Validar que los valores sean mayores o iguales a 1000
                 if vision_financiera < 1000 or estilo_vida < 1000 or contribucion < 1000:
                     MyMessageBox(self.root).showerror("Error", "Todos los valores deben ser enteros de al menos 1000.")
                     return
 
-                campos = {
-                    "Financiera": vision_financiera,
-                    "Estilo de vida": estilo_vida,
-                    "Contribucion": contribucion,
-                }
-
                 self.PlaInversion.update_plan_inversion(
                     idcuenta=self.sesion["Stock"]["idcuenta"],
                     vision="deseada",
-                    values=campos,
+                    values={
+                        "Financiera": vision_financiera,
+                        "Estilo de vida": estilo_vida,
+                        "Contribucion": contribucion,
+                    },
                 )
+
+                meta_cap = entry_meta_capital.get().strip() or "1.2M USD"
+                meta_year = entry_meta_año.get().strip() or "2030"
+                ingreso_pct = entry_ingreso_pct.get().strip() or "≥3%"
+                perdida_pct = entry_perdida_pct.get().strip() or "20%"
+                mision_txt = txt_mision.get("1.0", tk.END).strip()
+
+                ses = BDsystem.get_sesion_by_vehiculo("Stock")
+                raw = ses.get("parameters") or "{}"
+                params = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+                params.setdefault("agente_ia", {})["plan"] = {
+                    "meta_capital": meta_cap,
+                    "meta_año": meta_year,
+                    "ingreso_pasivo_pct": ingreso_pct,
+                    "perdida_max_pct": perdida_pct,
+                    "mision": mision_txt,
+                }
+                BDsystem.update_sesion_parameters("Stock", params)
+
                 eexit()
                 self.widgets_plan()
 
             except ValueError:
-                MyMessageBox.showerror("Error", "Todos los valores deben ser números enteros válidos.")
+                MyMessageBox(self.root).showerror("Error", "Todos los valores deben ser números enteros válidos.")
 
         try:
+            ia_plan = _load_ia_plan()
+
             rnb = tk.Toplevel()
-            title = "Visión Deseada"
-            marco = "%dx%d+%d+%d" % (620, 150, 667, 490)
+            marco = "%dx%d+%d+%d" % (680, 440, 650, 320)
             rnb.geometry(marco)
             rnb.resizable(False, False)
             rnb.attributes("-toolwindow", 1)
             rnb.config(bg=self.bgcolor)
-            rnb.title(title)
+            rnb.title("Editar Plan")
             rnb.focus()
             rnb.grab_set()
             rnb.protocol("WM_DELETE_WINDOW", eexit)
 
-            # Etiquetas y entradas
-            vision = tk.Label(rnb, text="Visión financiera (mínimo 1000 $USD):", bg=self.bgcolor)
-            vision.grid(row=0, column=0, padx=10, pady=7, sticky=E)
-            vision_str = tk.StringVar()
-            vision_str.set(str(self.plan["Financiera"]))
+            # marco superior cyan — igual al estilo de la ventana Gestión
+            top = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")
+            top.pack(fill=tk.X, pady=(0, 1))
 
-            entry_vision = tk.Entry(rnb, textvariable=vision_str)
-            entry_vision.grid(row=0, column=1, padx=10, pady=5)
-
-            estilo = tk.Label(rnb, text="Estilo de vida (mínimo 1000 $USD):", bg=self.bgcolor)
-            estilo.grid(row=1, column=0, padx=10, pady=5, sticky=E)
-            estilo_str = tk.StringVar()
-            estilo_str.set(str(self.plan["Estilo de vida"]))
-
-            entry_estilo = tk.Entry(rnb, textvariable=estilo_str)
-            entry_estilo.grid(row=1, column=1, padx=10, pady=5)
-
-            contrib = tk.Label(rnb, text="Contribución (mínimo 1000 $USD):", bg=self.bgcolor)
-            contrib.grid(row=2, column=0, padx=10, pady=5, sticky=E)
-
-            contrib_str = tk.StringVar()
-            contrib_str.set(str(self.plan["Contribucion"]))
-
-            entry_contribucion = tk.Entry(rnb, textvariable=contrib_str)
-            entry_contribucion.grid(row=2, column=1, padx=10, pady=5)
-
-            # Botón para enviar
-            ct1 = tk.Button(
-                rnb,
-                text="Update",
-                width=8,
-                bg="gray",
+            # sección Visión Deseada
+            sec1 = tk.Button(
+                top,
+                text="Visión Deseada",
+                width=30,
+                height=1,
+                state="disabled",
+                font=("Segoe UI", 9, "bold"),
                 fg="white",
-                command=lambda: submit_values(),
+                bg="#37474f",
+                relief=tk.FLAT,
             )
-            ct2 = tk.Button(
-                rnb,
-                text="Cancel",
-                width=8,
-                bg="gray",
+            sec1.grid(row=0, column=0, columnspan=2, padx=2, pady=(4, 2), sticky=W)
+
+            _lbl = {"bg": self.bgcolor, "fg": "white", "font": ("Segoe UI", 9)}
+
+            tk.Label(top, text="Visión financiera (USD):", **_lbl).grid(row=1, column=0, padx=20, pady=3, sticky=E)
+            vision_str = tk.StringVar(value=str(self.plan.get("Financiera", 0)))
+            entry_vision = tk.Entry(
+                top, textvariable=vision_str, width=22, bg=self.bgcolor, fg="white", insertbackground="white"
+            )
+            entry_vision.grid(row=1, column=1, padx=10, pady=3, sticky=W)
+
+            tk.Label(top, text="Estilo de vida (USD):", **_lbl).grid(row=2, column=0, padx=20, pady=3, sticky=E)
+            estilo_str = tk.StringVar(value=str(self.plan.get("Estilo de vida", 0)))
+            entry_estilo = tk.Entry(
+                top, textvariable=estilo_str, width=22, bg=self.bgcolor, fg="white", insertbackground="white"
+            )
+            entry_estilo.grid(row=2, column=1, padx=10, pady=3, sticky=W)
+
+            tk.Label(top, text="Contribución (USD):", **_lbl).grid(row=3, column=0, padx=20, pady=3, sticky=E)
+            contrib_str = tk.StringVar(value=str(self.plan.get("Contribucion", 0)))
+            entry_contribucion = tk.Entry(
+                top, textvariable=contrib_str, width=22, bg=self.bgcolor, fg="white", insertbackground="white"
+            )
+            entry_contribucion.grid(row=3, column=1, padx=10, pady=3, sticky=W)
+
+            # sección Misión IA
+            mid = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")
+            mid.pack(fill=tk.X, pady=(0, 1))
+
+            sec2 = tk.Button(
+                mid,
+                text="Misión IA",
+                width=30,
+                height=1,
+                state="disabled",
+                font=("Segoe UI", 9, "bold"),
                 fg="white",
-                command=lambda: eexit(),
+                bg="#1565c0",
+                relief=tk.FLAT,
+            )
+            sec2.grid(row=0, column=0, columnspan=2, padx=2, pady=(4, 2), sticky=W)
+
+            tk.Label(mid, text="Meta capital:", **_lbl).grid(row=1, column=0, padx=20, pady=3, sticky=E)
+            entry_meta_capital = tk.Entry(mid, width=22, bg=self.bgcolor, fg="white", insertbackground="white")
+            entry_meta_capital.insert(0, ia_plan.get("meta_capital", "1.2M USD"))
+            entry_meta_capital.grid(row=1, column=1, padx=10, pady=3, sticky=W)
+
+            tk.Label(mid, text="Año objetivo:", **_lbl).grid(row=2, column=0, padx=20, pady=3, sticky=E)
+            entry_meta_año = tk.Entry(mid, width=22, bg=self.bgcolor, fg="white", insertbackground="white")
+            entry_meta_año.insert(0, ia_plan.get("meta_año", "2030"))
+            entry_meta_año.grid(row=2, column=1, padx=10, pady=3, sticky=W)
+
+            tk.Label(mid, text="Ingreso pasivo mínimo:", **_lbl).grid(row=3, column=0, padx=20, pady=3, sticky=E)
+            entry_ingreso_pct = tk.Entry(mid, width=22, bg=self.bgcolor, fg="white", insertbackground="white")
+            entry_ingreso_pct.insert(0, ia_plan.get("ingreso_pasivo_pct", "≥3%"))
+            entry_ingreso_pct.grid(row=3, column=1, padx=10, pady=3, sticky=W)
+
+            tk.Label(mid, text="Pérdida máx. tolerada:", **_lbl).grid(row=4, column=0, padx=20, pady=3, sticky=E)
+            entry_perdida_pct = tk.Entry(mid, width=22, bg=self.bgcolor, fg="white", insertbackground="white")
+            entry_perdida_pct.insert(0, ia_plan.get("perdida_max_pct", "20%"))
+            entry_perdida_pct.grid(row=4, column=1, padx=10, pady=3, sticky=W)
+
+            tk.Label(mid, text="Misión (texto libre):", **_lbl).grid(
+                row=5, column=0, padx=20, pady=(3, 2), sticky=N + E
+            )
+            txt_mision = tk.Text(
+                mid,
+                height=4,
+                width=38,
+                bg=self.bgcolor,
+                fg="white",
+                insertbackground="white",
+                font=("Segoe UI", 8),
+                wrap="word",
+            )
+            txt_mision.insert(
+                "1.0", ia_plan.get("mision", "En crisis → Hold o sumar posiciones, nunca vender por pánico.")
+            )
+            txt_mision.grid(row=5, column=1, padx=10, pady=3, sticky=W)
+
+            # botones al fondo
+            bot = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="B.TFrame")
+            bot.pack(fill=tk.X, pady=(1, 0))
+
+            tk.Button(bot, text="Guardar", width=10, bg="gray", fg="white", command=submit_values).pack(
+                side=tk.LEFT, padx=(20, 5), pady=8
+            )
+            tk.Button(bot, text="Cancelar", width=10, bg="gray", fg="white", command=eexit).pack(
+                side=tk.LEFT, padx=5, pady=8
             )
 
-            ct1.grid(row=3, column=3, padx=10, pady=10)
-            ct2.grid(row=3, column=4, padx=10, pady=10)
-        except ValueError:
-            raise ValueError("Error: {}".format("los valores deben ser números enteros."))
+        except Exception as e:
+            print(f"edit_plan(): {e}")
 
     # asegura que esté completo performance crypto para crear extracto
     def check_performance_vehiculo(self, vehiculo=None, account=None, extracto=None):

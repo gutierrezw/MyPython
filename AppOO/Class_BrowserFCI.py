@@ -96,7 +96,11 @@ class BrowserFCI:
             pass  # form abreviado — solo pide Clave
 
         await campo_pass.fill(clave)
-        await page.get_by_role("button", name=self._BBVA_BTN_LOGIN).click()
+        await campo_pass.dispatch_event("input")
+        await campo_pass.dispatch_event("change")
+        btn_login = page.get_by_role("button", name=self._BBVA_BTN_LOGIN)
+        await btn_login.wait_for(state="enabled", timeout=_TIMEOUT)
+        await btn_login.click()
         await self._wait_nav(page)
 
         try:

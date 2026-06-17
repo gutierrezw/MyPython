@@ -910,7 +910,15 @@ class AnalisisFCI(AnalisisBase):
         row = self.crear_seccion(frame, f"Cartera vs Índice:", row)
         row = self.crear_grafico_vs_indice(parent=frame, row=row)
 
-        row = self.crear_tabla_spread_banda(parent=frame, row=row)
+        # ========== GRÁFICO FONDO INDIVIDUAL VS BANDA ==========
+        row = self.crear_seccion(frame, "Fondo vs Banda de Referencia:", row)
+        row_chart, fn_update_fondo = self.crear_grafico_fondo_vs_banda(parent=frame, row=row)
+        row = row_chart
+
+        # ========== SPREAD VS BANDA (tabla) ==========
+        row, primera_fondo = self.crear_tabla_spread_banda(parent=frame, row=row, on_select=fn_update_fondo)
+        if primera_fondo and fn_update_fondo:
+            fn_update_fondo(primera_fondo)
 
         # ========== SEÑALES ==========
         if not self.df_lotes.empty and "decision" in self.df_lotes.columns:
@@ -932,10 +940,192 @@ class AnalisisFCI(AnalisisBase):
                     height=min(8, len(senales_df)),
                 )
 
-    def crear_tabla_spread_banda(self, parent, row):
-        """Tabla de spread de cada fondo vs FBA Horizonte (piso) y Supergestion Mix VI (techo)."""
+    def crear_grafico_fondo_vs_banda(self, parent, row):
+        """Gráfico interactivo: fondo seleccionado vs banda piso/techo. Retorna (row+1, fn_actualizar)."""
+        if not hasattr(self, "df_historico") or self.df_historico.empty:
+            return row, None
+        try:
+            frame_g = tk.Frame(parent, bg=self.CG_COLOR)
+            frame_g.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+
+            fg = Figure(figsize=(5.4, 3.2), dpi=100)
+            fg.patch.set_facecolor(self.CG_COLOR)
+            canvas = FigureCanvasTkAgg(fg, master=frame_g)
+            canvas.get_tk_widget().pack(fill="x", expand=True, pady=2)
+
+            _ctx = {"fondo": None, "dias": 365, "modo": "banda"}
+
+            def _dibujar(fondo=None, dias=None, modo=None):
+                if fondo is not None:
+                    _ctx["fondo"] = fondo
+                if dias is not None:
+                    _ctx["dias"] = dias
+                if modo is not None:
+                    _ctx["modo"] = modo
+                nombre = _ctx["fondo"]
+                if not nombre:
+                    return
+
+                df = self.df_historico.copy()
+                df["fecha"] = pd.to_datetime(df["fecha"])
+                df = df.sort_values(["fondo", "fecha"])
+                fecha_desde = pd.Timestamp.now() - pd.Timedelta(days=_ctx["dias"])
+                df = df[df["fecha"] >= fecha_desde]
+                if df.empty:
+                    return
+                df["rend"] = df.groupby("fondo")["valorActual"].transform(lambda x: (x / x.iloc[0] - 1) * 100)
+
+                def _serie(n):
+                    s = df[df["fondo"] == n][["fecha", "rend"]].dropna()
+                    return s["fecha"].values, s["rend"].values
+
+                fechas_piso, vals_piso = _serie(self._BANDA_PISO)
+                fechas_techo, vals_techo = _serie(self._BANDA_TECHO)
+                fechas_fondo, vals_fondo = _serie(nombre)
+
+                fg.clear()
+                ax = fg.add_subplot(111)
+                ax.set_facecolor(self.CG_COLOR)
+                ax.set_frame_on(False)
+                ax.grid(True, color="#333333", linewidth=0.5, alpha=0.5, zorder=0)
+
+                piso_s = pd.Series(vals_piso, index=pd.to_datetime(fechas_piso))
+                techo_s = pd.Series(vals_techo, index=pd.to_datetime(fechas_techo))
+                idx_comun = piso_s.index.intersection(techo_s.index)
+
+                modo_actual = _ctx["modo"]
+                if len(idx_comun):
+                    if modo_actual == "banda":
+                        ax.fill_between(
+                            idx_comun, piso_s[idx_comun], techo_s[idx_comun], alpha=0.35, color="#f1c40f", zorder=1
+                        )
+                        ax.plot(
+                            idx_comun,
+                            piso_s[idx_comun],
+                            "--",
+                            color="white",
+                            linewidth=0.8,
+                            alpha=0.6,
+                            label=self._BANDA_PISO[:20],
+                            zorder=2,
+                        )
+                        ax.plot(
+                            idx_comun,
+                            techo_s[idx_comun],
+                            "-",
+                            color="#f1c40f",
+                            linewidth=0.8,
+                            alpha=0.8,
+                            label=self._BANDA_TECHO[:20],
+                            zorder=2,
+                        )
+                    else:
+                        estimador_s = (piso_s[idx_comun] + techo_s[idx_comun]) / 2
+                        ax.plot(
+                            idx_comun,
+                            estimador_s,
+                            "--",
+                            color="#f1c40f",
+                            linewidth=1.0,
+                            alpha=0.8,
+                            label="Estimador",
+                            zorder=2,
+                        )
+
+                if len(fechas_fondo):
+                    fd = pd.to_datetime(fechas_fondo)
+                    ax.plot(fd, vals_fondo, color="#00d4ff", linewidth=1.8, label=nombre[:28], zorder=3)
+
+                    if len(idx_comun):
+                        fondo_s = pd.Series(vals_fondo, index=fd)
+                        common = piso_s.index.intersection(fondo_s.index)
+                        if not common.empty:
+                            spread = fondo_s[common] - piso_s[common]
+                            for i in range(1, len(spread)):
+                                if spread.iloc[i - 1] >= 0 > spread.iloc[i]:
+                                    ax.annotate(
+                                        "▲",
+                                        xy=(spread.index[i], piso_s[spread.index[i]]),
+                                        color="#2ecc71",
+                                        fontsize=7,
+                                        ha="center",
+                                        zorder=4,
+                                    )
+                                elif spread.iloc[i - 1] < 0 <= spread.iloc[i]:
+                                    ax.annotate(
+                                        "▼",
+                                        xy=(spread.index[i], piso_s[spread.index[i]]),
+                                        color="#e74c3c",
+                                        fontsize=7,
+                                        ha="center",
+                                        zorder=4,
+                                    )
+
+                ax.set_ylabel("Rend. Acum. (%)", color="white", fontsize=7)
+                ax.tick_params(colors="white", labelsize=7)
+                ax.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
+                ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+                fg.autofmt_xdate(rotation=30, ha="right")
+
+                handles, labels = ax.get_legend_handles_labels()
+                all_h = [h for h, l in zip(handles, labels) if not l.startswith("_")]
+                all_l = [l for l in labels if not l.startswith("_")]
+                if all_h:
+                    fg.legend(
+                        handles=all_h,
+                        labels=all_l,
+                        loc="outside lower left",
+                        fontsize=6,
+                        facecolor="white",
+                        labelcolor="black",
+                        framealpha=0.9,
+                        ncols=2,
+                    )
+
+                _DIAS_LABEL = {30: "1m", 90: "3m", 180: "6m", 365: "1y", 1825: "5y"}
+                periodo = _DIAS_LABEL.get(_ctx["dias"], f"{_ctx['dias']}d")
+                titulo_corto = nombre if len(nombre) <= 28 else nombre[:25] + "…"
+                base = "vs Banda" if modo_actual == "banda" else "vs Estimador"
+                fg.suptitle(f"{titulo_corto} {base} — {periodo}", fontsize=8, color="white", y=0.98)
+                fg.subplots_adjust(left=0.09, right=0.93, top=0.88, bottom=0.24)
+                canvas.draw()
+
+            frame_btns = tk.Frame(frame_g, bg=self.CG_COLOR)
+            frame_btns.pack(anchor="e", padx=4)
+            for label, dias in {"1m": 30, "3m": 90, "6m": 180, "1y": 365, "5y": 1825}.items():
+                d = dias
+                tk.Button(
+                    frame_btns,
+                    text=label,
+                    width=2,
+                    bg=self.CG_COLOR,
+                    fg=self.BG_COLOR,
+                    relief=tk.FLAT,
+                    command=lambda d=d: _dibujar(dias=d),
+                ).pack(side="left")
+            for emoji, modo in (("〰", "banda"), ("≈", "estimador")):
+                m = modo
+                tk.Button(
+                    frame_btns,
+                    text=emoji,
+                    width=3,
+                    bg=self.CG_COLOR,
+                    fg=self.BG_COLOR,
+                    relief=tk.FLAT,
+                    command=lambda m=m: _dibujar(modo=m),
+                ).pack(side="left")
+
+            return row + 1, _dibujar
+        except Exception as e:
+            _logger.error(f"[crear_grafico_fondo_vs_banda]: {e}")
+            return row, None
+
+    def crear_tabla_spread_banda(self, parent, row, on_select=None):
+        """Tabla de spread de cada fondo vs FBA Horizonte (piso) y Supergestion Mix VI (techo).
+        Retorna (row, primera_fondo) — primera_fondo es el nombre del primer fondo en la lista."""
+        primera_fondo = None
         if self.df_historico.empty:
-            return row
+            return row, primera_fondo
         try:
             df = self.df_historico.copy()
             df["fecha"] = pd.to_datetime(df["fecha"])
@@ -946,7 +1136,7 @@ class AnalisisFCI(AnalisisBase):
             rend_piso = ultima.get(self._BANDA_PISO, None)
             rend_techo = ultima.get(self._BANDA_TECHO, None)
             if rend_piso is None or rend_techo is None:
-                return row
+                return row, primera_fondo
 
             excluir = {self._BANDA_PISO, self._BANDA_TECHO}
             fondos = [f for f in ultima.index if f not in excluir]
@@ -967,27 +1157,61 @@ class AnalisisFCI(AnalisisBase):
                 )
 
             if not filas:
-                return row
+                return row, primera_fondo
 
-            df_spread = pd.DataFrame(filas).sort_values("vs_piso")
-            columnas = [
+            df_spread = pd.DataFrame(filas).sort_values("vs_piso").reset_index(drop=True)
+            primera_fondo = df_spread.iloc[0]["fondo"]
+
+            # ── treeview inline para poder bindear selección ──────────────────
+            row = self.crear_seccion(parent, "Spread vs Banda de Referencia", row)
+            col_defs = [
                 ("fondo", "Fondo", 160),
                 ("rend", "Rend%", 55),
                 ("vs_piso", "vs Horizonte", 75),
                 ("vs_techo", "vs Supergestion", 80),
                 ("senal", "Señal", 70),
             ]
-            row = self.crear_treeview_ranking(
-                parent=parent,
-                df=df_spread,
-                columnas=columnas,
-                titulo="Spread vs Banda de Referencia",
-                row=row,
-                height=min(12, len(df_spread)),
-            )
+            frame_tree = tk.Frame(parent, bg="black")
+            frame_tree.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+
+            col_ids = [c[0] for c in col_defs]
+            tree = ttk.Treeview(frame_tree, columns=col_ids, show="headings", height=min(12, len(df_spread)))
+            tree.tag_configure("compra", foreground="lime")
+            tree.tag_configure("cautela", foreground="orange")
+            tree.tag_configure("neutral", foreground="white")
+            for col_id, col_titulo, col_ancho in col_defs:
+                tree.heading(col_id, text=col_titulo)
+                tree.column(col_id, width=col_ancho, anchor="w" if col_id == "fondo" else "center")
+
+            _iid_fondo = {}
+            for _, fila in df_spread.iterrows():
+                senal = str(fila.get("senal", "")).upper()
+                tag = "compra" if "COMPRA" in senal else ("cautela" if "CAUTELA" in senal else "neutral")
+                iid = tree.insert(
+                    "",
+                    "end",
+                    values=(fila["fondo"], fila["rend"], fila["vs_piso"], fila["vs_techo"], fila["senal"]),
+                    tags=(tag,),
+                )
+                _iid_fondo[iid] = fila["fondo"]
+
+            if on_select:
+
+                def _on_tree_select(event):
+                    sel = tree.selection()
+                    if sel:
+                        on_select(_iid_fondo.get(sel[0]))
+
+                tree.bind("<<TreeviewSelect>>", _on_tree_select)
+
+            sb = ttk.Scrollbar(frame_tree, orient="vertical", command=tree.yview)
+            tree.configure(yscrollcommand=sb.set)
+            tree.pack(side=tk.LEFT, fill="both", expand=True)
+            sb.pack(side="right", fill="y")
+            row += 1
         except Exception as e:
             _logger.error(f"[crear_tabla_spread_banda]: {e}")
-        return row
+        return row, primera_fondo
 
     def cargar_datos_historicos(self):
         """Carga historial de precios desde diaria_cnv"""
@@ -997,8 +1221,13 @@ class AnalisisFCI(AnalisisBase):
                 SELECT * FROM bdinv.diaria_cnv
                 ORDER BY fecha DESC
             """
-            self.df_historico = pd.read_sql(query, conn)
+            cursor = conn.cursor()
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            cols = [d[0] for d in cursor.description]
+            cursor.close()
             conn.close()
+            self.df_historico = pd.DataFrame(rows, columns=cols)
 
             if not self.df_historico.empty:
                 self.df_historico["fecha"] = pd.to_datetime(self.df_historico["fecha"])

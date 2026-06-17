@@ -2463,6 +2463,18 @@ class DashMain:
             self.crypto.set_header_panel(Dgyp=dgyp, Nav=nav, Unpyl=unpyl, Unprofit=unprofit, Per=per)
             self.crypto.header_panel()
 
+        def _init_crypto_ui():
+            self.procesos.append({"widget": {"update_widget(Crypto)": self.it_crypto}})
+            self.crypto.positions = self.crypto_ts.positions
+            self.crypto.resumen = self.crypto_ts.resumen
+            self.crypto.inicio_widget_treeview(self.crypto.positions)
+            self.crypto.run_graficos()
+            self.update_widget(vehiculo=vehiculo)
+
+        def _init_crypto_bg():
+            self.crypto_ts.run()
+            self.root.after(0, _init_crypto_ui)
+
         try:
             cb = BinanceClient().spot
             self.crypto = WidgetVehiculo(master=self.win1, account=account, vehiculo=vehiculo)
@@ -2470,17 +2482,7 @@ class DashMain:
             if cb.check_binance_connection():
                 DataHub.manager_sesion.update({"Crypto": True})
                 self.crypto_ts = DatosVehivulo(account=account, vehiculo=vehiculo)
-                self.crypto_ts.run()
-
-                self.procesos.append({"widget": {"update_widget(Crypto)": self.it_crypto}})
-
-                # información para widgetCrypto
-                self.crypto.positions = self.crypto_ts.positions
-                self.crypto.resumen = self.crypto_ts.resumen
-
-                self.crypto.inicio_widget_treeview(self.crypto.positions)
-                self.crypto.run_graficos()
-                self.update_widget(vehiculo=vehiculo)
+                threading.Thread(target=_init_crypto_bg, daemon=True).start()
 
             # para widget offline
             elif not cb.check_binance_connection():
@@ -2771,7 +2773,7 @@ class DashMain:
             params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
             params.setdefault("agente_ia", {})["modo"] = nuevo
             params.setdefault("gains_capture", {})["modo"] = _GC_MAP[nuevo]
-            BDsystem.update_sesion_config("Stock", params)
+            BDsystem.update_sesion_parameters("Stock", params)
         except Exception as e:
             print(f"_toggle_modo_operacion: {e}")
         estilos = self.btn_agente_modo._modos[nuevo]
