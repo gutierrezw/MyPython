@@ -22,27 +22,7 @@ from Modulos_Utilitarios import delete_file, buscar_ticker, define_FileCache, is
 from Modulos_Comunes import diaria_book_performance, proceso_update_performance
 from download_cnv_selenium import descargar_cnv_hoy
 
-_SUPERFONDO_CAFCI = frozenset(
-    {
-        689,
-        213,
-        3335,
-        1346,
-        1347,
-        2658,
-        2659,
-        1325,
-        1326,
-        3333,
-        3334,
-        3298,
-        1565,
-        1564,
-        1555,
-        2011,
-        5334,
-    }
-)
+_SUPERFONDO_CAFCI = frozenset({689, 1346, 1325, 1565, 5334})
 
 _CNV_NAMES_LIST = [
     "fondo",
@@ -130,9 +110,7 @@ def sync_cnv_superfondos(df) -> int:
     for keys in df.itertuples():
         try:
             cafci = keys.Código_CAFCI
-            nombre = str(keys.fondo)
-            es_superfondo = cafci in _SUPERFONDO_CAFCI or nombre.startswith(("Superfondo", "Super Ahorro"))
-            if not es_superfondo or not keys.V_actual or keys.Fecha == 0:
+            if cafci not in _SUPERFONDO_CAFCI or not keys.V_actual or keys.Fecha == 0:
                 continue
             values, symbol = _parse_cnv_row_fn(keys)
             cnv_db.insert_CNV(values=values, symbol=symbol)
