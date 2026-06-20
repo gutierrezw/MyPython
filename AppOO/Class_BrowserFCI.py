@@ -60,52 +60,24 @@ class BrowserFCI:
         await page.wait_for_timeout(1_500)
 
     async def _bbva_login(self, page, nro_doc: str, usuario: str, clave: str):
-        """Login BBVA. Maneja form completo (DNI+Usuario+Clave) o solo-Clave."""
-        from playwright.async_api import TimeoutError as AsyncTimeout
-
+        """Login BBVA usando perfil persistente Chrome — autofill llena las credenciales."""
         await page.goto(self._BBVA_URL_LOGIN, wait_until="domcontentloaded", timeout=_TIMEOUT)
 
+        # Esperar que el form cargue y Chrome autofill complete los campos
         campo_pass = page.locator("input[name='password']")
         await campo_pass.wait_for(state="visible", timeout=_TIMEOUT)
+        await page.wait_for_timeout(3_000)
 
-        campo_user = page.locator("input[name='username']")
-        try:
-            await campo_user.wait_for(state="visible", timeout=3_000)
-            if nro_doc:
-                await page.evaluate(
-                    """(val) => {
-                        function findInput(root) {
-                            for (const el of root.querySelectorAll('*')) {
-                                if (el.tagName === 'INPUT' && (el.name === 'document' || el.name === 'nroDoc'
-                                        || (el.placeholder || '').includes('documento'))) {
-                                    el.value = val;
-                                    el.dispatchEvent(new Event('input', {bubbles: true}));
-                                    el.dispatchEvent(new Event('change', {bubbles: true}));
-                                    return true;
-                                }
-                                if (el.shadowRoot && findInput(el.shadowRoot)) return true;
-                            }
-                            return false;
-                        }
-                        findInput(document);
-                    }""",
-                    nro_doc,
-                )
-            await campo_user.fill(usuario)
-        except AsyncTimeout:
-            pass  # form abreviado — solo pide Clave
-
-        await campo_pass.fill(clave)
-        await campo_pass.dispatch_event("input")
-        await campo_pass.dispatch_event("change")
+        # Hacer click en el botón — autofill nativo ya disparó los eventos correctos
         btn_login = page.get_by_role("button", name=self._BBVA_BTN_LOGIN)
-        await btn_login.wait_for(state="enabled", timeout=_TIMEOUT)
-        await btn_login.click()
+        try:
+            await btn_login.wait_for(state="enabled", timeout=10_000)
+        except Exception:
+            pass  # si no se habilitó solo, forzar click igual
+        await btn_login.click(force=True)
         await self._wait_nav(page)
 
         try:
-            from playwright.async_api import TimeoutError as AsyncTimeout2
-
             btn_no = page.get_by_role("button", name="No me interesa")
             await btn_no.wait_for(state="visible", timeout=_MODAL_WAIT)
             await btn_no.click()
@@ -174,11 +146,13 @@ class BrowserFCI:
         return asyncio.run(self._bbva_async(profile_dir, nro_doc, usuario, clave, destino, prefijo))
 
     async def _sant_login(self, page, usuario: str, clave: str):
-        """Login Santander — HTML estándar AngularJS, sin shadow DOM."""
+        """Login Santander usando perfil persistente Chrome — autofill llena las credenciales."""
         await page.goto(self._SANT_URL_LOGIN, wait_until="domcontentloaded", timeout=_TIMEOUT)
-        await page.locator(self._SANT_SEL_USER).wait_for(state="visible", timeout=_TIMEOUT)
-        await page.locator(self._SANT_SEL_USER).fill(usuario)
-        await page.locator(self._SANT_SEL_PASS).fill(clave)
+
+        # Esperar que el form cargue y Chrome autofill complete los campos
+        await page.locator(self._SANT_SEL_PASS).wait_for(state="visible", timeout=_TIMEOUT)
+        await page.wait_for_timeout(3_000)
+
         await page.locator("button.button-login").click()
         await self._wait_nav(page)
 

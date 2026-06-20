@@ -816,10 +816,10 @@ class GestionInversion(tk.Frame):
                 chart_trazaplan(fg=self.fg0, traza=traz, cchart=self.colors["cchart"])
                 self.cv0.draw()
 
-    def _make_editable_list(self, parent, grid_row, items, cols, max_filas=10):
+    def _make_editable_list(self, parent, grid_row, items, cols, max_filas=10, col_span=2):
         """Treeview editable reutilizable. Grida frame en grid_row y botones en grid_row+1."""
         frame = tk.Frame(parent, bg=self.bgcolor)
-        frame.grid(row=grid_row, column=0, columnspan=2, sticky="ew", padx=8, pady=(2, 0))
+        frame.grid(row=grid_row, column=0, columnspan=col_span, sticky="ew", padx=8, pady=(2, 0))
 
         col_ids = [c[0] for c in cols]
         h = min(max(len(items), 2), 6)
@@ -892,7 +892,7 @@ class GestionInversion(tk.Frame):
         vsb.pack(side=tk.RIGHT, fill="y")
 
         btn_frame = tk.Frame(parent, bg=self.bgcolor)
-        btn_frame.grid(row=grid_row + 1, column=0, columnspan=2, sticky="w", padx=8, pady=(1, 4))
+        btn_frame.grid(row=grid_row + 1, column=0, columnspan=col_span, sticky="w", padx=8, pady=(1, 4))
 
         def _add():
             if sum(1 for v in _rows.values() if not v["deleted"]) >= max_filas:
@@ -968,24 +968,18 @@ class GestionInversion(tk.Frame):
 
             dlg = tk.Toplevel()
             dlg.title("Editar Riesgos y Objetivos")
-            dlg.resizable(False, True)
+            dlg.resizable(False, False)
             dlg.attributes("-toolwindow", 1)
             dlg.config(bg=self.bgcolor)
             _edit_x = max(0, (anchor_x - 800) if anchor_x is not None else self.tree_plan.winfo_rootx())
-            dlg.geometry("780x680+%d+%d" % (_edit_x, 65))
+            dlg.geometry("780x900+%d+%d" % (_edit_x, 30))
             dlg.grab_set()
             dlg.protocol("WM_DELETE_WINDOW", eexit)
 
-            canvas = tk.Canvas(dlg, bg=self.bgcolor, highlightthickness=0)
-            sb = ttk.Scrollbar(dlg, orient="vertical", command=canvas.yview)
-            canvas.configure(yscrollcommand=sb.set)
-            sb.pack(side=tk.RIGHT, fill=tk.Y)
-            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-            body = tk.Frame(canvas, bg=self.bgcolor)
-            body_id = canvas.create_window((0, 0), window=body, anchor="nw")
-            body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-            canvas.bind("<Configure>", lambda e: canvas.itemconfig(body_id, width=e.width))
+            body = tk.Frame(dlg, bg=self.bgcolor)
+            body.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+            body.columnconfigure(0, weight=0)
+            body.columnconfigure(1, weight=1)
 
             _lbl = {"bg": self.bgcolor, "fg": "white", "font": ("Segoe UI", 8)}
             r = 0
@@ -996,11 +990,11 @@ class GestionInversion(tk.Frame):
             objetivo_entries = []
             for pr in plan_rows or []:
                 tk.Label(body, text=pr.get("vision", ""), width=14, anchor="e", **_lbl).grid(
-                    row=r, column=0, padx=(8, 2), pady=2, sticky="e"
+                    row=r, column=0, padx=(8, 2), pady=3, sticky="e"
                 )
-                e = tk.Entry(body, width=62, bg=self.bgcolor, fg="white", insertbackground="white")
+                e = tk.Entry(body, bg="black", fg="white", insertbackground="white", font=("Segoe UI", 9))
                 e.insert(0, pr.get("proyecto", ""))
-                e.grid(row=r, column=1, padx=4, pady=2, sticky="w")
+                e.grid(row=r, column=1, padx=(2, 8), pady=3, sticky="ew")
                 objetivo_entries.append(e)
                 r += 1
 
@@ -1889,7 +1883,7 @@ class GestionInversion(tk.Frame):
             rnb.geometry(marco)
             rnb.resizable(False, True)
             rnb.attributes("-toolwindow", 1)
-            rnb.config(bg=self.bgcolor)
+            rnb.config(bg=self.cgcolor)
             rnb.title("Editar Plan")
             rnb.focus()
             rnb.grab_set()
@@ -1900,7 +1894,7 @@ class GestionInversion(tk.Frame):
             top.pack(fill=tk.X, pady=(0, 1))
 
             # sección Visión Deseada
-            sec1 = tk.Button(
+            tk.Button(
                 top,
                 text="Visión Deseada",
                 width=30,
@@ -1908,12 +1902,12 @@ class GestionInversion(tk.Frame):
                 state="disabled",
                 font=("Segoe UI", 9, "bold"),
                 fg="white",
+                disabledforeground="white",
                 bg="#37474f",
                 relief=tk.FLAT,
-            )
-            sec1.grid(row=0, column=0, columnspan=2, padx=2, pady=(4, 2), sticky=W)
+            ).grid(row=0, column=0, columnspan=2, padx=2, pady=(4, 2), sticky="ew")
 
-            _lbl = {"bg": self.bgcolor, "fg": "white", "font": ("Segoe UI", 9)}
+            _lbl = {"bg": self.cgcolor, "fg": "white", "font": ("Segoe UI", 9)}
 
             tk.Label(top, text="Visión financiera (USD):", **_lbl).grid(row=1, column=0, padx=20, pady=3, sticky=E)
             vision_str = tk.StringVar(value=str(self.plan.get("Financiera", 0)))
@@ -1940,7 +1934,7 @@ class GestionInversion(tk.Frame):
             mid = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")
             mid.pack(fill=tk.X, pady=(0, 1))
 
-            sec2 = tk.Button(
+            tk.Button(
                 mid,
                 text="Misión IA",
                 width=30,
@@ -1948,38 +1942,36 @@ class GestionInversion(tk.Frame):
                 state="disabled",
                 font=("Segoe UI", 9, "bold"),
                 fg="white",
+                disabledforeground="white",
                 bg="#1565c0",
                 relief=tk.FLAT,
-            )
-            sec2.grid(row=0, column=0, columnspan=2, padx=2, pady=(4, 2), sticky=W)
+            ).grid(row=0, column=0, columnspan=4, padx=2, pady=(4, 2), sticky="ew")
 
-            tk.Label(mid, text="Meta capital:", **_lbl).grid(row=1, column=0, padx=20, pady=3, sticky=E)
-            entry_meta_capital = tk.Entry(mid, width=22, bg=self.bgcolor, fg="white", insertbackground="white")
+            _ent = {"width": 14, "bg": self.bgcolor, "fg": "white", "insertbackground": "white"}
+
+            tk.Label(mid, text="Meta capital:", **_lbl).grid(row=1, column=0, padx=(20, 5), pady=3, sticky=E)
+            entry_meta_capital = tk.Entry(mid, **_ent)
             entry_meta_capital.insert(0, ia_plan.get("meta_capital", "1.2M USD"))
-            entry_meta_capital.grid(row=1, column=1, padx=10, pady=3, sticky=W)
-
-            tk.Label(mid, text="Año objetivo:", **_lbl).grid(row=2, column=0, padx=20, pady=3, sticky=E)
-            entry_meta_año = tk.Entry(mid, width=22, bg=self.bgcolor, fg="white", insertbackground="white")
+            entry_meta_capital.grid(row=1, column=1, padx=5, pady=3, sticky=W)
+            tk.Label(mid, text="Año objetivo:", **_lbl).grid(row=1, column=2, padx=(15, 5), pady=3, sticky=E)
+            entry_meta_año = tk.Entry(mid, **_ent)
             entry_meta_año.insert(0, ia_plan.get("meta_año", "2030"))
-            entry_meta_año.grid(row=2, column=1, padx=10, pady=3, sticky=W)
+            entry_meta_año.grid(row=1, column=3, padx=(5, 20), pady=3, sticky=W)
 
-            tk.Label(mid, text="Ingreso pasivo mínimo:", **_lbl).grid(row=3, column=0, padx=20, pady=3, sticky=E)
-            entry_ingreso_pct = tk.Entry(mid, width=22, bg=self.bgcolor, fg="white", insertbackground="white")
+            tk.Label(mid, text="Ingreso pasivo mín.:", **_lbl).grid(row=2, column=0, padx=(20, 5), pady=3, sticky=E)
+            entry_ingreso_pct = tk.Entry(mid, **_ent)
             entry_ingreso_pct.insert(0, ia_plan.get("ingreso_pasivo_pct", "≥3%"))
-            entry_ingreso_pct.grid(row=3, column=1, padx=10, pady=3, sticky=W)
-
-            tk.Label(mid, text="Pérdida máx. tolerada:", **_lbl).grid(row=4, column=0, padx=20, pady=3, sticky=E)
-            entry_perdida_pct = tk.Entry(mid, width=22, bg=self.bgcolor, fg="white", insertbackground="white")
+            entry_ingreso_pct.grid(row=2, column=1, padx=5, pady=3, sticky=W)
+            tk.Label(mid, text="Pérdida máx.:", **_lbl).grid(row=2, column=2, padx=(15, 5), pady=3, sticky=E)
+            entry_perdida_pct = tk.Entry(mid, **_ent)
             entry_perdida_pct.insert(0, ia_plan.get("perdida_max_pct", "20%"))
-            entry_perdida_pct.grid(row=4, column=1, padx=10, pady=3, sticky=W)
+            entry_perdida_pct.grid(row=2, column=3, padx=(5, 20), pady=3, sticky=W)
 
-            tk.Label(mid, text="Misión (texto libre):", **_lbl).grid(
-                row=5, column=0, padx=20, pady=(3, 2), sticky=N + E
-            )
+            tk.Label(mid, text="Misión:", **_lbl).grid(row=3, column=0, padx=(20, 5), pady=(3, 2), sticky=N + E)
             txt_mision = tk.Text(
                 mid,
                 height=4,
-                width=38,
+                width=44,
                 bg=self.bgcolor,
                 fg="white",
                 insertbackground="white",
@@ -1989,7 +1981,7 @@ class GestionInversion(tk.Frame):
             txt_mision.insert(
                 "1.0", ia_plan.get("mision", "En crisis → Hold o sumar posiciones, nunca vender por pánico.")
             )
-            txt_mision.grid(row=5, column=1, padx=10, pady=3, sticky=W)
+            txt_mision.grid(row=3, column=1, columnspan=3, padx=(5, 20), pady=3, sticky=W)
 
             # ── sección Restricciones de cartera ─────────────────────────────
             rst = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")
@@ -2005,35 +1997,37 @@ class GestionInversion(tk.Frame):
                 disabledforeground="white",
                 bg="#37474f",
                 relief=tk.FLAT,
-            ).grid(row=0, column=0, columnspan=2, padx=2, pady=(4, 2), sticky="ew")
+            ).grid(row=0, column=0, columnspan=4, padx=2, pady=(4, 2), sticky="ew")
 
-            _rst_lbl = {"bg": self.bgcolor, "fg": "white", "font": ("Segoe UI", 9)}
-            _rst_ent = {"width": 10, "bg": self.bgcolor, "fg": "white", "insertbackground": "white"}
+            _rst_lbl = {"bg": self.cgcolor, "fg": "white", "font": ("Segoe UI", 9)}
+            _rst_ent = {"width": 8, "bg": self.bgcolor, "fg": "white", "insertbackground": "white"}
 
-            tk.Label(rst, text="Leverage máximo:", **_rst_lbl).grid(row=1, column=0, padx=20, pady=3, sticky=E)
+            tk.Label(rst, text="Leverage máximo:", **_rst_lbl).grid(row=1, column=0, padx=(20, 5), pady=3, sticky=E)
             entry_leverage = tk.Entry(rst, **_rst_ent)
             entry_leverage.insert(0, str(ia_config.get("leverage_max", 1.8)))
-            entry_leverage.grid(row=1, column=1, padx=10, pady=3, sticky=W)
-
-            tk.Label(rst, text="Deuda máxima %:", **_rst_lbl).grid(row=2, column=0, padx=20, pady=3, sticky=E)
+            entry_leverage.grid(row=1, column=1, padx=5, pady=3, sticky=W)
+            tk.Label(rst, text="Deuda máxima %:", **_rst_lbl).grid(row=1, column=2, padx=(15, 5), pady=3, sticky=E)
             entry_deuda = tk.Entry(rst, **_rst_ent)
             entry_deuda.insert(0, str(ia_config.get("deuda_max_pct", 35)))
-            entry_deuda.grid(row=2, column=1, padx=10, pady=3, sticky=W)
+            entry_deuda.grid(row=1, column=3, padx=(5, 20), pady=3, sticky=W)
 
-            tk.Label(rst, text="Risk real máximo:", **_rst_lbl).grid(row=3, column=0, padx=20, pady=3, sticky=E)
+            tk.Label(rst, text="Risk real máximo:", **_rst_lbl).grid(row=2, column=0, padx=(20, 5), pady=3, sticky=E)
             entry_risk = tk.Entry(rst, **_rst_ent)
             entry_risk.insert(0, str(ia_config.get("risk_real_max", 2.0)))
-            entry_risk.grid(row=3, column=1, padx=10, pady=3, sticky=W)
+            entry_risk.grid(row=2, column=1, padx=5, pady=3, sticky=W)
 
-            tk.Label(rst, text="Concentración sector %:", **_rst_lbl).grid(row=4, column=0, padx=20, pady=3, sticky=E)
+            tk.Label(rst, text="Concentración sector %:", **_rst_lbl).grid(
+                row=3, column=0, padx=(20, 5), pady=3, sticky=E
+            )
             entry_conc_sector = tk.Entry(rst, **_rst_ent)
             entry_conc_sector.insert(0, str(ia_config.get("concentracion_sector_max", 30)))
-            entry_conc_sector.grid(row=4, column=1, padx=10, pady=3, sticky=W)
-
-            tk.Label(rst, text="Concentración región %:", **_rst_lbl).grid(row=5, column=0, padx=20, pady=3, sticky=E)
+            entry_conc_sector.grid(row=3, column=1, padx=5, pady=3, sticky=W)
+            tk.Label(rst, text="Concentración región %:", **_rst_lbl).grid(
+                row=3, column=2, padx=(15, 5), pady=3, sticky=E
+            )
             entry_conc_region = tk.Entry(rst, **_rst_ent)
             entry_conc_region.insert(0, str(ia_config.get("concentracion_region_max", 40)))
-            entry_conc_region.grid(row=5, column=1, padx=10, pady=3, sticky=W)
+            entry_conc_region.grid(row=3, column=3, padx=(5, 20), pady=3, sticky=W)
 
             tk.Button(
                 rst,
@@ -2045,9 +2039,11 @@ class GestionInversion(tk.Frame):
                 disabledforeground="white",
                 bg="#c0392b",
                 relief=tk.FLAT,
-            ).grid(row=6, column=0, columnspan=2, padx=2, pady=(8, 2), sticky="ew")
+            ).grid(row=4, column=0, columnspan=4, padx=2, pady=(8, 2), sticky="ew")
 
-            _fn_criterios[0] = self._make_editable_list(rst, 7, criterios_items, [("ditem", "Criterio", 610)])
+            _fn_criterios[0] = self._make_editable_list(
+                rst, 5, criterios_items, [("ditem", "Criterio", 645)], col_span=4
+            )
 
             # botones al fondo
             bot = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="B.TFrame")
@@ -2056,7 +2052,7 @@ class GestionInversion(tk.Frame):
             tk.Button(bot, text="Guardar", width=10, bg="gray", fg="white", command=submit_values).pack(
                 side=tk.LEFT, padx=(20, 5), pady=8
             )
-            tk.Button(bot, text="Cancelar", width=10, bg="gray", fg="white", command=eexit).pack(
+            tk.Button(bot, text="Cancel", width=10, bg="gray", fg="white", command=eexit).pack(
                 side=tk.LEFT, padx=5, pady=8
             )
 

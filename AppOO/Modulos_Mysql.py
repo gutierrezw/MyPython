@@ -6525,7 +6525,7 @@ class IaTraceScreen(BDsystem):  # ----------------------------------------------
             cursor.execute(
                 "INSERT INTO ia_trace (vehiculo, simbolo, decision, monto, motivo, gates_ok) "
                 "VALUES (%s, %s, %s, %s, %s, %s)",
-                (vehiculo, simbolo or "", decision, monto or 0, motivo or "", json.dumps(gates_ok or {})),
+                (vehiculo, (simbolo or "")[:100], decision, monto or 0, motivo or "", json.dumps(gates_ok or {})),
             )
             conn.commit()
             return cursor.lastrowid

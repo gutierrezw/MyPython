@@ -4621,15 +4621,14 @@ class WidgetVehiculo(TickerInfo):
             print(f"[agregar_nuevo_activo()]: {e}")
 
     # mantiene actualizada información positions en self_treeview (panel)
-    def update_widget_treeview(self, symbol=None, position=None):
+    def update_widget_treeview(self, symbol=None, position=None, total=None):
         def update_items_dash():
             try:
-                # totaliza cartera y mueve totales a cada columna treeview row=0
-                total = self.header_total_positions(self.positions)
-                for idx, tree in enumerate(self.m_heard):
-                    sty = self.create_styles(0, idx, total, "total")
-                    data_string = self.display_format(tipo="total", data=total)
-                    tree.item(0, values=(data_string[idx],), tags=(sty,))
+                if total is not None:
+                    for idx, tree in enumerate(self.m_heard):
+                        sty = self.create_styles(0, idx, total, "total")
+                        data_string = self.display_format(tipo="total", data=total)
+                        tree.item(0, values=(data_string[idx],), tags=(sty,))
 
                 data = self.struct_datos(position)
                 for idx, tree in enumerate(self.m_tree):
@@ -4655,9 +4654,11 @@ class WidgetVehiculo(TickerInfo):
     def update_panelVehiculo(self, orden=None):
         try:
             positions = self.on_sort_treeview(orden=orden)
+            total = self.header_total_positions(self.positions)
             for position in positions:
                 symbol = position["ticket"]
-                self.update_widget_treeview(symbol=symbol, position=position)
+                self.update_widget_treeview(symbol=symbol, position=position, total=total)
+                total = None  # fila total ya actualizada en la primera iteración
         except Exception as e:
             print("[update_panelVehiculo()]: {}".format(e))
             traceback.print_exc()
@@ -6681,8 +6682,17 @@ class MyWebsocket:
         )
 
     # (thread): para ejecutar websocket
-    def my_message(self, message):
-        message = self.message_json
+    def my_message(self, raw_message):
+        _log = logging.getLogger("IBroks_Client")
+        try:
+            data = json.loads(raw_message)
+            topic = data.get("topic", "")
+            if topic == "system":
+                self.ws.send(raw_message)
+            elif topic == "sts":
+                _log.debug(f"WS sts: authenticated={data.get('args', {}).get('authenticated')}")
+        except Exception as e:
+            _log.debug(f"my_message: {e}")
 
     def websocket_loop(self, limit=10):
         _log = logging.getLogger("IBroks_Client")

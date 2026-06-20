@@ -557,16 +557,10 @@ class DatosVehivulo(TickerInfo, MyOrders):
             if data["topic"].startswith("smd"):
                 n_precio, conid, symbol = decodifica_message_websocket(data)
 
-                # agrega precio info() y contabiliza DataHub
+                # agrega precio info()
                 if n_precio:
                     self.update_precio_DataHubInfo(symbol=symbol, conid=conid, precio=n_precio)
                     procesa_stock(d_precio=n_precio[symbol])
-
-                    # cuenta las iteraciones websocket stock
-                    self.WsStock.counter += 1
-
-                    socket = f"WebsocketStream_OnMessage({self.vehiculo})"
-                    DataHub.update_self_procesos(proces="widget", tarea=socket, itera=self.WsStock.counter)
 
             elif data["topic"] == "sor":
                 # Smart Order Routing IB: args = lista de 1 dict con orderId/ticker/status
@@ -603,9 +597,15 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 except Exception as e:
                     print(f"[on_message_IBrks_websocket(sor)]: {e}")
 
-            elif not data["topic"].startswith("prefijo"):
-                # print(f"data=={data}")
-                pass
+            elif data["topic"] == "system":
+                try:
+                    self.WsStock.ws.send(message)
+                except Exception:
+                    pass
+            if self.WsStock is not None:
+                self.WsStock.counter += 1
+                socket = f"WebsocketStream_OnMessage({self.vehiculo})"
+                DataHub.update_self_procesos(proces="widget", tarea=socket, itera=self.WsStock.counter)
         except Exception as error:
             print("[on_message_IBrks_websocket({})]: {}".format(self.vehiculo, error))
 
@@ -2464,18 +2464,24 @@ class DashMain:
             self.crypto.header_panel()
 
         def _init_crypto_ui():
-            self.procesos.append({"widget": {"update_widget(Crypto)": self.it_crypto}})
             self.crypto.positions = self.crypto_ts.positions
             self.crypto.resumen = self.crypto_ts.resumen
             for tree in self.crypto.m_heard + self.crypto.m_tree:
                 tree.delete(*tree.get_children())
             self.crypto.inicio_widget_treeview(self.crypto.positions)
             self.crypto.run_graficos()
-            self.update_widget(vehiculo=vehiculo)
 
         def _init_crypto_bg():
-            self.crypto_ts.run()
-            self.root.after(0, _init_crypto_ui)
+            try:
+                self.crypto_ts.run()
+            except Exception as e:
+                logging.getLogger("IBroks_Client").error(f"_init_crypto_bg.run(): {e}")
+            for _attempt in range(5):
+                try:
+                    self.root.after(0, _init_crypto_ui)
+                    break
+                except RuntimeError:
+                    time.sleep(1)
 
         try:
             cb = BinanceClient().spot
@@ -2485,6 +2491,9 @@ class DashMain:
                 DataHub.manager_sesion.update({"Crypto": True})
                 self.crypto.carga_inversion_en_positions()
                 self.crypto.inicio_widget_treeview(self.crypto.positions)
+                self.crypto.run_graficos()
+                self.procesos.append({"widget": {"update_widget(Crypto)": self.it_crypto}})
+                self.update_widget(vehiculo=vehiculo)
                 self.crypto_ts = DatosVehivulo(account=account, vehiculo=vehiculo)
                 threading.Thread(target=_init_crypto_bg, daemon=True).start()
 
@@ -2721,6 +2730,9 @@ class DashMain:
             # información para widgetCrypto
             if vehiculo == "Crypto":
                 self.it_crypto += 1
+                if self.crypto_ts is not None:
+                    self.crypto.positions = self.crypto_ts.positions
+                    self.crypto.resumen = self.crypto_ts.resumen
                 self.crypto.header_panel()
                 DataHub.update_self_procesos(proces="widget", tarea="update_widget(Crypto)", itera=self.it_crypto)
 
@@ -2761,8 +2773,10 @@ class DashMain:
         finally:
             # siempre reprogramar — nunca detener el loop por una excepción interna
             if self.is_running:
-                after_id = self.root.after(500, lambda: self.update_widget(vehiculo=vehiculo))
+                after_id = self.root.after(1000, lambda: self.update_widget(vehiculo=vehiculo))
                 self.after_ids.append(after_id)
+                if len(self.after_ids) > 500:
+                    self.after_ids = self.after_ids[-500:]
 
     def _toggle_modo_operacion(self):
         _GC_MAP = {"OBSERVACION": "autorizado", "SUPERVISADO": "autorizado", "AUTONOMO": "automatico"}
@@ -5707,63 +5721,60 @@ class DashMain:
     def actualizar_totales_inversiones(self):
         """
         Actualiza los labels de ganancia diaria y costo base con datos de la tabla inversiones.
-        Se ejecuta periódicamente cada 30 segundos.
+        Se ejecuta periódicamente cada 30 segundos. Query BD en thread, UI update en hilo principal.
         """
-        try:
-            # Verificar si debemos continuar ejecutando
-            if not self.is_running:
-                return
+        if not self.is_running:
+            return
 
-            # Obtener totales desde la base de datos
-            totales = self.RepositorioOportunidades.get_totales_inversiones()
-            limit_costoB, limit_gyp = self.get_limite_inversion()
+        def _fetch():
+            try:
+                totales = self.RepositorioOportunidades.get_totales_inversiones()
+                limit_costoB, limit_gyp = self.get_limite_inversion()
+                self.root.after(0, lambda: _update_ui(totales, limit_costoB, limit_gyp))
+            except Exception as e:
+                print(f"[actualizar_totales_inversiones._fetch()]: {e}")
 
-            # add saldos botCrypto
-            capital_botCrypto = DataHub.manager_GyP["BotCrypto"].get("Inversion", 0)
-            Value_botCrypto = DataHub.manager_GyP["BotCrypto"].get("Value", 0)
-            Gyp_botCrypto = capital_botCrypto - Value_botCrypto
+        def _update_ui(totales, limit_costoB, limit_gyp):
+            try:
+                capital_botCrypto = DataHub.manager_GyP["BotCrypto"].get("Inversion", 0)
+                Value_botCrypto = DataHub.manager_GyP["BotCrypto"].get("Value", 0)
+                Gyp_botCrypto = capital_botCrypto - Value_botCrypto
 
-            ganancias_dia = totales["total_ganancia_dia"] + Gyp_botCrypto
-            costo_base = totales["total_costo_base"] + capital_botCrypto
+                ganancias_dia = totales["total_ganancia_dia"] + Gyp_botCrypto
+                costo_base = totales["total_costo_base"] + capital_botCrypto
 
-            if ganancias_dia > 0:
-                _inf = 0
-            elif ganancias_dia <= 0:
-                _inf = -1
+                _inf = 0 if ganancias_dia > 0 else -1
 
-            if limit_gyp == 0:
-                _mul = 1
-            elif abs(ganancias_dia) < limit_gyp:
-                _mul = 1
-            elif abs(ganancias_dia) > limit_gyp:
-                _mul = round(abs(ganancias_dia / limit_gyp), 1)
+                if limit_gyp == 0:
+                    _mul = 1
+                elif abs(ganancias_dia) < limit_gyp:
+                    _mul = 1
+                else:
+                    _mul = round(abs(ganancias_dia / limit_gyp), 1)
 
-            low_limit_gyp = (_inf * _mul) * limit_gyp
-            high_limit_gyp = _mul * limit_gyp
+                low_limit_gyp = (_inf * _mul) * limit_gyp
+                high_limit_gyp = _mul * limit_gyp
 
-            # deuda total Stock + Crypto vs límite máximo
-            total_debit = DataHub.manager_GyP.get("Stock", {}).get("Debit", 0) + DataHub.manager_GyP.get(
-                "Crypto", {}
-            ).get("Debit", 0)
-            total_debitmax = DataHub.manager_GyP.get("Stock", {}).get("DebitMax", 0) + DataHub.manager_GyP.get(
-                "Crypto", {}
-            ).get("DebitMax", 0)
+                total_debit = DataHub.manager_GyP.get("Stock", {}).get("Debit", 0) + DataHub.manager_GyP.get(
+                    "Crypto", {}
+                ).get("Debit", 0)
+                total_debitmax = DataHub.manager_GyP.get("Stock", {}).get("DebitMax", 0) + DataHub.manager_GyP.get(
+                    "Crypto", {}
+                ).get("DebitMax", 0)
 
-            # update progressos
-            self.GypProgress.update_values(low_limit_gyp, ganancias_dia, high_limit_gyp)
-            self.InvProgress.update_values(0, costo_base, limit_costoB)
-            self.DebtProgress.update_values(0, total_debit, total_debitmax if total_debitmax > 0 else 1)
+                self.GypProgress.update_values(low_limit_gyp, ganancias_dia, high_limit_gyp)
+                self.InvProgress.update_values(0, costo_base, limit_costoB)
+                self.DebtProgress.update_values(0, total_debit, total_debitmax if total_debitmax > 0 else 1)
+            except Exception as e:
+                print(f"[actualizar_totales_inversiones._update_ui()]: {e}")
+            finally:
+                if self.is_running:
+                    after_id = self.root.after(30000, self.actualizar_totales_inversiones)
+                    self.after_ids.append(after_id)
+                    if len(self.after_ids) > 500:
+                        self.after_ids = self.after_ids[-500:]
 
-            # Programar siguiente actualización (cada 30 segundos)
-            if self.is_running:
-                after_id = self.root.after(30000, self.actualizar_totales_inversiones)
-                self.after_ids.append(after_id)
-        except Exception as e:
-            print(f"[actualizar_totales_inversiones()]: {e}")
-            # Intentar nuevamente en 30 segundos aunque haya error
-            if self.is_running:
-                after_id = self.root.after(30000, self.actualizar_totales_inversiones)
-                self.after_ids.append(after_id)
+        threading.Thread(target=_fetch, daemon=True).start()
 
     def _load_profile(self):
         profile = "main"
