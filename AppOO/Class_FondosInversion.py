@@ -22,6 +22,125 @@ from Modulos_Utilitarios import delete_file, buscar_ticker, define_FileCache, is
 from Modulos_Comunes import diaria_book_performance, proceso_update_performance
 from download_cnv_selenium import descargar_cnv_hoy
 
+_SUPERFONDO_CAFCI = frozenset(
+    {
+        689,
+        213,
+        3335,
+        1346,
+        1347,
+        2658,
+        2659,
+        1325,
+        1326,
+        3333,
+        3334,
+        3298,
+        1565,
+        1564,
+        1555,
+        2011,
+        5334,
+    }
+)
+
+_CNV_NAMES_LIST = [
+    "fondo",
+    "Moneda",
+    "Region",
+    "Horizonte",
+    "Fecha",
+    "V_actual",
+    "V_anterior",
+    "variation",
+    "Reexp_Pesos",
+    "var_30d",
+    "var_60d",
+    "var_90d",
+    "cuota_p_actual",
+    "cuota_p_anterior",
+    "Patrimonio_actual",
+    "Patrimonio_anterior",
+    "Market_Share",
+    "Soc_Depositaria",
+    "Codigo_CNV",
+    "Calificación",
+    "Código_CAFCI",
+    "Código_SocGte",
+    "Código_SocDep",
+    "Sociedad_Gerente",
+    "Cód_Clasificación",
+    "Código_Moneda",
+    "Cód_Región",
+    "Cód_Horizonte",
+    "Indice_MM",
+    "Comision_Ingreso",
+    "Hon_Adm.SG",
+    "Hon_AdmSD",
+    "Gastos_Gestion",
+    "Comision_Rescate",
+    "Com_Transf",
+    "Hon_Éxito",
+    "Moneda_Fondo",
+    "Plazo_Liq",
+    "Decreto_596",
+    "F_CAFCI_padre",
+    "F CNV_padre",
+    "Tipo_escisión",
+    "Repatriación",
+    "Mín_Inversión",
+    "RegLey_27.743",
+    "Tipo_dinero",
+    "Calificado",
+]
+
+
+def _parse_cnv_row_fn(keys) -> tuple:
+    """Parsea una fila itertuples del Excel CNV → (values_dict, codCAFCI)."""
+    fecha = datetime.strptime(str(keys.Fecha), "%d/%m/%y")
+    values = {
+        "fecha": fecha.date(),
+        "fondo": str(keys.fondo),
+        "moneda": keys.Moneda,
+        "region": keys.Region,
+        "horizonte": keys.Horizonte,
+        "valorActual": keys.V_actual,
+        "valorAnterior": keys.V_anterior,
+        "variacion": keys.variation,
+        "valorPesos": keys.Reexp_Pesos,
+        "variacion30dias": keys.var_30d,
+        "variacion60dias": keys.var_60d,
+        "variacion90dias": keys.var_90d,
+        "patrimonioActual": keys.Patrimonio_actual,
+        "patrimonioAnterior": keys.Patrimonio_anterior,
+        "marketShare": keys.Market_Share,
+        "sociedadDepositaria": keys.Soc_Depositaria,
+        "codigoCNV": keys.Codigo_CNV,
+        "codSociedadDep": keys.Código_SocDep,
+        "monedaFondo": keys.Código_Moneda,
+    }
+    return values, keys.Código_CAFCI
+
+
+def sync_cnv_superfondos(df) -> int:
+    """Inserta en diaria_cnv las filas de Superfondos por codCAFCI/nombre, sin gate de otros_activos.
+    Retorna cantidad de filas insertadas."""
+    cnv_db = DiariaCNV()
+    insertados = 0
+    for keys in df.itertuples():
+        try:
+            cafci = keys.Código_CAFCI
+            nombre = str(keys.fondo)
+            es_superfondo = cafci in _SUPERFONDO_CAFCI or nombre.startswith(("Superfondo", "Super Ahorro"))
+            if not es_superfondo or not keys.V_actual or keys.Fecha == 0:
+                continue
+            values, symbol = _parse_cnv_row_fn(keys)
+            cnv_db.insert_CNV(values=values, symbol=symbol)
+            insertados += 1
+        except Exception:
+            continue
+    return insertados
+
 
 def sync_fci_browser(account_bbva: str = None) -> list:
     """Descarga extractos FCI de BBVA y Santander y los procesa en booktrading.
@@ -346,6 +465,7 @@ class ArsFondosInversion(tk.Frame):
                     # Almacena archivo CNV que no estan en otros_activos
                     # file_CNV = define_FileCache("CNV_FCI_missing_activos.json")
 
+                sync_cnv_superfondos(df)
                 delete_file(ruta=diaria_CNV, display=False)
         except Exception as e:
             print("load_EXCEL_TBdiaria_CNV_(): {}".format(e))
