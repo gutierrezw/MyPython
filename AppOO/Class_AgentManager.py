@@ -3,17 +3,7 @@ Class_AgentManager.py - Administrador de agentes síncronos
 Dominios: Stock | Crypto | IA | Infra
 """
 
-from Modulos_python import (
-    logging,
-    json,
-    datetime,
-    yf,
-    requests,
-    textwrap,
-    Path,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from Modulos_python import logging, json, datetime, yf, requests, textwrap, Path
 from Modulos_Utilitarios import wait_rate, read_json_tmp, write_json_tmp, track_claude_usage
 from Modulos_Mysql import (
     RepositorioOportunidadesBuySell,
@@ -558,17 +548,13 @@ class AgentManager:
 
     def _browser_fci_notify_blocked(self, data: dict):
         alerta = (
-            f"⚠️ BrowserFCI BLOQUEADO\n"
+            f"[FCI_BLOCKED]⚠️ BrowserFCI BLOQUEADO\n"
             f"Razón: {data.get('reason', '?')}\n"
             f"Desde: {data.get('timestamp', '?')}\n"
             f"FCI desactualizado."
         )
         if alerta not in DataHub.system_alerts:
             DataHub.system_alerts.append(alerta)
-        markup = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("🔓 Liberar bloqueo FCI", callback_data="fci_reset_blocked")]]
-        )
-        self.exec_modulo_async(self.send_Telegram(alerta, reply_markup=markup))
 
     @wait_rate(3600, persist=True, desc="BrowserFCI descarga FCI BBVA+Santander (L-V 8:30)", nivel=2)
     def Agente_BrowserFCI(self):

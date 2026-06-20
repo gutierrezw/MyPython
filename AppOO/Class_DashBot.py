@@ -411,7 +411,14 @@ class ClassAgenteIA:
         while DataHub.system_alerts:
             msg = DataHub.system_alerts.pop(0)
             try:
-                await self.send_Telegram(msg)
+                if msg.startswith("[FCI_BLOCKED]"):
+                    texto = msg[len("[FCI_BLOCKED]") :]
+                    markup = InlineKeyboardMarkup(
+                        [[InlineKeyboardButton("🔓 Liberar bloqueo FCI", callback_data="fci_reset_blocked")]]
+                    )
+                    await self.send_Telegram(texto, reply_markup=markup)
+                else:
+                    await self.send_Telegram(msg)
             except Exception as e:
                 self.logger.error(f"_flush_system_alerts: {e}")
 
