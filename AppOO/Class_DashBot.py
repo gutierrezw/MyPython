@@ -1806,6 +1806,13 @@ class Telegram:
                     parse_mode="Markdown",
                 )
 
+            elif accion == "fci_reset_blocked":
+                from Class_BrowserFCI import BrowserFCI  # import diferido — evita ciclo
+
+                BrowserFCI().reset_blocked()
+                await query.edit_message_reply_markup(reply_markup=None)
+                await query.edit_message_text("🔓 Bloqueo FCI liberado. El agente reintentará en el próximo ciclo.")
+
         except Exception as e:
             self.logger.error(f"handle_callback(): {e}\n{traceback.format_exc()}")
 
