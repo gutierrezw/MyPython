@@ -1,6 +1,7 @@
 import asyncio
 import os
 import logging
+import re
 
 from datetime import date, datetime
 
@@ -50,8 +51,7 @@ class BrowserFCI:
     _SANT_SEL_USER = "#datosusuario"
     _SANT_SEL_PASS = "#clave"
     _SANT_BTN_LOGIN = "Ingresar"
-    # Navegación FCI → pendiente inspección post-login
-    _SANT_SEL_DL = "#SELECTOR_TODO"
+    _SANT_SEL_DL = '[data-testid="downloadLink"]'
 
     # ── Helpers async BBVA ────────────────────────────────────────────────
 
@@ -63,12 +63,11 @@ class BrowserFCI:
         """Login BBVA usando perfil persistente Chrome — autofill llena las credenciales."""
         await page.goto(self._BBVA_URL_LOGIN, wait_until="domcontentloaded", timeout=_TIMEOUT)
 
-        # Esperar que el form cargue y Chrome autofill complete los campos
         campo_pass = page.locator("input[name='password']")
         await campo_pass.wait_for(state="visible", timeout=_TIMEOUT)
-        await page.wait_for_timeout(3_000)
+        await campo_pass.fill(clave)
+        await page.wait_for_timeout(1_000)
 
-        # Hacer click en el botón — autofill nativo ya disparó los eventos correctos
         btn_login = page.get_by_role("button", name=self._BBVA_BTN_LOGIN)
         try:
             await btn_login.wait_for(state="enabled", timeout=10_000)
@@ -77,21 +76,31 @@ class BrowserFCI:
         await btn_login.click(force=True)
         await self._wait_nav(page)
 
-        try:
-            btn_no = page.get_by_role("button", name="No me interesa")
-            await btn_no.wait_for(state="visible", timeout=_MODAL_WAIT)
-            await btn_no.click()
-            await self._wait_nav(page)
-            _logger.warning("_bbva_login: modal promocional descartado")
-        except Exception:
-            pass
+        await self._bbva_dismiss_modals(page)
+
+    async def _bbva_dismiss_modals(self, page):
+        """Cierra cualquier modal/banner promocional de BBVA."""
+        for nombre in ("No me interesa", "Cerrar", "No, gracias"):
+            try:
+                btn = page.get_by_role("button", name=nombre)
+                await btn.wait_for(state="visible", timeout=_MODAL_WAIT)
+                await btn.click()
+                await page.wait_for_timeout(800)
+            except Exception:
+                pass
 
     async def _bbva_navegar_movimientos(self, page):
         """Desde el dashboard navega hasta la pantalla Movimientos de FCI."""
-        await page.locator("p", has_text="Total de inversiones en pesos").click()
+        card = page.get_by_role("button", name="Estás en la inversión 1 de 1")
+        await card.wait_for(state="visible", timeout=_TIMEOUT)
+        await card.click()
         await self._wait_nav(page)
-        await page.locator('[data-testid="moreMovements"]').get_by_role("button").first.click()
-        await self._wait_nav(page)
+        btn_mov = page.get_by_role("button", name="Mostrar movimientos")
+        await btn_mov.nth(1).click()
+        await page.wait_for_function("() => window.location.hash.includes('movements')", timeout=_TIMEOUT)
+        await page.wait_for_timeout(2_000)
+        btn_dl = page.locator("button", has_text=re.compile(r"^[\s]*Descargar$")).first
+        await btn_dl.wait_for(state="visible", timeout=_TIMEOUT)
 
     async def _bbva_async(
         self, profile_dir: str, nro_doc: str, usuario: str, clave: str, destino: str, prefijo: str
@@ -106,6 +115,7 @@ class BrowserFCI:
                     accept_downloads=True,
                     permissions=["geolocation"],
                     geolocation={"latitude": -34.6037, "longitude": -58.3816},
+                    args=["--disable-blink-features=AutomationControlled"],
                 )
                 page = await ctx.new_page()
                 await self._bbva_login(page, nro_doc, usuario, clave)
@@ -113,7 +123,7 @@ class BrowserFCI:
                 nombre = f"{prefijo}{date.today().strftime('%Y%m%d')}.xls"
                 ruta = os.path.join(destino, nombre)
                 async with page.expect_download(timeout=_TIMEOUT) as dl_info:
-                    await page.get_by_role("button", name="Descargar").first.click()
+                    await page.locator("button", has_text=re.compile(r"^[\s]*Descargar$")).first.click()
                 download = await dl_info.value
                 await download.save_as(ruta)
                 await ctx.close()
@@ -179,6 +189,7 @@ class BrowserFCI:
                     profile_dir,
                     headless=False,
                     accept_downloads=True,
+                    args=["--disable-blink-features=AutomationControlled"],
                 )
                 page = await ctx.new_page()
                 await self._sant_login(page, usuario, clave)
