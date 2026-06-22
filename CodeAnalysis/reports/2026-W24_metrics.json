@@ -1,0 +1,383 @@
+{
+  "week": "2026-W24",
+  "date": "2026-06-14 13:49",
+  "totals": {
+    "lines": 63316,
+    "classes": 82,
+    "methods": 1791,
+    "files": 58
+  },
+  "files": {
+    "AppValuations\\consenso_score.py": {
+      "lines": 192,
+      "classes": 0,
+      "methods": 8
+    },
+    "AppValuations\\edgar_13f.py": {
+      "lines": 326,
+      "classes": 0,
+      "methods": 7
+    },
+    "AppValuations\\rebalance_engine.py": {
+      "lines": 1191,
+      "classes": 2,
+      "methods": 36
+    },
+    "AppValuations\\run_cleanup_fund_holdings.py": {
+      "lines": 12,
+      "classes": 0,
+      "methods": 0
+    },
+    "AppValuations\\run_sync_13f_holdings.py": {
+      "lines": 23,
+      "classes": 0,
+      "methods": 0
+    },
+    "AppValuations\\run_sync_13f_scores.py": {
+      "lines": 18,
+      "classes": 0,
+      "methods": 0
+    },
+    "AppValuations\\run_sync_fund_filings.py": {
+      "lines": 24,
+      "classes": 0,
+      "methods": 0
+    },
+    "AppValuations\\test_rebalance_engine.py": {
+      "lines": 115,
+      "classes": 1,
+      "methods": 1
+    },
+    "AppValuations\\valuation_alerts.py": {
+      "lines": 386,
+      "classes": 0,
+      "methods": 3
+    },
+    "AppValuations\\valuation_arelle_engine.py": {
+      "lines": 806,
+      "classes": 0,
+      "methods": 12
+    },
+    "AppValuations\\valuation_arelle_parser.py": {
+      "lines": 126,
+      "classes": 0,
+      "methods": 4
+    },
+    "AppValuations\\valuation_canadian_downloader.py": {
+      "lines": 240,
+      "classes": 0,
+      "methods": 3
+    },
+    "AppValuations\\valuation_cleanup.py": {
+      "lines": 541,
+      "classes": 0,
+      "methods": 6
+    },
+    "AppValuations\\valuation_ddm.py": {
+      "lines": 282,
+      "classes": 1,
+      "methods": 7
+    },
+    "AppValuations\\valuation_edgar_downloader.py": {
+      "lines": 280,
+      "classes": 0,
+      "methods": 6
+    },
+    "AppValuations\\valuation_xbrl_api.py": {
+      "lines": 914,
+      "classes": 1,
+      "methods": 17
+    },
+    "Batch_Oportunidades_sell-ejecutadas.py": {
+      "lines": 213,
+      "classes": 0,
+      "methods": 6
+    },
+    "Batch_reproceso_insert_performan.py": {
+      "lines": 198,
+      "classes": 0,
+      "methods": 6
+    },
+    "Class_AgentManager.py": {
+      "lines": 557,
+      "classes": 1,
+      "methods": 30
+    },
+    "Class_Analisis.py": {
+      "lines": 2613,
+      "classes": 4,
+      "methods": 69
+    },
+    "Class_ApiBinnace.py": {
+      "lines": 737,
+      "classes": 4,
+      "methods": 50
+    },
+    "Class_ApiCosts.py": {
+      "lines": 217,
+      "classes": 1,
+      "methods": 9
+    },
+    "Class_ApiIBrks.py": {
+      "lines": 975,
+      "classes": 1,
+      "methods": 31
+    },
+    "Class_BotCryptoUI.py": {
+      "lines": 5891,
+      "classes": 7,
+      "methods": 181
+    },
+    "Class_BrowserBridge.py": {
+      "lines": 302,
+      "classes": 1,
+      "methods": 21
+    },
+    "Class_BrowserFCI.py": {
+      "lines": 111,
+      "classes": 1,
+      "methods": 2
+    },
+    "Class_DashBot.py": {
+      "lines": 2862,
+      "classes": 4,
+      "methods": 85
+    },
+    "Class_DataFrame.py": {
+      "lines": 2982,
+      "classes": 2,
+      "methods": 62
+    },
+    "Class_Finance.py": {
+      "lines": 3605,
+      "classes": 18,
+      "methods": 147
+    },
+    "Class_FondosInversion.py": {
+      "lines": 1013,
+      "classes": 1,
+      "methods": 25
+    },
+    "Class_IA_modelos.py": {
+      "lines": 888,
+      "classes": 2,
+      "methods": 28
+    },
+    "Class_Ibrks.py": {
+      "lines": 1676,
+      "classes": 1,
+      "methods": 63
+    },
+    "Class_InstitucionalScore.py": {
+      "lines": 278,
+      "classes": 1,
+      "methods": 8
+    },
+    "Class_Screener.py": {
+      "lines": 2794,
+      "classes": 1,
+      "methods": 85
+    },
+    "Class_ServiciosCrypto.py": {
+      "lines": 163,
+      "classes": 1,
+      "methods": 6
+    },
+    "Class_SystemStatus.py": {
+      "lines": 3923,
+      "classes": 1,
+      "methods": 94
+    },
+    "Class_customer.py": {
+      "lines": 7282,
+      "classes": 10,
+      "methods": 191
+    },
+    "Class_debugging.py": {
+      "lines": 563,
+      "classes": 3,
+      "methods": 24
+    },
+    "Class_gestion.py": {
+      "lines": 1903,
+      "classes": 1,
+      "methods": 27
+    },
+    "Class_websocket_IB.py": {
+      "lines": 61,
+      "classes": 0,
+      "methods": 4
+    },
+    "ConvergIA\\Interprete_Sentimiento.py": {
+      "lines": 68,
+      "classes": 0,
+      "methods": 2
+    },
+    "ConvergIA\\Scanner_Sentimiento.py": {
+      "lines": 86,
+      "classes": 0,
+      "methods": 3
+    },
+    "ConvergIA\\Scanner_YouTube.py": {
+      "lines": 270,
+      "classes": 0,
+      "methods": 10
+    },
+    "ConvergIA\\ThemeMapper.py": {
+      "lines": 46,
+      "classes": 0,
+      "methods": 3
+    },
+    "ConvergIA\\__init__.py": {
+      "lines": 0,
+      "classes": 0,
+      "methods": 0
+    },
+    "DashMain.py": {
+      "lines": 5910,
+      "classes": 2,
+      "methods": 122
+    },
+    "EntrenamientoIA.py": {
+      "lines": 15,
+      "classes": 0,
+      "methods": 0
+    },
+    "Modulos_Comunes.py": {
+      "lines": 710,
+      "classes": 0,
+      "methods": 14
+    },
+    "Modulos_Mysql.py": {
+      "lines": 6376,
+      "classes": 8,
+      "methods": 197
+    },
+    "Modulos_Utilitarios.py": {
+      "lines": 1343,
+      "classes": 0,
+      "methods": 47
+    },
+    "Modulos_python.py": {
+      "lines": 160,
+      "classes": 0,
+      "methods": 0
+    },
+    "Modulos_python\\Class_GitHubMCP.py": {
+      "lines": 127,
+      "classes": 0,
+      "methods": 7
+    },
+    "SchemasSQL\\mysql_index_analyzer.py": {
+      "lines": 360,
+      "classes": 0,
+      "methods": 9
+    },
+    "__init__.py": {
+      "lines": 0,
+      "classes": 0,
+      "methods": 0
+    },
+    "clientportal.py": {
+      "lines": 99,
+      "classes": 1,
+      "methods": 7
+    },
+    "dividends_rendimiento.py": {
+      "lines": 99,
+      "classes": 0,
+      "methods": 1
+    },
+    "download_cnv_selenium.py": {
+      "lines": 361,
+      "classes": 0,
+      "methods": 5
+    },
+    "version.py": {
+      "lines": 3,
+      "classes": 0,
+      "methods": 0
+    }
+  },
+  "vulture": [
+    "AppValuations\\valuation_arelle_parser.py:9: unused import 'FileSource' (90% confidence)",
+    "AppValuations\\valuation_arelle_parser.py:9: unused import 'ModelManager' (90% confidence)",
+    "AppValuations\\valuation_xbrl_api.py:191: unused variable 'input_mode' (100% confidence)",
+    "Class_Analisis.py:346: unused variable 'titulo_ax' (100% confidence)",
+    "Class_Analisis.py:387: unused variable 'fondos_mejores' (100% confidence)",
+    "Class_Analisis.py:387: unused variable 'fondos_peores' (100% confidence)",
+    "Class_ApiIBrks.py:805: unreachable code after 'return' (100% confidence)",
+    "Class_BotCryptoUI.py:17: unused import 'multiprocessing' (90% confidence)",
+    "Class_customer.py:1: unused import 'dtime' (90% confidence)",
+    "Class_DashBot.py:2301: unused variable 'umbral_observacion' (100% confidence)",
+    "Class_DashBot.py:2551: unused variable 'umbral_observacion' (100% confidence)",
+    "Class_gestion.py:1416: unused variable 'condicion' (100% confidence)",
+    "Class_Ibrks.py:1642: unused variable 'risk_period' (100% confidence)",
+    "Class_Ibrks.py:1642: unused variable 'statistic_period' (100% confidence)",
+    "Class_Ibrks.py:1642: unused variable 'yield_period' (100% confidence)",
+    "Class_SystemStatus.py:200: unused variable 'sobre' (100% confidence)",
+    "DashMain.py:43: unused import 'MangerAfterEvents' (90% confidence)",
+    "DashMain.py:44: unused import 'InfoYfinance' (90% confidence)",
+    "DashMain.py:2043: unused variable 'ibrks' (100% confidence)",
+    "Modulos_python.py:11: unused import 'hmac' (90% confidence)",
+    "Modulos_python.py:26: unused import 'syncio' (90% confidence)",
+    "Modulos_python.py:36: unused import 'multiprocessing' (90% confidence)",
+    "Modulos_python.py:59: unused import 'Cache' (90% confidence)",
+    "Modulos_python.py:64: unused import 'create_engine' (90% confidence)",
+    "Modulos_python.py:65: unused import 'parser' (90% confidence)",
+    "Modulos_python.py:70: unused import 'YFRateLimitError' (90% confidence)",
+    "Modulos_python.py:73: unused import 'Updater' (90% confidence)",
+    "Modulos_python.py:82: unused import 'angle_helper' (90% confidence)",
+    "Modulos_python.py:89: unused import 'Process' (90% confidence)",
+    "Modulos_python.py:91: unused import 'HTTPAdapter' (90% confidence)",
+    "Modulos_python.py:94: unused import 'Cache' (90% confidence)",
+    "Modulos_python.py:96: unused import 'Retry' (90% confidence)",
+    "Modulos_python.py:100: unused import 'dtime' (90% confidence)",
+    "Modulos_python.py:101: unused import 'b64decode' (90% confidence)",
+    "Modulos_python.py:101: unused import 'urlsafe_b64decode' (90% confidence)",
+    "Modulos_python.py:101: unused import 'urlsafe_b64encode' (90% confidence)",
+    "Modulos_python.py:105: unused import 'SMAIndicator' (90% confidence)",
+    "Modulos_python.py:107: unused import 'ImageColor' (90% confidence)",
+    "Modulos_python.py:107: unused import 'ImageDraw' (90% confidence)",
+    "Modulos_python.py:112: unused import 'GridSpec' (90% confidence)",
+    "Modulos_python.py:118: unused import 'AutoDateFormatter' (90% confidence)",
+    "Modulos_python.py:118: unused import 'AutoDateLocator' (90% confidence)",
+    "Modulos_python.py:118: unused import 'ConciseDateFormatter' (90% confidence)",
+    "Modulos_python.py:118: unused import 'DayLocator' (90% confidence)",
+    "Modulos_python.py:118: unused import 'FR' (90% confidence)",
+    "Modulos_python.py:118: unused import 'HourLocator' (90% confidence)",
+    "Modulos_python.py:118: unused import 'MicrosecondLocator' (90% confidence)",
+    "Modulos_python.py:118: unused import 'MinuteLocator' (90% confidence)",
+    "Modulos_python.py:118: unused import 'MO' (90% confidence)",
+    "Modulos_python.py:118: unused import 'MonthLocator' (90% confidence)",
+    "Modulos_python.py:118: unused import 'MONTHLY' (90% confidence)",
+    "Modulos_python.py:118: unused import 'RRuleLocator' (90% confidence)",
+    "Modulos_python.py:118: unused import 'rrulewrapper' (90% confidence)",
+    "Modulos_python.py:118: unused import 'SA' (90% confidence)",
+    "Modulos_python.py:118: unused import 'SecondLocator' (90% confidence)",
+    "Modulos_python.py:118: unused import 'SU' (90% confidence)",
+    "Modulos_python.py:118: unused import 'TH' (90% confidence)",
+    "Modulos_python.py:118: unused import 'TU' (90% confidence)",
+    "Modulos_python.py:118: unused import 'WE' (90% confidence)",
+    "Modulos_python.py:118: unused import 'WeekdayLocator' (90% confidence)",
+    "Modulos_python.py:118: unused import 'YearLocator' (90% confidence)",
+    "Modulos_python.py:142: unused import 'finvizfinance' (90% confidence)",
+    "Modulos_python.py:143: unused import 'Overview' (90% confidence)",
+    "Modulos_Utilitarios.py:358: unreachable code after 'return' (100% confidence)"
+  ],
+  "git": {
+    "commits": 9,
+    "commit_list": [
+      "cd488ad docs: spec MCP appoo-github + settings.local + test script",
+      "1bb4458 feat: Class_GitHubMCP.py — servidor MCP appoo-github para rama docs",
+      "76c7dba feat: track_claude_usage por clave API + panel IA Cost + fix run counters agentes",
+      "6b4d71e feat: fix diaria_performance FCI — sincronización independiente de carga Excel",
+      "0d9720b feat: preservation stop basado en SMA20 + fix limit price STP LMT",
+      "918814c feat: tab offline IB/Binance + auto-browser IB auth + fix booktrading",
+      "0de7391 feat: panel API dinámico + fix Preservation + IB WebSocket monitor",
+      "a221174 feat: panel Agentes niveles + fix performa_inversion consolidado",
+      "6cf4785 feat: intent en order_trader + patron rotacion FCI + BrowserFCI skeleton"
+    ],
+    "diff_summary": " 39 files changed, 2241 insertions(+), 240 deletions(-)"
+  }
+}
