@@ -59,6 +59,14 @@ nul
 # 6. RECURSOS / IMÁGENES
 # ------------------------------------
 Iconos/
+*.png
+*.jpg
+
+# ------------------------------------
+# 7. REPORTES AUTO-GENERADOS
+# ------------------------------------
+CodeAnalysis/reports/*.txt
+CodeAnalysis/reports/latest_report.txt
 
 # ------------------------------------
 # 5. CONFIGURACIÓN LOCAL (tokens)
