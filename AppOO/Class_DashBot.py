@@ -2085,6 +2085,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self._feed_txt.tag_configure("ALERTA", foreground="#FFB347")
         self._feed_txt.tag_configure("meta", foreground="#444466")
         self._feed_txt.pack(fill=tk.BOTH, expand=True)
+        self._feed_rows = []
+        self._feed_txt.bind("<Double-Button-1>", self._ia_feed_click)
 
         # separador vertical
         tk.Frame(main, bg="#2a2a3a", width=1).pack(side=tk.LEFT, fill=tk.Y)
@@ -2173,18 +2175,19 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         try:
             ia_db = IaTraceScreen()
             rows = ia_db.select_trace(limit=20)
+            self._feed_rows = rows
             self._feed_txt.configure(state="normal")
             self._feed_txt.delete("1.0", tk.END)
             if not rows:
                 self._feed_txt.insert(tk.END, "  (sin decisiones aún)\n", "meta")
             for r in rows:
-                ts = str(r.get("fecha_hora", ""))[:16]
+                ts = str(r.get("timestamp", ""))[:16]
                 dec = r.get("decision", "HOLD")
                 sym = r.get("simbolo", "") or ""
                 monto = r.get("monto", 0) or 0
                 motivo = r.get("motivo", "") or ""
-                linea1 = f"{ts}  [{dec}] {sym}  ${monto:.0f}\n"
-                linea2 = f"  {motivo[:70]}\n\n"
+                linea1 = f"[{dec}] {sym}  ${monto:.0f}  {ts}\n"
+                linea2 = f"  {motivo[:80]}\n\n"
                 tag = dec if dec in ("BUY", "SELL", "HOLD", "ALERTA") else "meta"
                 self._feed_txt.insert(tk.END, linea1, tag)
                 self._feed_txt.insert(tk.END, linea2, "meta")
@@ -2193,6 +2196,112 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         except Exception as e:
             self.logger.error(f"_ia_feed_refresh: {e}")
         self.after(60_000, self._ia_feed_refresh)
+
+    def _ia_feed_click(self, event):
+        try:
+            line_no = int(self._feed_txt.index(f"@{event.x},{event.y}").split(".")[0])
+            idx = (line_no - 1) // 3
+            if not self._feed_rows or idx < 0 or idx >= len(self._feed_rows):
+                return
+            r = self._feed_rows[idx]
+            ts = str(r.get("timestamp", ""))[:19]
+            dec = r.get("decision", "HOLD")
+            sym = r.get("simbolo", "") or ""
+            monto = float(r.get("monto", 0) or 0)
+            motivo = r.get("motivo", "") or ""
+            vehiculo = r.get("vehiculo", "") or ""
+            estado = r.get("estado", "") or ""
+            gates_raw = r.get("gates_ok") or {}
+            if isinstance(gates_raw, (str, bytes)):
+                try:
+                    gates_raw = json.loads(gates_raw)
+                except Exception:
+                    gates_raw = {}
+
+            mkt = self.Market.select_feed_context(sym, self.account) if sym else {}
+            pos = self.Market.select_last_position(sym, self.account) if sym else {}
+
+            last_price = float(mkt.get("lastPrice") or 0)
+            short_name = mkt.get("shortName") or sym
+            sector = mkt.get("sector") or "—"
+            country = mkt.get("country") or "—"
+            inst_score = mkt.get("inst_score")
+            inst_pct = mkt.get("inst_ownership_pct")
+            fh_count = mkt.get("fh_count")
+            consenso_tag = mkt.get("consenso_tag") or "—"
+            consenso_suma = mkt.get("consenso_suma")
+
+            stock_qty = float(pos.get("stock") or 0)
+            basico = float(pos.get("basico") or 0)
+            valor_pos = stock_qty * last_price if last_price > 0 else 0
+            roi_pct = ((last_price - basico) / basico * 100) if basico > 0 and last_price > 0 else None
+            qty_sug = int(monto / last_price) if last_price > 0 and monto > 0 else 0
+
+            def _fmt(v, decimals=2, suffix=""):
+                if v is None:
+                    return "—"
+                return f"{v:.{decimals}f}{suffix}"
+
+            gates_lines = []
+            for k, v in (gates_raw.items() if isinstance(gates_raw, dict) else []):
+                gates_lines.append(f"  {'✓' if v else '✗'} {k}")
+            gates_str = "\n".join(gates_lines) if gates_lines else "  —"
+
+            sep = "─" * 48
+            lineas = [
+                f"{sep}",
+                f"  [{dec}] {short_name} ({sym})   ${monto:,.0f}",
+                f"  {ts}   Cuenta: {vehiculo}   Estado: {estado}",
+                f"{sep}",
+            ]
+
+            if stock_qty > 0 or basico > 0:
+                roi_str = f"  ROI: {roi_pct:+.1f}%" if roi_pct is not None else ""
+                lineas += [
+                    "💰 POSICIÓN ACTUAL",
+                    f"  Precio actual:  ${last_price:,.2f}    Costo prom: ${basico:,.2f}",
+                    f"  Tenencia:       {stock_qty:,.0f} acc   Valor: ${valor_pos:,.0f}{roi_str}",
+                ]
+            elif last_price > 0:
+                lineas += [
+                    "💰 PRECIO ACTUAL",
+                    f"  ${last_price:,.2f}  (sin posición registrada)",
+                ]
+            lineas.append("")
+
+            lineas += ["🎯 ACCIÓN SUGERIDA"]
+            if dec == "BUY":
+                qty_txt = f"~{qty_sug} acc @ ${last_price:,.2f}" if qty_sug > 0 else ""
+                lineas.append(f"  COMPRAR  ${monto:,.0f}  {qty_txt}")
+                if stock_qty == 0:
+                    lineas.append("  ⚠️  Sin posición previa — evaluar capital disponible antes")
+                else:
+                    lineas.append("  ⚠️  Velar deuda: si no hay cash libre, vender posición débil primero")
+            elif dec == "SELL":
+                qty_txt = f"~{qty_sug} acc @ ${last_price:,.2f}" if qty_sug > 0 else ""
+                pnl_str = f"  PnL est: ${(last_price - basico) * qty_sug:+,.0f}" if basico > 0 and qty_sug > 0 else ""
+                lineas.append(f"  VENDER   ${monto:,.0f}  {qty_txt}{pnl_str}")
+            else:
+                lineas.append(f"  {dec}  ${monto:,.0f}")
+            lineas.append("")
+
+            lineas += [
+                "📊 CONTEXTO MERCADO",
+                f"  Sector: {sector}   País: {country}",
+                f"  Consenso: {consenso_tag}" + (f" ({consenso_suma} votos)" if consenso_suma else ""),
+                f"  Inst Score: {_fmt(inst_score)}   13F Inst: {fh_count or '—'}   Inst %: {_fmt(inst_pct)}%",
+                "",
+                "🔍 GATES",
+                gates_str,
+                "",
+                "📝 RAZONAMIENTO",
+                f"  {motivo}",
+                sep,
+            ]
+
+            self._agregar_mensaje("\n".join(lineas), tag="asistente")
+        except Exception as e:
+            self.logger.error(f"_ia_feed_click: {e}")
 
     def _enviar(self, event=None):
         texto = self.entrada.get().strip()

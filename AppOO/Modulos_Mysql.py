@@ -3003,6 +3003,59 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             conn.close()
         return ctx
 
+    def select_feed_context(self, symbol: str, account: str) -> dict:
+        """Contexto de mercado para la plantilla de decisiones IA. Retorna dict con campos; ausentes como None."""
+        conn = self._conectar(tabla="select.market")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT lastPrice, shortName, sector, country, inst_score, inst_ownership_pct, "
+                "fh_count, consenso_tag, consenso_suma "
+                "FROM market WHERE symbol = %s AND account = %s LIMIT 1",
+                (symbol, account),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return {}
+            keys = (
+                "lastPrice",
+                "shortName",
+                "sector",
+                "country",
+                "inst_score",
+                "inst_ownership_pct",
+                "fh_count",
+                "consenso_tag",
+                "consenso_suma",
+            )
+            return dict(zip(keys, row))
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::select_feed_context({symbol})]: {error}")
+            return {}
+        finally:
+            conn.close()
+
+    def select_last_position(self, symbol: str, account: str) -> dict:
+        """Retorna {'stock': qty, 'basico': costo_promedio} desde booktrading. Dict vacío si no hay posición."""
+        conn = self._conectar(tabla="select.booktrading")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT stock, basico FROM booktrading "
+                "WHERE simbolo = %s AND cuenta = %s "
+                "ORDER BY fechahora DESC LIMIT 1",
+                (symbol, account),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return {}
+            return {"stock": float(row[0] or 0), "basico": float(row[1] or 0)}
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::select_last_position({symbol})]: {error}")
+            return {}
+        finally:
+            conn.close()
+
 
 class PlanInversion(BDsystem):  # ------------------------------------------------------------------------------------
     """
@@ -6562,7 +6615,7 @@ class IaTraceScreen(BDsystem):  # ----------------------------------------------
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, timestamp, vehiculo, simbolo, decision, monto, motivo, estado "
+                "SELECT id, timestamp, vehiculo, simbolo, decision, monto, motivo, estado, gates_ok "
                 "FROM ia_trace ORDER BY timestamp DESC LIMIT %s",
                 (limit,),
             )
