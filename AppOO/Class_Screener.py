@@ -2471,12 +2471,28 @@ def cleanup_market(account):
             _logger.warning(f"cleanup_market batch skip ({e}) — no se procesan {len(batch)} símbolos")
             continue
 
-    # ── Phase 2: Eliminar no encontrados — deslistados salen siempre, cartera o no
+    # ── Phase 2: Detectar renombres y eliminar no encontrados ────────────────
     eliminados = 0
+    renombrados = 0
     for sym in not_found:
-        market.delete(symbol=sym, account=account)
-        eliminados += 1
-        _logger.warning(f"cleanup_market: eliminado {sym}")
+        new_sym = None
+        try:
+            time.sleep(0.3)
+            r = _session.get(_QUOTE_URL, params={"symbols": sym, "crumb": _crumb}, timeout=10)
+            if r.ok:
+                items = r.json().get("quoteResponse", {}).get("result", [])
+                if items and items[0].get("symbol", "").upper() != sym.upper():
+                    new_sym = items[0]["symbol"].strip()
+        except Exception:
+            pass
+        if new_sym and new_sym not in existing:
+            rows = market.rename_symbol(old_symbol=sym, new_symbol=new_sym, account=account)
+            _logger.warning(f"cleanup_market: renombrado {sym} → {new_sym} {rows}")
+            renombrados += 1
+        else:
+            market.delete(symbol=sym, account=account)
+            eliminados += 1
+            _logger.warning(f"cleanup_market: eliminado {sym}")
 
     # ── Phase 3: Fundamentals — cualquier campo fundamental ausente ──────────────
     needs_fund = market.load_symbols_needing_fundamentals(account)
@@ -2494,6 +2510,7 @@ def cleanup_market(account):
         "batches_ok": batches_ok,
         "quote_actualizados": quote_ok,
         "eliminados": eliminados,
+        "renombrados": renombrados,
         "preferreds_eliminados": preferreds_eliminados,
         "fund_completados": fund_ok,
     }

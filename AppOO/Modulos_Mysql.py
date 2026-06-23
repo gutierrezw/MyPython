@@ -1581,6 +1581,37 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         except (Exception, connect.Error) as error:
             print(f"[Mysql::delete_market({symbol})]: {error}")
 
+    def rename_symbol(self, old_symbol: str, new_symbol: str, account: str) -> dict:
+        """Renombra un ticker en todas las tablas que lo referencian.
+
+        Tablas actualizadas: market, booktrading (simbolo), oportunidadesbuysell,
+        order_trader, trazaplan, youtube_candidatos, ia_trace (simbolo).
+        Devuelve dict {tabla: filas_afectadas} para log.
+        """
+        conn = self._conectar(tabla="rename.market")
+        cursor = conn.cursor()
+        result = {}
+        ops = [
+            ("market",               "UPDATE market SET symbol=%s WHERE symbol=%s AND account=%s",        (new_symbol, old_symbol, account)),
+            ("booktrading",          "UPDATE booktrading SET simbolo=%s WHERE simbolo=%s AND cuenta=%s",  (new_symbol, old_symbol, account)),
+            ("oportunidadesbuysell", "UPDATE oportunidadesbuysell SET symbol=%s WHERE symbol=%s",        (new_symbol, old_symbol)),
+            ("order_trader",         "UPDATE order_trader SET symbol=%s WHERE symbol=%s AND account=%s", (new_symbol, old_symbol, account)),
+            ("trazaplan",            "UPDATE trazaplan SET symbol=%s WHERE symbol=%s AND idcuenta=%s",    (new_symbol, old_symbol, account)),
+            ("youtube_candidatos",   "UPDATE youtube_candidatos SET symbol=%s WHERE symbol=%s",           (new_symbol, old_symbol)),
+            ("ia_trace",             "UPDATE ia_trace SET simbolo=%s WHERE simbolo=%s",                   (new_symbol, old_symbol)),
+        ]
+        try:
+            for tabla, sql, params in ops:
+                cursor.execute(sql, params)
+                result[tabla] = cursor.rowcount
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            _logger.error(f"rename_symbol({old_symbol}→{new_symbol}): {error}")
+        finally:
+            cursor.close()
+            conn.close()
+        return result
+
     def load_cartera_symbols(self, account) -> list:
         """Retorna lista de dicts {symbol, shortName, lastPrice, categoriaActivo} para activos encartera='Y'."""
         conn = self._conectar(tabla="select.market")

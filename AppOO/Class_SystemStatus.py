@@ -1155,16 +1155,17 @@ class system_status(tk.Frame):
                 for name, info in apis.items():
                     status = info["status"]
                     api_type = info["type"]
+                    connected = info.get("connected", True)
 
-                    # Extraer solo el emoji de estado
-                    status_emoji = status.split()[0] if status else "⚪"
+                    # Color según estado de conexión
+                    row_tag = "item" if connected else "err"
 
                     lista.insert(
                         "",
                         tk.END,
                         text=name,  # Nombre de API
                         values=(api_type, status),  # Tipo y Estado completo
-                        tags=("item",),
+                        tags=(row_tag,),
                     )
 
                 # Actualizar header con contador
@@ -1208,6 +1209,8 @@ class system_status(tk.Frame):
                 tree.tag_configure("info", foreground="lightgreen")
                 tree.tag_configure("summary", foreground="orange")
                 tree.tag_configure("value", foreground=self.fgcolor)
+                tree.tag_configure("ok", foreground="lightgreen")
+                tree.tag_configure("err", foreground="red")
 
                 # Scrollbar
                 vsb = ttk.Scrollbar(tree, orient=tk.VERTICAL, command=tree.yview)
@@ -1219,7 +1222,8 @@ class system_status(tk.Frame):
                 tree.insert("", "end", text="", tags=("spacer",))
 
                 # Información básica
-                tree.insert("", "end", text=f"📊 Estado: {api_info['status']}", tags=("info",))
+                _estado_tag = "ok" if api_info.get("connected") else "err"
+                tree.insert("", "end", text=f"📊 Estado: {api_info['status']}", tags=(_estado_tag,))
                 tree.insert("", "end", text=f"🔧 Tipo: {api_info['type']}", tags=("info",))
                 tree.insert(
                     "",
@@ -1425,6 +1429,7 @@ class system_status(tk.Frame):
 
             # Configurar colores
             lista.tag_configure("item", foreground="lightgreen")
+            lista.tag_configure("err", foreground="red")
 
             # --- Bind eventos ---
             lista.bind("<Double-Button-1>", on_double_click)

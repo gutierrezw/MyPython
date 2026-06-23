@@ -90,6 +90,27 @@ class IB(IBClient):
                 f"No se pudo conectar al Portal Cliente. Asegúrate de que está en ejecución. {error}",
             )
 
+    def create_session(self, set_server=True) -> bool:
+        """Override no-interactivo: avisa en log pero nunca llama input() desde un thread daemon."""
+        try:
+            auth_response = self.is_authenticated()
+            if auth_response and auth_response.get("authenticated"):
+                self.authenticated = True
+                return True
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.logger.warning(textwrap.dedent(f"""
+                ============================================================
+                ⚠️  IB GATEWAY — RE-AUTENTICACIÓN REQUERIDA  [{ts}]
+                ============================================================
+                PASO 1: Abrí el navegador en: {self.login_gateway_path}
+                PASO 2: Ingresá con tu usuario y contraseña de IBKR.
+                PASO 3: Cuando veas "Client login succeeds", la app reconecta sola.
+                ============================================================"""))
+            return False
+        except Exception as e:
+            self.logger.error(f"create_session(): {e}")
+            return False
+
     # valida connection de IB()
     def ib_is_connet(self) -> bool:
         connect = False
