@@ -561,6 +561,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 if n_precio:
                     self.update_precio_DataHubInfo(symbol=symbol, conid=conid, precio=n_precio)
                     procesa_stock(d_precio=n_precio[symbol])
+                if self.WsStock is not None:
+                    self.WsStock.price_counter += 1
 
             elif data["topic"] == "sor":
                 # Smart Order Routing IB: args = lista de 1 dict con orderId/ticker/status
@@ -597,11 +599,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 except Exception as e:
                     print(f"[on_message_IBrks_websocket(sor)]: {e}")
 
-            elif data["topic"] == "system":
-                try:
-                    self.WsStock.ws.send(message)
-                except Exception:
-                    pass
             if self.WsStock is not None:
                 self.WsStock.counter += 1
                 socket = f"WebsocketStream_OnMessage({self.vehiculo})"
@@ -1935,16 +1932,19 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 _log = logging.getLogger("IBroks_Client")
 
                 def _watchdog():
-                    # Cierra el WS si el counter no avanzó en 5 minutos — fuerza re-suscripción
+                    # Cierra el WS si no llegan mensajes smd+ (precios) en 5 min — heartbeats no cuentan
                     TIMEOUT = 300
                     while True:
                         time.sleep(60)
                         if self.WsStock is None:
                             continue
-                        prev = self.WsStock.counter
+                        prev = self.WsStock.price_counter
                         time.sleep(TIMEOUT - 60)
-                        if self.WsStock is not None and self.WsStock.counter == prev:
-                            _log.warning("websocket_stream(Stock): watchdog — sin datos 5 min, reconectando")
+                        if self.WsStock is not None and self.WsStock.price_counter == prev:
+                            _log.warning(
+                                f"websocket_stream(Stock): watchdog — sin precios smd+ {TIMEOUT}s "
+                                f"(price_counter={prev}), reconectando"
+                            )
                             try:
                                 self.WsStock.ws.close()
                             except Exception:
@@ -5703,7 +5703,8 @@ class DashMain:
         except Exception as e:
             print(f"[eexit error]: {e}")
 
-        sys.exit(0)
+        time.sleep(2)
+        os._exit(0)
 
     def get_limite_inversion(self):
         """toma limites de barraProgress"""

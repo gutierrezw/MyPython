@@ -6595,6 +6595,7 @@ class MyWebsocket:
         self.assets = assets
         self.idsymbol = idsymbol
         self.counter = 0
+        self.price_counter = 0
         self.procesos = DataHub.procesos
         self.limit = 10
         self.ws = None
@@ -6687,9 +6688,7 @@ class MyWebsocket:
         try:
             data = json.loads(raw_message)
             topic = data.get("topic", "")
-            if topic == "system":
-                self.ws.send(raw_message)
-            elif topic == "sts":
+            if topic == "sts":
                 _log.debug(f"WS sts: authenticated={data.get('args', {}).get('authenticated')}")
         except Exception as e:
             _log.debug(f"my_message: {e}")

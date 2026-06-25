@@ -961,7 +961,10 @@ class IPerformance(BDsystem):  # -----------------------------------------------
         conn = self._conectar(tabla="validate_performa")
         try:
             cursor = conn.cursor()
-            qry = """
+
+            # ── 1. Validar diaria_performance.value ───────────────────────────
+            cursor.execute(
+                """
                 SELECT t.Date, t.symbol, t.value, t.value_ayer,
                        t.value / t.value_ayer AS value_ratio
                 FROM (
@@ -974,32 +977,55 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                   AND t.Date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
                   AND (t.value / t.value_ayer > %s OR t.value / t.value_ayer < %s)
                 ORDER BY t.Date ASC
-            """
-            cursor.execute(qry, (account, threshold, low_threshold))
-            rows = cursor.fetchall()
+                """,
+                (account, threshold, low_threshold),
+            )
+            anomalias_value = cursor.fetchall()
 
-            if not rows:
+            # ── 2. Validar diaria_performance.costo_base ──────────────────────
+            cursor.execute(
+                """
+                SELECT t.Date, t.symbol, t.costo_base, t.costo_base_ayer,
+                       t.costo_base / t.costo_base_ayer AS ratio
+                FROM (
+                    SELECT Date, symbol, costo_base,
+                           LAG(costo_base) OVER (PARTITION BY account, symbol ORDER BY Date) AS costo_base_ayer
+                    FROM diaria_performance
+                    WHERE account = %s AND costo_base > 0
+                ) t
+                WHERE t.costo_base_ayer > 0
+                  AND t.Date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                  AND (t.costo_base / t.costo_base_ayer > %s OR t.costo_base / t.costo_base_ayer < %s)
+                ORDER BY t.Date ASC
+                """,
+                (account, threshold, low_threshold),
+            )
+            anomalias_cb = cursor.fetchall()
+
+            if not anomalias_value and not anomalias_cb:
                 cursor.close()
                 conn.close()
                 return {"anomalias": [], "purgados": False}
 
             anomalias = [
-                {
-                    "fecha": r[0],
-                    "symbol": r[1],
-                    "value": float(r[2]),
-                    "value_ayer": float(r[3]),
-                    "ratio": float(r[4]),
-                }
-                for r in rows
+                {"fecha": r[0], "symbol": r[1], "value": float(r[2]), "value_ayer": float(r[3]), "ratio": float(r[4])}
+                for r in anomalias_value
+            ]
+            anomalias += [
+                {"fecha": r[0], "symbol": r[1], "costo_base": float(r[2]), "costo_base_ayer": float(r[3]), "ratio": float(r[4])}
+                for r in anomalias_cb
             ]
 
             # purga quirúrgica: solo los registros del símbolo afectado
+            simbolos_purgados = set()
             for a in anomalias:
-                cursor.execute(
-                    "DELETE FROM diaria_performance WHERE account = %s AND symbol = %s AND Date >= %s",
-                    (account, a["symbol"], str(a["fecha"])),
-                )
+                key = (a["symbol"], str(a["fecha"]))
+                if key not in simbolos_purgados:
+                    cursor.execute(
+                        "DELETE FROM diaria_performance WHERE account = %s AND symbol = %s AND Date >= %s",
+                        (account, a["symbol"], str(a["fecha"])),
+                    )
+                    simbolos_purgados.add(key)
 
             conn.commit()
             cursor.close()
@@ -1018,6 +1044,56 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             finally:
                 cur2.close()
                 conn2.close()
+
+            # ── validación adicional: costo_base en performa_inversion ────────
+            # Detecta filas donde costo_base colapsa (ej: 313 vs 43K del día anterior)
+            # sin que diaria_performance lo haya capturado
+            conn3 = self._conectar(tabla="validate_performa.costo_base")
+            try:
+                cur3 = conn3.cursor()
+                cur3.execute(
+                    """
+                    SELECT t.fechaclose, t.costo_base, t.costo_base_ayer,
+                           t.costo_base / t.costo_base_ayer AS ratio
+                    FROM (
+                        SELECT fechaclose, costo_base,
+                               LAG(costo_base) OVER (
+                                   PARTITION BY idcuenta, vehiculo ORDER BY fechaclose
+                               ) AS costo_base_ayer
+                        FROM performa_inversion
+                        WHERE idcuenta = %s AND vehiculo = %s AND costo_base > 0
+                    ) t
+                    WHERE t.costo_base_ayer > 0
+                      AND t.fechaclose >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                      AND (t.costo_base / t.costo_base_ayer > %s
+                           OR t.costo_base / t.costo_base_ayer < %s)
+                    ORDER BY t.fechaclose ASC
+                    """,
+                    (account, vehiculo, threshold, low_threshold),
+                )
+                cb_anomalias = cur3.fetchall()
+                if cb_anomalias:
+                    fecha_cb_min = cb_anomalias[0][0]
+                    cur3.execute(
+                        "DELETE FROM performa_inversion WHERE idcuenta = %s AND vehiculo = %s AND fechaclose >= %s",
+                        (account, vehiculo, str(fecha_cb_min)),
+                    )
+                    conn3.commit()
+                    for row in cb_anomalias:
+                        print(
+                            f"[validate_performa] costo_base ANOMALIA — "
+                            f"fechaclose={row[0]} costo_base={row[1]:.2f} "
+                            f"ayer={row[2]:.2f} ratio={row[3]:.4f} → purgado desde {fecha_cb_min}"
+                        )
+                    # resetear schedule para que reagrege desde fecha_cb_min
+                    key = f"diaria_{vehiculo}"
+                    desde_reset = (fecha_cb_min - timedelta(days=1)).strftime("%Y-%m-%d")
+                    data = read_json_tmp("agents_schedule.json")
+                    data[key] = desde_reset
+                    write_json_tmp("agents_schedule.json", data)
+            finally:
+                cur3.close()
+                conn3.close()
 
             # cuarentena: si el mismo símbolo se purga 3+ veces en 6 horas, entra en cuarentena 24h
             _QUARANTINE_LIMIT = 3
@@ -1210,6 +1286,42 @@ class DiariaCNV(BDsystem):  # --------------------------------------------------
                 cursor.close()
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: update_diaria_CNV()]: {}".format(error))
+
+    def select_fci_rf_candidato(self, cuenta_fci: str) -> dict:
+        """Devuelve el fondo RF activo de `cuenta_fci` con menor variacion30dias (más deprimido).
+        Busca en inversion (iactiva='Y') los fondos activos de esa cuenta y cruza con
+        diaria_cnv para obtener el rendimiento. Excluye fondos de renta variable
+        (Acciones / Renta Variable en el nombre).
+        @param cuenta_fci: 'BBVA0001' o 'SANT0001'
+        @return: dict con fondo, variacion30dias, variacion90dias — vacío si no hay candidato."""
+        try:
+            conn = self._conectar(tabla="select.diaria_cnv.rf_candidato")
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT d.fondo, d.variacion30dias, d.variacion90dias
+                FROM bdinv.otros_activos o
+                JOIN bdinv.inversion i ON i.ticket = o.symbol AND i.iactiva = 'Y'
+                JOIN bdinv.diaria_cnv d
+                  ON d.fondo = i.ticket
+                  AND d.fecha = (SELECT MAX(fecha) FROM bdinv.diaria_cnv)
+                WHERE o.cuenta = %s
+                  AND d.fondo NOT LIKE '%%Acciones%%'
+                  AND d.fondo NOT LIKE '%%Renta Variable%%'
+                ORDER BY d.variacion30dias ASC
+                LIMIT 1
+                """,
+                (cuenta_fci,),
+            )
+            row = cursor.fetchone()
+            cols = [d[0] for d in cursor.description]
+            cursor.close()
+            conn.close()
+            if row:
+                return dict(zip(cols, row))
+        except Exception as e:
+            _logger.error(f"select_fci_rf_candidato({cuenta_fci}): {e}")
+        return {}
 
 
 class EstrategiaInversion(BDsystem):  # ------------------------------------------------------------------------------
@@ -5316,11 +5428,24 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
             stock = ustock + values["cantidad"]
 
+            # Rechazar venta que generaría posición en corto para stocks/ETFs
+            if stock < -0.001 and values["cantidad"] < 0 and values.get("categoria") in ("Stock", "ETF"):
+                print(
+                    f"[insert_booktrading] SHORT RECHAZADO — {symbol}: "
+                    f"stock_actual={ustock:.4f}  venta={values['cantidad']:.4f}  "
+                    f"resultado={stock:.4f}. No se permite vender más de lo que se tiene."
+                )
+                return
+
             # cuando es compra en largo
             if values["cantidad"] > 0:
 
                 # obtener basico y recalcular el nuevo producto de utrading entre el nuevo stock
-                basico = (values["preciotrans"] * values["cantidad"] + values["tarifacomision"] + nw_producto) / stock
+                # stock puede ser 0 (cierre de corto) o incluso positivo después de un corto — evitar /0
+                if abs(stock) > 0.0001:
+                    basico = (values["preciotrans"] * values["cantidad"] + values["tarifacomision"] + nw_producto) / stock
+                else:
+                    basico = 0.0
                 gpreal = 0.0
                 codigo = "O"
                 mtmgp = 0.00

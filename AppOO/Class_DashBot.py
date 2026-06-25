@@ -62,6 +62,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "AppValuations"))
 from Modulos_Mysql import (
     RepositorioOportunidadesBuySell,
     BDsystem,
+    DiariaCNV,
     PlanInversion,
     MarketScreen,
     IaTraceScreen,
@@ -543,7 +544,7 @@ class ClassAgenteIA:
         simbolo = decision.get("simbolo", "—")
         accion = decision.get("decision", "—")
         monto = decision.get("monto", 0)
-        motivo = str(decision.get("motivo", ""))[:300]
+        motivo = str(decision.get("motivo", ""))[:500]
         emoji = "🟢" if accion == "BUY" else "🔴"
         texto = (
             f"{emoji} *Propuesta IA — {accion} {simbolo}*\n"
@@ -654,6 +655,19 @@ class ClassAgenteIA:
         oport_buy.sort(key=lambda x: x["gain_inversion"])
         oport_sell.sort(key=lambda x: -x["profit"])
 
+        _FCI_ENTIDADES = {
+            "BBVA0001": ("FBA", "Supergestion"),
+            "SANT0001": ("Superfondo", "Supergestion"),
+        }
+        fci_rotacion = {}
+        fci_sell_symbols = {s["symbol"] for s in oport_sell}
+        cnv_db = DiariaCNV()
+        for cuenta, prefijos in _FCI_ENTIDADES.items():
+            if any(any(s.startswith(p) for p in prefijos) for s in fci_sell_symbols):
+                candidato = cnv_db.select_fci_rf_candidato(cuenta)
+                if candidato:
+                    fci_rotacion[cuenta] = candidato
+
         return {
             "portfolio": portfolio,
             "candidatos": candidatos,
@@ -661,6 +675,7 @@ class ClassAgenteIA:
             "rebalanceo_ranking": rebalanceo_ranking,
             "oport_buy": oport_buy[:8],
             "oport_sell": oport_sell[:5],
+            "fci_rotacion": fci_rotacion,
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "pinvertir": pinvertir,
             "min_ganancia": min_ganancia,
@@ -742,6 +757,18 @@ class ClassAgenteIA:
                 f"  {r['symbol']}: score={r['score']} dim={r['dimension']} monto=${r['monto']:.0f}" for r in rows
             )
 
+        def _fci_rotacion_txt():
+            rotacion = ctx.get("fci_rotacion", {})
+            if not rotacion:
+                return ""
+            lineas = ["Rotación FCI sugerida (si SELL sobre RV, rotar al RF más deprimido de la misma entidad):"]
+            for cuenta, c in rotacion.items():
+                entidad = "BBVA" if "BBVA" in cuenta else "Santander"
+                v30 = c.get("variacion30dias", 0) or 0
+                v90 = c.get("variacion90dias", 0) or 0
+                lineas.append(f"  {entidad} → {c['fondo']} (rend30d: {v30:+.2f}% | rend90d: {v90:+.2f}%)")
+            return "\n".join(lineas) + "\n\n"
+
         gains_symbols = [p["symbol"] for p in ctx.get("portfolio", []) if p.get("gains_candidate")]
         gains_txt = f"Posiciones con ganancia ≥${ctx.get('min_ganancia', 100):.0f} (candidatas a captura): " + (
             ", ".join(gains_symbols) if gains_symbols else "(ninguna)"
@@ -764,15 +791,17 @@ class ClassAgenteIA:
             f"Oportunidades BUY detectadas por el sistema:\n{_oport_buy_txt()}\n\n"
             f"Oportunidades SELL detectadas por el sistema:\n{_oport_sell_txt()}\n\n"
             f"Candidatos externos (consenso ≥ {ia_config.get('gate_consenso_min', 4)}):\n{_candidatos_txt()}\n\n"
+            f"{_fci_rotacion_txt()}"
             f"Límites: monto_base=${ctx.get('pinvertir', 170):.0f} (se ajusta al precio del activo) | "
             f"leverage_max={ia_config.get('leverage_max', 1.8)}x | "
             f"inst_score_min={ia_config.get('gate_inst_score_min', 0.5)}\n\n"
             "Para BUY: cruzar oportunidades BUY del sistema con candidatos externos y ranking rebalanceo. "
             "Priorizar los que aparecen en más de una fuente y alineen con dimensiones subponderadas (▼). "
-            "Para posiciones [GAINS?] o SELL del sistema: evaluá si el contexto justifica captura (SELL) u HOLD.\n\n"
+            "Para posiciones [GAINS?] o SELL del sistema: evaluá si el contexto justifica captura (SELL) u HOLD. "
+            "Si el SELL es sobre un FCI de Renta Variable, en el motivo indicar hacia qué fondo de Renta Fija rotar.\n\n"
             "Producí UNA decisión con formato JSON exacto:\n"
             '{"decision": "BUY|SELL|HOLD|ALERTA", "simbolo": "TICKER_O_VACIO", '
-            '"monto": 0, "motivo": "max 150 chars"}'
+            '"monto": 0, "motivo": "explicación en 2-3 oraciones completas: qué acción, por qué ahora, qué se espera lograr. Sin abreviaturas."}'
         )
         try:
             resp = requests.post(
@@ -784,7 +813,7 @@ class ClassAgenteIA:
                 },
                 json={
                     "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 300,
+                    "max_tokens": 500,
                     "messages": [{"role": "user", "content": prompt}],
                 },
                 timeout=20,
@@ -2285,15 +2314,23 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 lineas.append(f"  {dec}  ${monto:,.0f}")
             lineas.append("")
 
+            if mkt:
+                lineas += [
+                    "📊 CONTEXTO MERCADO",
+                    f"  Sector: {sector}   País: {country}",
+                    f"  Consenso: {consenso_tag}" + (f" ({consenso_suma} votos)" if consenso_suma else ""),
+                    f"  Inst Score: {_fmt(inst_score)}   13F Inst: {fh_count or '—'}   Inst %: {_fmt(inst_pct)}%",
+                    "",
+                ]
+
+            if gates_raw:
+                lineas += [
+                    "🔍 GATES",
+                    gates_str,
+                    "",
+                ]
+
             lineas += [
-                "📊 CONTEXTO MERCADO",
-                f"  Sector: {sector}   País: {country}",
-                f"  Consenso: {consenso_tag}" + (f" ({consenso_suma} votos)" if consenso_suma else ""),
-                f"  Inst Score: {_fmt(inst_score)}   13F Inst: {fh_count or '—'}   Inst %: {_fmt(inst_pct)}%",
-                "",
-                "🔍 GATES",
-                gates_str,
-                "",
                 "📝 RAZONAMIENTO",
                 f"  {motivo}",
                 sep,

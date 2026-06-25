@@ -699,13 +699,15 @@ class ArsFondosInversion(tk.Frame):
     # carga en booktrading operaciones de FCI
     def load_positions_FCI(self):
         def insert_values_in_booktrading(trader):
+            _PRIORIDAD = {"Rescate": 1, "Transferencia": 2, "Inversión": 3}
             try:
                 asc_trader = sorted(
                     trader,
-                    key=itemgetter(
-                        "cuenta",
-                        "symbol",
-                        "fechahora",
+                    key=lambda x: (
+                        x["cuenta"],
+                        x["symbol"],
+                        x["fechahora"],
+                        _PRIORIDAD.get(x.get("tipomov", "Inversión"), 3),
                     ),
                 )
 
@@ -730,6 +732,7 @@ class ArsFondosInversion(tk.Frame):
                     # inserta trader mayores a last_trader
                     if last_date < values["fechahora"]:
                         values.pop("symbol")
+                        values.pop("tipomov", None)
                         self.RepositorioOportunidades.insert_booktrading(values, symbol=symbol)
 
                     eof_book, values = next(ebook, (None, None))
@@ -766,8 +769,10 @@ class ArsFondosInversion(tk.Frame):
                         values = {}
                         if rows["Tipo"] == "Suscripción":
                             codigo = "O"
+                            tipomov = "Inversión"
                         elif rows["Tipo"] == "Rescate":
                             codigo = "C"
+                            tipomov = "Rescate"
                         else:
                             continue
                         if self.string_float(s=rows.get("Cantidad (VN)", 0)) <= 0:
@@ -812,6 +817,7 @@ class ArsFondosInversion(tk.Frame):
                             values.update({"codigo": codigo})
                             values.update({"factor_cambio": tasa_cambio})
                             values.update({"symbol": activo[0]["symbol"]})
+                            values.update({"tipomov": tipomov})
                             trader.append(values)
 
                 # insert booktradin
@@ -858,12 +864,16 @@ class ArsFondosInversion(tk.Frame):
                         # Evalua tipos de movimientos espardos
                         if rows["Movimiento"] == "Inversión":
                             codigo = "O"
+                            tipomov = "Inversión"
                         elif rows["Movimiento"] == "Rescate":
                             codigo = "C"
+                            tipomov = "Rescate"
                         elif rows["Movimiento"] == "Transferencia - origen":
                             codigo = "C"
+                            tipomov = "Transferencia"
                         elif rows["Movimiento"] == "Transferencia - destino":
                             codigo = "O"
+                            tipomov = "Transferencia"
                         else:
                             continue
 
@@ -907,6 +917,7 @@ class ArsFondosInversion(tk.Frame):
                             values.update({"codigo": codigo})
                             values.update({"factor_cambio": tasa_cambio})
                             values.update({"symbol": activo[0]["symbol"]})
+                            values.update({"tipomov": tipomov})
                             trader.append(values)
 
                 # valida e inserta booktrading

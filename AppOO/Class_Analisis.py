@@ -1129,7 +1129,7 @@ class AnalisisFCI(AnalisisBase):
         try:
             df = self.df_historico.copy()
             df["fecha"] = pd.to_datetime(df["fecha"])
-            df = df.sort_values(["fondo", "fecha"])
+            df = df.sort_values(["fondo", "fecha"]).drop_duplicates(subset=["fondo", "fecha"], keep="last")
             df["rend"] = df.groupby("fondo")["valorActual"].transform(lambda x: (x / x.iloc[0] - 1) * 100)
 
             ultima = df.groupby("fondo")["rend"].last()

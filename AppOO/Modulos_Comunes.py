@@ -518,6 +518,19 @@ def actualiza_performa_inversion(account=None, vehiculo=None):
                 f_limite = f_desde.date() if hasattr(f_desde, "date") else f_desde
                 df_update = df_previo[df_previo.index > f_limite]
 
+                # saltar fechas con cobertura de símbolos < 80% vs día anterior (diaria incompleta)
+                n_simbolos = datos.groupby("Date")["symbol"].nunique()
+                n_simbolos.index = pd.to_datetime(n_simbolos.index).date
+                n_ayer = n_simbolos.shift(1)
+                fechas_incompletas = set(n_simbolos[(n_simbolos < n_ayer * 0.8)].index)
+                if fechas_incompletas:
+                    omitidas = df_update.index.isin(fechas_incompletas)
+                    print(
+                        f"[actualiza_performa_inversion] fechas omitidas por cobertura < 80%: "
+                        f"{sorted(fechas_incompletas)}"
+                    )
+                    df_update = df_update[~omitidas]
+
                 inserta_index_performa(
                     dataframe=df_update,
                     index=index_ref,
