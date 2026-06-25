@@ -60,3 +60,7 @@ config_local.py
 portfolio_personal.csv
 trades_history.xlsx
 datos_personales/
+
+# Scripts de prueba/diagnóstico local
+AppTest/
+backup_bdinv.bat
