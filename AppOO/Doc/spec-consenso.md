@@ -1,5 +1,5 @@
-# SCREENER & MODELO DE CONSENSO — CARTERA DE DIVIDENDOS
-**AppOO · Versión 2026-W17**
+# CONSENSO SCORE — ARQUITECTURA, IMPLEMENTACIÓN Y EXPANSIÓN
+**AppOO · Versión 2026-W25**
 
 ---
 
@@ -171,7 +171,7 @@ Los XMLs 13F usan CUSIP como identificador. La resolución a ticker se hace en d
 
 ---
 
-## FÓRMULA inst_score v2
+## FÓRMULA inst_score v2 — IMPLEMENTADA
 
 ```
 fund_holdings (13F) — STK positions
@@ -199,12 +199,6 @@ fund_holdings (13F) — STK positions
 > La salida se detecta por ausencia en Q4. Ventanas calculadas dinámicamente en `load_fund_holdings_stats`
 > según calendario 13F (Q_ant: Aug–Dec, Q_act: Jan+).
 
-### Señal institucional compuesta (columna "Inst Señal")
-
-- **ACOMPAÑAR** — inst_score ≥ 0.40 AND buy_ratio ≥ 0.50 AND fh_count ≥ 20
-- **MANTENER** — inst_score ≥ 0.25 OR fh_count ≥ 10
-- **REVISAR** — resto
-
 ---
 
 ## SEÑAL INSTITUCIONAL COMPUESTA (columna "Inst Señal")
@@ -217,55 +211,51 @@ Resume en una palabra la postura de los fondos institucionales:
 
 ---
 
-## MODELO DE CONSENSO — 7 VOTOS
+## MODELO DE CONSENSO — 7 VOTOS (ACTUAL)
 
 Cada señal emite: `+1` favorable | `0` neutral | `-1` desfavorable | `None` abstiene
 
 ```
-  FUENTE              CÁLCULO                        VOTO
+  # FUENTE           CÁLCULO                        VOTO
   ──────────────────────────────────────────────────────────────────
-  1. NET (13F)        fh_buy_ratio − fh_sell_ratio   ranking cartera
-                      top 33%  → +1                  +1 / 0 / -1
-                      mid 33%  →  0                  None si sin datos
-                      bot 33%  → -1
+  1. NET (13F)       fh_buy_ratio − fh_sell_ratio   +1 / 0 / -1
+                     ranking cartera                None si sin datos
+                     top 33%  → +1
+                     mid 33%  →  0
+                     bot 33%  → -1
 
-  2. OPTIONS (13F)    call_shares/(call+put shares)
-                      ≥ 0.60   → +1                  +1 / 0 / -1
-                      ≥ 0.40   →  0                  None si sin opciones
-                      < 0.40   → -1
-                      Usa acciones totales (millones), no cantidad de fondos.
+  2. OPTIONS (13F)   call_shares/(call+put shares)  +1 / 0 / -1
+                     ≥ 0.60   → +1                  None si sin opciones
+                     ≥ 0.40   →  0
+                     < 0.40   → -1
 
-  3. FLUJO (13F)      (new_entrants − full_exits) / fh_count   ranking cartera
-                      flujo_neto clipeado [-1, +1]             +1 / 0 / -1
-                      top 33%  → +1                            None si sin fh_count
-                      mid 33%  →  0
-                      bot 33%  → -1
-                      new_entrants = fondos nuevos en Q4
-                      full_exits   = fondos en Q3 que no presentaron Q4
+  3. FLUJO (13F)     (new_entrants − full_exits) /  +1 / 0 / -1
+                     fh_count ranking cartera       None si sin fh_count
+                     flujo_neto clipeado [-1, +1]
+                     top 33%  → +1
+                     mid 33%  →  0
+                     bot 33%  → -1
 
-  4. ANALISTAS (YF)   recommendationKey
-                      buy/strong_buy  → +1            +1 / 0 / -1
-                      hold            →  0            None si sin datos
-                      sell/strong_sell→ -1
+  4. ANALISTAS (YF)  recommendationKey              +1 / 0 / -1
+                     buy/strong_buy  → +1           None si sin datos
+                     hold            →  0
+                     sell/strong_sell→ -1
 
-  5. IA SIGNAL (Mod)  CSV buy/sell (activa en mercado abierto)
-                      buy   → +1                      +1 / 0 / -1
-                      sell  → -1
-                      none  →  0
-                      ──────────────────────────────────────────
-                      ⚠ SOLO DISPLAY — NO cuenta en gate Telegram
-                        ni en consenso_tag / consenso_suma.
-                        Aparece en popup Consenso para referencia
-                        visual, pero se excluye del cálculo para
-                        evitar que la señal técnica se confirme a
-                        sí misma (auto-confirmación).
+  5. IA SIGNAL (Mod) CSV buy/sell (mercado abierto)  +1 / 0 / -1
+                     buy   → +1
+                     sell  → -1
+                     none  →  0
+                     ──────────────────────────────────────────
+                     ⚠ SOLO DISPLAY — NO cuenta en
+                        gate Telegram ni en consenso_tag.
+                        Aparece para referencia visual.
 
-  6. VALUACIÓN        categoriaActivo
-                      I → +1 / N → 0 / S → -1         +1 / 0 / -1
-                      X / T → abstiene                 None
+  6. VALUACIÓN       categoriaActivo                +1 / 0 / -1
+                     I → +1 / N → 0 / S → -1        None si X/T
+                     X / T → abstiene
 
-  7. COBERTURA        fh_count
-                      ≥ 20 → +1 / ≥ 5 → 0 / < 5 → -1  +1 / 0 / -1
+  7. COBERTURA       fh_count                       +1 / 0 / -1
+                     ≥ 20 → +1 / ≥ 5 → 0 / < 5 → -1
   ──────────────────────────────────────────────────────────────────
 
          suma_votos_activos
@@ -289,7 +279,7 @@ Cada señal emite: `+1` favorable | `0` neutral | `-1` desfavorable | `None` abs
 
 ---
 
-## POPUP INST. OUT
+## POPUP INSTITUCIONAL — ALIGNMENT CHECK
 
 Muestra alineación para activos en cartera cruzando tres fuentes:
 **Inst Señal** (ACOMPAÑAR/MANTENER/REVISAR) · **Analistas** (Wall Street) · **IA Signal** (modelo propio)
@@ -366,3 +356,137 @@ Monitorea la integridad del pipeline en tiempo real:
 | 📋 pendientes | Filings descargados no procesados (`processed=0`) | 0 | bajo | alto |
 | 🔄 por renovar | Filings con `filing_date ≥ 80 días` | 0 | < 50 | ≥ 50 |
 | ⚠ inconsistencias | `fund_holdings` sin symbol en market + market sin CUSIP | 0 | bajo | alto |
+
+---
+
+## EXPANSIÓN — DECISIONES DE ALCANCE
+
+Los votos de Consenso deben ser señales **estructuralmente distintas** al análisis técnico:
+flujos institucionales, recomendaciones de analistas, fundamentals.
+
+| Señal | Destino | Razón |
+|---|---|---|
+| Rango 52 semanas | **Modelos IA (BUY/SELL)** | Indicador técnico de precio — el ML aprende el peso óptimo |
+| Volumen relativo | **Modelos IA (BUY/SELL)** | Ídem — mejor como feature de entrenamiento que como regla fija |
+| Tech Alignment | **Voto nuevo en Consenso** | Señal externa (noticias) que el modelo IA no ve |
+
+Rango 52w y Volumen quedan **pendientes para la próxima revisión de features** de los modelos IA.
+Ver `Doc/modelo_buyv01.md` y `Doc/modelo_sellv01.md` para el estado actual de features.
+
+---
+
+## VOTO FUTURO: TECH ALIGNMENT (Pendiente)
+
+### Qué mide
+
+Si la empresa está alineada con una tendencia tecnológica emergente que aparece en noticias del día.
+Es información que **ningún otro voto captura** y que el modelo IA no tiene como input.
+
+### Cómo funcionaría
+
+```
+RSS feeds (TechCrunch, MIT Tech Review)
+  → feedparser: extrae titulares
+      → Claude Haiku: "¿qué categorías tech son prominentes hoy?"
+          → retorna lista JSON: ["ai_semiconductors", "clean_energy", ...]
+              → THEME_MAP: categoría → tickers en cartera
+                  → voto_tech_alignment(symbol, temas_activos)
+```
+
+### Comportamiento del voto
+
+| Caso | Voto |
+|---|---|
+| Símbolo en tema activo hoy | +1 |
+| Sin alineación | 0 (abstención — no penaliza) |
+
+No penaliza porque la mayoría de nuestras acciones son dividendo/utilities. Un banco no debería
+bajar su consenso por no ser semiconductores.
+
+### THEME_MAP propuesto
+
+```python
+THEME_MAP = {
+    "ai_semiconductors": ["NVDA", "AMD", "INTC", "ASML", "QCOM", "MU"],
+    "clean_energy":      ["VST", "PLUG", "NEE", "ENPH", "FSLR", "CEG"],
+    "biotech":           ["PFE", "ABBV", "BMY", "AMGN", "GILD", "MRNA"],
+    "blockchain":        ["CGPT", "MSTR", "COIN"],
+    "cloud_saas":        ["MSFT", "AMZN", "GOOGL", "CRM", "NOW", "SNOW"],
+    "robotics":          ["ISRG", "ABB", "ROK", "TER"],
+}
+```
+
+### Infraestructura necesaria
+
+| Qué | Detalle |
+|---|---|
+| Paquetes | `feedparser` + `anthropic` — ya instalados |
+| API key | `ANTHROPIC_API_KEY` como env variable (igual que `APPOO_TMP`) |
+| Módulo RSS + Claude | `ConvergIA/Scanner_Tecnologias.py` |
+| Módulo THEME_MAP | `ConvergIA/ThemeMapper.py` |
+| Agente | `Agente_TechAlignment` en `Class_DashBot.py` — 1 vez/día |
+| Persistencia | `tmp/tech_temas.json` — el popup lo lee en tiempo real |
+| Fallback | JSON vacío → voto 0 para todos → no rompe nada |
+
+### Decisiones pendientes antes de codificar
+
+1. **API key:** ¿env variable en `launch.json` o en tabla `sesion` bajo vehiculo `"CLAUDE"`?
+2. **Scope del voto:** ¿solo en el popup Consenso o también en la columna del Screener?
+3. **THEME_MAP:** ¿en código Python (archivo editable) o en JSON configurable desde la app?
+
+---
+
+## IDEA FUTURA: SCANNER YOUTUBE (No implementada)
+
+### Origen de la idea
+
+PLUG fue descubierto a través de un video de YouTube antes de que apareciera en ningún screener
+institucional. Los canales de inversión de calidad a veces identifican activos antes que los datos
+estructurados (13F, analistas). Eso es valor que hoy no capturamos.
+
+### Cómo funcionaría
+
+YouTube expone **RSS feeds por canal** sin necesidad de API key ni costo:
+```
+https://www.youtube.com/feeds/videos.xml?channel_id=XXXX
+```
+Devuelve títulos y descripciones de los últimos videos — exactamente el mismo formato que
+TechCrunch. `feedparser` ya instalado lo lee sin cambios.
+
+```
+RSS feeds de canales de inversión seleccionados
+  → feedparser: extrae títulos + descripciones
+      → Claude Haiku: "¿qué tickers se mencionan como oportunidad?"
+          → lista de símbolos candidatos
+              → sync_market() los agrega con categoriaActivo='T' (descubierto externamente)
+                  → entran al análisis normal de Consenso
+```
+
+### Por qué encaja bien
+
+- Misma infraestructura que Tech Alignment (feedparser + Claude) — costo de implementación bajo
+- Los tickers que salen se agregan a `market` con `categoriaActivo='T'`, que ya existe
+- Desde ahí el sistema de Consenso los evalúa automáticamente como a cualquier otro activo
+
+### Filtrado necesario (el problema central)
+
+YouTube tiene demasiado volumen — la mayoría es ruido. Se necesitan 4 capas:
+
+1. **Canales curados** — solo 5-10 canales ya validados por el usuario (no rastrear YouTube en general)
+2. **Filtro de título** — descartar videos sin tickers o palabras clave de análisis (`buy`, `undervalued`, `dividend`). Bota el 80% sin costo.
+3. **Claude como juez** — de los que pasan, evalúa si es análisis genuino o clickbait y si el tono es bullish
+4. **Consenso como validación final** — el ticker descubierto entra a `market` con `categoriaActivo='T'` y pasa por los 6 votos existentes. YouTube solo detecta candidatos, no decide compras.
+
+### Estado
+
+**Idea documentada — no implementada.** Implementar después de validar Tech Alignment con RSS de noticias.
+
+---
+
+## LO QUE NO VAMOS A HACER
+
+- Sistema de consenso paralelo — el existente es la fuente de verdad
+- Votos de indicadores técnicos en Consenso (van a los modelos IA)
+- Alpha Vantage o Google Trends — otra dependencia inestable
+- Tablas nuevas — si hace falta persistir algo, columna nueva en `market`
+- Penalización negativa con Tech Alignment

@@ -168,31 +168,20 @@ Luego el flujo completo:
 Vault: `C:\Users\InversionesWildaga\Documents\MyObsidian\AppOO\`
 - `10-Memoria/` → junction a `.claude/.../memory/` (mismos archivos que Claude lee/escribe)
 - `20-Proyecto/` → junction a `AppOO/Doc/`
-- `30-Gestion/Sesiones/` → notas por sesión (Claude escribe al cerrar)
 
 ### Checklist al INICIAR sesión
 
 Claude debe ejecutar estos pasos antes de responder al primer mensaje de trabajo:
 
-1. Leer `30-Gestion/Sesiones/` → identificar la nota más reciente y leerla para retomar momentum
-2. Leer `00-Home.md` → verificar estado actual de módulos y links relevantes
-3. Leer `10-Memoria/MEMORY.md` → ya cargado como contexto automático, confirmar que es coherente con lo anterior
-
-Si no existe nota de sesión previa → arrancar desde `MEMORY.md` + `00-Home.md`.
+1. Leer `00-Home.md` → verificar estado actual de módulos y links relevantes
+2. Leer `10-Memoria/MEMORY.md` → ya cargado como contexto automático, confirmar que es coherente con lo anterior
 
 ### Checklist al CERRAR sesión
 
-Antes de hacer commit, ejecutar en orden:
+Antes de hacer commit, verificar:
 
 1. ¿Quedó algún acuerdo de UI/columnas sin registrar?
-2. ¿Hay ideas pendientes por guardar en memoria?
+2. ¿Hay ideas o decisiones relevantes para guardar en MEMORY/FEEDBACK?
 3. ¿Todos los cambios de código tienen su contraparte en datos (header + valor en mismo orden)?
 4. ¿Se documentaron nuevos índices o cambios en la BD?
-5. **Escribir nota de sesión** en `30-Gestion/Sesiones/YYYY-MM-DD.md` con:
-   - Objetivo de la sesión
-   - Cambios realizados (archivos + descripción)
-   - Decisiones técnicas tomadas
-   - Commits del día
-   - Próximos pasos / pendientes
-6. Si `00-Home.md` quedó desactualizado → actualizarlo (módulos nuevos, estado cambiado)
-7. Sincronizar memoria importante a `Doc/memory/` en rama `docs` si aplica
+5. Si `00-Home.md` quedó desactualizado → actualizarlo (módulos nuevos, estado cambiado)
