@@ -557,7 +557,23 @@ class Screener(tk.Frame):
                     stretch=tk.NO,
                 )
 
-            self.ctree_widget.tree_fixed.bind("<<TreeviewSelect>>", item_selected)
+            def _on_fixed_select(event):
+                item_selected(event)
+                sel = self.ctree_widget.tree_fixed.selection()
+                if sel:
+                    self.ctree_widget.tree_scroll.selection_set(sel)
+                    self.ctree_widget.tree_scroll.see(sel[0])
+
+            def _on_scroll_click(event):
+                row = self.ctree_widget.tree_scroll.identify_row(event.y)
+                if not row:
+                    return
+                self.ctree_widget.tree_scroll.selection_set(row)
+                self.ctree_widget.tree_fixed.selection_set(row)
+                self.ctree_widget.tree_fixed.see(row)
+
+            self.ctree_widget.tree_fixed.bind("<<TreeviewSelect>>", _on_fixed_select)
+            self.ctree_widget.tree_scroll.bind("<ButtonRelease-1>", _on_scroll_click)
 
             def _open_website(event):
                 tree = event.widget

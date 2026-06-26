@@ -55,6 +55,9 @@ secrets.py
 credentials.json
 api_keys.txt
 config_local.py
+config/credenciales.py
+dumps/
+profiles/main.json
 
 # Datos financieros privados (si aplicable)
 portfolio_personal.csv

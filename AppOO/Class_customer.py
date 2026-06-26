@@ -5267,7 +5267,8 @@ class WidgetVehiculo(TickerInfo):
             self.orderActivas.destroy()
 
         self.orderActivas = tk.Toplevel()
-        title = option + " : " + self.symbol
+        name = self.gchar.get("name", "")
+        title = f"{option} : {self.symbol}" + (f"  —  {name}" if name else "")
 
         # (ancho, largo  position:  x, y) % (620, 180, self.df - 10, 775)
         dimension = "%dx%d+%d+%d" % (620, 180, self.df - 630, 565)
