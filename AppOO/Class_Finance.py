@@ -20,7 +20,7 @@ from Modulos_python import (
     FigureCanvasTkAgg,
     ticker,
 )
-from Modulos_Mysql import FinanceScreen
+from Modulos_Mysql import BDsystem, FinanceScreen
 from Class_ApiBinnace import BinanceClient
 
 _logger = logging.getLogger("Finance")
@@ -1453,12 +1453,6 @@ class FinancePanel(tk.Frame):
 # Parsers de extractos bancarios — dominio Finance
 # ─────────────────────────────────────────────────────────────────────────────
 
-DB_CONFIG = {
-    "user": "root",
-    "password": "",
-    "host": "localhost",
-    "database": "bdinv",
-}
 
 EXTRACTOS_DIR = os.path.join(
     os.environ.get("APPOO_TMP") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmp"), "extractos"
@@ -3556,7 +3550,7 @@ def process_pdf(pdf_path: str) -> bool:
             if _multi_section
             else AdapterClass(pdf_path=pdf_path, account_ref=account_ref)
         )
-        conn = connect(**DB_CONFIG)
+        conn = connect(**BDsystem.DB_CONFIG)
         stats = adapter.load(conn)
         conn.close()
         _logger.info(
