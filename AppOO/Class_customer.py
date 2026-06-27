@@ -220,8 +220,9 @@ class DataHub:
     clients = {}  # {vehiculo: client_instance} — IClient para Stock, BClient para Crypto
     manager_GyP = {
         "BotCrypto": {"Value": 0, "Inversion": 0, "dGyP": 0, "Debit": 0, "Margen": 0},
-        "Stock": {"Debit": 0, "DebitMax": 0, "BetaPortfolio": 1.0},
-        "Crypto": {"Debit": 0, "DebitMax": 0, "BetaPortfolio": 1.5, "Colateral": 0, "CapitalNeto": 0, "Leverage": 0},
+        "Stock": {"Debit": 0, "DebitMax": 0, "BetaPortfolio": 1.0, "dGyP": 0},
+        "Crypto": {"Debit": 0, "DebitMax": 0, "BetaPortfolio": 1.5, "Colateral": 0, "CapitalNeto": 0, "Leverage": 0, "dGyP": 0},
+        "Ars": {"dGyP": 0},
     }
     manager_positions = {"Stock": [], "Crypto": []}  # posiciones vivas por vehículo para agentes
     rebalanceo = {}
@@ -4312,6 +4313,7 @@ class WidgetVehiculo(TickerInfo):
                 debit_max_crypto = colateral_value * 0.65
                 DataHub.manager_GyP["Crypto"]["Debit"] = debit
                 DataHub.manager_GyP["Crypto"]["DebitMax"] = debit_max_crypto
+                DataHub.manager_GyP["Crypto"]["dGyP"] = dgyp
                 beta_crypto = DataHub.manager_GyP["Crypto"].get("BetaPortfolio", 1.5)
                 neto_api = DataHub.manager_GyP["Crypto"].get("CapitalNeto", 0)
                 equity_crypto = max(neto_api if neto_api > 0 else colateral_value - debit, 1.0)
@@ -4360,6 +4362,9 @@ class WidgetVehiculo(TickerInfo):
                     debit_max_stock = mktvalue * 0.8
                     DataHub.manager_GyP["Stock"]["Debit"] = deuda_actual
                     DataHub.manager_GyP["Stock"]["DebitMax"] = debit_max_stock
+                    DataHub.manager_GyP["Stock"]["dGyP"] = dgyp
+                    if DataHub.ws_stock_connected and dgyp != 0:
+                        write_json_tmp("dgyp_last", {"Stock": dgyp})
                     beta_stock = DataHub.manager_GyP["Stock"].get("BetaPortfolio", 1.0)
                     equity_stock = max(mktvalue, 1.0)
                     margen = (deuda_actual / equity_stock) * beta_stock

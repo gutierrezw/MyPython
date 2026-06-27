@@ -1447,8 +1447,7 @@ class EstrategiaInversion(BDsystem):  # ----------------------------------------
             print("[Mysql:: Estrategia.Select()]: {}".format(error))
 
     def get_etfs_pendientes(self, account):
-        """ETFs (categoriaActivo='X') y stocks de commodities (sector Basic Materials/Energy
-        con estrategia=P02 por default) pendientes de clasificación por Claude."""
+        """ETFs, commodities y posiciones con código de esquema viejo pendientes de clasificación."""
         try:
             conn = self._conectar(tabla="select.etf_pendientes")
             cursor = conn.cursor()
@@ -1462,6 +1461,9 @@ class EstrategiaInversion(BDsystem):  # ----------------------------------------
                        (m.categoriaActivo IN ('I','S','N') AND m.encartera = 'Y'
                         AND (i.estrategia IS NULL OR i.estrategia = 'P02')
                         AND m.shortName REGEXP 'Gold|Silver|Plata|Oro')
+                       OR
+                       (i.iactiva = 'Y' AND m.encartera = 'Y'
+                        AND i.estrategia IN ('A01','A02','A03','A04','A05','A99','C01','C02'))
                      )"""
             cursor.execute(qry, (account, account))
             cols = [c[0] for c in cursor.description]
@@ -3630,12 +3632,13 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         def update(keys, ticket):
             try:
                 xlistvalues = []
-                qry = """UPDATE inversion  SET  position = '%s', peso = '%s', costobase = '%s', conid = '%s', 
-                                                sector = '%s', dividendo = '%s', objetivo = '%s', retorno = '%s', 
-                                                unrealizedpnl = '%s', dividendYield = '%s', exDividendDate = '%s', 
-                                                factor_cambio = '%s', deuda = '%s',  mrkprice = '%s', open = '%s', 
+                qry = """UPDATE inversion  SET  position = '%s', peso = '%s', costobase = '%s', conid = '%s',
+                                                sector = '%s', dividendo = '%s', objetivo = '%s', retorno = '%s',
+                                                unrealizedpnl = '%s', dividendYield = '%s', exDividendDate = '%s',
+                                                factor_cambio = '%s', deuda = '%s',  mrkprice = '%s', open = '%s',
                                                 dgyp = '%s', iactiva = '%s', empresa = '%s', region = '%s',
-                                                country = '%s', timestamp = '%s' 
+                                                country = '%s', timestamp = '%s',
+                                                estrategia = CASE WHEN estrategia IN ('A01','A02','A03','A04','A05','A99','C01','C02') OR estrategia IS NULL THEN '%s' ELSE estrategia END
                         WHERE ticket ='%s' AND useraccount ='%s';"""
 
                 factor = keys["factor_cambio"] if "factor_cambio" in keys else 1
@@ -3675,6 +3678,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 xlistvalues.append(keys["region"] if "region" in keys else "")
                 xlistvalues.append(keys["country"] if "country" in keys else "")
                 xlistvalues.append(datetime.now())
+                xlistvalues.append(keys["estrategia"] if "estrategia" in keys else "")
 
                 xlistvalues.append(ticket)
                 xlistvalues.append(account)
@@ -5519,6 +5523,46 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             self.update_otros_activos(account=account, values=cvalues, symbol=symbol)
         except (Exception, EncodingWarning, connect.Error) as error:
             print(f"[Mysql:: insert_booktrading()]: {error}")
+
+    def update_preciotrans_fci(self, account, idivisa, symbol, idtrans, preciotrans, cantidad, producto):
+        """
+        Actualiza precio y cuotapartes de una operación FCI ajustada retroactivamente por el banco.
+        Importe ARS fijo → precio ajustado implica cantidad distinta.
+        Recalcula stock acumulado del símbolo ya que cantidad cambia.
+        """
+        try:
+            conn = self._conectar(tabla="update.booktrading")
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """UPDATE booktrading
+                   SET preciotrans = %s, preciocierre = %s, cantidad = %s, producto = %s, updateStamp = %s
+                   WHERE cuenta = %s AND divisa = %s AND simbolo = %s AND idtrans = %s;""",
+                (preciotrans, preciotrans, cantidad, producto, datetime.now(), account, idivisa, symbol, idtrans),
+            )
+            conn.commit()
+
+            # Recalcula stock corrido para todos los registros del símbolo
+            cursor.execute(
+                """UPDATE booktrading b
+                   JOIN (
+                       SELECT id,
+                              SUM(cantidad) OVER (
+                                  PARTITION BY cuenta, simbolo, divisa
+                                  ORDER BY fechahora, sec
+                              ) AS stock_real
+                       FROM booktrading
+                       WHERE cuenta = %s AND simbolo = %s AND divisa = %s
+                   ) calc ON b.id = calc.id
+                   SET b.stock = calc.stock_real
+                   WHERE b.cuenta = %s AND b.simbolo = %s AND b.divisa = %s;""",
+                (account, symbol, idivisa, account, symbol, idivisa),
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+        except (Exception, EncodingWarning, connect.Error) as error:
+            print(f"[Mysql:: update_preciotrans_fci()]: {error}")
 
     def select_botcrypto_performance(self, account, dias=90):
         """

@@ -75,6 +75,7 @@ from Modulos_Utilitarios import (
     is_numeric,
     str_float,
     write_json_tmp,
+    read_json_tmp,
 )
 from Class_customer import (
     CustomTreeview,
@@ -2166,20 +2167,32 @@ class DashMain:
         lineLeft = ttk.Frame(topPn0, style="C.TFrame")
         lineRight = ttk.Frame(topPn0, style="C.TFrame")
         leftBotPn0 = ttk.Frame(botPn0, style="C.TFrame")
+        midBotPn0 = ttk.Frame(botPn0, style="C.TFrame")
         rightBotPn0 = ttk.Frame(botPn0, style="C.TFrame")
+        farRightBotPn0 = ttk.Frame(botPn0, style="C.TFrame")
         gypBottom = ttk.Frame(leftBotPn0, style="C.TFrame")
         InvBottom = ttk.Frame(leftBotPn0, style="C.TFrame")
+        LeverageBottom = ttk.Frame(midBotPn0, style="C.TFrame")
+        UnpnlBottom = ttk.Frame(midBotPn0, style="C.TFrame")
         DebtBottom = ttk.Frame(rightBotPn0, style="C.TFrame")
+        BetaBottom = ttk.Frame(rightBotPn0, style="C.TFrame")
+        DivBottom = ttk.Frame(farRightBotPn0, style="C.TFrame")
 
         topPn0.pack(side=tk.TOP, fill=tk.X, expand=True)
         botPn0.pack(side=tk.BOTTOM)
         lineLeft.pack(side=tk.LEFT, fill=tk.X)
         lineRight.pack(side=tk.RIGHT, fill=tk.X, expand=True)
         leftBotPn0.pack(side=tk.LEFT)
+        midBotPn0.pack(side=tk.LEFT)
         rightBotPn0.pack(side=tk.LEFT)
+        farRightBotPn0.pack(side=tk.LEFT)
         gypBottom.pack(side=tk.TOP)
         InvBottom.pack(side=tk.BOTTOM)
+        LeverageBottom.pack(side=tk.TOP)
+        UnpnlBottom.pack(side=tk.BOTTOM)
         DebtBottom.pack(side=tk.TOP)
+        BetaBottom.pack(side=tk.BOTTOM)
+        DivBottom.pack(side=tk.TOP)
 
         # información usuario -----------------------------------------------------------------------------------------
         self.line = tk.Label(
@@ -2288,9 +2301,49 @@ class DashMain:
             height=10,
             bg_color=self.colors["bgcolor"],
         )
+        self.LeverageProgress = ProgressBar(
+            LeverageBottom,
+            label="Leverage  (D/K %)",
+            avance=0,
+            proyeccion=30,
+            width=130,
+            height=10,
+            bg_color=self.colors["bgcolor"],
+        )
+        self.UnpnlProgress = ProgressBar(
+            UnpnlBottom,
+            label="UnP&L vs Capital",
+            avance=0,
+            proyeccion=1,
+            width=130,
+            height=10,
+            bg_color=self.colors["bgcolor"],
+        )
+        self.BetaProgress = ProgressBar(
+            BetaBottom,
+            label="Beta Portafolio",
+            avance=0,
+            proyeccion=2.0,
+            width=130,
+            height=10,
+            bg_color=self.colors["bgcolor"],
+        )
+        self.DivProgress = ProgressBar(
+            DivBottom,
+            label="Dividendos YTD",
+            avance=0,
+            proyeccion=1,
+            width=130,
+            height=10,
+            bg_color=self.colors["bgcolor"],
+        )
         self.GypProgress.pack(side=tk.LEFT, pady=5)
         self.InvProgress.pack(side=tk.LEFT, pady=5)
+        self.LeverageProgress.pack(side=tk.LEFT, pady=5)
+        self.UnpnlProgress.pack(side=tk.LEFT, pady=5)
         self.DebtProgress.pack(side=tk.LEFT, pady=5)
+        self.BetaProgress.pack(side=tk.LEFT, pady=5)
+        self.DivProgress.pack(side=tk.LEFT, pady=5)
 
         # áreas y figuras de gráficos principales --------------------------------------------------------------------
         self.rg0 = Figure(figsize=(2.77, 2.4), dpi=110, layout="tight")  # firgura de rendimiento ultimos 6 meses
@@ -5731,17 +5784,27 @@ class DashMain:
             try:
                 totales = self.RepositorioOportunidades.get_totales_inversiones()
                 limit_costoB, limit_gyp = self.get_limite_inversion()
-                self.root.after(0, lambda: _update_ui(totales, limit_costoB, limit_gyp))
+                extracto = self.RepositorioOportunidades.select_extracto(account=self.account, extract="sum")
+                div_ytd = float(extracto[0].get("dividendos") or 0) if extracto else 0.0
+                self.root.after(0, lambda: _update_ui(totales, limit_costoB, limit_gyp, div_ytd))
             except Exception as e:
                 print(f"[actualizar_totales_inversiones._fetch()]: {e}")
 
-        def _update_ui(totales, limit_costoB, limit_gyp):
+        def _update_ui(totales, limit_costoB, limit_gyp, div_ytd):
             try:
                 capital_botCrypto = DataHub.manager_GyP["BotCrypto"].get("Inversion", 0)
                 Value_botCrypto = DataHub.manager_GyP["BotCrypto"].get("Value", 0)
                 Gyp_botCrypto = capital_botCrypto - Value_botCrypto
 
-                ganancias_dia = totales["total_ganancia_dia"] + Gyp_botCrypto
+                stock_dgyp = DataHub.manager_GyP.get("Stock", {}).get("dGyP", 0)
+                if stock_dgyp == 0 and not DataHub.ws_stock_connected:
+                    stock_dgyp = read_json_tmp("dgyp_last").get("Stock", 0)
+                ganancias_dia = (
+                    stock_dgyp
+                    + DataHub.manager_GyP.get("Crypto", {}).get("dGyP", 0)
+                    + DataHub.manager_GyP.get("Ars", {}).get("dGyP", 0)
+                    + Gyp_botCrypto
+                )
                 costo_base = totales["total_costo_base"] + capital_botCrypto
 
                 _inf = 0 if ganancias_dia > 0 else -1
@@ -5763,9 +5826,35 @@ class DashMain:
                     "Crypto", {}
                 ).get("DebitMax", 0)
 
+                # Leverage: deuda total como % del capital (máx referencia 30%)
+                leverage_pct = (total_debit / max(costo_base, 1)) * 100
+
+                # UnP&L vs Capital: ganancia no realizada como % (rango ±20% del capital)
+                unpnl = totales["total_unrealized_pnl"]
+                unpnl_limit = max(abs(unpnl), 0.20 * max(costo_base, 1))
+
+                # Beta consolidado ponderado por capital Stock vs Crypto
+                beta_stock = DataHub.manager_GyP.get("Stock", {}).get("BetaPortfolio", 1.0)
+                beta_crypto = DataHub.manager_GyP.get("Crypto", {}).get("BetaPortfolio", 1.5)
+                peso_stock = max(totales["total_costo_base"], 0)
+                peso_crypto = max(DataHub.manager_GyP.get("Crypto", {}).get("CapitalNeto", 0), 0)
+                total_peso = peso_stock + peso_crypto
+                if total_peso > 0:
+                    beta_consolidado = (beta_stock * peso_stock + beta_crypto * peso_crypto) / total_peso
+                else:
+                    beta_consolidado = beta_stock
+
+                # Dividendos YTD vs proyección anual (extrapolación por mes)
+                mes_actual = datetime.now().month
+                div_proyeccion = max((div_ytd / max(mes_actual, 1)) * 12, div_ytd)
+
                 self.GypProgress.update_values(low_limit_gyp, ganancias_dia, high_limit_gyp)
                 self.InvProgress.update_values(0, costo_base, limit_costoB)
+                self.LeverageProgress.update_values(0, leverage_pct, 30.0)
+                self.UnpnlProgress.update_values(-unpnl_limit, unpnl, unpnl_limit)
                 self.DebtProgress.update_values(0, total_debit, total_debitmax if total_debitmax > 0 else 1)
+                self.BetaProgress.update_values(0, beta_consolidado, 2.0)
+                self.DivProgress.update_values(0, div_ytd, max(div_proyeccion, 1))
             except Exception as e:
                 print(f"[actualizar_totales_inversiones._update_ui()]: {e}")
             finally:

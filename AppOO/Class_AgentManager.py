@@ -435,8 +435,8 @@ class AgentManager:
                 symbol = etf["symbol"]
                 yf_info = DataHub.info.get(symbol, {}).get("activos", {})
                 if not yf_info:
+                    yf_info = {"shortName": etf.get("shortName", symbol)}
                     sin_info += 1
-                    continue
                 codigo = self._clasificar_etf_claude(yf_info, opciones)
                 if codigo:
                     estrategia_svc.update_estrategia_etf(symbol, self.account, codigo)

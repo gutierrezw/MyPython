@@ -215,6 +215,7 @@ class ArsFondosInversion(tk.Frame):
     def update_panel_fci(self):
         def change_a_ARS():
             nav, unpyl, dgyp, unprofit, costo, fecha = 0.0, 0.0, 0.0, 0.0, 0.0, None
+            dgyp_usd = 0.0
 
             # obtiene tasa de cambio USDT-ARS
             hoy = datetime.now()
@@ -227,6 +228,7 @@ class ArsFondosInversion(tk.Frame):
                 if keys["costobase"] <= 5 or keys["position"] <= 0:
                     continue
 
+                dgyp_usd += keys["dgyp"] * keys["position"]
                 keys["mrkprice"] = keys["mrkprice"] * keys["factor_cambio"]
                 keys["mktvalue"] = keys["mrkprice"] * keys["position"]
                 keys["costobase"] = keys["costobase"] * keys["factor_cambio"]
@@ -262,6 +264,7 @@ class ArsFondosInversion(tk.Frame):
                 self.cus.update_precio_DataHubInfo(symbol=symbol, conid=conid, precio=d_precio)
 
             per = costo / unprofit if unprofit > 0 else 0
+            DataHub.manager_GyP["Ars"]["dGyP"] = dgyp_usd
             self.ars.set_header_panel(
                 Dgyp=dgyp,
                 Nav=nav,
@@ -714,10 +717,17 @@ class ArsFondosInversion(tk.Frame):
                 ebook = enumerate(asc_trader)
                 eof_book, values = next(ebook, (None, None))
                 keySymbol = None
+                hoy = datetime.now().date()
 
                 while eof_book is not None:
 
                     symbol = values["symbol"]
+
+                    # Fix 1: ignorar ops del día de descarga — precio aún no ajustado por el banco
+                    if values["fechahora"].date() >= hoy:
+                        eof_book, values = next(ebook, (None, None))
+                        continue
+
                     if keySymbol != symbol:
                         last_trader, ix = self.RepositorioOportunidades.select_booktrading(
                             accion="last",
@@ -726,11 +736,28 @@ class ArsFondosInversion(tk.Frame):
                             symbol=symbol,
                         )
                         last_date = last_trader[0]["fechahora"] if last_trader else datetime(2000, 1, 1)
-
                         keySymbol = symbol
 
-                    # inserta trader mayores a last_trader
-                    if last_date < values["fechahora"]:
+                    idtrans = str(values.get("idtrans", ""))
+                    # Fix 2: si idtrans ya existe actualizar precio ajustado, no duplicar
+                    existing, _ = self.RepositorioOportunidades.select_booktrading(
+                        accion="valida",
+                        account=self.account_bbva,
+                        idivisa="ARS",
+                        symbol=symbol,
+                        idtrans=idtrans,
+                    )
+                    if existing:
+                        self.RepositorioOportunidades.update_preciotrans_fci(
+                            account=self.account_bbva,
+                            idivisa="ARS",
+                            symbol=symbol,
+                            idtrans=idtrans,
+                            preciotrans=values["preciotrans"],
+                            cantidad=values["cantidad"],
+                            producto=values.get("producto", 0),
+                        )
+                    elif last_date < values["fechahora"]:
                         values.pop("symbol")
                         values.pop("tipomov", None)
                         self.RepositorioOportunidades.insert_booktrading(values, symbol=symbol)
