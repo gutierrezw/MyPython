@@ -160,7 +160,7 @@ class IBClient:  # -------------------------------------------------------------
             )
         )
 
-        # Finally make sure we are authenticated.   >daga2004
+        # Finally make sure we are authenticated.
         print("create_session:", auth_response)
         if auth_response:
             if "authenticated" in auth_response.keys() and auth_response["authenticated"] and self._set_server():
@@ -639,7 +639,7 @@ class IBClient:  # -------------------------------------------------------------
             )
             return data
 
-        # if it was a bad request print it out.  >daga2004
+        # if it was a bad request print it out.
         elif not response.ok and url != "https://localhost:5501/v1/portal/iserver/account":
             logging.error(
                 msg=f"url: {response.url}, code: {status_code},  Message: {response.text}"

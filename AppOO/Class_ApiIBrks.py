@@ -300,7 +300,7 @@ class IB(IBClient):
            Auth Response: {auth_response}
            """))
 
-        # Finally make sure we are authenticated.   >daga2004
+        # Finally make sure we are authenticated.
         # print('create_session:', auth_response)
         if auth_response:
             if "authenticated" in auth_response.keys() and auth_response["authenticated"] and self._set_server():
