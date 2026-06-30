@@ -2621,8 +2621,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 qty = o.get("quantity") or 0
                 price = f"@{o.get('price') or 0}"
                 ts = o.get("timestamp") or ""
+                status = (o.get("status") or "")[:8]
                 lines.append(f"{sym:<7} {side:<4} {qty:>8} {price:>15}")
-                lines.append(f"  {ts}")
+                lines.append(f"  {ts:<14} {status:>18}")
                 lines.append(sep)
 
             message = f"🟢🔴 *Trader recent (-7 days):*\n"
