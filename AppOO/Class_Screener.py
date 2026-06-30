@@ -11,6 +11,15 @@ from Modulos_Utilitarios import (
 from Class_customer import CustomTreeview
 from Class_BrowserBridge import abrir_tradingview
 from ConvergIA.ThemeMapper import load_sentiment, load_analysis, voto_tech_alignment
+from AppValuations.consenso_score import (
+    voto_net_relativo,
+    voto_options,
+    voto_analistas,
+    voto_valuacion,
+    voto_cobertura,
+    voto_flujo,
+    senal_consenso,
+)
 from Modulos_python import (
     tk,
     ttk,
@@ -74,88 +83,6 @@ def _build_flujo_percentiles(cartera_rows):
     return vals[n // 3], vals[(2 * n) // 3]
 
 
-def voto_net_relativo(buy_r, sell_r, p33, p67, fh_count=None):
-    if not fh_count:
-        return 0
-    net = (buy_r or 0.0) - (sell_r or 0.0)
-    if net >= p67:
-        return 1
-    if net >= p33:
-        return 0
-    return -1
-
-
-def voto_options(call_shares, put_shares):
-    total = (call_shares or 0) + (put_shares or 0)
-    if total == 0:
-        return 0
-    ratio = (call_shares or 0) / total
-    if ratio >= 0.6:
-        return 1
-    if ratio >= 0.4:
-        return 0
-    return -1
-
-
-def voto_analistas(rec):
-    r = (rec or "").lower().replace(" ", "_")
-    if r in ("strong_buy", "buy"):
-        return 1
-    if r in ("sell", "strong_sell"):
-        return -1
-    if r == "hold":
-        return 0
-    return 0
-
-
-def voto_valuacion(categ):
-    if categ == "I":
-        return 1
-    if categ == "S":
-        return -1
-    if categ == "N":
-        return 0
-    return 0
-
-
-def voto_cobertura(fh_count):
-    c = fh_count or 0
-    if c >= 20:
-        return 1
-    if c >= 5:
-        return 0
-    return -1
-
-
-def voto_flujo(new_ent, exits, fh_count, p33, p67):
-    if not fh_count:
-        return 0
-    fn = max(-1.0, min(1.0, ((new_ent or 0) - (exits or 0)) / fh_count))
-    if fn >= p67:
-        return 1
-    if fn >= p33:
-        return 0
-    return -1
-
-
-def senal_consenso(votos_activos, suma):
-    n = len(votos_activos)
-    if n == 0:
-        return "S/D", 0, 0
-    pct = suma / n
-    if suma == n:
-        etiqueta = "UNANIME"
-    elif pct >= 0.6:
-        etiqueta = "CONSENSO"
-    elif pct >= 0.2:
-        etiqueta = "TENDENCIA"
-    elif pct > -0.2:
-        etiqueta = "NEUTRO"
-    elif pct > -0.6:
-        etiqueta = "ALERTA"
-    else:
-        etiqueta = "SALIDA"
-    return etiqueta, suma, n
 
 
 _ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
@@ -1486,7 +1413,7 @@ class Screener(tk.Frame):
         v_opt = voto_options(call_s, put_s)
         v_flujo = voto_flujo(new_ent, exits, row.get("fh_count"), p33_flujo, p67_flujo)
         v_ana = voto_analistas(rec)
-        v_val = voto_valuacion(categ) if categ not in ("X", "T") else None
+        v_val = voto_valuacion(categ)
         v_cob = voto_cobertura(fh_count)
         v_sent = voto_tech_alignment(symbol, sentiment, analysis)
         ia_signal = "BUY" if symbol in syms_buy else ("SELL" if symbol in syms_sell else "—")
@@ -1865,7 +1792,7 @@ class Screener(tk.Frame):
             )
             flujo_str = f"{_fn:+.2f}" if _fn is not None else ""
             _sent = votos.get("Sent", 0)
-            sent_str = f"{_sent:+d}" if _sent != 0 else "0"
+            sent_str = f"{_sent:+d}" if _sent else "0"
             filas.append(
                 {
                     "values": (

@@ -179,6 +179,19 @@ def senal_consenso(votos_activos: list, suma: int) -> tuple:
     return etiqueta, suma, n
 
 
+def voto_flujo(new_entrants: int, full_exits: int, fh_count: int, p33: float, p67: float) -> int:
+    """Voto Flujo: entrada/salida neta de fondos relativa a cartera.
+    Top 33% → +1 | Medio → 0 | Bottom 33% → -1. Abstiene (0) si sin cobertura."""
+    if not fh_count:
+        return 0
+    fn = max(-1.0, min(1.0, ((new_entrants or 0) - (full_exits or 0)) / fh_count))
+    if fn >= p67:
+        return 1
+    if fn >= p33:
+        return 0
+    return -1
+
+
 def senal_institucional(inst_score: float, fh_buy_ratio: float, fh_count: int) -> str:
     """Señal institucional compuesta (Inst Señal en popup).
     Resume inst_score (blend yfinance+13F) + flujo neto + cobertura."""

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TradingView — App Panel
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.1
 // @match        https://www.tradingview.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -299,21 +299,17 @@
               <td id="tv-gyp" ${td2} style="padding:2px 0;color:${gColor}">${fmts(gyp_total)} (${fmtsp(roi_total)})</td></tr>
         </table>
 
-        ${!isCrypto ? `
+        ${!isCrypto && pos.consenso_label ? `
         <div style="font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:1px;
                     border-bottom:1px solid #2a2e39;padding-bottom:4px;margin-bottom:6px">Consenso</div>
         <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
-          <tr><td ${td1}>Rotación</td><td ${td2}>${pos.rotacion || "—"}</td></tr>
-          <tr><td ${td1}>Inst Señal</td><td ${td2}>${pos.senal_inst || "—"}</td></tr>
-          <tr><td ${td1}>Analistas</td><td ${td2}>${pos.senal_ana || "—"}</td></tr>
-          <tr><td ${td1}>IA Signal</td><td ${td2}>${pos.ia_signal || "—"}</td></tr>
-          ${pos.consenso_label ? `<tr style="border-top:1px solid #2a2e39">
-            <td ${td1} style="color:#787b86;padding:4px 0 2px">Consenso</td>
-            <td style="padding:4px 0 2px;font-weight:bold">
+          <tr>
+            <td ${td1}>Consenso</td>
+            <td style="text-align:right;padding:2px 0;font-weight:bold">
               ${pos.consenso_label}
               ${pos.consenso_suma ? `<span style="color:#787b86;font-size:11px;margin-left:6px">${pos.consenso_suma}</span>` : ""}
             </td>
-          </tr>` : ""}
+          </tr>
         </table>` : ""}
 
         <div style="font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:1px;

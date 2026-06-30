@@ -2808,7 +2808,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             mensaje += f"{'CostoB posVenta':<15} {row['PosCostobase']:>12.2f}\n"
             mensaje += f"{'Valoracion'         :<18} {""}\n"
 
-            if modo == "ia":
+            confianza = row.get("confianza") if modo != "ia" else confianza
+            if confianza is not None:
                 mensaje += f"{'-' * 37}\n"
                 mensaje += f"{'Confianza IA'   :<15} {confianza:>12.1%}\n"
 
@@ -3003,26 +3004,44 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             # aprobadas = resultado[resultado["confianza"] >= umbral].copy()
 
     def get_top_sell(self, top=5) -> list:
-        """
-        Obtiene las TOP 10 oportunidades de venta ordenadas por ROI.
-        Criterio: Mayor ROI indica mejor momento para vender.
-        Retorna lista de diccionarios con las mejores oportunidades.
-        """
+        def _tecnicos(row):
+            raw = row.get("datos_tecnicos") or row.get("Datostecnicos")
+            if not raw:
+                return None, {}
+            try:
+                d = json.loads(raw) if isinstance(raw, str) else raw
+                diaria = d.get("diaria", {})
+                return diaria.get("rsi"), diaria.get("ema(20,50,100,200)", {})
+            except Exception:
+                return None, {}
+
+        def _score_hibrido(o):
+            confianza = o.get("confianza") or 0
+            rsi, emas = _tecnicos(o)
+            rsi_score = max(0.0, (rsi - 60) / 40) if rsi is not None else 0.0
+            e20 = emas.get("EMA020") or 0
+            e50 = emas.get("EMA050") or 0
+            e100 = emas.get("EMA100") or 0
+            if e20 > 0 and e50 > 0 and e100 > 0 and e20 < e50 < e100:
+                tendencia = 1.0
+            elif e20 > 0 and e50 > 0 and e20 < e50:
+                tendencia = 0.5
+            else:
+                tendencia = 0.0
+            return (confianza * 0.50) + (rsi_score * 0.30) + (tendencia * 0.20)
+
+        def _es_candidato(o):
+            if o.get("confianza") is not None:
+                return _score_hibrido(o) >= 0.25
+            return (o.get("%Roi") or 0) > DataHub.Toleranciasell
+
         try:
             if not self.sell_enviados:
                 return []
-
-            # Convertir a lista y ordenar por ROI descendente
-            oportunidades = list(self.sell_enviados.values())
-
-            # Ordenar por %Roi (mayor primero)
-            oportunidades_ordenadas = sorted(
-                oportunidades,
-                key=lambda x: (x.get("%Roi", 0) or 0, x.get("Profit", 0) or 0),
-                reverse=True,
-            )
-
-            return oportunidades_ordenadas[:top]
+            oportunidades = [o for o in self.sell_enviados.values() if _es_candidato(o)]
+            if not oportunidades:
+                return []
+            return sorted(oportunidades, key=_score_hibrido, reverse=True)[:top]
         except Exception as e:
             print(f"get_top_sell(): {e}")
             return []
@@ -3063,7 +3082,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             mensaje += f"{'Objetivo'         :<18} {row.get('objetivo', 0):>12.4f}\n"
             mensaje += f"{'Valoracion'       :<18} {""}\n"
 
-            if modo == "ia":
+            confianza = row.get("confianza") if modo != "ia" else confianza
+            if confianza is not None:
                 mensaje += f"{'-' * 37}\n"
                 mensaje += f"{'Confianza IA'     :<18} {confianza:>12.1%}\n"
 
@@ -3377,30 +3397,47 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             return pd.DataFrame()
 
     def get_top_buy(self, top=5) -> list:
-        """
-        Obtiene las TOP 10 oportunidades de compra ordenadas por score y ganancia_precio.
-        Criterio: Mayor score indica mejor oportunidad de rebalanceo.
-                  Mayor ganancia_precio indica mejor precio respecto al objetivo.
-        Retorna lista de diccionarios con las mejores oportunidades.
-        """
+        def _tecnicos(row):
+            raw = row.get("Datostecnicos")
+            if not raw:
+                return None, {}
+            try:
+                d = json.loads(raw) if isinstance(raw, str) else raw
+                diaria = d.get("diaria", {})
+                return diaria.get("rsi"), diaria.get("ema(20,50,100,200)", {})
+            except Exception:
+                return None, {}
+
+        def _score_hibrido(o):
+            confianza = o.get("confianza") or 0
+            rsi, emas = _tecnicos(o)
+            rsi_score = max(0.0, (60 - rsi) / 60) if rsi is not None else 0.0
+            e20 = emas.get("EMA020") or 0
+            e50 = emas.get("EMA050") or 0
+            e100 = emas.get("EMA100") or 0
+            if e20 > 0 and e50 > 0 and e100 > 0 and e20 > e50 > e100:
+                tendencia = 1.0
+            elif e20 > 0 and e50 > 0 and e20 > e50:
+                tendencia = 0.5
+            else:
+                tendencia = 0.0
+            return (confianza * 0.50) + (rsi_score * 0.30) + (tendencia * 0.20)
+
+        def _es_candidato(o):
+            if o.get("confianza") is not None:
+                return _score_hibrido(o) >= 0.25
+            return (
+                (o.get("score") or 0) >= DataHub.MinScoreBuy
+                and (o.get("ganancia_precio") or 0) >= DataHub.MinGananciaPrecio
+            )
+
         try:
             if not self.buy_enviados:
                 return []
-
-            # Convertir a lista y ordenar por score + ganancia_precio
-            oportunidades = list(self.buy_enviados.values())
-
-            # Ordenar por score (mayor primero), luego por ganancia_precio
-            oportunidades_ordenadas = sorted(
-                oportunidades,
-                key=lambda x: (
-                    x.get("score", 0) or 0,
-                    x.get("ganancia_precio", 0) or 0,
-                ),
-                reverse=True,
-            )
-
-            return oportunidades_ordenadas[:top]
+            oportunidades = [o for o in self.buy_enviados.values() if _es_candidato(o)]
+            if not oportunidades:
+                return []
+            return sorted(oportunidades, key=_score_hibrido, reverse=True)[:top]
         except Exception as e:
             print(f"get_top_buy(): {e}")
             return []

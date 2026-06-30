@@ -3917,53 +3917,6 @@ class WidgetVehiculo(TickerInfo):
     def _abrir_tradingview(self, symbol):
         """Abre TradingView con panel de lotes, estrategia y señales de consenso."""
 
-        def _senal_inst(score, buy_r, count):
-            score = score or 0.0
-            buy_r = buy_r or 0.0
-            count = count or 0
-            if score >= 0.4 and buy_r >= 0.5 and count >= 20:
-                return "ACOMPAÑAR"
-            elif score >= 0.25 or count >= 10:
-                return "MANTENER"
-            return "REVISAR"
-
-        def _senal_analyst(rec):
-            mapa = {
-                "strong_buy": "▲▲ FUERTE",
-                "buy": "▲ COMPRAR",
-                "hold": "→ MANTENER",
-                "sell": "▼ VENDER",
-                "strong_sell": "▼▼ FUERTE",
-            }
-            return mapa.get((rec or "").lower().replace(" ", "_"), "—")
-
-        def _rotacion(vol, float_sh):
-            try:
-                r = float(vol) / float(float_sh)
-            except (TypeError, ValueError, ZeroDivisionError):
-                return "—"
-            if r >= 3.0:
-                return "⚡ EXTREMA"
-            if r >= 1.0:
-                return "↑↑ ALTA"
-            if r >= 0.3:
-                return "↑ MEDIA"
-            return "— BAJA"
-
-        def _modelo_ia(sym):
-            try:
-                buy_path = define_FileCache(name="csv_datosIA_buy.csv")
-                sell_path = define_FileCache(name="csv_datosIA_sell.csv")
-                import csv as _csv
-
-                with open(buy_path, encoding="utf-8") as f:
-                    en_buy = sym in {r["Symbol"].strip() for r in _csv.DictReader(f) if "Symbol" in r}
-                with open(sell_path, encoding="utf-8") as f:
-                    en_sell = sym in {r["Symbol"].strip() for r in _csv.DictReader(f) if "Symbol" in r}
-                return "▲ COMPRAR" if en_buy else ("▼ VENDER" if en_sell else "—")
-            except Exception:
-                return "—"
-
         found, position = buscar_ticker(self.positions, symbol)
         posicion = {}
         lotes = []
@@ -3996,70 +3949,14 @@ class WidgetVehiculo(TickerInfo):
             else:
                 lotes = []
 
-        # señales de consenso desde market
+        # consenso desde market (fuente única — mismo valor que Screener y Telegram)
         try:
             rows, ix = self.Market.select(account=self.account, symbol=symbol)
             if rows and ix:
                 row = dict(zip(ix, rows[0]))
-                rec = row.get("recommendationKey") or ""
-                categ = row.get("categoriaActivo") or ""
-                fh_count = row.get("fh_count") or 0
-                call_sh = row.get("fh_call_shares") or 0
-                put_sh = row.get("fh_put_shares") or 0
-
-                # votos individuales
-                def _voto_ana(r):
-                    return {"strong_buy": 1, "buy": 1, "hold": 0, "sell": -1, "strong_sell": -1}.get(
-                        r.lower().replace(" ", "_"), None
-                    )
-
-                def _voto_val(c):
-                    return {"I": 1, "S": -1, "N": 0, "X": None, "T": None}.get(c)
-
-                def _voto_cob(n):
-                    return 1 if n >= 20 else (0 if n >= 5 else -1) if n else None
-
-                def _voto_opt(c, p):
-                    try:
-                        ratio = float(c) / (float(c) + float(p)) if (float(c) + float(p)) > 0 else None
-                    except (TypeError, ValueError):
-                        ratio = None
-                    if ratio is None:
-                        return None
-                    return 1 if ratio >= 0.6 else (-1 if ratio <= 0.4 else 0)
-
-                votos = {
-                    "Ana": _voto_ana(rec),
-                    "Val": _voto_val(categ),
-                    "Cob": _voto_cob(fh_count),
-                    "Opt": _voto_opt(call_sh, put_sh),
-                    "IA": (1 if _modelo_ia(symbol) == "▲ COMPRAR" else (-1 if _modelo_ia(symbol) == "▼ VENDER" else 0)),
-                }
-                activos = {k: v for k, v in votos.items() if v is not None}
-                suma = sum(activos.values())
-                n = len(activos)
-                pct = suma / n if n else 0
-                if suma == n:
-                    _label = "★ UNÁNIME"
-                elif pct >= 0.6:
-                    _label = "▲ CONSENSO"
-                elif pct >= 0.2:
-                    _label = "↗ TENDENCIA"
-                elif pct > -0.2:
-                    _label = "→ NEUTRO"
-                elif pct > -0.6:
-                    _label = "↘ ALERTA"
-                else:
-                    _label = "↙ SALIDA"
-
-                posicion["rotacion"] = _rotacion(
-                    row.get("volume"), row.get("floatShares") or row.get("sharesOutstanding")
-                )
-                posicion["senal_inst"] = _senal_inst(row.get("inst_score"), row.get("fh_buy_ratio"), fh_count)
-                posicion["senal_ana"] = _senal_analyst(rec)
-                posicion["ia_signal"] = _modelo_ia(symbol)
-                posicion["consenso_label"] = _label if n else ""
-                posicion["consenso_suma"] = f"{suma:+d}/{n}" if n else ""
+                posicion["consenso_label"] = row.get("consenso_tag") or ""
+                suma = row.get("consenso_suma")
+                posicion["consenso_suma"] = f"{int(suma):+d}" if suma is not None else ""
         except Exception:
             pass
 
