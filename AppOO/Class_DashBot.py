@@ -2264,7 +2264,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             basico = float(pos.get("basico") or 0)
             valor_pos = stock_qty * last_price if last_price > 0 else 0
             roi_pct = ((last_price - basico) / basico * 100) if basico > 0 and last_price > 0 else None
-            qty_sug = int(monto / last_price) if last_price > 0 and monto > 0 else 0
+            qty_sug = max(1, int(monto / last_price)) if last_price > 0 and monto > 0 and vehiculo == "Stock" else (
+                (monto / last_price) if last_price > 0 and monto > 0 else 0
+            )
 
             def _fmt(v, decimals=2, suffix=""):
                 if v is None:

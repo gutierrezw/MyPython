@@ -3361,6 +3361,8 @@ class TickerInfo(MyOrders):
 
                 if (position["mrkprice"] > 0.000001) and (invertir > 0) and (position["position"] > 0):
                     stock = int(invertir / position["mrkprice"])
+                    if stock == 0 and self.vehiculo == "Stock":
+                        stock = 1
                     stockNew = stock + position["position"]
                     avgCost = position["costobase"] / position["position"]
 
