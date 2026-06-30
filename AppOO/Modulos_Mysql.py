@@ -797,11 +797,11 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             cursor = conn.cursor()
             qry = """SELECT vehiculo,
                             SUM(CASE WHEN fechaclose >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-                                     THEN nr_gyp + dividends ELSE 0 END) AS d30,
+                                     THEN gyp_dia + dividends ELSE 0 END) AS d30,
                             SUM(CASE WHEN fechaclose >= DATE_SUB(CURDATE(), INTERVAL 60 DAY)
-                                     THEN nr_gyp + dividends ELSE 0 END) AS d60,
+                                     THEN gyp_dia + dividends ELSE 0 END) AS d60,
                             SUM(CASE WHEN fechaclose >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
-                                     THEN nr_gyp + dividends ELSE 0 END) AS d90
+                                     THEN gyp_dia + dividends ELSE 0 END) AS d90
                        FROM performa_inversion
                       WHERE fechaclose >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
                         {where_account}

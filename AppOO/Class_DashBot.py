@@ -1504,7 +1504,7 @@ class Telegram:
                 InlineKeyboardButton("⬆️ Buy", callback_data="menu_buy"),
             ],
             [
-                InlineKeyboardButton("🎯 Performan", callback_data="performan"),
+                InlineKeyboardButton("🎯 G/P Real", callback_data="performan"),
                 InlineKeyboardButton("🟢🔴 Orders", callback_data="OrdersExec"),
                 InlineKeyboardButton("🤖 BotTrader", callback_data="botrtrader"),
             ],
