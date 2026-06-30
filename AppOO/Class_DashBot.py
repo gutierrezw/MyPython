@@ -2638,7 +2638,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         """Envía resumen de G/P y dividendos acumulados por vehículo."""
         try:
             performa = IPerformance()
-            rows, ix = performa.select_resumen_por_vehiculo(account=self.account)
+            rows, ix = performa.select_resumen_por_vehiculo(account=None)
             if not rows:
                 await self.send_Telegram("ℹ️ Sin datos de performance.", None)
                 return
