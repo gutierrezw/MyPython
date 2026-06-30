@@ -2948,9 +2948,10 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     subtipo="gain",
                     row=row,
                 )
-                # en casos de existir, elimina hash_id anterior
+                # en casos de existir, elimina hash_id anterior y notifica si el modo está activo
                 if existe:
                     self.sell_enviados.pop(hash_id, None)
+                    insert = True
 
                 # en casos de no existente, inserta nueva oportunidad
                 if not existe:
@@ -3218,9 +3219,10 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     subtipo="rebalanceo",
                     row=row,
                 )
-                # En caso de existir, elimina hash_id anterior
+                # En caso de existir, elimina hash_id anterior y notifica si el modo está activo
                 if existe:
                     self.buy_enviados.pop(hash_id, None)
+                    insert = True
 
                 # En caso de no existente, inserta nueva oportunidad
                 if not existe:
