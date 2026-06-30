@@ -1780,6 +1780,7 @@ class Telegram:
                     parse_mode="Markdown",
                 )
                 self.MostrarOpcionMenu_enTelegram = "Sell"
+                await self._flush_sell_actual()
 
             elif accion == "menu_buy":
                 await query.edit_message_text(
@@ -1787,6 +1788,7 @@ class Telegram:
                     parse_mode="Markdown",
                 )
                 self.MostrarOpcionMenu_enTelegram = "Buy"
+                await self._flush_buy_actual()
 
             elif accion == "menu_top":
                 self.MostrarOpcionMenu_enTelegram = "Top10"
@@ -2593,7 +2595,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
                 orders.append(
                     {
-                        "timestamp": timestamp.strftime("%d-%b,%H%M%S"),
+                        "timestamp": timestamp.strftime("%d-%b,%H:%M"),
                         "symbol": trader[ix.index("symbol")],
                         "side": trader[ix.index("side")],
                         "quantity": trader[ix.index("quantity")],
@@ -2607,26 +2609,51 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 await self.send_Telegram("ℹ️ No hay órdenes ejecutadas recientes.", None)
                 return
 
-            # Formatea la lista (ejemplo genérico)
             lines = []
-
             for o in orders[:limit]:
-                if isinstance(o, dict):
-                    lines.append(
-                        f"{o.get('timestamp'):>14} {o.get('symbol'):>7} "
-                        f"{o.get('side'):<4} {o.get('quantity'):>7} {o.get('price'):>7} {o.get('status'):>9}"
-                    )
+                if not isinstance(o, dict):
+                    continue
+                sym = (o.get("symbol") or "")[:7]
+                side = o.get("side") or ""
+                qty = o.get("quantity") or 0
+                price = o.get("price") or 0
+                ts = o.get("timestamp") or ""
+                lines.append(f"{sym:<7} {side:<4} {qty:>8} @{price}")
+                lines.append(f"  {ts}")
+                lines.append("")
 
             message = f"🟢🔴 *Trader recent (-7 days):*\n"
             message += f"```\n"
-            message += f"{'timestamp':<12} {'symbol':>7} {'side':>4} {'quantity':>7} {'price':>5} {'status':>7}\n"
-            message += f"{'-' * 52}\n"
-            message += "\n".join(lines)
+            message += "\n".join(lines).rstrip()
             message += "```"
 
             await self.send_Telegram(message, None)
         except Exception as e:
             print(f"list_orders_exec(): {e}")
+
+    async def _flush_sell_actual(self):
+        """Envía las oportunidades de venta actuales al seleccionar el modo Sell."""
+        top = self.get_top_sell(top=20)
+        if not top:
+            return
+        for row in top:
+            hash_id = self.RepositorioOportunidades.generar_hash_id(
+                row.get("account"), row.get("Symbol"), row.get("Opcion"),
+                row.get("Fecha"), "sell", "gain", row.get("Recomendado"),
+            )
+            await self.opportunity_handler_message_sell(hash_id=hash_id, row=row, origen="top10")
+
+    async def _flush_buy_actual(self):
+        """Envía las oportunidades de compra actuales al seleccionar el modo Buy."""
+        top = self.get_top_buy(top=20)
+        if not top:
+            return
+        for row in top:
+            hash_id = self.RepositorioOportunidades.generar_hash_id(
+                row.get("account"), row.get("Symbol"), row.get("vehiculo"),
+                row.get("Fecha"), "buy", "rebalanceo", row.get("Recomendado"),
+            )
+            await self.opportunity_handler_message_buy(hash_id=hash_id, row=row, origen="top10")
 
     async def send_top10_telegram(self, forzar=False):
         """
@@ -2799,26 +2826,27 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 mensaje = f"🔴 *IA Sell: ${symbol} ({option};  @price: {price})*\n"
                 mensaje += "```\n"
 
-            mensaje += f"{'Métrica':<15} {'Valor':>12}\n"
+            mensaje += f"{'Métrica':<18} {'Valor':>12}\n"
             mensaje += f"{'-' * 37}\n"
-            mensaje += f"{'Profit'         :<15} {row['Profit']:>12.2f}\n"
-            mensaje += f"{'ROI (%)'        :<15} {row['%Roi'] * 100:>12.2f}\n"
-            mensaje += f"{'for sell'       :<15} {row['CantidadSell']:>12.1f} de {row['Disponible']:>12.1f}\n"
-            mensaje += f"{'CostoAcum'      :<15} {row['CostoCum']:>12.2f}\n"
-            mensaje += f"{'Prec. posVenta' :<15} {row['PosAvgCost']:>12.4f}\n"
-            mensaje += f"{'Pos. posVenta'  :<15} {row['PosPosition']:>12.4f}\n"
-            mensaje += f"{'CostoB posVenta':<15} {row['PosCostobase']:>12.2f}\n"
-            mensaje += f"{'Valoracion'         :<18} {""}\n"
+            mensaje += f"{'Profit'          :<18} {row['Profit']:>12.2f}\n"
+            mensaje += f"{'ROI (%)'         :<18} {row['%Roi'] * 100:>12.2f}\n"
+            _cant = f"{row['CantidadSell']:.1f}/{row['Disponible']:.1f}"
+            mensaje += f"{'Cant Sell'        :<18} {_cant:>12}\n"
+            mensaje += f"{'CostoAcum'        :<18} {row['CostoCum']:>12.2f}\n"
+            mensaje += f"{'Prec. posVenta'   :<18} {row['PosAvgCost']:>12.4f}\n"
+            mensaje += f"{'Pos. posVenta'    :<18} {row['PosPosition']:>12.4f}\n"
+            mensaje += f"{'CostoB posVenta'  :<18} {row['PosCostobase']:>12.2f}\n"
+            mensaje += f"{'Valoracion'       :<18} {""}\n"
 
             confianza = row.get("confianza") if modo != "ia" else confianza
             if confianza is not None:
                 mensaje += f"{'-' * 37}\n"
-                mensaje += f"{'Confianza IA'   :<15} {confianza:>12.1%}\n"
+                mensaje += f"{'Confianza IA'     :<18} {confianza:>12.1%}\n"
 
             tag, suma = self._consenso_info(symbol)
             if tag:
                 mensaje += f"{'-' * 37}\n"
-                mensaje += f"{'Consenso':<12} {tag} ({suma:+d})\n"
+                mensaje += f"{'Consenso'         :<18} {tag} ({suma:+d})\n"
 
             mensaje += "```"
 
