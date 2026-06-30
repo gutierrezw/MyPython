@@ -790,6 +790,38 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+    def select_resumen_por_vehiculo(self, account=None):
+        """Retorna G/P+Div acumulados por vehículo para 30, 60 y 90 días."""
+        conn = self._conectar(tabla="select.resumen_por_vehiculo")
+        try:
+            cursor = conn.cursor()
+            qry = """SELECT vehiculo,
+                            SUM(CASE WHEN fechaclose >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                                     THEN nr_gyp + dividends ELSE 0 END) AS d30,
+                            SUM(CASE WHEN fechaclose >= DATE_SUB(CURDATE(), INTERVAL 60 DAY)
+                                     THEN nr_gyp + dividends ELSE 0 END) AS d60,
+                            SUM(CASE WHEN fechaclose >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+                                     THEN nr_gyp + dividends ELSE 0 END) AS d90
+                       FROM performa_inversion
+                      WHERE fechaclose >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+                        {where_account}
+                      GROUP BY vehiculo
+                      ORDER BY d90 DESC"""
+            where = "AND idcuenta = %s" if account else ""
+            if account:
+                cursor.execute(qry.format(where_account=where), (account,))
+            else:
+                cursor.execute(qry.format(where_account=where))
+            rows = cursor.fetchall()
+            ix = [c[0] for c in cursor.description]
+            return rows, ix
+        except Exception as e:
+            print(f"Mysql:: select_resumen_por_vehiculo(): {e}")
+            return [], []
+        finally:
+            cursor.close()
+            conn.close()
+
     def insert_performa_inversion(self, values=None):
         """
         @param values: de campos a actualizar en tabla performa_inversiones

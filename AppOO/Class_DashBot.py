@@ -63,6 +63,7 @@ from Modulos_Mysql import (
     RepositorioOportunidadesBuySell,
     BDsystem,
     DiariaCNV,
+    IPerformance,
     PlanInversion,
     MarketScreen,
     IaTraceScreen,
@@ -1803,7 +1804,8 @@ class Telegram:
                 await query.edit_message_text("⚙️ Ajustes: próximamente más opciones.", parse_mode="Markdown")
 
             elif accion == "performan":
-                await query.edit_message_text("🎯 Perfonance: Ganancias y Perdidas.", parse_mode="Markdown")
+                await query.edit_message_text("🎯 Cargando performance…", parse_mode="Markdown")
+                await self._send_performa(chat_id=update.effective_chat.id)
 
             elif accion == "OrdersExec":
                 self.MostrarOpcionMenu_enTelegram = "ListOrder"
@@ -2630,6 +2632,36 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             await self.send_Telegram(message, None)
         except Exception as e:
             print(f"list_orders_exec(): {e}")
+
+    async def _send_performa(self):
+        """Envía resumen de G/P y dividendos acumulados por vehículo."""
+        try:
+            performa = IPerformance()
+            rows, ix = performa.select_resumen_por_vehiculo(account=self.account)
+            if not rows:
+                await self.send_Telegram("ℹ️ Sin datos de performance.", None)
+                return
+            sep = "─" * 37
+            msg = "```\n"
+            msg += f"{'Vehículo':<10} {'30d':>8} {'60d':>8} {'90d':>8}\n"
+            msg += sep + "\n"
+            tot30 = tot60 = tot90 = 0.0
+            for row in rows:
+                d = dict(zip(ix, row))
+                veh = (d.get("vehiculo") or "")[:10]
+                d30 = float(d.get("d30") or 0)
+                d60 = float(d.get("d60") or 0)
+                d90 = float(d.get("d90") or 0)
+                tot30 += d30
+                tot60 += d60
+                tot90 += d90
+                msg += f"{veh:<10} {d30:>+8,.0f} {d60:>+8,.0f} {d90:>+8,.0f}\n"
+            msg += sep + "\n"
+            msg += f"{'TOTAL':<10} {tot30:>+8,.0f} {tot60:>+8,.0f} {tot90:>+8,.0f}\n"
+            msg += "```"
+            await self.send_Telegram(f"🎯 *Performance Acumulada*\n{msg}", None)
+        except Exception as e:
+            self.logger.error(f"_send_performa(): {e}")
 
     async def _flush_sell_actual(self):
         """Envía las oportunidades de venta actuales al seleccionar el modo Sell."""
