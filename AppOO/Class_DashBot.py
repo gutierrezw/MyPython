@@ -1805,7 +1805,7 @@ class Telegram:
 
             elif accion == "performan":
                 await query.edit_message_text("🎯 Cargando performance…", parse_mode="Markdown")
-                await self._send_performa(chat_id=update.effective_chat.id)
+                await self._send_performa()
 
             elif accion == "OrdersExec":
                 self.MostrarOpcionMenu_enTelegram = "ListOrder"
@@ -2611,22 +2611,23 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 await self.send_Telegram("ℹ️ No hay órdenes ejecutadas recientes.", None)
                 return
 
-            lines = []
+            sep = "─" * 37
+            lines = [f"{'Sym':<7} {'Side':<4} {'Qty':>8} {'@Precio':>15}", sep]
             for o in orders[:limit]:
                 if not isinstance(o, dict):
                     continue
                 sym = (o.get("symbol") or "")[:7]
                 side = o.get("side") or ""
                 qty = o.get("quantity") or 0
-                price = o.get("price") or 0
+                price = f"@{o.get('price') or 0}"
                 ts = o.get("timestamp") or ""
-                lines.append(f"{sym:<7} {side:<4} {qty:>8} @{price}")
+                lines.append(f"{sym:<7} {side:<4} {qty:>8} {price:>15}")
                 lines.append(f"  {ts}")
-                lines.append("")
+                lines.append(sep)
 
             message = f"🟢🔴 *Trader recent (-7 days):*\n"
             message += f"```\n"
-            message += "\n".join(lines).rstrip()
+            message += "\n".join(lines)
             message += "```"
 
             await self.send_Telegram(message, None)
