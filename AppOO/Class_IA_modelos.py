@@ -426,6 +426,10 @@ class ModeloOportunidadesSell:
                 print("predecir_modelo(): Modelo no entrenado o cargado.")
                 return None
 
+            for col in self.modelo.feature_names_in_:
+                if col not in df.columns:
+                    df[col] = 0.0
+
             X_nuevo = df[self.modelo.feature_names_in_].copy()
             X_nuevo = X_nuevo.fillna(0)
 
@@ -829,6 +833,10 @@ class ModeloOportunidadesBuy:
             if self.modelo is None:
                 print("predecir_modelo(): Modelo no entrenado o cargado.")
                 return None
+
+            for col in self.modelo.feature_names_in_:
+                if col not in df.columns:
+                    df[col] = 0.0
 
             X_nuevo = df[self.modelo.feature_names_in_].copy()
             X_nuevo = X_nuevo.fillna(0)

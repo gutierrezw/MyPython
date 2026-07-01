@@ -447,6 +447,26 @@ class AgentManager:
         except Exception as e:
             self._log_ia.error(f"Agente_ClasificadorETF(): {e}")
 
+    @wait_rate(604800, persist=True, desc="Reclasifica crypto con estrategia incorrecta (semanal)", nivel=2)
+    def Agente_ClasificadorCrypto(self):
+        try:
+            estrategia_svc = EstrategiaInversion()
+            opciones = estrategia_svc.select(accion="vehiculo", ivehiculo="Crypto")
+            cryptos = estrategia_svc.get_crypto_pendientes(self.account)
+            clasificados = 0
+            for crypto in cryptos:
+                symbol = crypto["symbol"]
+                yf_info = {"shortName": crypto.get("shortName") or symbol}
+                codigo = self._clasificar_etf_claude(yf_info, opciones)
+                if codigo:
+                    estrategia_svc.update_estrategia_etf(symbol, self.account, codigo)
+                    clasificados += 1
+            self._log_ia.warning(
+                f"ClasificadorCrypto: pendientes={len(cryptos)} clasificados={clasificados}"
+            )
+        except Exception as e:
+            self._log_ia.error(f"Agente_ClasificadorCrypto(): {e}")
+
     @wait_rate(3600, persist=True)
     def Agente_ApiCostTracker(self):
         try:
@@ -595,6 +615,7 @@ class AgentManager:
             ("Agente_13FScores", self.Agente_13FScores, 300),
             ("Agente_AuditPortfolio", self.Agente_AuditPortfolio, 300),
             ("Agente_ClasificadorETF", self.Agente_ClasificadorETF, 300),
+            ("Agente_ClasificadorCrypto", self.Agente_ClasificadorCrypto, 300),
             ("Agente_Sentimiento", self.Agente_Sentimiento, 300),
             ("Agente_InterpreteSentimiento", self.Agente_InterpreteSentimiento, 300),
             ("Agente_ApiCostTracker", self.Agente_ApiCostTracker, 300),

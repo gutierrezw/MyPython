@@ -1511,6 +1511,33 @@ class EstrategiaInversion(BDsystem):  # ----------------------------------------
             except Exception:
                 pass
 
+    def get_crypto_pendientes(self, account):
+        """Crypto activos con estrategia NULL o código viejo pendientes de clasificación."""
+        try:
+            conn = self._conectar(tabla="select.crypto_pendientes")
+            cursor = conn.cursor()
+            qry = """SELECT i.ticket AS symbol, o.descripcion AS shortName
+                     FROM inversion i
+                     LEFT JOIN otros_activos o ON o.symbol = i.ticket
+                     WHERE i.useraccount = %s
+                       AND i.tipoinv = 'Crypto'
+                       AND i.iactiva = 'Y'
+                       AND (i.estrategia IS NULL
+                            OR i.estrategia IN ('A01','A02','A03','A04','A05','A99','C01','C02'))"""
+            cursor.execute(qry, (account,))
+            cols = [c[0] for c in cursor.description]
+            rows = cursor.fetchall()
+            return [dict(zip(cols, r)) for r in rows] if rows else []
+        except Exception as e:
+            print(f"[EstrategiaInversion.get_crypto_pendientes()]: {e}")
+            return []
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+
     def update_estrategia_etf(self, ticket, account, estrategia):
         """Actualiza estrategia en inversion para un ETF clasificado. Write-once."""
         try:

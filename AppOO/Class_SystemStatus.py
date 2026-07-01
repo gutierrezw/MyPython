@@ -18,7 +18,7 @@ from Modulos_python import (
     mpatches,
     filedialog,
 )
-from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, IaTraceScreen
+from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, IaTraceScreen, MarketScreen
 from Modulos_Utilitarios import AGENTES_SCHEDULE, documentar_estructura, read_json_tmp, write_json_tmp
 from Class_customer import (
     MyMessageBox,
@@ -2944,85 +2944,58 @@ class system_status(tk.Frame):
             return
 
         def entrenar_modelo():
-            """Inicia el entrenamiento del modelo usando lógica centralizada"""
-            try:
-                # Instanciar modelo
-                modelo = ModeloOportunidadesSell()
-
-                # Obtener datos de entrenamiento usando método centralizado
-                # Usa chatbot.obtener_dataframe_entrenamiento_IA()
-                df, errores_parseo = chatbot.obtener_dataframe_entrenamiento_IA(tipo="sell", return_stats=True)
-
-                if df.empty:
-                    msg = MyMessageBox(self.system)
-                    msg.showinfo(
-                        "Sin datos para entrenar",
-                        "No hay datos disponibles para entrenar el modelo Sell.\n\n"
-                        "Asegúrate de tener oportunidades Sell registradas con decisiones tomadas (1 o -1).",
-                    )
-                    return
-
-                # Calcular total de errores
-                total_errores = sum(errores_parseo.values())
-                registros = df.to_dict("records")
-
-                if len(df) < 10:
-                    # Construir mensaje detallado de errores
-                    errores_msg = f"Sin decisión tomada: {errores_parseo.get('sin_decision', 0)}\n"
-                    errores_msg += f"JSON inválido: {errores_parseo.get('json_invalido', 0)}\n"
-                    errores_msg += f"Detalle no es dict: {errores_parseo.get('detalle_no_dict', 0)}\n"
-                    errores_msg += f"Indicadores no es dict: {errores_parseo.get('indicadores_no_dict', 0)}\n"
-                    errores_msg += f"Otros errores: {errores_parseo.get('otros', 0)}"
-
-                    msg = MyMessageBox(self.system)
-                    msg.showinfo(
-                        "Datos insuficientes",
-                        f"Datos insuficientes para entrenar el modelo.\n\n"
-                        f"Registros válidos: {len(df)}\n"
-                        f"Mínimo requerido: 10\n"
-                        f"Total omitidos: {total_errores}\n\n"
-                        f"Desglose de errores:\n{errores_msg}\n\n"
-                        f"Genera más oportunidades Sell con decisiones tomadas.",
-                    )
-                    return
-
-                # Entrenar modelo
-                modelo.entrenar_modelo(df)
-                modelo.save_modelo(modelo.modelo_name)
-
-                # Actualizar métricas
-                actualizar_metricas()
-
-                # Construir mensaje detallado de errores para éxito también
-                errores_msg = ""
-                if total_errores > 0:
-                    errores_msg = f"\n\nRegistros omitidos ({total_errores}):\n"
-                    if errores_parseo["sin_decision"] > 0:
-                        errores_msg += f"• Sin decisión: {errores_parseo['sin_decision']}\n"
-                    if errores_parseo["json_invalido"] > 0:
-                        errores_msg += f"• JSON inválido: {errores_parseo['json_invalido']}\n"
-                    if errores_parseo["detalle_no_dict"] > 0:
-                        errores_msg += f"• Detalle no dict: {errores_parseo['detalle_no_dict']}\n"
-                    if errores_parseo["indicadores_no_dict"] > 0:
-                        errores_msg += f"• Indicadores no dict: {errores_parseo['indicadores_no_dict']}\n"
-                    if errores_parseo["otros"] > 0:
-                        errores_msg += f"• Otros: {errores_parseo['otros']}"
-
+            """Inicia el entrenamiento del modelo en hilo de fondo para no bloquear la UI."""
+            def _show(title, message):
                 msg = MyMessageBox(self.system)
-                msg.showinfo(
-                    "Entrenamiento exitoso",
-                    f"Modelo Sell entrenado exitosamente.\n\n" f"Las métricas se han actualizado.",
-                )
-            except Exception as e:
-                error_msg = str(e)
-                print(f"entrenar_modelo(): {e}")
-                traceback.print_exc()
+                msg.showinfo(title, message)
 
-                msg = MyMessageBox(self.system)
-                msg.showinfo(
-                    "Error al entrenar",
-                    f"Error al entrenar el modelo Sell:\n\n{error_msg}\n\n" f"Revisa la consola para más detalles.",
-                )
+            def _run():
+                try:
+                    modelo = ModeloOportunidadesSell()
+                    df, errores_parseo = chatbot.obtener_dataframe_entrenamiento_IA(tipo="sell", return_stats=True)
+
+                    if df.empty:
+                        self.system.after(0, lambda: _show(
+                            "Sin datos para entrenar",
+                            "No hay datos disponibles para entrenar el modelo Sell.\n\n"
+                            "Asegúrate de tener oportunidades Sell registradas con decisiones tomadas (1 o -1).",
+                        ))
+                        return
+
+                    total_errores = sum(errores_parseo.values())
+
+                    if len(df) < 10:
+                        errores_msg = (
+                            f"Sin decisión tomada: {errores_parseo.get('sin_decision', 0)}\n"
+                            f"JSON inválido: {errores_parseo.get('json_invalido', 0)}\n"
+                            f"Detalle no es dict: {errores_parseo.get('detalle_no_dict', 0)}\n"
+                            f"Indicadores no es dict: {errores_parseo.get('indicadores_no_dict', 0)}\n"
+                            f"Otros errores: {errores_parseo.get('otros', 0)}"
+                        )
+                        self.system.after(0, lambda: _show(
+                            "Datos insuficientes",
+                            f"Datos insuficientes para entrenar el modelo.\n\n"
+                            f"Registros válidos: {len(df)}\nMínimo requerido: 10\n"
+                            f"Total omitidos: {total_errores}\n\nDesglose:\n{errores_msg}",
+                        ))
+                        return
+
+                    sent_features = MarketScreen().load_sentiment_features(chatbot.account)
+                    df = modelo.enriquecer_con_sentimiento(df, sent_features)
+                    modelo.entrenar_modelo(df)
+                    modelo.save_modelo(modelo.modelo_name)
+
+                    self.system.after(0, actualizar_metricas)
+                    self.system.after(0, lambda: _show("Entrenamiento exitoso", "Modelo Sell entrenado.\n\nLas métricas se han actualizado."))
+                except Exception as e:
+                    print(f"entrenar_modelo(): {e}")
+                    traceback.print_exc()
+                    self.system.after(0, lambda err=str(e): _show("Error al entrenar", f"Error al entrenar el modelo Sell:\n\n{err}"))
+                finally:
+                    self.system.after(0, lambda: train_btn.config(state="normal", text="Entrenar"))
+
+            train_btn.config(state="disabled", text="Entrenando...")
+            threading.Thread(target=_run, daemon=True, name="Train_Sell").start()
 
         # Programar actualización automática cada 30 segundos
         def auto_actualizar():
@@ -3520,68 +3493,58 @@ class system_status(tk.Frame):
             return
 
         def entrenar_modelo():
-            """Inicia el entrenamiento del modelo usando lógica centralizada"""
-            try:
-                # Instanciar modelo
-                modelo = ModeloOportunidadesBuy()
-
-                # Obtener datos de entrenamiento usando método centralizado
-                df, errores_parseo = chatbot.obtener_dataframe_entrenamiento_IA(tipo="buy", return_stats=True)
-
-                if df.empty:
-                    msg = MyMessageBox(self.system)
-                    msg.showinfo(
-                        "Sin datos para entrenar",
-                        "No hay datos disponibles para entrenar el modelo Buy.\n\n"
-                        "Asegúrate de tener oportunidades Buy registradas con decisiones tomadas (1 o -1).",
-                    )
-                    return
-
-                # Calcular total de errores
-                total_errores = sum(errores_parseo.values())
-
-                if len(df) < 10:
-                    # Construir mensaje detallado de errores
-                    errores_msg = f"Sin decisión tomada: {errores_parseo.get('sin_decision', 0)}\n"
-                    errores_msg += f"JSON inválido: {errores_parseo.get('json_invalido', 0)}\n"
-                    errores_msg += f"Detalle no es dict: {errores_parseo.get('detalle_no_dict', 0)}\n"
-                    errores_msg += f"Indicadores no es dict: {errores_parseo.get('indicadores_no_dict', 0)}\n"
-                    errores_msg += f"Otros errores: {errores_parseo.get('otros', 0)}"
-
-                    msg = MyMessageBox(self.system)
-                    msg.showinfo(
-                        "Datos insuficientes",
-                        f"Datos insuficientes para entrenar el modelo.\n\n"
-                        f"Registros válidos: {len(df)}\n"
-                        f"Mínimo requerido: 10\n"
-                        f"Total omitidos: {total_errores}\n\n"
-                        f"Desglose de errores:\n{errores_msg}\n\n"
-                        f"Genera más oportunidades Buy con decisiones tomadas.",
-                    )
-                    return
-
-                # Entrenar modelo
-                modelo.entrenar_modelo(df)
-                modelo.save_modelo(modelo.modelo_name)
-
-                # Actualizar métricas
-                actualizar_metricas()
-
+            """Inicia el entrenamiento del modelo en hilo de fondo para no bloquear la UI."""
+            def _show(title, message):
                 msg = MyMessageBox(self.system)
-                msg.showinfo(
-                    "Entrenamiento exitoso",
-                    f"Modelo Buy entrenado exitosamente.\n\n" f"Las métricas se han actualizado.",
-                )
-            except Exception as e:
-                error_msg = str(e)
-                print(f"entrenar_modelo(): {e}")
-                traceback.print_exc()
+                msg.showinfo(title, message)
 
-                msg = MyMessageBox(self.system)
-                msg.showinfo(
-                    "Error al entrenar",
-                    f"Error al entrenar el modelo Buy:\n\n{error_msg}\n\n" f"Revisa la consola para más detalles.",
-                )
+            def _run():
+                try:
+                    modelo = ModeloOportunidadesBuy()
+                    df, errores_parseo = chatbot.obtener_dataframe_entrenamiento_IA(tipo="buy", return_stats=True)
+
+                    if df.empty:
+                        self.system.after(0, lambda: _show(
+                            "Sin datos para entrenar",
+                            "No hay datos disponibles para entrenar el modelo Buy.\n\n"
+                            "Asegúrate de tener oportunidades Buy registradas con decisiones tomadas (1 o -1).",
+                        ))
+                        return
+
+                    total_errores = sum(errores_parseo.values())
+
+                    if len(df) < 10:
+                        errores_msg = (
+                            f"Sin decisión tomada: {errores_parseo.get('sin_decision', 0)}\n"
+                            f"JSON inválido: {errores_parseo.get('json_invalido', 0)}\n"
+                            f"Detalle no es dict: {errores_parseo.get('detalle_no_dict', 0)}\n"
+                            f"Indicadores no es dict: {errores_parseo.get('indicadores_no_dict', 0)}\n"
+                            f"Otros errores: {errores_parseo.get('otros', 0)}"
+                        )
+                        self.system.after(0, lambda: _show(
+                            "Datos insuficientes",
+                            f"Datos insuficientes para entrenar el modelo.\n\n"
+                            f"Registros válidos: {len(df)}\nMínimo requerido: 10\n"
+                            f"Total omitidos: {total_errores}\n\nDesglose:\n{errores_msg}",
+                        ))
+                        return
+
+                    sent_features = MarketScreen().load_sentiment_features(chatbot.account)
+                    df = modelo.enriquecer_con_sentimiento(df, sent_features)
+                    modelo.entrenar_modelo(df)
+                    modelo.save_modelo(modelo.modelo_name)
+
+                    self.system.after(0, actualizar_metricas)
+                    self.system.after(0, lambda: _show("Entrenamiento exitoso", "Modelo Buy entrenado.\n\nLas métricas se han actualizado."))
+                except Exception as e:
+                    print(f"entrenar_modelo(): {e}")
+                    traceback.print_exc()
+                    self.system.after(0, lambda err=str(e): _show("Error al entrenar", f"Error al entrenar el modelo Buy:\n\n{err}"))
+                finally:
+                    self.system.after(0, lambda: train_btn.config(state="normal", text="Entrenar"))
+
+            train_btn.config(state="disabled", text="Entrenando...")
+            threading.Thread(target=_run, daemon=True, name="Train_Buy").start()
 
         # Programar actualización automática cada 30 segundos
         def auto_actualizar():

@@ -206,12 +206,13 @@ class ClassAgenteIA:
         # if len(self.sell_enviados) >= DataHub.max_mensajes:
         #    return False
 
-        # Gate Consenso: SELL de toma de ganancias no requiere fundamentos débiles.
-        # Solo bloquear si el consenso indica que la posición aún está sólida Y el ROI es bajo
-        # (probable señal falsa). Con ROI alto es toma de ganancias legítima sin importar el tag.
-        tag = self._consenso_tag(symbol)
-        if tag and tag not in self._SELL_TAGS and roi < DataHub.MaxRoi:
-            return False
+        # Gate Consenso: solo aplica si el modelo IA no tiene confianza suficiente.
+        # Si confianza >= umbral, el modelo ya evaluó los fundamentos → bypass.
+        confianza = row.get("confianza") or 0
+        if confianza < self.Sellumbral:
+            tag = self._consenso_tag(symbol)
+            if tag and tag not in self._SELL_TAGS and roi < DataHub.MaxRoi:
+                return False
 
         # si pasó todas las reglas → actualiza registro
         self.ultimo_envio[symbol] = {"roi": roi, "time": ahora}
@@ -294,7 +295,7 @@ class ClassAgenteIA:
     # agente para las recomendaciones de ventas ---------------------------------------------------------------------------------
     async def Agente_ManagerSell(self):
         try:
-            df_sell = self.readCSV_sell(file="csv_datosIA_sell")
+            df_sell = self.readCSV_sell(file="csv_datosIA_sell", filtrar=False)
 
             if df_sell.empty:
                 return
@@ -310,7 +311,7 @@ class ClassAgenteIA:
     # agente para las recomendaciones de compras
     async def Agente_ManagerBuy(self):
         try:
-            df_buy = self.readCSV_buy(file="csv_datosIA_buy")
+            df_buy = self.readCSV_buy(file="csv_datosIA_buy", filtrar=False)
 
             if df_buy.empty:
                 return
@@ -470,7 +471,7 @@ class ClassAgenteIA:
             ses = BDsystem.get_sesion_by_vehiculo("ClaudeAPIP")
             api_key = ses["userapi"].decode("utf-8") if ses else ""
             result = interpretar_sentimiento(account=self.account, api_key=api_key)
-            deleted = self.Market.cleanup_sentiment(months=3)
+            deleted = self.Market.cleanup_sentiment(months=5)
             self.logger.warning(
                 f"Agente_InterpreteSentimiento [iter={self.counter}]: "
                 f"{len(result)} patrones → {result} | depurados={deleted}"
@@ -2667,27 +2668,31 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
     async def _flush_sell_actual(self):
         """Envía las oportunidades de venta actuales al seleccionar el modo Sell."""
-        top = self.get_top_sell(top=20)
-        if not top:
-            return
-        for row in top:
-            hash_id = self.RepositorioOportunidades.generar_hash_id(
-                row.get("account"), row.get("Symbol"), row.get("Opcion"),
-                row.get("Fecha"), "sell", "gain", row.get("Recomendado"),
+        try:
+            df_sell = self.readCSV_sell(file="csv_datosIA_sell", filtrar=False)
+            if df_sell is None or df_sell.empty:
+                return
+            await self.evaluar_oportunidades_sell_con_IA(
+                df_sell=df_sell,
+                umbral_venta=self.Sellumbral,
+                umbral_observacion=self.SellumbralObserv,
             )
-            await self.opportunity_handler_message_sell(hash_id=hash_id, row=row, origen="top10")
+        except Exception as e:
+            self.logger.error(f"_flush_sell_actual(): {e}")
 
     async def _flush_buy_actual(self):
         """Envía las oportunidades de compra actuales al seleccionar el modo Buy."""
-        top = self.get_top_buy(top=20)
-        if not top:
-            return
-        for row in top:
-            hash_id = self.RepositorioOportunidades.generar_hash_id(
-                row.get("account"), row.get("Symbol"), row.get("vehiculo"),
-                row.get("Fecha"), "buy", "rebalanceo", row.get("Recomendado"),
+        try:
+            df_buy = self.readCSV_buy(file="csv_datosIA_buy", filtrar=False)
+            if df_buy is None or df_buy.empty:
+                return
+            await self.evaluar_oportunidades_buy_con_IA(
+                df_buy=df_buy,
+                umbral_compra=self.Buyumbral,
+                umbral_observacion=self.BuyumbralObserv,
             )
-            await self.opportunity_handler_message_buy(hash_id=hash_id, row=row, origen="top10")
+        except Exception as e:
+            self.logger.error(f"_flush_buy_actual(): {e}")
 
     async def send_top10_telegram(self, forzar=False):
         """
@@ -3087,9 +3092,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             e20 = emas.get("EMA020") or 0
             e50 = emas.get("EMA050") or 0
             e100 = emas.get("EMA100") or 0
-            if e20 > 0 and e50 > 0 and e100 > 0 and e20 < e50 < e100:
+            if e20 > 0 and e50 > 0 and e100 > 0 and e20 > e50 > e100:
                 tendencia = 1.0
-            elif e20 > 0 and e50 > 0 and e20 < e50:
+            elif e20 > 0 and e50 > 0 and e20 > e50:
                 tendencia = 0.5
             else:
                 tendencia = 0.0

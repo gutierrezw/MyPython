@@ -6653,9 +6653,19 @@ class MyMessageBox(tk.Toplevel):
 
         self.Bdsystem = BDsystem()
 
+    def _clear_frames(self):
+        for frame in (self.left, self.right, self.bottom):
+            for widget in frame.winfo_children():
+                widget.destroy()
+
     # Etiqueta para el mensaje informativo
     def showinfo(self, title, message):
-        self.deiconify()  # Mostrar la ventana ahora que tiene contenido
+        if not self.winfo_exists():
+            return
+        self._clear_frames()
+        self.deiconify()
+
+        done = tk.BooleanVar(value=False)
 
         # agrega icono de mensaje ----------------------------------------------------------------------------------
         imagen0, xlis = BDsystem.select_objeto(codigo=18)
@@ -6676,7 +6686,7 @@ class MyMessageBox(tk.Toplevel):
         )
         message_label.pack(fill=tk.X, pady=20, expand=True)
 
-        # Botón de cierre
+        # Botón de cierre — withdraw en vez de destroy para permitir reutilización
         close_button = tk.Button(
             self.bottom,
             text="Aceptar",
@@ -6684,26 +6694,30 @@ class MyMessageBox(tk.Toplevel):
             bg="grey",
             fg="black",
             font=self.font,
-            command=self.destroy,
+            command=lambda: [done.set(True), self.withdraw()],
         )
         close_button.pack(side=tk.RIGHT, pady=10)
         button.pack(padx=10, pady=10)
 
         # Hacer que sea una ventana modal
         self.title(title)
-        self.transient()  # Evitar que se minimice por separado
-        self.grab_set()  # Bloquear interacción con la ventana principal
-        self.wait_window()  # Esperar hasta que se cierre
+        self.transient()
+        self.grab_set()
+        self.wait_variable(done)
 
     def askquestion(self, title, message):
-        self.deiconify()  # Mostrar la ventana ahora que tiene contenido
+        if not self.winfo_exists():
+            return "no"
+        self._clear_frames()
+        self.deiconify()
+
+        done = tk.BooleanVar(value=False)
+        ask = ["no"]
 
         def respuesta(accion):
-            nonlocal ask
-            ask = accion
-            self.destroy()
-
-        ask = "no"
+            ask[0] = accion
+            done.set(True)
+            self.withdraw()
 
         # agrega icono de mensaje ----------------------------------------------------------------------------------
         imagen0, xlis = BDsystem.select_objeto(codigo=19)
@@ -6733,7 +6747,7 @@ class MyMessageBox(tk.Toplevel):
             font=self.font,
             command=lambda: respuesta("yes"),
         )
-        # Botón Nos
+        # Botón No
         no = tk.Button(
             self.bottom,
             text="No",
@@ -6750,11 +6764,11 @@ class MyMessageBox(tk.Toplevel):
 
         # Hacer que sea una ventana modal
         self.title(title)
-        self.transient()  # Evitar que se minimice por separado
-        self.grab_set()  # Bloquear interacción con la ventana principal
-        self.wait_window()  # Esperar hasta que se cierre
+        self.transient()
+        self.grab_set()
+        self.wait_variable(done)
 
-        return ask
+        return ask[0]
 
     # Asignar un alias al método
     showwarning = showinfo
