@@ -1127,9 +1127,9 @@ class system_status(tk.Frame):
                 apis["TradingView Server"] = {
                     "status": "🟢 Activo" if tv_running else "🔴 Detenido",
                     "type": "HTTP Local",
-                    "endpoint": "localhost:5050",
+                    "endpoint": "localhost:5051",
                     "connected": tv_running,
-                    "description": "Servidor local para TradingView bridge",
+                    "description": "Callback server órdenes TV (Node bridge: 8050)",
                 }
 
             except Exception as e:

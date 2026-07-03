@@ -2669,17 +2669,34 @@ class DashMain:
             if connected:
                 DataHub.manager_sesion.update({"Stock": True})
                 self.stock_ts = DatosVehivulo(account=account, vehiculo=vehiculo)
-                self.stock_ts.run()
 
-                self.procesos.append({"widget": {"update_widget(Stock)": self.it_stock}})
-
-                # información para widgetCrypto
+                # mostrar UI inmediatamente con datos BD — run() (yfinance × 41) va en background
+                self.stock_ts.carga_inversion_en_positions()
                 self.stock.positions = self.stock_ts.positions
                 self.stock.resumen = self.stock_ts.resumen
-
                 self.stock.inicio_widget_treeview(self.stock.positions)
                 self.stock.run_graficos()
+                self.procesos.append({"widget": {"update_widget(Stock)": self.it_stock}})
                 self.update_widget(vehiculo=vehiculo)
+
+                def _init_stock_bg():
+                    try:
+                        self.stock_ts.run()
+                    except Exception as e:
+                        logging.getLogger("IBroks_Client").error(f"_init_stock_bg.run(): {e}")
+
+                    def _apply():
+                        self.stock.positions = self.stock_ts.positions
+                        self.stock.resumen = self.stock_ts.resumen
+
+                    for _attempt in range(5):
+                        try:
+                            self.root.after(0, _apply)
+                            break
+                        except RuntimeError:
+                            time.sleep(1)
+
+                threading.Thread(target=_init_stock_bg, daemon=True, name="InitStock_BG").start()
 
             # para widget offline
             else:

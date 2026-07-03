@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AppOO — Contexto de Cartera en Claude
 // @namespace    AppOO
-// @version      1.0
+// @version      1.1
 // @description  Inyecta contexto de cartera desde la app local en claude.ai
 // @match        https://claude.ai/*
 // @grant        GM_xmlhttpRequest
@@ -12,7 +12,7 @@
 (function () {
     "use strict";
 
-    const SERVER = "http://localhost:5050/contexto";
+    const SERVER = "http://localhost:8050/tv/contexto";
     const BTN_ID = "appoo-ctx-btn";
     let contextoData = null;
 
@@ -112,7 +112,7 @@
                 if (!ok || !contextoData) {
                     btn.textContent = "📊 Cartera";
                     btn.className = "error";
-                    btn.title = "Error: AppOO no responde en localhost:5050";
+                    btn.title = "Error: AppOO no responde en localhost:8050";
                     setTimeout(() => { btn.className = ""; btn.title = "Inyectar posiciones de cartera desde AppOO"; }, 3000);
                     return;
                 }

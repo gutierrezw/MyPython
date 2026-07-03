@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TradingView — App Panel
 // @namespace    http://tampermonkey.net/
-// @version      2.1
+// @version      2.2
 // @match        https://www.tradingview.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -11,7 +11,7 @@
 (function () {
     "use strict";
 
-    const PORT = 5050;
+    const BASE = "http://localhost:8050/tv";
     let panelEl = null, bodyEl = null, titleEl = null, symbolsEl = null, btnCartera = null;
     let minimized = false;
     let symbolsVisible = false;
@@ -143,7 +143,7 @@
 
     // ── Heartbeat ──────────────────────────────────────────────────────────
     function ping() {
-        GM_xmlhttpRequest({ method: "GET", url: `http://localhost:${PORT}/ping`, onerror: () => { } });
+        GM_xmlhttpRequest({ method: "GET", url: `${BASE}/ping`, onerror: () => { } });
     }
 
     // ── Leer símbolo actual de TV desde la URL ─────────────────────────────
@@ -522,7 +522,7 @@
     function fetchSymbols() {
         GM_xmlhttpRequest({
             method: "GET",
-            url: `http://localhost:${PORT}/symbols`,
+            url: `${BASE}/symbols`,
             onload: (r) => {
                 try {
                     const d = JSON.parse(r.responseText);
@@ -538,7 +538,7 @@
     function switchSymbol(sym) {
         GM_xmlhttpRequest({
             method: "POST",
-            url: `http://localhost:${PORT}/current`,
+            url: `${BASE}/current`,
             headers: { "Content-Type": "application/json" },
             data: JSON.stringify({ symbol: sym }),
             onload: (r) => {
@@ -601,7 +601,7 @@
     function _doPostOrder(body, qtyEl, statusEl) {
         GM_xmlhttpRequest({
             method: "POST",
-            url: `http://localhost:${PORT}/order`,
+            url: `${BASE}/order`,
             headers: { "Content-Type": "application/json" },
             data: JSON.stringify(body),
             onload: (r) => {
@@ -645,7 +645,7 @@
             const cost = _tvModo === "USD" ? val : val * price;
             GM_xmlhttpRequest({
                 method: "GET",
-                url: `http://localhost:${PORT}/balance`,
+                url: `${BASE}/balance`,
                 onload: (rb) => {
                     try {
                         const bd = JSON.parse(rb.responseText);
@@ -710,7 +710,7 @@
         ping();
         GM_xmlhttpRequest({
             method: "GET",
-            url: `http://localhost:${PORT}/current`,
+            url: `${BASE}/current`,
             onload: (r) => {
                 try {
                     const cur = JSON.parse(r.responseText).symbol || "";
@@ -722,7 +722,7 @@
 
                     GM_xmlhttpRequest({
                         method: "GET",
-                        url: `http://localhost:${PORT}/position?symbol=${sym}`,
+                        url: `${BASE}/position?symbol=${sym}`,
                         onload: (r2) => {
                             try {
                                 const data = JSON.parse(r2.responseText);
@@ -730,7 +730,7 @@
                                     // Obtener precio live antes de renderizar para que nunca sea stale
                                     GM_xmlhttpRequest({
                                         method: "GET",
-                                        url: `http://localhost:${PORT}/price?symbol=${sym}`,
+                                        url: `${BASE}/price?symbol=${sym}`,
                                         onload: (rp) => {
                                             try {
                                                 const pd = JSON.parse(rp.responseText);
@@ -765,7 +765,7 @@
         if (!sym || !panelEl || panelEl.style.display === "none") return;
         GM_xmlhttpRequest({
             method: "GET",
-            url: `http://localhost:${PORT}/price?symbol=${sym}`,
+            url: `${BASE}/price?symbol=${sym}`,
             onload: (r) => {
                 try {
                     const d = JSON.parse(r.responseText);

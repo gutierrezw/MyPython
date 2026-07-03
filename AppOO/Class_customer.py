@@ -3833,7 +3833,7 @@ class WidgetVehiculo(TickerInfo):
 
             # selecciona activos para más detalle en windows
             self.select_activo = self.m_tree[0].item(item, "values")
-            if not (self.select_activo is None):
+            if self.select_activo:
                 symbol = self.select_activo[0].strip()
 
                 # antes de invocar válida que este construida la self.ts_yfinance_symbol
@@ -6704,6 +6704,7 @@ class MyMessageBox(tk.Toplevel):
         self.transient()
         self.grab_set()
         self.wait_variable(done)
+        self.grab_release()
 
     def askquestion(self, title, message):
         if not self.winfo_exists():
@@ -6767,6 +6768,7 @@ class MyMessageBox(tk.Toplevel):
         self.transient()
         self.grab_set()
         self.wait_variable(done)
+        self.grab_release()
 
         return ask[0]
 

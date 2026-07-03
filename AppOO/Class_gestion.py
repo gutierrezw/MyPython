@@ -1587,7 +1587,7 @@ class GestionInversion(tk.Frame):
             axis=1,
         )
         datos["retiros"] = datos.apply(
-            lambda rows: (rows["basico"] * rows["cantidad"] / rows["factor_cambio"] if rows["codigo"] == "C" else 0),
+            lambda rows: (abs(rows["basico"] * rows["cantidad"]) / rows["factor_cambio"] if rows["codigo"] == "C" else 0),
             axis=1,
         )
         datos["perdidas"] = datos.apply(
