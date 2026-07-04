@@ -2714,7 +2714,16 @@ class DashMain:
             # Tickle siempre corre — detecta reconexión aunque arranque offline
             ib.start_tickle(interval=30, datahub=DataHub, on_reconnect=_ib_on_reconnect)
 
-            set_switch_callback(self.stock._abrir_tradingview)
+            def _switch_tv(symbol):
+                _CRYPTO_SUFFIXES = ("USDT", "BUSD", "BTC", "ETH", "BNB")
+                crypto_syms = {p.get("ticket", "") for p in (self.crypto.positions or [])} if self.crypto else set()
+                is_crypto = symbol in crypto_syms or symbol.endswith(_CRYPTO_SUFFIXES)
+                if is_crypto and self.crypto:
+                    self.crypto._abrir_tradingview(symbol)
+                else:
+                    self.stock._abrir_tradingview(symbol)
+
+            set_switch_callback(_switch_tv)
             set_symbols_fn(
                 lambda: sorted(
                     set(

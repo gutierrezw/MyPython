@@ -1,5 +1,23 @@
 # AppOO — Convenciones específicas del proyecto
 
+## Visión de plataforma — principios arquitectónicos
+
+AppOO es una plataforma de automatización de inversiones con visión de evolucionar de herramienta personal a servicio para terceros. La arquitectura debe soportar ese camino sin reescrituras.
+
+### Principios que Claude debe verificar antes de proponer cualquier diseño
+
+1. **Portabilidad**: ¿Este componente corre igual en localhost, en un VPS o en Venezuela con internet inestable? Si no → rediseñar.
+2. **Account-first**: Toda lógica y dato debe estar aislado por `account`. Hoy es 1 usuario, mañana pueden ser N clientes.
+3. **Resiliencia**: Servicios deben sobrevivir reinicios sin pérdida de estado. Usar `persist=True` en agentes, JSON en `tmp/` para estado crítico.
+4. **Broker-agnóstico**: La lógica de negocio no debe acoplarse a IB o Binance directamente. Solo `Class_ApiIBrks` y `Class_ApiBinnace` tocan los brokers. Todo lo demás consume MySQL o DataHub.
+5. **Automatización primero**: Si una tarea se hace manualmente más de una vez, debe tener ruta de automatización.
+6. **API-first**: Toda funcionalidad nueva debe ser accesible vía API (no solo desde la UI). Habilita terceros, Claude y acceso remoto.
+
+### Lo que NO puede cambiar sin revisión explícita
+- IB Gateway corre local (restricción del broker) — no intentar moverlo a cloud sin análisis
+- Datos financieros propios nunca en servicios de terceros — MySQL propio siempre
+- `account` como parámetro en toda función que toque datos de cartera — sin excepciones
+
 ## Screener — columnas scrollables (orden fijo)
 
 El orden de `_COL_DEFS` en `Class_Screener.py` y los valores en `insert_treeview` deben estar **siempre sincronizados** (posición a posición).

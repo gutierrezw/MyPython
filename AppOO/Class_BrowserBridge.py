@@ -28,7 +28,6 @@ _EXCHANGE_PREFIX = {
 }
 
 _tv_current = {"symbol": ""}   # copia local para abrir_tradingview sin depender de Node
-_tv_last_ping = {"t": 0.0, "ever": False}
 _callback_server = None        # mini-server 5051 para callbacks de órdenes
 
 _order_callback = None         # fn(symbol, vehiculo, account, opt, qty, price, conid, razon)
@@ -36,6 +35,15 @@ _switch_callback = None        # fn(symbol)
 _symbols_fn = None             # fn() → list[str]
 _info_fn = None                # fn() → DataHub.info
 _balance_fn = None             # fn() → float USDT libre
+
+
+def _is_tv_active() -> bool:
+    """Consulta a Node si el panel TV (Tampermonkey) ha pingeado alguna vez."""
+    try:
+        resp = requests.get(f"{_NODE_URL}/tv/ping-status", timeout=1)
+        return resp.json().get("ever", False)
+    except Exception:
+        return False
 
 
 def _push(type_, payload, symbol=None):
@@ -260,7 +268,7 @@ def abrir_tradingview(symbol, vehiculo="Stock", posicion=None, lotes=None):
                 pass
 
         tv_symbol = _tv_symbol(symbol, vehiculo)
-        tv_activo = _tv_last_ping["ever"]
+        tv_activo = _is_tv_active()
         if not tv_activo:
             webbrowser.open(f"https://www.tradingview.com/chart/?symbol={tv_symbol}")
         _logger.warning(f"TradingView {'navegado por Tampermonkey' if tv_activo else 'abierto'}: {symbol} ({vehiculo})")

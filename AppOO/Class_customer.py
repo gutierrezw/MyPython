@@ -3920,6 +3920,7 @@ class WidgetVehiculo(TickerInfo):
         """Abre TradingView con panel de lotes, estrategia y señales de consenso."""
 
         found, position = buscar_ticker(self.positions, symbol)
+        self.logger.warning(f"_abrir_tradingview: {symbol} vehiculo={self.vehiculo} found={found} positions={len(self.positions)}")
         posicion = {}
         lotes = []
         if found and position:
