@@ -2,7 +2,7 @@
 // @name         TradingView — App Panel
 // @namespace    http://tampermonkey.net/
 // @version      2.2
-// @match        https://www.tradingview.com/*
+// @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      localhost
