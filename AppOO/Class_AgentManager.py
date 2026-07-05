@@ -3,7 +3,7 @@ Class_AgentManager.py - Administrador de agentes síncronos
 Dominios: Stock | Crypto | IA | Infra
 """
 
-from Modulos_python import logging, json, datetime, yf, requests, textwrap, Path
+from Modulos_python import logging, json, datetime, yf, requests, textwrap, Path, ntplib
 from Modulos_Utilitarios import wait_rate, read_json_tmp, write_json_tmp, track_claude_usage
 from Modulos_Mysql import (
     RepositorioOportunidadesBuySell,
@@ -602,6 +602,25 @@ class AgentManager:
         except Exception as e:
             self._log_infra.error(f"Agente_BrowserFCI(): {e}")
 
+    @wait_rate(300, persist=True, desc="Check deriva NTP — alerta si >500ms (5min)", nivel=1)
+    def Agente_NtpCheck(self):
+        try:
+            result = self._check_ntp_drift()
+            self._log_infra.warning(f"NtpCheck: offset={result['offset_ms']:.0f}ms server={result['server']}")
+        except Exception as e:
+            self._log_infra.error(f"Agente_NtpCheck(): {e}")
+
+    def _check_ntp_drift(self):
+        from DataHub import DataHub
+        client = ntplib.NTPClient()
+        response = client.request("pool.ntp.org", version=3)
+        offset_ms = abs(response.offset) * 1000
+        if offset_ms > 500:
+            DataHub.system_alerts.append(
+                f"⏱ NTP: reloj deriva {offset_ms:.0f}ms — riesgo de rechazo de órdenes IB/Binance"
+            )
+        return {"offset_ms": offset_ms, "server": "pool.ntp.org"}
+
     def register_threads(self):
         """Registra agentes de larga duración como threads independientes."""
         _threads = [
@@ -623,6 +642,7 @@ class AgentManager:
             ("Agente_YouTubeBackfill", self.Agente_YouTubeBackfill, 60),
             ("Agente_MonitorBooktrading", self.Agente_MonitorBooktrading, 300),
             ("Agente_BrowserFCI", self.Agente_BrowserFCI, 300),
+            ("Agente_NtpCheck", self.Agente_NtpCheck, 300),
         ]
         for name, target, sleep in _threads:
             DataHub.procesos.append({"thread": {name: 1}})

@@ -22,6 +22,7 @@ import webbrowser
 import random
 import shutil
 import string
+import ntplib
 import psutil
 import syncio
 import asyncio
