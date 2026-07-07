@@ -2914,7 +2914,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             print(f"opportunity_handler(): {e}")
 
     # Obtener oportunidades desde modelo IA
-    async def evaluar_oportunidades_sell_con_IA(self, df_sell=None, umbral_venta=0.65, _umbral_observacion=0.35):
+    async def evaluar_oportunidades_sell_con_IA(self, df_sell=None, umbral_venta=0.65, umbral_observacion=0.35):
         """
         Sistema de dos umbrales:
         - confianza >= umbral_venta (0.65): Enviar a Telegram para vender
@@ -3184,7 +3184,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             self.logger.error(f"oportunity_handler_buy(): {e}")
 
     # Obtener oportunidades de compra desde modelo IA
-    async def evaluar_oportunidades_buy_con_IA(self, df_buy=None, umbral_compra=0.65, _umbral_observacion=0.35):
+    async def evaluar_oportunidades_buy_con_IA(self, df_buy=None, umbral_compra=0.65, umbral_observacion=0.35):
         """
         Sistema de dos umbrales para Buy:
         - confianza >= umbral_compra (0.65): Enviar a Telegram para comprar
