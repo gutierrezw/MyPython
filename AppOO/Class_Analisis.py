@@ -343,7 +343,7 @@ class AnalisisBase:
             traceback.print_exc()
             return row
 
-    def _dibujar_evolucion_ax(self, ax, df_historico, fondos_list, titulo_ax, color_titulo):
+    def _dibujar_evolucion_ax(self, ax, df_historico, fondos_list, color_titulo):
         """Helper compartido: filtra, calcula rendimiento acumulado y dibuja sobre un eje existente."""
         df_f = df_historico[df_historico["fondo"].isin(fondos_list)].copy()
         if df_f.empty:
@@ -384,7 +384,7 @@ class AnalisisBase:
     ]
     _EQUITY_COLORES = ["#2ecc71", "#e74c3c", "#3498db"]
 
-    def crear_grafico_evolucion_combinado(self, parent, df_historico, fondos_mejores, fondos_peores, row):
+    def crear_grafico_evolucion_combinado(self, parent, df_historico, _fondos_mejores, _fondos_peores, row):
         """Un único gráfico: banda o estimador sintético + líneas renta variable. Botones Banda/Estimador + temporalidad."""
         if df_historico.empty:
             return row
@@ -698,7 +698,7 @@ class AnalisisBase:
                 fg = Figure(figsize=(5.4, 2.8), dpi=100)
                 fg.patch.set_facecolor(self.CG_COLOR)
                 ax = fg.add_subplot(111)
-                p_legend = self._dibujar_evolucion_ax(ax, df_hist, simbolos, titulo, color_titulo)
+                p_legend = self._dibujar_evolucion_ax(ax, df_hist, simbolos, color_titulo)
                 fg.legend(
                     handles=p_legend,
                     loc="outside upper left",
@@ -901,8 +901,8 @@ class AnalisisFCI(AnalisisBase):
             row = self.crear_grafico_evolucion_combinado(
                 parent=frame,
                 df_historico=self.df_historico,
-                fondos_mejores=[],
-                fondos_peores=[],
+                _fondos_mejores=[],
+                _fondos_peores=[],
                 row=row,
             )
 

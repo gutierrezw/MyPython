@@ -1531,7 +1531,7 @@ class Telegram:
 
     # envio de mensaje a Telegram
     async def send_Telegram(self, texto, hash_id=None, reply_markup=None):
-        async def _send(bot, chat_id, text, markup, h_id):
+        async def _send(bot, chat_id, text, markup):
             """Intenta con Markdown; si falla por parse error, reintenta sin parse_mode."""
             kwargs = {"chat_id": chat_id, "text": text}
             if markup is not None:
@@ -1553,12 +1553,12 @@ class Telegram:
             async with Bot(token=self.TOKEN) as bot:
                 for CHAT_ID in self.userAuth:
                     if reply_markup is not None:
-                        sent_message = await _send(bot, CHAT_ID, texto, reply_markup, None)
+                        sent_message = await _send(bot, CHAT_ID, texto, reply_markup)
                         await self._save_message(sent_message, CHAT_ID)
                         return
 
                     elif hash_id is None:
-                        sent_message = await _send(bot, CHAT_ID, texto, None, None)
+                        sent_message = await _send(bot, CHAT_ID, texto, None)
                         await self._save_message(sent_message, CHAT_ID)
                         return
 
@@ -1570,7 +1570,7 @@ class Telegram:
                             ]
                         ]
                         markup = InlineKeyboardMarkup(botones)
-                        sent_message = await _send(bot, CHAT_ID, texto, markup, hash_id)
+                        sent_message = await _send(bot, CHAT_ID, texto, markup)
                         await self._save_message(sent_message, CHAT_ID, hash_id=hash_id)
                         return
         except Exception as e:
@@ -2914,7 +2914,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             print(f"opportunity_handler(): {e}")
 
     # Obtener oportunidades desde modelo IA
-    async def evaluar_oportunidades_sell_con_IA(self, df_sell=None, umbral_venta=0.65, umbral_observacion=0.35):
+    async def evaluar_oportunidades_sell_con_IA(self, df_sell=None, umbral_venta=0.65, _umbral_observacion=0.35):
         """
         Sistema de dos umbrales:
         - confianza >= umbral_venta (0.65): Enviar a Telegram para vender
@@ -3184,7 +3184,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             self.logger.error(f"oportunity_handler_buy(): {e}")
 
     # Obtener oportunidades de compra desde modelo IA
-    async def evaluar_oportunidades_buy_con_IA(self, df_buy=None, umbral_compra=0.65, umbral_observacion=0.35):
+    async def evaluar_oportunidades_buy_con_IA(self, df_buy=None, umbral_compra=0.65, _umbral_observacion=0.35):
         """
         Sistema de dos umbrales para Buy:
         - confianza >= umbral_compra (0.65): Enviar a Telegram para comprar

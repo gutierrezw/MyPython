@@ -1665,7 +1665,7 @@ class GestionInversion(tk.Frame):
 
         return resultado
 
-    def update_plan(self, account=None, condicion=None):
+    def update_plan(self, account=None, _condicion=None):
         """
         @param account: id de cuenta de inversión
         @param condicion: si para cierre de fiscal
@@ -2194,9 +2194,9 @@ class GestionInversion(tk.Frame):
 
                     # actualiza tabla de plan cuando cierra el año fiscal ---------------------------------------------
                     if self.d_extract["extracto"].month == sesion["fiscalYear"].month:
-                        self.update_plan(account=sesion["idcuenta"], condicion="Cumplido")
+                        self.update_plan(account=sesion["idcuenta"], _condicion="Cumplido")
                     else:
-                        self.update_plan(account=sesion["idcuenta"], condicion=None)
+                        self.update_plan(account=sesion["idcuenta"], _condicion=None)
 
                     MyMessageBox(self.root).showwarning("Add", "Cargados exitosamente los Extracto")
 

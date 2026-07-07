@@ -823,22 +823,6 @@ class IB(IBClient):
 
         return content
 
-        """
-        provisional :: An extension of the `place_confirm` endpoint but allows to confirm id orders.
-
-        NAME: replyid
-        DESC: The number ID to place an order.
-        TYPE: String
-        """
-        base_url = f"{self.ib_gateway_host}:{self.ib_gateway_port}/v1/api/"
-        endpoint = r"iserver/reply/{}".format(replyid)
-        reply_url = "".join([base_url, endpoint])
-        json_body = {"confirmed": True}
-        order_req = requests.post(url=reply_url, verify=False, json=json_body)
-        content = json.dumps(order_req.json(), indent=2)
-
-        return content
-
     def orderconfirm(self, replyid: str) -> str:
         """
         Confirma una orden que requiere respuesta.

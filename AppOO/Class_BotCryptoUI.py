@@ -27,7 +27,6 @@ from Modulos_python import (
     Figure,
     FigureCanvasTkAgg,
     logging,
-    multiprocessing,
     np,
     timedelta,
     mdates,

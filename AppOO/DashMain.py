@@ -40,13 +40,12 @@ def _early_configure_db():
 _early_configure_db()
 
 from version import APP_NAME, VERSION
-from Class_debugging import ManagerEvents, MangerAfterEvents, Debugging
+from Class_debugging import ManagerEvents, Debugging
 from Class_DataFrame import (
     grupo_activos,
     setup_fear_greed,
     grupo_sector,
     grupo_dividendo,
-    InfoYfinance,
     sectores,
     Agente_income_Manager,
     grupo_region,
@@ -64,7 +63,6 @@ from Modulos_Mysql import (
 )
 from Modulos_Utilitarios import (
     style_app,
-    spaces,
     convierte_ticket_crypto,
     sort_positions,
     buscar_ticker,
@@ -2041,7 +2039,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
 # modulo principal
 class DashMain:
-    def __init__(self, ibrks=False):
+    def __init__(self):
         self.stock_ts = None
         self.stock = None
         self.crypto_ts = None

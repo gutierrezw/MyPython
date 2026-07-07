@@ -1667,7 +1667,7 @@ class IBClient:  # -------------------------------------------------------------
         # define request components
         endpoint = r"fundamentals/mf_performance/{mutual_fund_id}".format(mutual_fund_id=conid)
         req_type = "GET"
-        params = {"risk_period": None, "yield_period": None, "statistic_period": None}
+        params = {"risk_period": risk_period, "yield_period": yield_period, "statistic_period": statistic_period}
         content = self._make_request(endpoint=endpoint, req_type=req_type, params=params)
 
         return content

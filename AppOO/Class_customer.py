@@ -22,7 +22,7 @@ from Modulos_python import (
     colormaps,
     mdates,
     mpatches,
-    dtime,
+
     schedule,
     os,
     subprocess,

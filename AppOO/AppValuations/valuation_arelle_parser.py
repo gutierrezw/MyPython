@@ -3,10 +3,7 @@
 # Capa: acceso directo a Arelle
 # ================================================
 from Modulos_python import Path, ZipFile
-
-from zipfile import ZipFile
-from pathlib import Path
-from arelle import Cntlr, ModelManager, FileSource
+from arelle import Cntlr
 
 
 def load_xbrl_with_arelle(path, instance=None, display_logs=False):

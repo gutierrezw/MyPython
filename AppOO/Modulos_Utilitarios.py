@@ -355,58 +355,6 @@ def valida_meses_consecutivos(inicio=None, fin=None):
 
     return f_fin == f_inicio + diferencia
 
-    def convertir(dato):
-        num = 0
-        if not dato.isalpha() and not isNumeric(dato):
-            x = dato.replace("%", "")
-            num = float(x) / 100
-        else:
-            num = 0.10
-        return num
-
-    valor = 0.00
-    """
-    @ valora ganancias del precio medio
-    @ respecto al precio objetivo
-    """
-    if positions["Obje"] > 0:
-        dprc: float = (positions["avgCost"] - positions["prcmd"]) / positions["avgCost"]
-        keys = tabla["Gprc"]
-        for i in keys:
-            if convertir(i) >= dprc:
-                valor += keys[i]
-                break
-            else:
-                if convertir(i) == 1:
-                    valor += keys[i]
-
-        """
-        @ valora delta de Gyp proyectado
-        @ respecto a las Gyp  objetivo
-        """
-        if positions["GyPo"] > 0:
-            keys = tabla["GGyp"]
-            dpyg = (positions["GyPp"] - positions["GyPo"]) / invertir
-            for i in keys:
-                if convertir(i) >= dpyg:
-                    valor += keys[i]
-                    break
-                else:
-                    if convertir(i) == 1:
-                        valor += keys[i]
-        """
-        @ valora peso del activo para que no
-        @ exceda el 10% de la cartera
-        """
-        if peso > 0:
-            keys = tabla["peso"]
-            if peso <= 0.10:
-                valor += keys["menorq"]
-            else:
-                valor += keys["mayorq"]
-
-    return valor / 8
-
 
 def buscar_ticker(positions, ticket) -> float:
     """

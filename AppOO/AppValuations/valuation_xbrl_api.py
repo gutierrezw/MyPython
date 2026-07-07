@@ -188,7 +188,7 @@ def compare_tickers(tickers, years=10, display_log=False):
 # -----------------------------------------------------
 # ✅ coordindador de analisis de dividendos
 # -----------------------------------------------------
-def Analyze_options(ticker=None, years=10, input_mode=False):
+def Analyze_options(ticker=None, years=10, _input_mode=False):
 
     # Si pasan ticker como argumento
     if len(ticker) == 1:

@@ -200,7 +200,7 @@ class system_status(tk.Frame):
             except Exception as e:
                 print(f"obtener_datos(): {e}")
 
-        def buscar_item_treeview(keys=None, iid=None, sobre="text"):
+        def buscar_item_treeview(keys=None, iid=None, _sobre="text"):
             for item_id in tree.get_children(padre[keys]):
                 info = tree.item(item_id)
                 if info["text"] == iid:
@@ -267,7 +267,7 @@ class system_status(tk.Frame):
 
                 if keys == "jobs":
                     for clave, vals in grupo.items():
-                        Bitems = buscar_item_treeview(keys=keys, iid=clave, sobre="values")
+                        Bitems = buscar_item_treeview(keys=keys, iid=clave, _sobre="values")
 
                         if Bitems is None:
                             tree.insert(
