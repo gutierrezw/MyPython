@@ -1136,16 +1136,17 @@ def chart_symbol(fg=None, datos=None, keys=None):
             )
             ae.plot(l_ix, keys["avgCost"], marker=">", color="yellow")
 
-            if keys["position"] and z_buy.get("y2"):
+            if keys["position"]:
                 ae.text(
                     0.5,
-                    z_buy["y2"],
-                    "Zone Sell",
+                    0.5,
+                    "Zona\nCompra",
                     transform=ae.transAxes,
                     fontsize=10,
                     color="gray",
-                    alpha=0.5,
-                    va="bottom",
+                    alpha=0.4,
+                    va="center",
+                    ha="center",
                     rotation=90,
                 )
 
@@ -1253,20 +1254,25 @@ def chart_symbol(fg=None, datos=None, keys=None):
             )
             return None
 
-        # Resample cada columna por separado para evitar problemas de compatibilidad
-        resampled = datos.resample(periodo)
-        pdatos = pd.DataFrame()
-        pdatos["Open"] = resampled["Open"].apply(lambda x: x.iloc[0] if len(x) > 0 else None)
-        pdatos["High"] = resampled["High"].max()
-        pdatos["Low"] = resampled["Low"].min()
-        pdatos["Close"] = resampled["Close"].apply(lambda x: x.iloc[-1] if len(x) > 0 else None)
-        pdatos["Volume"] = resampled["Volume"].sum()
-        pdatos = pdatos.dropna()
-
-        # Validar que hay datos suficientes para graficar
-        if pdatos.empty or len(pdatos) < 10:
-            _logger.warning(f"chart_symbol(): datos insuficientes {len(pdatos)} filas (mínimo 10)")
-            return None
+        # Resample cada columna por separado; si hay pocos datos, degradar periodo
+        _fallback = {"YE": "2QE", "2QE": "QE", "QE": "ME", "ME": "W", "W": "D"}
+        _periodo_usado = periodo
+        while True:
+            resampled = datos.resample(_periodo_usado)
+            pdatos = pd.DataFrame()
+            pdatos["Open"] = resampled["Open"].apply(lambda x: x.iloc[0] if len(x) > 0 else None)
+            pdatos["High"] = resampled["High"].max()
+            pdatos["Low"] = resampled["Low"].min()
+            pdatos["Close"] = resampled["Close"].apply(lambda x: x.iloc[-1] if len(x) > 0 else None)
+            pdatos["Volume"] = resampled["Volume"].sum()
+            pdatos = pdatos.dropna()
+            if len(pdatos) >= 10:
+                break
+            if _periodo_usado not in _fallback:
+                _logger.warning(f"chart_symbol(): datos insuficientes {len(pdatos)} filas para periodo={_periodo_usado}")
+                return None
+            _logger.info(f"chart_symbol(): {periodo} → {_fallback[_periodo_usado]} (solo {len(pdatos)} barras)")
+            _periodo_usado = _fallback[_periodo_usado]
 
         pclose = pdatos["Close"]
         vmax: object = pdatos["High"].max()

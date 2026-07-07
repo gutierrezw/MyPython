@@ -1153,6 +1153,21 @@ def write_json_tmp(name: str, data: dict) -> None:
         pass
 
 
+def load_vehiculo_params(vehiculo: str, cache: dict, plan_inversion) -> dict:
+    """Carga y cachea el JSON de parameters de la sesión de un vehículo. Retorna dict o None."""
+    if vehiculo not in cache:
+        import json as _json
+        sesion = plan_inversion.get_sesion_by_vehiculo(vehiculo)
+        params_raw = sesion.get("parameters") if sesion else None
+        if not params_raw:
+            cache[vehiculo] = None
+        else:
+            cache[vehiculo] = _json.loads(
+                params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw
+            )
+    return cache.get(vehiculo)
+
+
 _doc_windows: dict = {}  # singleton: evita abrir la misma ventana dos veces
 
 

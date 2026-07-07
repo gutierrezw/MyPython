@@ -78,6 +78,7 @@ from Modulos_Utilitarios import (
     AGENTES_SCHEDULE,
     wait_rate,
     track_claude_usage,
+    load_vehiculo_params,
 )
 from Class_AgentManager import AgentManager
 from ConvergIA.Scanner_Sentimiento import scan_sentimiento
@@ -341,6 +342,29 @@ class ClassAgenteIA:
 
         except Exception as e:
             self.logger.error(f"Agente_ManagerTop10(): {e}")
+
+    def _call_claude(self, prompt: str, api_key: str, session_key: str, max_tokens: int = 500, timeout: int = 20):
+        """POST a Claude API, retorna primer bloque JSON parseado o None."""
+        try:
+            resp = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={"model": "claude-haiku-4-5-20251001", "max_tokens": max_tokens,
+                      "messages": [{"role": "user", "content": prompt}]},
+                timeout=timeout,
+            )
+            if not resp.ok:
+                self.logger.error(f"_call_claude({session_key}): HTTP {resp.status_code} — {resp.text[:200]}")
+                return None
+            usage = resp.json().get("usage", {})
+            track_claude_usage(session_key, usage.get("input_tokens", 0), usage.get("output_tokens", 0))
+            text = resp.json()["content"][0]["text"].strip()
+            start, end = text.find("{"), text.rfind("}") + 1
+            if start >= 0 and end > start:
+                return json.loads(text[start:end])
+        except Exception as e:
+            self.logger.error(f"_call_claude({session_key}): {e}")
+        return None
 
     def _consultar_claude(self, mensaje_usuario, contexto="", messages=None):
         """Llamada a Claude API. Si messages se provee, usa conversación multi-turno con historial."""
@@ -805,35 +829,8 @@ class ClassAgenteIA:
             '{"decision": "BUY|SELL|HOLD|ALERTA", "simbolo": "TICKER_O_VACIO", '
             '"monto": 0, "motivo": "explicación en 2-3 oraciones completas: qué acción, por qué ahora, qué se espera lograr. Sin abreviaturas."}'
         )
-        try:
-            resp = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 500,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=20,
-            )
-            if not resp.ok:
-                self.logger.error(f"_claude_ia_eval: HTTP {resp.status_code} — {resp.text[:200]}")
-                return None
-            usage = resp.json().get("usage", {})
-            track_claude_usage("ClaudeAPIP", usage.get("input_tokens", 0), usage.get("output_tokens", 0))
-            text = resp.json()["content"][0]["text"].strip()
-            start, end = text.find("{"), text.rfind("}") + 1
-            if start >= 0 and end > start:
-                result = json.loads(text[start:end])
-                if "decision" in result:
-                    return result
-        except Exception as e:
-            self.logger.error(f"_claude_ia_eval(): {e}")
-        return None
+        result = self._call_claude(prompt, api_key, "ClaudeAPIP", max_tokens=500, timeout=20)
+        return result if result and "decision" in result else None
 
     def _gains_capture_run(self):
         _gc_logger = logging.getLogger("GainsCapture")
@@ -1049,47 +1046,11 @@ class ClassAgenteIA:
             f"- '100%': spike claro o sobrecompra extrema, salida total del lote\n\n"
             f'Respondé SOLO con JSON: {{"accion": "vender"|"esperar", "escenario": "25%"|"33%"|"100%", "razon": "max 120 chars"}}'
         )
-        try:
-            resp = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                json={
-                    "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 200,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=15,
-            )
-            if not resp.ok:
-                return None
-            usage = resp.json().get("usage", {})
-            track_claude_usage("ClaudeAPIP", usage.get("input_tokens", 0), usage.get("output_tokens", 0))
-            text = resp.json()["content"][0]["text"].strip()
-            start, end = text.find("{"), text.rfind("}") + 1
-            if start >= 0 and end > start:
-                result = json.loads(text[start:end])
-                if "accion" in result:
-                    return result
-        except Exception as e:
-            logging.getLogger("GainsCapture").error(f"_gains_capture_claude_eval({symbol}): {e}")
-        return None
+        result = self._call_claude(prompt, api_key, "ClaudeAPIP", max_tokens=200, timeout=15)
+        return result if result and "accion" in result else None
 
     def _load_params(self, vehiculo):
-        """
-        Carga y cachea el JSON completo de parameters para el vehiculo.
-        Fuente única — evita duplicar parseo entre agentes (preservation, ltv, etc.).
-        Retorna dict o None si no hay parameters en sesion.
-        """
-        if vehiculo not in self._params_cache:
-            sesion = self.PlanInversion.get_sesion_by_vehiculo(vehiculo)
-            params_raw = sesion.get("parameters")
-            if not params_raw:
-                self._params_cache[vehiculo] = None
-            else:
-                self._params_cache[vehiculo] = json.loads(
-                    params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw
-                )
-        return self._params_cache.get(vehiculo)
+        return load_vehiculo_params(vehiculo, self._params_cache, self.PlanInversion)
 
     def _build_preservation_context(
         self, symbol, account, roi, last, sma_base, max_price, stop_calculado, stop_anterior, atr, base_limit
@@ -1166,35 +1127,8 @@ class ClassAgenteIA:
             f"NUNCA sugerir un stop inferior al base calculado por reglas (${ctx['stop_calculado']:.2f}).\n"
             f'Respondé SOLO con JSON válido: {{"stop_sugerido": float, "razon": "str max 120 chars", "urgencia": "alta"|"media"|"baja"}}'
         )
-        try:
-            resp = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 256,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=15,
-            )
-            if not resp.ok:
-                self.logger.error(f"_claude_preservation_eval({ctx['symbol']}): HTTP {resp.status_code}")
-                return None
-            usage = resp.json().get("usage", {})
-            track_claude_usage("ClaudeAPIP", usage.get("input_tokens", 0), usage.get("output_tokens", 0))
-            text = resp.json()["content"][0]["text"].strip()
-            start, end = text.find("{"), text.rfind("}") + 1
-            if start >= 0 and end > start:
-                result = json.loads(text[start:end])
-                if "stop_sugerido" in result:
-                    return result
-        except Exception as e:
-            self.logger.error(f"_claude_preservation_eval({ctx['symbol']}): {e}")
-        return None
+        result = self._call_claude(prompt, api_key, "ClaudeAPIP", max_tokens=256, timeout=15)
+        return result if result and "stop_sugerido" in result else None
 
     def _preservation_get_config(self, vehiculo):
         """

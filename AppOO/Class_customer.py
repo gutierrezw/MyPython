@@ -3770,7 +3770,7 @@ class WidgetVehiculo(TickerInfo):
             "avgCost": 0.0,
             "account": 0,
             "mkPrice": 0.0,
-            "periodo": "W",
+            "periodo": "ME",
             "secType": "Stock",
             "name": "buscar nombre",
             "tipo": "candle",
@@ -4684,6 +4684,12 @@ class WidgetVehiculo(TickerInfo):
                         )
                         cv2.draw()
 
+                # fg1 — Rentabilidad por períodos (siempre visible)
+                _veh_r = "hist" if self.vehiculo == "Stock" else ("download" if self.vehiculo == "Crypto" else self.vehiculo)
+                _, pdatos_r, _ = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=_veh_r)
+                self.graph_returns_periodos(fg=fg1, datos=pdatos_r, symbol=self.symbol)
+                cv1.draw()
+
                 # Gráfica performance acumulado para el symbol
                 ddatos = performa_asset(
                     account=self.account,
@@ -4700,10 +4706,36 @@ class WidgetVehiculo(TickerInfo):
                     "Costo": "Cost basic",
                     "legend": "outside upper left",
                     "aspect": 0.21,
-                    "titulo": "Performance (acumulativo) " + self.symbol,
+                    "titulo": "Performance " + self.symbol,
                 }
                 self.graph_performace_portafolio(fg=fg3, data=ddatos, parm=parm)
                 cv3.draw()
+
+                def perf_setup(periodo_perf):
+                    try:
+                        offsets = {
+                            "1Y": pd.DateOffset(years=1),
+                            "6M": pd.DateOffset(months=6),
+                            "3M": pd.DateOffset(months=3),
+                            "1M": pd.DateOffset(months=1),
+                        }
+                        desde = pd.Timestamp.now() - offsets[periodo_perf]
+                        parm["periodo"] = periodo_perf
+                        parm["titulo"] = f"Performance {self.symbol} — {periodo_perf}"
+                        idx_dt = pd.to_datetime(ddatos.index)
+                        self.graph_performace_portafolio(fg=fg3, data=ddatos[idx_dt >= desde], parm=parm)
+                        cv3.draw()
+                    except Exception as e:
+                        print(f"[perf_setup()]: {e}")
+
+                for _i, (_txt, _per) in enumerate([("1y", "1Y"), ("6m", "6M"), ("3m", "3M"), ("1m", "1M")]):
+                    tk.Button(
+                        scr3, text=_txt, width=2, bg=self.cgcolor, fg=self.bgcolor,
+                        relief=tk.FLAT, command=lambda p=_per: perf_setup(p),
+                    ).place(x=540 + _i * 22, y=3)
+
+                perf_setup("6M")
+
             except Exception as e:
                 print("[window_analisis()]: {}".format(e))
 
@@ -4723,6 +4755,12 @@ class WidgetVehiculo(TickerInfo):
                     vehiculo = self.vehiculo
 
                 activo, pdatos, update = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=vehiculo)
+                if periodo == "D":
+                    desde = pd.Timestamp.now(tz=pdatos.index.tz) - pd.DateOffset(days=180)
+                    pdatos = pdatos[pdatos.index >= desde]
+                elif periodo == "W":
+                    desde = pd.Timestamp.now(tz=pdatos.index.tz) - pd.DateOffset(years=1)
+                    pdatos = pdatos[pdatos.index >= desde]
                 self.gchar["periodo"] = periodo if accion == "p" else self.gchar["periodo"]
                 self.gchar["tipo"] = tipo if accion == "t" else self.gchar["tipo"]
 
@@ -4977,12 +5015,23 @@ class WidgetVehiculo(TickerInfo):
             win20.pack(side=tk.LEFT)
             win21.pack(side=tk.RIGHT)
 
+            _pbg, _pfg = self.bgcolor, self.cgcolor
+
+            bt0 = tk.Button(
+                win21,
+                text="1d",
+                width=2,
+                bg=_pbg,
+                fg=_pfg,
+                relief=tk.FLAT,
+                command=lambda: chart_setup("D", gtipo, "p"),
+            )
             bt1 = tk.Button(
                 win21,
                 text="1w",
                 width=2,
-                bg=self.bgcolor,
-                fg=self.cgcolor,
+                bg=_pbg,
+                fg=_pfg,
                 relief=tk.FLAT,
                 command=lambda: chart_setup("W", gtipo, "p"),
             )
@@ -4990,8 +5039,8 @@ class WidgetVehiculo(TickerInfo):
                 win21,
                 text="1m",
                 width=2,
-                bg=self.bgcolor,
-                fg=self.cgcolor,
+                bg=_pbg,
+                fg=_pfg,
                 relief=tk.FLAT,
                 command=lambda: chart_setup("ME", gtipo, "p"),
             )
@@ -4999,8 +5048,8 @@ class WidgetVehiculo(TickerInfo):
                 win21,
                 text="3m",
                 width=2,
-                bg=self.bgcolor,
-                fg=self.cgcolor,
+                bg=_pbg,
+                fg=_pfg,
                 relief=tk.FLAT,
                 command=lambda: chart_setup("QE", gtipo, "p"),
             )
@@ -5008,8 +5057,8 @@ class WidgetVehiculo(TickerInfo):
                 win21,
                 text="1y",
                 width=2,
-                bg=self.bgcolor,
-                fg=self.cgcolor,
+                bg=_pbg,
+                fg=_pfg,
                 relief=tk.FLAT,
                 command=lambda: chart_setup("YE", gtipo, "p"),
             )
@@ -5017,14 +5066,14 @@ class WidgetVehiculo(TickerInfo):
                 win21,
                 text="6m",
                 width=2,
-                bg=self.bgcolor,
-                fg=self.cgcolor,
+                bg=_pbg,
+                fg=_pfg,
                 relief=tk.FLAT,
                 command=lambda: chart_setup("2QE", gtipo, "p"),
             )
 
             # inicia variables
-            gtipo, gperiodo, position = "candle", "W", None
+            gtipo, gperiodo, position = "candle", "ME", None
             AGain, ALost = [], []
             self.gchar["fibonacci"] = False
 
@@ -5139,7 +5188,8 @@ class WidgetVehiculo(TickerInfo):
             gt0.pack(side=tk.RIGHT, anchor=tk.E)
             gt3.pack(side=tk.RIGHT, anchor=tk.E, padx=(4, 1))
 
-            bt1.pack(side=tk.RIGHT, anchor=tk.E)  # 1w  → derecha
+            bt0.pack(side=tk.RIGHT, anchor=tk.E)  # 1d  → derecha
+            bt1.pack(side=tk.RIGHT, anchor=tk.E)  # 1w
             bt2.pack(side=tk.RIGHT, anchor=tk.E)  # 1m
             bt3.pack(side=tk.RIGHT, anchor=tk.E)  # 3m
             bt5.pack(side=tk.RIGHT, anchor=tk.E)  # 6m
@@ -5842,10 +5892,9 @@ class WidgetVehiculo(TickerInfo):
                     linewidth=1.3,
                 )
 
-            # formateo eje X
-            Xformatter = "%b-%y" if parm.get("periodo") in ("6M", "1Y", "5Y") else "%d-%b"
-            ax.xaxis.set_major_formatter(mdates.DateFormatter(Xformatter))
-
+            # formateo eje X — auto según rango de datos
+            ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=10))
+            ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(mdates.AutoDateLocator()))
             xlabels = ax.get_xticklabels()
             plt.setp(xlabels, ha="right", rotation=20, fontsize=6)
             ax.tick_params(axis="x", colors=self.cchart["plot5"])
@@ -6035,6 +6084,78 @@ class WidgetVehiculo(TickerInfo):
                 pass
         except Exception as e:
             print(f"graph_performace_portafolio(): {e}")
+
+    def graph_returns_periodos(self, fg=None, datos=None, symbol=""):
+        try:
+            fg.clear()
+            ax = fg.add_subplot(111)
+            ax.set_facecolor(self.cchart.get("fondo_fig", self.bgcolor))
+            fg.set_facecolor(self.cchart.get("fondo_fig", self.bgcolor))
+
+            if datos is None or datos.empty:
+                return
+
+            now = datos.index[-1]
+            price_now = float(datos["Close"].iloc[-1])
+            tz = datos.index.tz
+
+            def price_at(offset_date):
+                subset = datos[datos.index <= offset_date]
+                return float(subset["Close"].iloc[-1]) if not subset.empty else None
+
+            periodos = [
+                ("1S",  now - pd.DateOffset(weeks=1)),
+                ("1M",  now - pd.DateOffset(months=1)),
+                ("3M",  now - pd.DateOffset(months=3)),
+                ("6M",  now - pd.DateOffset(months=6)),
+                ("YTD", pd.Timestamp(now.year, 1, 1, tz=tz)),
+                ("1A",  now - pd.DateOffset(years=1)),
+                ("3A",  now - pd.DateOffset(years=3)),
+            ]
+
+            labels, returns, colors = [], [], []
+            for label, desde in periodos:
+                p = price_at(desde)
+                if p is None or p == 0:
+                    continue
+                ret = (price_now - p) / p * 100
+                labels.append(label)
+                returns.append(ret)
+                colors.append(self.cchart.get("plot2", "green") if ret >= 0 else self.cchart.get("plot1", "red"))
+
+            if not returns:
+                ax.set_title(f"Rentabilidad {symbol} — sin datos", color=self.cchart.get("titulo", "white"), fontsize=8)
+                return
+
+            bars = ax.barh(labels, returns, color=colors, alpha=0.75, height=0.5)
+
+            x_range = max(abs(v) for v in returns) or 1
+            pad = x_range * 0.03
+            small = x_range * 0.12  # umbral barra "pequeña"
+            for bar, val in zip(bars, returns):
+                y_mid = bar.get_y() + bar.get_height() / 2
+                if val >= 0:
+                    if val > small:  # barra grande: etiqueta dentro
+                        xpos, ha = val - pad, "right"
+                    else:            # barra chica: etiqueta fuera a la derecha
+                        xpos, ha = val + pad, "left"
+                else:
+                    if abs(val) > small:  # barra grande: etiqueta dentro
+                        xpos, ha = val + pad, "left"
+                    else:                 # barra chica negativa: etiqueta a la derecha del cero
+                        xpos, ha = pad, "left"
+                ax.text(xpos, y_mid, f"{val:+.1f}%", va="center", ha=ha, color="white", fontsize=7)
+
+            ax.axvline(0, color="gray", linewidth=0.8, alpha=0.6)
+            ax.set_title(f"Rentabilidad {symbol}", color=self.cchart.get("titulo", "white"), fontsize=8, pad=3)
+            ax.tick_params(colors="white", labelsize=7)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.spines["bottom"].set_color("gray")
+            ax.spines["left"].set_color("gray")
+            ax.set_xlim(left=min(returns) * 1.25, right=max(returns) * 1.25)
+        except Exception as e:
+            print(f"[graph_returns_periodos()]: {e}")
 
     # (thread): coordinador de actualización de graficos
     def run_graficos(self):

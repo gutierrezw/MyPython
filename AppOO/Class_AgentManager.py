@@ -4,7 +4,7 @@ Dominios: Stock | Crypto | IA | Infra
 """
 
 from Modulos_python import logging, json, datetime, yf, requests, textwrap, Path, ntplib
-from Modulos_Utilitarios import wait_rate, read_json_tmp, write_json_tmp, track_claude_usage
+from Modulos_Utilitarios import wait_rate, read_json_tmp, write_json_tmp, track_claude_usage, load_vehiculo_params
 from Modulos_Mysql import (
     RepositorioOportunidadesBuySell,
     BDsystem,
@@ -49,16 +49,7 @@ class AgentManager:
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _load_params(self, vehiculo: str):
-        if vehiculo not in self._params_cache:
-            sesion = self.PlanInversion.get_sesion_by_vehiculo(vehiculo)
-            params_raw = sesion.get("parameters")
-            if not params_raw:
-                self._params_cache[vehiculo] = None
-            else:
-                self._params_cache[vehiculo] = json.loads(
-                    params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw
-                )
-        return self._params_cache.get(vehiculo)
+        return load_vehiculo_params(vehiculo, self._params_cache, self.PlanInversion)
 
     def _clasificar_etf_claude(self, yf_info: dict, opciones: list):
         sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIE")
@@ -396,74 +387,34 @@ class AgentManager:
             self._log_crypto.error(f"Agente_CryptoBeta(): {e}")
 
     # ── Agente.IA ─────────────────────────────────────────────────────────────
+    # Sentimiento e InterpreteSentimiento viven en Class_DashBot (incluyen cleanup_sentiment)
 
-    @wait_rate(3600, persist=True)
-    def Agente_Sentimiento(self):
-        if datetime.now().weekday() >= 5:
-            return
-        try:
-            sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIS")
-            api_key = sesion["userapi"].decode("utf-8") if sesion else ""
-            result = scan_sentimiento(account=self.account, api_key=api_key)
-            self._log_ia.warning(
-                f"Sentimiento: símbolos={result['symbols']} con_noticias={result['with_news']} "
-                f"clasificados={result['classified']}"
-            )
-        except Exception as e:
-            self._log_ia.error(f"Agente_Sentimiento(): {e}")
-
-    @wait_rate(86400, persist=True)
-    def Agente_InterpreteSentimiento(self):
-        if datetime.now().weekday() >= 5:
-            return
-        try:
-            sesion = BDsystem.get_sesion_by_vehiculo("ClaudeAPIS")
-            api_key = sesion["userapi"].decode("utf-8") if sesion else ""
-            result = interpretar_sentimiento(account=self.account, api_key=api_key)
-            self._log_ia.warning(f"InterpreteSentimiento: {len(result)} símbolos interpretados")
-        except Exception as e:
-            self._log_ia.error(f"Agente_InterpreteSentimiento(): {e}")
+    def _run_clasificador(self, estrategia_svc, ivehiculo: str, pendientes: list, nombre: str):
+        opciones = estrategia_svc.select(accion="vehiculo", ivehiculo=ivehiculo)
+        clasificados = 0
+        for item in pendientes:
+            symbol = item["symbol"]
+            yf_info = DataHub.info.get(symbol, {}).get("activos", {}) or {"shortName": item.get("shortName", symbol)}
+            codigo = self._clasificar_etf_claude(yf_info, opciones)
+            if codigo:
+                estrategia_svc.update_estrategia_etf(symbol, self.account, codigo)
+                clasificados += 1
+        self._log_ia.warning(f"{nombre}: pendientes={len(pendientes)} clasificados={clasificados}")
 
     @wait_rate(604800, persist=True)
     def Agente_ClasificadorETF(self):
         try:
-            estrategia_svc = EstrategiaInversion()
-            opciones = estrategia_svc.select(accion="vehiculo", ivehiculo="Balance")
-            etfs = estrategia_svc.get_etfs_pendientes(self.account)
-            clasificados = sin_info = 0
-            for etf in etfs:
-                symbol = etf["symbol"]
-                yf_info = DataHub.info.get(symbol, {}).get("activos", {})
-                if not yf_info:
-                    yf_info = {"shortName": etf.get("shortName", symbol)}
-                    sin_info += 1
-                codigo = self._clasificar_etf_claude(yf_info, opciones)
-                if codigo:
-                    estrategia_svc.update_estrategia_etf(symbol, self.account, codigo)
-                    clasificados += 1
-            self._log_ia.warning(
-                f"ClasificadorETF: pendientes={len(etfs)} clasificados={clasificados} sin_info={sin_info}"
-            )
+            svc = EstrategiaInversion()
+            self._run_clasificador(svc, "Balance", svc.get_etfs_pendientes(self.account), "ClasificadorETF")
         except Exception as e:
             self._log_ia.error(f"Agente_ClasificadorETF(): {e}")
 
-    @wait_rate(604800, persist=True, desc="Reclasifica crypto con estrategia incorrecta (semanal)", nivel=2)
+    @wait_rate(604800, persist=True, desc="Reclasifica crypto y Exchange legacy con estrategia incorrecta (semanal)", nivel=2)
     def Agente_ClasificadorCrypto(self):
         try:
-            estrategia_svc = EstrategiaInversion()
-            opciones = estrategia_svc.select(accion="vehiculo", ivehiculo="Crypto")
-            cryptos = estrategia_svc.get_crypto_pendientes(self.account)
-            clasificados = 0
-            for crypto in cryptos:
-                symbol = crypto["symbol"]
-                yf_info = {"shortName": crypto.get("shortName") or symbol}
-                codigo = self._clasificar_etf_claude(yf_info, opciones)
-                if codigo:
-                    estrategia_svc.update_estrategia_etf(symbol, self.account, codigo)
-                    clasificados += 1
-            self._log_ia.warning(
-                f"ClasificadorCrypto: pendientes={len(cryptos)} clasificados={clasificados}"
-            )
+            svc = EstrategiaInversion()
+            pendientes = svc.get_crypto_pendientes(self.account) + svc.get_exchange_pendientes(self.account)
+            self._run_clasificador(svc, "Crypto", pendientes, "ClasificadorCrypto")
         except Exception as e:
             self._log_ia.error(f"Agente_ClasificadorCrypto(): {e}")
 
@@ -635,8 +586,6 @@ class AgentManager:
             ("Agente_AuditPortfolio", self.Agente_AuditPortfolio, 300),
             ("Agente_ClasificadorETF", self.Agente_ClasificadorETF, 300),
             ("Agente_ClasificadorCrypto", self.Agente_ClasificadorCrypto, 300),
-            ("Agente_Sentimiento", self.Agente_Sentimiento, 300),
-            ("Agente_InterpreteSentimiento", self.Agente_InterpreteSentimiento, 300),
             ("Agente_ApiCostTracker", self.Agente_ApiCostTracker, 300),
             ("Agente_YouTubeScanner", self.Agente_YouTubeScanner, 300),
             ("Agente_YouTubeBackfill", self.Agente_YouTubeBackfill, 60),

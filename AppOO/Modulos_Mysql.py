@@ -1478,31 +1478,16 @@ class EstrategiaInversion(BDsystem):  # ----------------------------------------
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: Estrategia.Select()]: {}".format(error))
 
-    def get_etfs_pendientes(self, account):
-        """ETFs, commodities y posiciones con código de esquema viejo pendientes de clasificación."""
+    def _get_pendientes_query(self, qry: str, params: tuple, nombre: str) -> list:
         try:
-            conn = self._conectar(tabla="select.etf_pendientes")
+            conn = self._conectar(tabla=f"select.{nombre}")
             cursor = conn.cursor()
-            qry = """SELECT m.symbol, m.shortName
-                     FROM market m
-                     LEFT JOIN inversion i ON i.ticket = m.symbol AND i.useraccount = %s AND i.iactiva = 'Y'
-                     WHERE m.account = %s AND (
-                       (m.categoriaActivo = 'X'
-                        AND (i.estrategia IS NULL OR i.estrategia NOT IN ('P01','P02','P03','P04','P05')))
-                       OR
-                       (m.categoriaActivo IN ('I','S','N') AND m.encartera = 'Y'
-                        AND (i.estrategia IS NULL OR i.estrategia = 'P02')
-                        AND m.shortName REGEXP 'Gold|Silver|Plata|Oro')
-                       OR
-                       (i.iactiva = 'Y' AND m.encartera = 'Y'
-                        AND i.estrategia IN ('A01','A02','A03','A04','A05','A99','C01','C02'))
-                     )"""
-            cursor.execute(qry, (account, account))
+            cursor.execute(qry, params)
             cols = [c[0] for c in cursor.description]
             rows = cursor.fetchall()
             return [dict(zip(cols, r)) for r in rows] if rows else []
         except Exception as e:
-            print(f"[EstrategiaInversion.get_etfs_pendientes()]: {e}")
+            print(f"[EstrategiaInversion.{nombre}()]: {e}")
             return []
         finally:
             try:
@@ -1511,32 +1496,52 @@ class EstrategiaInversion(BDsystem):  # ----------------------------------------
             except Exception:
                 pass
 
+    def get_etfs_pendientes(self, account):
+        """ETFs, commodities y posiciones con código de esquema viejo pendientes de clasificación."""
+        return self._get_pendientes_query(
+            """SELECT m.symbol, m.shortName
+               FROM market m
+               LEFT JOIN inversion i ON i.ticket = m.symbol AND i.useraccount = %s AND i.iactiva = 'Y'
+               WHERE m.account = %s AND (
+                 (m.categoriaActivo = 'X'
+                  AND (i.estrategia IS NULL OR i.estrategia NOT IN ('P01','P02','P03','P04','P05')))
+                 OR
+                 (m.categoriaActivo IN ('I','S','N') AND m.encartera = 'Y'
+                  AND (i.estrategia IS NULL OR i.estrategia = 'P02')
+                  AND m.shortName REGEXP 'Gold|Silver|Plata|Oro')
+                 OR
+                 (i.iactiva = 'Y' AND m.encartera = 'Y'
+                  AND i.estrategia IN ('A01','A02','A03','A04','A05','A99','C01','C02'))
+               )""",
+            (account, account), "get_etfs_pendientes",
+        )
+
     def get_crypto_pendientes(self, account):
         """Crypto activos con estrategia NULL o código viejo pendientes de clasificación."""
-        try:
-            conn = self._conectar(tabla="select.crypto_pendientes")
-            cursor = conn.cursor()
-            qry = """SELECT i.ticket AS symbol, o.descripcion AS shortName
-                     FROM inversion i
-                     LEFT JOIN otros_activos o ON o.symbol = i.ticket
-                     WHERE i.useraccount = %s
-                       AND i.tipoinv = 'Crypto'
-                       AND i.iactiva = 'Y'
-                       AND (i.estrategia IS NULL
-                            OR i.estrategia IN ('A01','A02','A03','A04','A05','A99','C01','C02'))"""
-            cursor.execute(qry, (account,))
-            cols = [c[0] for c in cursor.description]
-            rows = cursor.fetchall()
-            return [dict(zip(cols, r)) for r in rows] if rows else []
-        except Exception as e:
-            print(f"[EstrategiaInversion.get_crypto_pendientes()]: {e}")
-            return []
-        finally:
-            try:
-                cursor.close()
-                conn.close()
-            except Exception:
-                pass
+        return self._get_pendientes_query(
+            """SELECT i.ticket AS symbol, o.descripcion AS shortName
+               FROM inversion i
+               LEFT JOIN otros_activos o ON o.symbol = i.ticket
+               WHERE i.useraccount = %s
+                 AND i.tipoinv = 'Crypto'
+                 AND i.iactiva = 'Y'
+                 AND (i.estrategia IS NULL
+                      OR i.estrategia IN ('A01','A02','A03','A04','A05','A99','C01','C02'))""",
+            (account,), "get_crypto_pendientes",
+        )
+
+    def get_exchange_pendientes(self, account):
+        """Assets con descripción 'Exchange' (categoría legacy) pendientes de reclasificación como Crypto."""
+        return self._get_pendientes_query(
+            """SELECT i.ticket AS symbol, COALESCE(o.descripcion, i.ticket) AS shortName
+               FROM inversion i
+               LEFT JOIN otros_activos o ON o.symbol = i.ticket
+               LEFT JOIN estrategia e ON i.estrategia = e.estrategia
+               WHERE i.useraccount = %s
+                 AND i.iactiva = 'Y'
+                 AND e.descripcion = 'Exchange'""",
+            (account,), "get_exchange_pendientes",
+        )
 
     def update_estrategia_etf(self, ticket, account, estrategia):
         """Actualiza estrategia en inversion para un ETF clasificado. Write-once."""

@@ -5851,6 +5851,12 @@ class DashMain:
                 total_debitmax = DataHub.manager_GyP.get("Stock", {}).get("DebitMax", 0) + DataHub.manager_GyP.get(
                     "Crypto", {}
                 ).get("DebitMax", 0)
+                if total_debit == 0 and not DataHub.ws_stock_connected:
+                    _debt_cache = read_json_tmp("debt_last")
+                    total_debit = _debt_cache.get("total_debit", 0)
+                    total_debitmax = _debt_cache.get("total_debitmax", 1)
+                elif total_debit > 0:
+                    write_json_tmp("debt_last", {"total_debit": total_debit, "total_debitmax": total_debitmax})
 
                 # Leverage: deuda total como % del capital (máx referencia 30%)
                 leverage_pct = (total_debit / max(costo_base, 1)) * 100
@@ -5871,6 +5877,10 @@ class DashMain:
                     beta_consolidado = beta_stock
 
                 # Dividendos YTD vs proyección anual (extrapolación por mes)
+                if div_ytd == 0:
+                    div_ytd = read_json_tmp("div_ytd_last").get("div_ytd", 0)
+                elif div_ytd > 0:
+                    write_json_tmp("div_ytd_last", {"div_ytd": div_ytd})
                 mes_actual = datetime.now().month
                 div_proyeccion = max((div_ytd / max(mes_actual, 1)) * 12, div_ytd)
 
