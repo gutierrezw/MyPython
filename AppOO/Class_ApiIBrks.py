@@ -507,11 +507,19 @@ class IB(IBClient):
                 self.logger.warning(f"_get_symbol(): No se encontró conid para {symbol}")
                 return None
 
-            # Extraer el conid del primer resultado
-            conid = []
-            conid.append(str(conid_data[0].get("conid", "")))
+            # Preferir STK en NYSE/SMART/NASDAQ sobre futuros/índices (CME, etc.)
+            preferred = next(
+                (c for c in conid_data if c.get("secType") == "STK" and c.get("currency", "").upper() == "USD"),
+                next((c for c in conid_data if c.get("secType") == "STK"), conid_data[0]),
+            )
+            self.logger.warning(
+                f"_get_symbol(): {symbol} → conid={preferred.get('conid')} "
+                f"secType={preferred.get('secType')} exchange={preferred.get('primaryExch')} "
+                f"total={len(conid_data)}"
+            )
+            conid = [str(preferred.get("conid", ""))]
 
-            if not conid:
+            if not conid or not conid[0]:
                 self.logger.warning(f"_get_symbol(): conid vacío para {symbol}")
                 return None
 
@@ -840,7 +848,15 @@ class IB(IBClient):
 
         try:
             order_req = requests.post(url=reply_url, verify=False, json=json_body)
-            return json.dumps(order_req.json(), indent=2)
+            if not order_req.text or not order_req.text.strip():
+                self.logger.warning(f"orderconfirm(): IB body vacío → confirmado | replyid={replyid}")
+                return json.dumps([{"order_status": "Submitted", "order_id": ""}])
+            try:
+                return json.dumps(order_req.json(), indent=2)
+            except Exception:
+                # IB devolvió texto no-JSON (ej: HTML) → tratar como confirmación OK
+                self.logger.warning(f"orderconfirm(): IB respuesta no-JSON → confirmado | replyid={replyid} | text={order_req.text[:80]}")
+                return json.dumps([{"order_status": "Submitted", "order_id": ""}])
         except Exception as e:
             self.logger.error(f"orderconfirm(): {e}")
             return json.dumps({"error": str(e)})

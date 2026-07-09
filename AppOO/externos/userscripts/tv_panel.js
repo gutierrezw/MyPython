@@ -695,7 +695,12 @@
         const btnBuy = document.getElementById("tv-btn-buy");
         const btnSell = document.getElementById("tv-btn-sell");
         if (btnBuy) btnBuy.onclick = () => postOrder("BUY");
-        if (btnSell) btnSell.onclick = () => postOrder("SELL");
+        if (btnSell) {
+            const hasPos = posicion && posicion.position > 0;
+            btnSell.onclick = hasPos ? () => postOrder("SELL") : null;
+            btnSell.style.opacity = hasPos ? "1" : "0.35";
+            btnSell.style.cursor = hasPos ? "pointer" : "not-allowed";
+        }
         // Retry hasta que TV API esté lista (necesario tras navegación/recarga)
         let _attempts = 0;
         const _tryDraw = () => {

@@ -1204,6 +1204,9 @@ class MyOrders:
                 # Rectifica types de los parametros
                 for keys in pedido["orders"]:
                     if "conid" in keys:
+                        if not keys["conid"]:
+                            resp_sym = self.IClient._get_symbol(symbol=symbol, secType="STK")
+                            keys["conid"] = int(resp_sym["conid"]) if resp_sym and resp_sym.get("conid") else 0
                         keys["conid"] = int(keys["conid"])
                     if "price" in keys:
                         keys["price"] = float(keys["price"])
@@ -1235,20 +1238,28 @@ class MyOrders:
                     f"place_OrderStock: place_order OK | id={resp.get('id')} | response={response} | symbol={symbol}"
                 )
 
-                # Confirma orden en IB cuando no es simulación
-                if not self.simulation and resp.get("id"):
-                    RespEnviada = self.IClient.orderconfirm(replyid=resp["id"])
-
-                    if RespEnviada:
+                # Confirma orden en IB — puede requerir múltiples rondas por advertencias
+                if resp.get("id"):
+                    replyid = resp["id"]
+                    for _round in range(5):
+                        RespEnviada = self.IClient.orderconfirm(replyid=replyid)
+                        if not RespEnviada:
+                            self.logger.error(f"place_OrderStock: orderconfirm sin respuesta | replyid={replyid}")
+                            break
                         tempJson = json.loads(RespEnviada)
                         enviada = tempJson[0] if isinstance(tempJson, list) else tempJson
                         if "order_status" in enviada:
                             status = enviada.get("order_status")
                             ClientOrderid = enviada.get("order_id")
                             stampSubmit = datetime.now()
-                        self.logger.warning(f"place_OrderStock: confirm OK | status={status} | orderId={ClientOrderid}")
-                    else:
-                        self.logger.error(f"place_OrderStock: orderconfirm sin respuesta | replyid={resp.get('id')}")
+                            self.logger.warning(f"place_OrderStock: confirm OK round={_round} | status={status} | orderId={ClientOrderid}")
+                            break
+                        elif enviada.get("id"):
+                            replyid = enviada["id"]
+                            self.logger.warning(f"place_OrderStock: confirm round={_round} | msg={enviada.get('message')}")
+                        else:
+                            self.logger.warning(f"place_OrderStock: confirm sin order_status | {enviada}")
+                            break
 
                 # Salva información de la orden — normalizar response a lista de dicts
                 if isinstance(response, dict):
@@ -1267,7 +1278,7 @@ class MyOrders:
                         {
                             "account": account,
                             "vehiculo": vehiculo,
-                            "id_order": items["id"],
+                            "id_order": items.get("id") or items.get("order_id") or "",
                             "conid": orden["conid"],
                             "orderType": orden["orderType"],
                             "price": orden["price"],
@@ -3951,6 +3962,14 @@ class WidgetVehiculo(TickerInfo):
                 lotes = a_gain + a_lost
             else:
                 lotes = []
+        else:
+            info_sym = DataHub.info.get(symbol, {})
+            posicion = {
+                "avgcost": 0.0, "costo_base": 0.0, "position": 0.0,
+                "last": info_sym.get("websocket", {}).get("last") or 0.0,
+                "objetivo": 0.0, "stop_loss": 0.0,
+                "account": self.account, "conid": info_sym.get("conid") or 0,
+            }
 
         # consenso desde market (fuente única — mismo valor que Screener y Telegram)
         try:

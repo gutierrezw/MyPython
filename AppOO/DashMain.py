@@ -3380,7 +3380,6 @@ class DashMain:
         def envia_orders_stock(vehiculo, fields, values):
             try:
                 if vehiculo == "Stock":
-                    print(fields)
                     symbol = values[fields.index("symbol")]
                     orderId = values[fields.index("id_enviar")]
                     account = values[fields.index("account")]
