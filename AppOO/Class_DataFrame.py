@@ -1569,7 +1569,7 @@ def grupo_activos(fg: object, parm=None, strategy=None):
 
         data.update({keys: (cbase, vmark)})
 
-    keys = list(data.keys())
+    keys = sorted(data.keys(), key=lambda k: data[k][1], reverse=True)
     x = np.arange(len(keys))
 
     cbase = np.array([data[k][0] for k in keys])
@@ -1691,7 +1691,7 @@ def grupo_region(fg: object, strategy=None, parm=None):
 
     data, Valuemarket = get_region_portafolio(strategy)
 
-    keys = list(data.keys())
+    keys = sorted(data.keys(), key=lambda k: data[k]["Valor Market"], reverse=True)
     x = np.arange(len(keys))
 
     cbase = np.array([data[i]["Capital"] for i in keys])
