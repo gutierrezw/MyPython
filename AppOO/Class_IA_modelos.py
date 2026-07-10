@@ -1,4 +1,5 @@
 from Modulos_python import (
+    os,
     pd,
     joblib,
     json,
@@ -465,9 +466,18 @@ class ModeloOportunidadesSell:
             joblib.dump(self.metrics, path_metrics)
 
     def load_modelo(self, file="modelo_ia"):
-        """Carga el modelo y sus métricas si existen"""
+        """Carga el modelo y métricas; solo recarga si el archivo cambió (cache mtime)."""
         path_modelo = define_FileCache(f"{file}.pkl")
         path_metrics = define_FileCache(f"{file}_metrics.pkl")
+        try:
+            mtime = os.path.getmtime(path_modelo)
+        except OSError:
+            self.modelo = None
+            self.metrics = None
+            return
+        if getattr(self, "_modelo_mtime", None) == mtime:
+            return
+        self._modelo_mtime = mtime
         try:
             self.modelo = joblib.load(path_modelo)
         except FileNotFoundError:
@@ -869,9 +879,18 @@ class ModeloOportunidadesBuy:
             joblib.dump(self.metrics, path_metrics)
 
     def load_modelo(self, file="modelo_ia"):
-        """Carga el modelo y métricas."""
+        """Carga el modelo y métricas; solo recarga si el archivo cambió (cache mtime)."""
         path_modelo = define_FileCache(f"{file}.pkl")
         path_metrics = define_FileCache(f"{file}_metrics.pkl")
+        try:
+            mtime = os.path.getmtime(path_modelo)
+        except OSError:
+            self.modelo = None
+            self.metrics = None
+            return
+        if getattr(self, "_modelo_mtime", None) == mtime:
+            return
+        self._modelo_mtime = mtime
         try:
             self.modelo = joblib.load(path_modelo)
         except FileNotFoundError:

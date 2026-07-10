@@ -1352,13 +1352,17 @@ def setup_fear_greed(fg: object, parm=None):
 
     def fear_vix(fear=None):
         def _last_cached():
-            cached = read_json_tmp("fear_vix.json")
+            cached = read_json_tmp("kpi_snapshot")
             wfear = cached.get("fear", fear if not is_none(fear) else 50)
             vix = cached.get("vix", 50)
             return wfear, vix
 
         try:
             hoy = datetime.now().date()
+            cached = read_json_tmp("kpi_snapshot")
+            if cached.get("fear_date") == str(hoy) and is_none(fear):
+                return cached.get("fear", 50), cached.get("vix", 50)
+
             BASE_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata/"
             START_DATE = hoy.strftime("%Y-%m-%d")
             ua = UserAgent()
@@ -1375,7 +1379,9 @@ def setup_fear_greed(fg: object, parm=None):
             data = r.json()
             wfear = data["fear_and_greed"]["score"] if is_none(fear) else fear
             ind_wix = data["market_volatility_vix"]["score"]
-            write_json_tmp("fear_vix.json", {"fear": wfear, "vix": ind_wix, "date": str(hoy)})
+            _kpi = read_json_tmp("kpi_snapshot")
+            _kpi.update({"fear": wfear, "vix": ind_wix, "fear_date": str(hoy)})
+            write_json_tmp("kpi_snapshot", _kpi)
             return wfear, ind_wix
         except (requests.exceptions.RequestException, ValueError, KeyError) as e:
             _logger.error(f"fear_vix(): {e} — usando último valor guardado")

@@ -3563,14 +3563,16 @@ class WidgetVehiculo(TickerInfo):
 
                 # command=lambda: chart_setup('W', gtipo, 'p'))
                 def _toggle_index(btn):
-                    data = read_json_tmp("perf_show_index")
+                    _ui = read_json_tmp("ui_state")
+                    data = _ui.get("perf_show_index", {})
                     show = not data.get(self.vehiculo, True)
                     data[self.vehiculo] = show
-                    write_json_tmp("perf_show_index", data)
+                    _ui["perf_show_index"] = data
+                    write_json_tmp("ui_state", _ui)
                     btn.config(fg=self.colors["bgcolor"] if show else "gray")
                     self.setup_graph_performace(self._last_perf_periodo)
 
-                _idx_state = read_json_tmp("perf_show_index").get(self.vehiculo, True)
+                _idx_state = read_json_tmp("ui_state").get("perf_show_index", {}).get(self.vehiculo, True)
                 bt1 = tk.Button(
                     win,
                     text="1m",
@@ -4283,7 +4285,9 @@ class WidgetVehiculo(TickerInfo):
                     DataHub.manager_GyP["Stock"]["DebitMax"] = debit_max_stock
                     DataHub.manager_GyP["Stock"]["dGyP"] = dgyp
                     if DataHub.ws_stock_connected and dgyp != 0:
-                        write_json_tmp("dgyp_last", {"Stock": dgyp})
+                        _kpi = read_json_tmp("kpi_snapshot")
+                        _kpi["stock_dgyp"] = dgyp
+                        write_json_tmp("kpi_snapshot", _kpi)
                     beta_stock = DataHub.manager_GyP["Stock"].get("BetaPortfolio", 1.0)
                     equity_stock = max(mktvalue, 1.0)
                     margen = (deuda_actual / equity_stock) * beta_stock
@@ -5672,7 +5676,7 @@ class WidgetVehiculo(TickerInfo):
         self._last_perf_periodo = tipo or getattr(self, "_last_perf_periodo", "1Y")
         tipo = self._last_perf_periodo
 
-        show_index = read_json_tmp("perf_show_index").get(self.vehiculo, True)
+        show_index = read_json_tmp("ui_state").get("perf_show_index", {}).get(self.vehiculo, True)
         symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=self.vehiculo)
         parm = {
             "BTC": index_ref,
@@ -6390,6 +6394,7 @@ class CustomTreeview:
         self.height = height
         self.column_alignments = column_alignments or {}
         self.arbol = {}
+        self._id_map = {}
         self.style = style or ttk.Style()
         show_fixed_row = "headings" if not self.fixed_row else "tree"
 
@@ -6566,18 +6571,29 @@ class CustomTreeview:
     # Función para sincronizar la selección
     def sync_fixed_selection(self, event):
         selected = self.tree_fixed.selection()
-        if self.tree_scroll.selection() != selected:
-            self.tree_scroll.selection_set(selected)
+        if not selected:
+            return
+        mapped = tuple(self._id_map[s] for s in selected if s in self._id_map)
+        if mapped and self.tree_scroll.selection() != mapped:
+            self.tree_scroll.selection_set(mapped)
 
     def sync_scroll_selection(self, event):
         selected = self.tree_scroll.selection()
-        if self.tree_fixed.selection() != selected:
-            self.tree_fixed.selection_set(selected)
+        if not selected:
+            return
+        mapped = tuple(self._id_map[s] for s in selected if s in self._id_map)
+        if mapped and self.tree_fixed.selection() != mapped:
+            self.tree_fixed.selection_set(mapped)
 
-    def insert_row(self, padre=None, texto=None, values=None, summary=None):
+    def tag_configure(self, tag, **kwargs):
+        self.tree_fixed.tag_configure(tag, **kwargs)
+        self.tree_scroll.tag_configure(tag, **kwargs)
+
+    def insert_row(self, padre=None, texto=None, values=None, summary=None, tag=None):
         """Método para insertar una fila en los Treeviews.
         Values: para detalle y
         summary: para línea de totales"""
+        _tags = (tag,) if tag else ()
         if self.fixed_columns:
             if values is not None:
                 fixed_values = values[: len(self.fixed_columns)]
@@ -6585,15 +6601,19 @@ class CustomTreeview:
 
                 # treeview simple
                 if texto is None and padre is None:
-                    self.tree_fixed.insert("", "end", values=fixed_values)
-                    self.tree_scroll.insert("", "end", values=scrollable_values)
+                    f = self.tree_fixed.insert("", "end", values=fixed_values, tags=_tags)
+                    s = self.tree_scroll.insert("", "end", values=scrollable_values, tags=_tags)
+                    self._id_map[f] = s
+                    self._id_map[s] = f
 
                 else:
                     # treeview tipo arbol
                     if padre is None:
-                        fixed = self.tree_fixed.insert("", "end", text=texto, values=fixed_values)
-                        scroll = self.tree_scroll.insert("", "end", values=scrollable_values)
+                        fixed = self.tree_fixed.insert("", "end", text=texto, values=fixed_values, tags=_tags)
+                        scroll = self.tree_scroll.insert("", "end", values=scrollable_values, tags=_tags)
                         self.arbol.update({texto: {"fixed": fixed, "scroll": scroll}})
+                        self._id_map[fixed] = scroll
+                        self._id_map[scroll] = fixed
 
                         self.tree_fixed.item(fixed, open=True)
                         self.tree_scroll.item(scroll, open=True)
@@ -6601,8 +6621,10 @@ class CustomTreeview:
                         fixed = self.arbol[padre]["fixed"]
                         scroll = self.arbol[padre]["scroll"]
 
-                        items = self.tree_fixed.insert(fixed, "end", values=fixed_values)
-                        posts = self.tree_scroll.insert(scroll, "end", values=scrollable_values)
+                        items = self.tree_fixed.insert(fixed, "end", values=fixed_values, tags=_tags)
+                        posts = self.tree_scroll.insert(scroll, "end", values=scrollable_values, tags=_tags)
+                        self._id_map[items] = posts
+                        self._id_map[posts] = items
 
         if self.fixed_row:
             if summary is not None:

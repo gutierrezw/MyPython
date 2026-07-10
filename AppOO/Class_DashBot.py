@@ -106,12 +106,14 @@ class ClassAgenteIA:
         modelo_config = json.loads(modelo["paramts"].decode("utf-8"))
         self.Sellumbral = modelo_config.get("umbral_sell", 0.50)
         self.SellumbralObserv = modelo_config.get("umbral_observacion", 0.35)
+        self.modo_etiquetado_sell = modelo_config.get("modo_etiquetado", False)
 
         # variables Modelo buy
         modelo = BDsystem.get_modelo_ia(modelo="modelo_buyv01")
         modelo_config = json.loads(modelo["paramts"].decode("utf-8"))
-        self.Buyumbral = modelo_config.get("umbral_sell", 0.50)
+        self.Buyumbral = modelo_config.get("umbral_buy", 0.65)
         self.BuyumbralObserv = modelo_config.get("umbral_observacion", 0.35)
+        self.modo_etiquetado_buy = modelo_config.get("modo_etiquetado", False)
 
         # Asigna Nombre Logging
         self.logger = logging.getLogger("ClassAgenteIA")
@@ -508,12 +510,25 @@ class ClassAgenteIA:
         try:
             from Class_BrowserFCI import BrowserFCI  # import diferido — evita ciclo con Modulos_Mysql
 
-            browser = BrowserFCI()
             path = os.environ.get("APPOO_TMP") or os.path.join(os.getcwd(), "tmp")
+            hoy = datetime.now().strftime("%Y%m%d")
+
+            # Guardia: si los archivos de hoy ya existen no abre el browser
+            bbva_existe = any(
+                f.startswith(f"BBVA_Comprobante_{hoy}") for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))
+            )
+            sant_existe = any(
+                f.startswith(f"movimientos-de-superfondos-{datetime.now().strftime('%Y-%m-%d')}") for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))
+            )
+            if bbva_existe and sant_existe:
+                self.logger.warning("Agente_ExtractoBBVA: archivos de hoy ya existen, omitiendo")
+                return
+
+            browser = BrowserFCI()
             descargados = []
-            if browser.download_bbva(desde=None, destino=path, prefijo="BBVA_Comprobante_"):
+            if not bbva_existe and browser.download_bbva(desde=None, destino=path, prefijo="BBVA_Comprobante_"):
                 descargados.append("BBVA")
-            if browser.download_santander(desde=None, destino=path, prefijo="movimientos-de-superfondos-"):
+            if not sant_existe and browser.download_santander(desde=None, destino=path, prefijo="movimientos-de-superfondos-"):
                 descargados.append("SANT")
             self.logger.warning(f"Agente_ExtractoBBVA: descargados={descargados}")
         except Exception as e:
@@ -2940,10 +2955,16 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             return df_filtrado
 
         try:
-            # Cargar modelo
+            # Modo etiquetado forzado: enviar sin cargar modelo (evita joblib.load innecesario)
+            if self.modo_etiquetado_sell:
+                for _, row in df_sell.iterrows():
+                    await self.oportunity_handler_sell(row=row, origen="system")
+                return
+
+            # Cargar modelo (solo cuando se necesita para predicción)
             self.IAsell.load_modelo(self.modelo_name)
 
-            # Sin modelo: enviar todas las oportunidades para etiquetar y ganar experiencia
+            # Sin modelo: enviar para etiquetado
             if self.IAsell.modelo is None:
                 self.logger.info("evaluar_oportunidades_sell_con_IA(): Sin modelo, enviando para etiquetado")
                 for _, row in df_sell.iterrows():
@@ -3006,6 +3027,22 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             # Filtrar por confianza mínima
             # aprobadas = resultado[resultado["confianza"] >= umbral].copy()
+
+    def _set_modo_etiquetado(self, tipo: str, valor: bool):
+        if tipo == "buy":
+            self.modo_etiquetado_buy = valor
+            modelo_name = self.modelo_name_buy
+        else:
+            self.modo_etiquetado_sell = valor
+            modelo_name = self.modelo_name
+        try:
+            modelo_data = BDsystem.get_modelo_ia(modelo_name)
+            if modelo_data and modelo_data.get("paramts"):
+                params = json.loads(modelo_data["paramts"].decode("utf-8"))
+                params["modo_etiquetado"] = valor
+                BDsystem.update_modelo_ia(modelo=modelo_name, paramts=json.dumps(params).encode("utf-8"))
+        except Exception as e:
+            self.logger.error(f"_set_modo_etiquetado(): {e}")
 
     def get_top_sell(self, top=5) -> list:
         def _tecnicos(row):
@@ -3105,7 +3142,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         try:
             # Para top10: siempre enviar (son los mejores para entrenar)
             # Para otros: verificar control de frecuencia y mejora de score
-            if origen != "top10" and not self.Agente_message_Manager_Buy(row):
+            if origen != "top10" and not self.modo_etiquetado_buy and not self.Agente_message_Manager_Buy(row):
                 return
 
             # Marcar como enviado y da formato al mensaje
@@ -3138,8 +3175,10 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             # Válida los mensajes ya enviados
             if hash_id in self.buy_enviados.keys():
-                # Update RepositorioOportunidades con nuevos Buy
-                insert = self.RepositorioOportunidades.actualizar_oportunidad_buy(
+                # En etiquetado: skip DB update + skip reenvío (ya fue procesado)
+                if self.modo_etiquetado_buy:
+                    return
+                self.RepositorioOportunidades.actualizar_oportunidad_buy(
                     hash_id=hash_id,
                     estado="pendiente",
                     origen=self.modelo_name_buy,
@@ -3177,8 +3216,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             # Si insert es True, significa que se insertó correctamente
             if insert:
-                # Verifica que esté TRUE mostrar las compras
-                if self.MostrarOpcionMenu_enTelegram == "Buy":
+                # En modo etiquetado: siempre enviar (bypassea el filtro de menú Telegram)
+                if self.MostrarOpcionMenu_enTelegram == "Buy" or self.modo_etiquetado_buy:
                     await self.opportunity_handler_message_buy(hash_id=hash_id, row=row, origen=origen)
         except Exception as e:
             self.logger.error(f"oportunity_handler_buy(): {e}")
@@ -3208,10 +3247,16 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             return df_filtrado
 
         try:
-            # Cargar modelo
+            # Modo etiquetado forzado: enviar sin cargar modelo (evita joblib.load innecesario)
+            if self.modo_etiquetado_buy:
+                for _, row in df_buy.iterrows():
+                    await self.oportunity_handler_buy(row=row, origen="system")
+                return
+
+            # Cargar modelo solo cuando se necesita para predicción
             self.IAbuy.load_modelo(self.modelo_name_buy)
 
-            # Sin modelo: enviar todas las oportunidades para etiquetar y ganar experiencia
+            # Sin modelo: enviar para etiquetado
             if self.IAbuy.modelo is None:
                 self.logger.info("evaluar_oportunidades_buy_con_IA(): Sin modelo, enviando para etiquetado")
                 for _, row in df_buy.iterrows():

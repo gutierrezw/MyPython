@@ -7,6 +7,7 @@
         "database": "bdinv"
     },
     "tmp_path": "..\\tmp",
+    "obsidian_vault": "",
     "tabs": {
         "Crypto": true,
         "Stock": false,

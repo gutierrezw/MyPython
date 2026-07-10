@@ -428,14 +428,13 @@ class Debugging:
 
     def _apply_saved_agents(self):
         """Carga agents_config.json y aplica estado active/inactive sobre AGENTES_SCHEDULE."""
-        saved = read_json_tmp("agents_config")
+        saved = read_json_tmp("ui_state").get("agents_config", {})
         for name, active in saved.items():
             if name in AGENTES_SCHEDULE:
                 AGENTES_SCHEDULE[name]["active"] = bool(active)
 
     def _apply_saved_levels(self):
-        """Carga logger_levels.json y aplica los niveles guardados sobre los defaults."""
-        saved = read_json_tmp("logger_levels")
+        saved = read_json_tmp("ui_state").get("logger_levels", {})
         for key, lvl_name in saved.items():
             if key in self.logger:
                 level = getattr(logging, lvl_name, None)

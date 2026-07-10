@@ -1,6 +1,7 @@
 from Modulos_python import (
     tk,
     ttk,
+    os,
     sys,
     datetime,
     threading,
@@ -17,6 +18,7 @@ from Modulos_python import (
     logging,
     mpatches,
     filedialog,
+    subprocess,
 )
 from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, IaTraceScreen, MarketScreen
 from Modulos_Utilitarios import AGENTES_SCHEDULE, documentar_estructura, read_json_tmp, write_json_tmp
@@ -1456,7 +1458,9 @@ class system_status(tk.Frame):
 
             def _save_levels():
                 data = {tree.item(iid, "text"): tree.set(iid, "Level") for iid in tree.get_children()}
-                write_json_tmp("logger_levels", data)
+                _ui = read_json_tmp("ui_state")
+                _ui["logger_levels"] = data
+                write_json_tmp("ui_state", _ui)
 
             def _set_level(level_name):
                 sel = tree.selection()
@@ -1590,7 +1594,9 @@ class system_status(tk.Frame):
 
             def _save_agents():
                 data = {name: cfg["active"] for name, cfg in AGENTES_SCHEDULE.items()}
-                write_json_tmp("agents_config", data)
+                _ui = read_json_tmp("ui_state")
+                _ui["agents_config"] = data
+                write_json_tmp("ui_state", _ui)
 
             def _toggle_agent(iid):
                 name = tree.item(iid, "text")
@@ -2508,142 +2514,45 @@ class system_status(tk.Frame):
         self.rv.draw()
 
     def _modificar_parametros_modelo(self, tipo_modelo="sell"):
-        """
-        Función unificada para modificar parámetros de modelos IA (Sell/Buy).
-
-        Args:
-            tipo_modelo: "sell" o "buy"
-        """
-
         def guardar():
-            """Guarda los cambios en BD"""
             try:
-                nombre = entry_nombre.get().strip()
-                tipo = entry_tipo.get().strip()
-                define = entry_define.get().strip()
                 params_str = text_params.get("1.0", tk.END).strip()
-                docs_str = text_docs.get("1.0", tk.END).strip()
-
-                # Validar JSON de parámetros
                 try:
-                    json.loads(params_str)
+                    params = json.loads(params_str)
                 except json.JSONDecodeError as e:
                     msg = MyMessageBox(config_window)
-                    msg.showinfo("Error", f"JSON de parámetros inválido:\n{e}")
+                    msg.showinfo("Error", f"JSON inválido:\n{e}")
                     return
 
-                params_bytes = params_str.encode("utf-8")
-                docs_bytes = docs_str.encode("utf-8") if docs_str else None
+                params["modo_etiquetado"] = bool(var_etiquetado.get())
+                params_bytes = json.dumps(params, indent=2).encode("utf-8")
 
                 if modelo_data:
-                    success = BDsystem.update_modelo_ia(
-                        modelo=modelo_name,
-                        nombre=nombre,
-                        tipo_modelo=tipo,
-                        paramts=params_bytes,
-                        documents=docs_bytes,
-                        define_modelo=define,
-                    )
+                    success = BDsystem.update_modelo_ia(modelo=modelo_name, paramts=params_bytes)
                 else:
                     success = BDsystem.insert_modelo_ia(
                         modelo=modelo_name,
-                        nombre=nombre,
-                        tipo_modelo=tipo,
+                        nombre=default_nombre,
+                        tipo_modelo="RandomForest",
                         paramts=params_bytes,
-                        documents=docs_bytes,
-                        define_modelo=define,
+                        define_modelo=default_define,
                     )
 
                 if success:
                     msg = MyMessageBox(config_window)
-                    msg.showinfo("Éxito", "Configuración guardada correctamente")
+                    msg.showinfo("Éxito", "Parámetros guardados correctamente")
                     on_close()
                 else:
                     msg = MyMessageBox(config_window)
-                    msg.showinfo("Error", "No se pudo guardar la configuración")
+                    msg.showinfo("Error", "No se pudo guardar")
             except Exception as e:
-                print(f"guardar(): {e}")
                 msg = MyMessageBox(config_window)
                 msg.showinfo("Error", f"Error al guardar:\n{e}")
-
-        def cancelar():
-            on_close()
 
         def on_close():
             window_attr = f"_modelo_{tipo_modelo}_config_window"
             setattr(self, window_attr, None)
             config_window.destroy()
-
-        def cargar_documento():
-            """Carga documentación desde archivo"""
-            filepath = filedialog.askopenfilename(
-                parent=config_window,
-                title="Seleccionar documento",
-                filetypes=[("Markdown", "*.md"), ("Archivos de texto", "*.txt"), ("Todos", "*.*")],
-            )
-            if filepath:
-                try:
-                    with open(filepath, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    text_docs.delete("1.0", tk.END)
-                    text_docs.insert("1.0", content)
-                except Exception as e:
-                    msg = MyMessageBox(config_window)
-                    msg.showinfo("Error", f"Error al cargar archivo:\n{e}")
-
-        def ver_documentacion():
-            """Abre ventana para visualizar documentación"""
-            docs_content = text_docs.get("1.0", tk.END).strip()
-            if not docs_content:
-                msg = MyMessageBox(config_window)
-                msg.showinfo("Info", "No hay documentación cargada")
-                return
-
-            # Crear ventana de visualización
-            doc_window = tk.Toplevel(config_window)
-            doc_window.title(f"Documentación - {modelo_name}")
-            doc_window.geometry("700x500")
-            doc_window.configure(bg=self.bgcolor)
-
-            # Frame con scroll
-            doc_frame = tk.Frame(doc_window, bg=self.bgcolor)
-            doc_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-            # Scrollbar
-            scrollbar = tk.Scrollbar(doc_frame)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-            # Text widget para mostrar documentación
-            doc_text = tk.Text(
-                doc_frame,
-                wrap=tk.WORD,
-                bg=entry_bg,
-                fg=self.fgcolor,
-                font=("Consolas", 10),
-                yscrollcommand=scrollbar.set,
-            )
-            doc_text.pack(fill=tk.BOTH, expand=True)
-            scrollbar.config(command=doc_text.yview)
-
-            # Insertar contenido
-            doc_text.insert("1.0", docs_content)
-            doc_text.configure(state="disabled")  # Solo lectura
-
-            # Botón cerrar
-            ttk.Button(doc_window, text="Cerrar", command=doc_window.destroy, width=10).pack(pady=10)
-
-        def crear_fila(parent, label_text, default_value="", readonly=False):
-            """Helper para crear filas de formulario"""
-            frame = tk.Frame(parent, bg=self.bgcolor)
-            frame.pack(fill=tk.X, pady=4)
-            lbl = tk.Label(frame, text=label_text, width=20, anchor="w", bg=self.bgcolor, fg=label_fg)
-            lbl.pack(side=tk.LEFT)
-            entry = tk.Entry(frame, width=53, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor)
-            entry.insert(0, default_value)
-            if readonly:
-                entry.configure(state="readonly")
-            entry.pack(side=tk.LEFT, padx=5)
-            return entry
 
         # Verificar si ya existe ventana abierta
         window_attr = f"_modelo_{tipo_modelo}_config_window"
@@ -2657,26 +2566,9 @@ class system_status(tk.Frame):
             except:
                 setattr(self, window_attr, None)
 
-        # Colores desde DataHub
         entry_bg = self.cchart.get("fondo_fig", self.cgcolor)
         label_fg = self.cchart.get("texto", self.fgcolor)
 
-        # Crear ventana Toplevel
-        config_window = tk.Toplevel(self.system)
-        titulo = "Configuración Modelo IA - Sell" if tipo_modelo == "sell" else "Configuración Modelo IA - Buy"
-        config_window.title(titulo)
-        config_window.geometry("530x450")
-        config_window.configure(bg=self.bgcolor)
-        config_window.resizable(False, False)
-        setattr(self, window_attr, config_window)
-
-        # Posicionar ventana
-        config_window.update_idletasks()
-        x = self.system.winfo_x() + self.system.winfo_width() + 10
-        y = self.system.winfo_y() + 380
-        config_window.geometry(f"+{x}+{y}")
-
-        # Obtener modelo según tipo
         if tipo_modelo == "sell":
             modelo = ModeloOportunidadesSell()
             default_nombre = "Modelo Sell Oportunidades"
@@ -2689,8 +2581,9 @@ class system_status(tk.Frame):
                 "test_size": 0.3,
                 "umbral_sell": 0.65,
                 "umbral_observacion": 0.35,
+                "modo_etiquetado": False,
             }
-        elif tipo_modelo == "buy":
+        else:
             modelo = ModeloOportunidadesBuy()
             default_nombre = "Modelo Buy Oportunidades"
             default_define = "buy_classifier"
@@ -2702,91 +2595,118 @@ class system_status(tk.Frame):
                 "test_size": 0.3,
                 "umbral_buy": 0.65,
                 "umbral_observacion": 0.35,
+                "modo_etiquetado": False,
             }
 
         modelo_name = modelo.modelo_name
-
-        # Cargar datos existentes de BD
         modelo_data = BDsystem.get_modelo_ia(modelo_name)
 
-        # Frame principal
+        titulo = "Parámetros Modelo IA - Sell" if tipo_modelo == "sell" else "Parámetros Modelo IA - Buy"
+        config_window = tk.Toplevel(self.system)
+        config_window.title(titulo)
+        config_window.geometry("420x360")
+        config_window.configure(bg=self.bgcolor)
+        config_window.resizable(False, False)
+        setattr(self, window_attr, config_window)
+
+        config_window.update_idletasks()
+        x = self.system.winfo_x() + self.system.winfo_width() + 10
+        y = self.system.winfo_y() + 380
+        config_window.geometry(f"+{x}+{y}")
+
         main_frame = tk.Frame(config_window, bg=self.bgcolor, padx=15, pady=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Campos del formulario
-        entry_modelo = crear_fila(main_frame, "Modelo:", modelo_name, readonly=True)
-        entry_nombre = crear_fila(
-            main_frame,
-            "Nombre:",
-            modelo_data.get("Nombre", default_nombre) if modelo_data else default_nombre,
-        )
-        entry_tipo = crear_fila(
-            main_frame,
-            "Tipo Modelo:",
-            modelo_data.get("tipo_modelo", "RandomForest") if modelo_data else "RandomForest",
-        )
-        entry_define = crear_fila(
-            main_frame,
-            "Define Modelo:",
-            modelo_data.get("define_modelo", default_define) if modelo_data else default_define,
-        )
+        # Fila modelo (readonly)
+        row_id = tk.Frame(main_frame, bg=self.bgcolor)
+        row_id.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(row_id, text="Modelo:", width=16, anchor="w", bg=self.bgcolor, fg=label_fg).pack(side=tk.LEFT)
+        entry_id = tk.Entry(row_id, width=30, bg=entry_bg, fg=self.fgcolor)
+        entry_id.insert(0, modelo_name)
+        entry_id.configure(state="readonly")
+        entry_id.pack(side=tk.LEFT, padx=5)
 
-        # Campo: Parámetros (JSON)
+        # Fila modo etiquetado
+        _etiq_inicial = False
+        if modelo_data and modelo_data.get("paramts"):
+            try:
+                _etiq_inicial = bool(json.loads(modelo_data["paramts"].decode("utf-8")).get("modo_etiquetado", False))
+            except Exception:
+                pass
+        var_etiquetado = tk.BooleanVar(value=_etiq_inicial)
+
+        row_etiq = tk.Frame(main_frame, bg=self.bgcolor)
+        row_etiq.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(row_etiq, text="Modo Etiquetado:", width=16, anchor="w", bg=self.bgcolor, fg=label_fg).pack(side=tk.LEFT)
+        chk = tk.Checkbutton(
+            row_etiq,
+            variable=var_etiquetado,
+            text="Activo (el modelo no filtra — todas las oportunidades van a Telegram)",
+            bg=self.bgcolor,
+            fg=label_fg,
+            selectcolor=self.bgcolor,
+            activebackground=self.bgcolor,
+            font=("TkDefaultFont", 8),
+        )
+        chk.pack(side=tk.LEFT, padx=5)
+
+        # Parámetros JSON
         row_params = tk.Frame(main_frame, bg=self.bgcolor)
-        row_params.pack(fill=tk.X, pady=4)
-        tk.Label(row_params, text="Parámetros (JSON):", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(
+        row_params.pack(fill=tk.BOTH, expand=True, pady=4)
+        tk.Label(row_params, text="Parámetros (JSON):", width=16, anchor="nw", bg=self.bgcolor, fg=label_fg).pack(
             side=tk.LEFT, anchor=tk.N
         )
 
+        params_frame = tk.Frame(row_params, bg=self.bgcolor)
+        params_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+
+        scrollbar = tk.Scrollbar(params_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
         text_params = tk.Text(
-            row_params, width=40, height=7, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor
+            params_frame,
+            width=32,
+            height=10,
+            bg=entry_bg,
+            fg=self.fgcolor,
+            insertbackground=self.fgcolor,
+            yscrollcommand=scrollbar.set,
         )
         if modelo_data and modelo_data.get("paramts"):
             try:
                 params = json.loads(modelo_data["paramts"].decode("utf-8"))
+                params.setdefault("modo_etiquetado", False)
                 text_params.insert("1.0", json.dumps(params, indent=2))
             except:
                 text_params.insert("1.0", json.dumps(default_params, indent=2))
         else:
             text_params.insert("1.0", json.dumps(default_params, indent=2))
-        text_params.pack(side=tk.LEFT, padx=5)
+        text_params.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=text_params.yview)
 
-        # Campo: Documentación (BLOB)
-        row_docs = tk.Frame(main_frame, bg=self.bgcolor)
-        row_docs.pack(fill=tk.X, pady=4)
-        tk.Label(row_docs, text="Documentación:", width=20, anchor="w", bg=self.bgcolor, fg=label_fg).pack(
-            side=tk.LEFT, anchor=tk.N
-        )
-
-        docs_container = tk.Frame(row_docs, bg=self.bgcolor)
-        docs_container.pack(side=tk.LEFT, padx=5)
-
-        text_docs = tk.Text(
-            docs_container, width=30, height=4, bg=entry_bg, fg=self.fgcolor, insertbackground=self.fgcolor
-        )
-        if modelo_data and modelo_data.get("documents"):
-            try:
-                docs = modelo_data["documents"].decode("utf-8")
-                text_docs.insert("1.0", docs)
-            except:
-                pass
-        text_docs.pack(side=tk.LEFT)
-
-        # Botones Import y View para documentación
-        docs_btn_frame = tk.Frame(docs_container, bg=self.bgcolor)
-        docs_btn_frame.pack(side=tk.LEFT, padx=5)
-        ttk.Button(docs_btn_frame, text="Import", command=cargar_documento, width=8).pack(pady=2)
-        ttk.Button(docs_btn_frame, text="View", command=ver_documentacion, width=8).pack(pady=2)
-
-        # Botones Guardar/Cancelar
         btn_frame = tk.Frame(main_frame, bg=self.bgcolor)
-        btn_frame.pack(fill=tk.X, pady=(20, 10))
-
-        # Botones centrados
-        ttk.Button(btn_frame, text="Guardar", command=guardar, width=10).pack(side=tk.LEFT, padx=(130, 10))
-        ttk.Button(btn_frame, text="Cancel", command=cancelar, width=10).pack(side=tk.LEFT)
+        btn_frame.pack(fill=tk.X, pady=(12, 0))
+        ttk.Button(btn_frame, text="Guardar", command=guardar, width=10).pack(side=tk.LEFT, padx=(80, 10))
+        ttk.Button(btn_frame, text="Cancelar", command=on_close, width=10).pack(side=tk.LEFT)
 
         config_window.protocol("WM_DELETE_WINDOW", on_close)
+
+    def _abrir_doc_obsidian(self):
+        vault = os.environ.get("APPOO_OBSIDIAN_VAULT", "")
+        if not vault:
+            return
+        url = f"obsidian://open?vault={vault}&file=20-Proyecto%2Fref-modelos-ia"
+        try:
+            subprocess.Popen(
+                ["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", f'Start-Process "{url}"'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except Exception as e:
+            msg = MyMessageBox(self.system)
+            msg.showinfo("Error", f"No se pudo abrir la documentación:\n{e}")
 
     def _ia_feed_refresh(self):
         """Actualiza el teletipo IA (panel derecho) con las últimas decisiones de ia_trace."""
@@ -3391,7 +3311,37 @@ class system_status(tk.Frame):
                 width=10,
                 style="TButton",
             )
-            config_btn.pack(side=tk.LEFT)
+            config_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+            def _apply_estado_etiq_sell(activo):
+                if activo:
+                    etiq_btn.config(text="Etiquetando", bg="#cc0000", fg="white", activebackground="#aa0000")
+                else:
+                    etiq_btn.config(text="Modelo ON", bg=self.cgcolor, fg=self.fgcolor, activebackground=self.cgcolor)
+
+            def _toggle_etiquetado_sell():
+                if chatbot is None:
+                    return
+                nuevo = not chatbot.modo_etiquetado_sell
+                chatbot._set_modo_etiquetado("sell", nuevo)
+                _apply_estado_etiq_sell(nuevo)
+
+            etiq_btn = tk.Button(
+                btn_frame, text="Modelo ON", command=_toggle_etiquetado_sell,
+                width=10, bg=self.cgcolor, fg=self.fgcolor,
+                activebackground=self.cgcolor, relief=tk.FLAT, cursor="hand2",
+            )
+            etiq_btn.pack(side=tk.LEFT, padx=(0, 5))
+            if chatbot is not None and chatbot.modo_etiquetado_sell:
+                _apply_estado_etiq_sell(True)
+
+            ttk.Button(
+                btn_frame,
+                text="Ver Docs",
+                command=self._abrir_doc_obsidian,
+                width=8,
+                style="TButton",
+            ).pack(side=tk.LEFT)
 
             # === SECCIÓN DERECHA: Oportunidades Actuales ===
             opp_label = ttk.Label(
@@ -3942,7 +3892,37 @@ class system_status(tk.Frame):
                 width=10,
                 style="TButton",
             )
-            config_btn.pack(side=tk.LEFT)
+            config_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+            def _apply_estado_etiq_buy(activo):
+                if activo:
+                    etiq_btn.config(text="Etiquetando", bg="#cc0000", fg="white", activebackground="#aa0000")
+                else:
+                    etiq_btn.config(text="Modelo ON", bg=self.cgcolor, fg=self.fgcolor, activebackground=self.cgcolor)
+
+            def _toggle_etiquetado_buy():
+                if chatbot is None:
+                    return
+                nuevo = not chatbot.modo_etiquetado_buy
+                chatbot._set_modo_etiquetado("buy", nuevo)
+                _apply_estado_etiq_buy(nuevo)
+
+            etiq_btn = tk.Button(
+                btn_frame, text="Modelo ON", command=_toggle_etiquetado_buy,
+                width=10, bg=self.cgcolor, fg=self.fgcolor,
+                activebackground=self.cgcolor, relief=tk.FLAT, cursor="hand2",
+            )
+            etiq_btn.pack(side=tk.LEFT, padx=(0, 5))
+            if chatbot is not None and chatbot.modo_etiquetado_buy:
+                _apply_estado_etiq_buy(True)
+
+            ttk.Button(
+                btn_frame,
+                text="Ver Docs",
+                command=self._abrir_doc_obsidian,
+                width=8,
+                style="TButton",
+            ).pack(side=tk.LEFT)
 
             # === SECCIÓN DERECHA: Oportunidades Actuales ===
             opp_label = ttk.Label(

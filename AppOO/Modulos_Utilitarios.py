@@ -23,7 +23,11 @@ from Modulos_python import (
     math,
     filedialog,
     messagebox,
+    subprocess,
+    threading,
 )
+
+_SCHEDULE_LOCK = threading.Lock()
 
 AGENTES_SCHEDULE = {
     "Agente_MarketScreener": {"intervalo": 86400, "desc": "Discovery + Yahoo (diario)", "active": True, "nivel": 1},
@@ -159,7 +163,8 @@ def wait_rate(intervalo_segundos: int, persist: bool = False, initial_delay: int
             ahora = time.time()
             if func.last_run == 0:
                 if persist:
-                    func.last_run = read_json_tmp(_FILE).get(func.__name__, 0)
+                    with _SCHEDULE_LOCK:
+                        func.last_run = read_json_tmp(_FILE).get(func.__name__, 0)
                 if func.last_run == 0 and initial_delay > 0:
                     func.last_run = ahora - intervalo_segundos + initial_delay
             transcurrido = ahora - func.last_run
@@ -175,9 +180,10 @@ def wait_rate(intervalo_segundos: int, persist: bool = False, initial_delay: int
             if func.__name__ in AGENTES_SCHEDULE:
                 AGENTES_SCHEDULE[func.__name__]["run_count"] = AGENTES_SCHEDULE[func.__name__].get("run_count", 0) + 1
             if persist:
-                data = read_json_tmp(_FILE)
-                data[func.__name__] = ahora
-                write_json_tmp(_FILE, data)
+                with _SCHEDULE_LOCK:
+                    data = read_json_tmp(_FILE)
+                    data[func.__name__] = ahora
+                    write_json_tmp(_FILE, data)
             wrapper._overdue = False
             return resultado
 
@@ -1116,189 +1122,31 @@ def load_vehiculo_params(vehiculo: str, cache: dict, plan_inversion) -> dict:
     return cache.get(vehiculo)
 
 
-_doc_windows: dict = {}  # singleton: evita abrir la misma ventana dos veces
+_OBSIDIAN_DOCS_MAP = {
+    "DataHub": "20-Proyecto/ref-datahub",
+    "Cache": "20-Proyecto/ref-cache",
+    "BuySell": "20-Proyecto/ref-oportunidades",
+    "Rebalanceo": "20-Proyecto/design-rebalanceo",
+    "Screener": "20-Proyecto/spec-consenso",
+}
 
 
-def documentar_estructura(nombre_estructura: str, parent, colors: dict) -> None:
-    """Abre popup para ver/editar/guardar documentación técnica de una estructura.
-
-    Patrón de uso desde cualquier módulo sin depender de instancias:
-        from Modulos_Utilitarios import documentar_estructura
-        documentar_estructura("Screener", self, self.colors)
-
-    Args:
-        nombre_estructura: clave de la estructura (ej: "Screener", "DataHub", "BuySell").
-        parent           : widget tk padre del Toplevel.
-        colors           : dict con clave "bgcolor" para los colores de la ventana.
-    """
-    from Modulos_Mysql import (
-        BDsystem,
-    )  # import diferido — evita ciclo: Modulos_Utilitarios→Modulos_Mysql→Modulos_Utilitarios
-
-    bgcolor = colors.get("bgcolor", "black") if colors else "black"
-    fgcolor = "#cccccc"
-    entry_bg = "#2d2d2d"
-
-    def guardar():
-        try:
-            docs_str = text_docs.get("1.0", tk.END).strip()
-            descripcion = entry_descripcion.get().strip()
-            docs_bytes = docs_str.encode("utf-8") if docs_str else None
-            modelo_name = f"estructura_{nombre_estructura.lower()}"
-            if modelo_data:
-                success = BDsystem.update_modelo_ia(
-                    modelo=modelo_name,
-                    nombre=f"Estructura {nombre_estructura}",
-                    tipo_modelo="documentacion",
-                    paramts=b"{}",
-                    documents=docs_bytes,
-                    define_modelo=descripcion,
-                )
-            else:
-                success = BDsystem.insert_modelo_ia(
-                    modelo=modelo_name,
-                    nombre=f"Estructura {nombre_estructura}",
-                    tipo_modelo="documentacion",
-                    paramts=b"{}",
-                    documents=docs_bytes,
-                    define_modelo=descripcion,
-                )
-            if success:
-                messagebox.showinfo("Éxito", "Documentación guardada correctamente", parent=doc_window)
-            else:
-                messagebox.showerror("Error", "No se pudo guardar la documentación", parent=doc_window)
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al guardar:\n{e}", parent=doc_window)
-
-    def on_close():
-        _doc_windows.pop(nombre_estructura, None)
-        doc_window.destroy()
-
-    def cargar_archivo():
-        filepath = filedialog.askopenfilename(
-            parent=doc_window,
-            title="Seleccionar documento",
-            filetypes=[("Markdown", "*.md"), ("Archivos de texto", "*.txt"), ("Todos", "*.*")],
+def documentar_estructura(nombre_estructura: str, parent=None, colors: dict = None) -> None:
+    vault = os.environ.get("APPOO_OBSIDIAN_VAULT", "")
+    if not vault:
+        return
+    file_path = _OBSIDIAN_DOCS_MAP.get(nombre_estructura, "00-Home")
+    url = f"obsidian://open?vault={vault}&file={file_path.replace('/', '%2F')}"
+    try:
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", f'Start-Process "{url}"'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        if filepath:
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    content = f.read()
-                text_docs.delete("1.0", tk.END)
-                text_docs.insert("1.0", content)
-            except Exception as e:
-                messagebox.showerror("Error", f"Error al cargar archivo:\n{e}", parent=doc_window)
-
-    def ver_documentacion():
-        docs_content = text_docs.get("1.0", tk.END).strip()
-        if not docs_content:
-            messagebox.showinfo("Info", "No hay documentación cargada", parent=doc_window)
-            return
-        view_win = tk.Toplevel(doc_window)
-        view_win.title(f"Documentación — {nombre_estructura}")
-        view_win.geometry("800x600")
-        view_win.configure(bg=bgcolor)
-        view_frame = tk.Frame(view_win, bg=bgcolor)
-        view_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        sb = tk.Scrollbar(view_frame)
-        sb.pack(side=tk.RIGHT, fill=tk.Y)
-        doc_text = tk.Text(
-            view_frame,
-            wrap=tk.WORD,
-            bg="#1e1e1e",
-            fg=fgcolor,
-            font=("Consolas", 10),
-            yscrollcommand=sb.set,
-        )
-        doc_text.pack(fill=tk.BOTH, expand=True)
-        sb.config(command=doc_text.yview)
-        doc_text.insert("1.0", docs_content)
-        doc_text.config(state=tk.DISABLED)
-        ttk.Button(view_win, text="Cerrar", command=view_win.destroy).pack(pady=10)
-
-    # Singleton: si ya hay ventana abierta para esta estructura, la trae al frente
-    existing = _doc_windows.get(nombre_estructura)
-    if existing:
-        try:
-            existing.lift()
-            return
-        except tk.TclError:
-            _doc_windows.pop(nombre_estructura, None)
-
-    doc_window = tk.Toplevel(parent)
-    doc_window.title(f"Documentación — {nombre_estructura}")
-    doc_window.geometry("700x550")
-    doc_window.configure(bg=bgcolor)
-    doc_window.protocol("WM_DELETE_WINDOW", on_close)
-    _doc_windows[nombre_estructura] = doc_window
-
-    modelo_name = f"estructura_{nombre_estructura.lower()}"
-    modelo_data = BDsystem.get_modelo_ia(modelo_name)
-
-    main_frame = tk.Frame(doc_window, bg=bgcolor, padx=15, pady=10)
-    main_frame.pack(fill=tk.BOTH, expand=True)
-
-    tk.Label(
-        main_frame,
-        text=f"Documentación: {nombre_estructura}",
-        font=("TkDefaultFont", 12, "bold"),
-        bg=bgcolor,
-        fg=fgcolor,
-    ).pack(anchor=tk.W, pady=(0, 10))
-
-    desc_frame = tk.Frame(main_frame, bg=bgcolor)
-    desc_frame.pack(fill=tk.X, pady=5)
-    tk.Label(desc_frame, text="Descripción:", bg=bgcolor, fg=fgcolor, width=12, anchor=tk.W).pack(side=tk.LEFT)
-    entry_descripcion = tk.Entry(desc_frame, bg=entry_bg, fg=fgcolor, insertbackground=fgcolor)
-    entry_descripcion.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-    _default_desc = {
-        "DataHub": "Hub central de datos en tiempo real para activos financieros",
-        "BuySell": "Gestor de señales de compra/venta y dividendos",
-        "Rebalanceo": "Motor de rebalanceo y optimización de cartera",
-        "Screener": "Modelo de señales de consenso — cartera de dividendos",
-    }
-    if modelo_data and modelo_data.get("define_modelo"):
-        entry_descripcion.insert(0, modelo_data["define_modelo"])
-    else:
-        entry_descripcion.insert(0, _default_desc.get(nombre_estructura, f"Estructura {nombre_estructura}"))
-
-    docs_frame = tk.Frame(main_frame, bg=bgcolor)
-    docs_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-
-    docs_header = tk.Frame(docs_frame, bg=bgcolor)
-    docs_header.pack(fill=tk.X)
-    tk.Label(docs_header, text="Documentación Técnica:", bg=bgcolor, fg=fgcolor).pack(side=tk.LEFT, anchor=tk.W)
-    ttk.Button(docs_header, text="View", command=ver_documentacion, width=8).pack(side=tk.RIGHT, padx=2)
-    ttk.Button(docs_header, text="Import", command=cargar_archivo, width=8).pack(side=tk.RIGHT, padx=2)
-
-    text_frame = tk.Frame(docs_frame, bg=bgcolor)
-    text_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-    scrollbar = tk.Scrollbar(text_frame)
-    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    text_docs = tk.Text(
-        text_frame,
-        height=18,
-        bg=entry_bg,
-        fg=fgcolor,
-        insertbackground=fgcolor,
-        font=("Consolas", 9),
-        wrap=tk.WORD,
-        yscrollcommand=scrollbar.set,
-    )
-    text_docs.pack(fill=tk.BOTH, expand=True)
-    scrollbar.config(command=text_docs.yview)
-
-    if modelo_data and modelo_data.get("documents"):
-        try:
-            text_docs.insert("1.0", modelo_data["documents"].decode("utf-8"))
-        except Exception:
-            pass
-
-    btn_frame = tk.Frame(main_frame, bg=bgcolor)
-    btn_frame.pack(fill=tk.X, pady=(10, 0))
-    ttk.Button(btn_frame, text="Guardar", command=guardar, width=10).pack(side=tk.LEFT, padx=5)
-    ttk.Button(btn_frame, text="Cancelar", command=on_close, width=10).pack(side=tk.LEFT, padx=5)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

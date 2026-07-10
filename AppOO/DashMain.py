@@ -35,6 +35,7 @@ def _early_configure_db():
             tmp_path = os.path.normpath(os.path.join(base, tmp_path))
         os.makedirs(tmp_path, exist_ok=True)
         os.environ["APPOO_TMP"] = tmp_path
+        os.environ["APPOO_OBSIDIAN_VAULT"] = cfg.get("obsidian_vault", "")
 
 
 _early_configure_db()
@@ -3030,6 +3031,7 @@ class DashMain:
 
                 tree.tag_configure("green", background="green", foreground="white")
                 tree.tag_configure("red", background="red", foreground="white")
+                tree.tag_configure("blue", background="#1565C0", foreground="white")
             except Exception as e:
                 print("treeview_ordenes(): {}".format(e))
 
@@ -3103,7 +3105,7 @@ class DashMain:
             try:
                 for i, orden in enumerate(_load_stock_orders_today()):
                     st = orden["status"]
-                    tag = "green" if "fill" in st.lower() else "red" if "cancel" in st.lower() else ""
+                    tag = "red" if "cancel" in st.lower() else "blue" if orden["side"].upper() == "SELL" else "green"
                     price = orden["price"]
                     qty = orden["quantity"]
                     jd = orden.get("json_detalle") or ""
@@ -3139,7 +3141,7 @@ class DashMain:
                 for i, row in enumerate(rows):
                     r = dict(zip(ix, row))
                     st = r.get("status", "")
-                    tag = "green" if "fill" in st.lower() else "red" if "cancel" in st.lower() else ""
+                    tag = "red" if "cancel" in st.lower() else "blue" if r.get("side", "").upper() == "SELL" else "green"
                     price = r.get("price", "")
                     qty = r.get("quantity", "")
                     tree.insert(
@@ -4154,6 +4156,8 @@ class DashMain:
                     lambda event: item_selected(event, tree.tree_fixed, windows),
                 )
 
+                tree.tag_configure("country_hdr", background="#1A3A5C", foreground="white")
+
                 # Agrupar posiciones por país
                 strategy = self.Estrategia.read()
                 d_country = {}
@@ -4183,6 +4187,7 @@ class DashMain:
                     tree.insert_row(
                         texto=country,
                         padre=None,
+                        tag="country_hdr",
                         values=[
                             country,
                             "",
@@ -5819,9 +5824,12 @@ class DashMain:
                 Value_botCrypto = DataHub.manager_GyP["BotCrypto"].get("Value", 0)
                 Gyp_botCrypto = capital_botCrypto - Value_botCrypto
 
+                _kpi_cache = read_json_tmp("kpi_snapshot")
+                _kpi_dirty = False
+
                 stock_dgyp = DataHub.manager_GyP.get("Stock", {}).get("dGyP", 0)
                 if stock_dgyp == 0 and not DataHub.ws_stock_connected:
-                    stock_dgyp = read_json_tmp("dgyp_last").get("Stock", 0)
+                    stock_dgyp = _kpi_cache.get("stock_dgyp", 0)
                 ganancias_dia = (
                     stock_dgyp
                     + DataHub.manager_GyP.get("Crypto", {}).get("dGyP", 0)
@@ -5842,18 +5850,19 @@ class DashMain:
                 low_limit_gyp = (_inf * _mul) * limit_gyp
                 high_limit_gyp = _mul * limit_gyp
 
-                total_debit = DataHub.manager_GyP.get("Stock", {}).get("Debit", 0) + DataHub.manager_GyP.get(
-                    "Crypto", {}
-                ).get("Debit", 0)
-                total_debitmax = DataHub.manager_GyP.get("Stock", {}).get("DebitMax", 0) + DataHub.manager_GyP.get(
-                    "Crypto", {}
-                ).get("DebitMax", 0)
-                if total_debit == 0 and not DataHub.ws_stock_connected:
-                    _debt_cache = read_json_tmp("debt_last")
-                    total_debit = _debt_cache.get("total_debit", 0)
-                    total_debitmax = _debt_cache.get("total_debitmax", 1)
-                elif total_debit > 0:
-                    write_json_tmp("debt_last", {"total_debit": total_debit, "total_debitmax": total_debitmax})
+                stock_debit = DataHub.manager_GyP.get("Stock", {}).get("Debit", 0)
+                stock_debitmax = DataHub.manager_GyP.get("Stock", {}).get("DebitMax", 0)
+                crypto_debit = DataHub.manager_GyP.get("Crypto", {}).get("Debit", 0)
+                crypto_debitmax = DataHub.manager_GyP.get("Crypto", {}).get("DebitMax", 0)
+                if stock_debit == 0 and not DataHub.ws_stock_connected:
+                    stock_debit = _kpi_cache.get("stock_debit", 0)
+                    stock_debitmax = _kpi_cache.get("stock_debitmax", 1)
+                elif stock_debit > 0:
+                    _kpi_cache["stock_debit"] = stock_debit
+                    _kpi_cache["stock_debitmax"] = stock_debitmax
+                    _kpi_dirty = True
+                total_debit = stock_debit + crypto_debit
+                total_debitmax = stock_debitmax + crypto_debitmax
 
                 # Leverage: deuda total como % del capital (máx referencia 30%)
                 leverage_pct = (total_debit / max(costo_base, 1)) * 100
@@ -5875,9 +5884,13 @@ class DashMain:
 
                 # Dividendos YTD vs proyección anual (extrapolación por mes)
                 if div_ytd == 0:
-                    div_ytd = read_json_tmp("div_ytd_last").get("div_ytd", 0)
+                    div_ytd = _kpi_cache.get("div_ytd", 0)
                 elif div_ytd > 0:
-                    write_json_tmp("div_ytd_last", {"div_ytd": div_ytd})
+                    _kpi_cache["div_ytd"] = div_ytd
+                    _kpi_dirty = True
+
+                if _kpi_dirty:
+                    write_json_tmp("kpi_snapshot", _kpi_cache)
                 mes_actual = datetime.now().month
                 div_proyeccion = max((div_ytd / max(mes_actual, 1)) * 12, div_ytd)
 

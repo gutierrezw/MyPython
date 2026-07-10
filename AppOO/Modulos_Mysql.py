@@ -520,7 +520,7 @@ class BDsystem:  # -------------------------------------------------------------
             modelo: Nombre del modelo (ej: 'modelo_sellv01')
 
         Returns:
-            dict con campos: id, modelo, Nombre, paramts, documents, define_modelo, timestamp
+            dict con campos: id, modelo, Nombre, paramts, define_modelo, timestamp
             None si no existe
         """
         try:
@@ -580,33 +580,19 @@ class BDsystem:  # -------------------------------------------------------------
         modelo: str,
         nombre: str,
         paramts: bytes = None,
-        documents: bytes = None,
         tipo_modelo: str = None,
         define_modelo: str = None,
     ) -> bool:
-        """
-        Inserta un nuevo modelo IA.
-
-        Args:
-            modelo: Identificador único del modelo (PK)
-            nombre: Nombre descriptivo del modelo
-            paramts: Parámetros del modelo (blob serializado)
-            documents: Documentación/metadata (blob serializado)
-            define_modelo: Definición/tipo del modelo
-
-        Returns:
-            True si se insertó correctamente, False en caso de error
-        """
         try:
             conn = BDsystem.connect_dbase("insert.define_modelosia", False)
             cursor = conn.cursor()
 
             sql = """
                 INSERT INTO bdinv.modelos_ia
-                (modelo, Nombre, paramts, documents, define_modelo, tipo_modelo)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                (modelo, Nombre, paramts, define_modelo, tipo_modelo)
+                VALUES (%s, %s, %s, %s, %s)
             """
-            cursor.execute(sql, (modelo, nombre, paramts, documents, define_modelo, tipo_modelo))
+            cursor.execute(sql, (modelo, nombre, paramts, define_modelo, tipo_modelo))
             conn.commit()
 
             rows_affected = cursor.rowcount
@@ -622,28 +608,13 @@ class BDsystem:  # -------------------------------------------------------------
         modelo: str,
         nombre: str = None,
         paramts: bytes = None,
-        documents: bytes = None,
         define_modelo: str = None,
         tipo_modelo: str = None,
     ) -> bool:
-        """
-        Actualiza un modelo IA existente.
-
-        Args:
-            modelo: Identificador del modelo a actualizar (PK)
-            nombre: Nuevo nombre (opcional)
-            paramts: Nuevos parámetros (opcional)
-            documents: Nueva documentación (opcional)
-            define_modelo: Nueva definición (opcional)
-
-        Returns:
-            True si se actualizó correctamente, False en caso de error
-        """
         try:
             conn = BDsystem.connect_dbase("update.define_modelosia", False)
             cursor = conn.cursor()
 
-            # Construir query dinámicamente según campos proporcionados
             updates = []
             values = []
 
@@ -653,9 +624,6 @@ class BDsystem:  # -------------------------------------------------------------
             if paramts is not None:
                 updates.append("paramts = %s")
                 values.append(paramts)
-            if documents is not None:
-                updates.append("documents = %s")
-                values.append(documents)
             if define_modelo is not None:
                 updates.append("define_modelo = %s")
                 values.append(define_modelo)
@@ -1133,8 +1101,9 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             _QUARANTINE_TTL = 24 * 3600
             now = time.time()
 
-            purge_hist = read_json_tmp("purge_history.json")
-            quarantine = read_json_tmp("quarantine_symbols.json")
+            _ch = read_json_tmp("cache_health")
+            purge_hist = _ch.get("purge_history", {})
+            quarantine = _ch.get("quarantine", {})
 
             symbols_ok = []
             for a in anomalias:
@@ -1149,8 +1118,7 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                     a["quarantined"] = False
                     symbols_ok.append(sym)
 
-            write_json_tmp("purge_history.json", purge_hist)
-            write_json_tmp("quarantine_symbols.json", quarantine)
+            write_json_tmp("cache_health", {"purge_history": purge_hist, "quarantine": quarantine})
 
             # solo resetea el schedule si hay símbolos no cuarentenados con anomalías
             if symbols_ok:
@@ -4520,6 +4488,17 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         return json.dumps(detalle)
 
     def detalle_OportunidadBuy(self, origen, row=None):
+        import math
+
+        def _sanitize(v):
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                return None
+            if isinstance(v, dict):
+                return {k: _sanitize(val) for k, val in v.items()}
+            if isinstance(v, list):
+                return [_sanitize(i) for i in v]
+            return v
+
         detalle = {
             "ganancia_precio": row.get("ganancia_precio", 0),
             "ganancia_inversion": row.get("ganancia_inversion", 0),
@@ -4541,7 +4520,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             "post_costobase": row.get("post_costobase", 0),
             "recomendado": row.get("Recomendado"),
             "comentarios": row.get("Comentarios"),
-            "indicadores": row.get("Datostecnicos") or {},
+            "indicadores": _sanitize(row.get("Datostecnicos") or {}),
             "otros": {"modelo": origen, "timestamp_local": str(datetime.now())},
         }
         return json.dumps(detalle)

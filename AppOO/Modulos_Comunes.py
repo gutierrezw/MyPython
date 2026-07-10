@@ -364,7 +364,7 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                 yf_ticket = convierte_ticket_stock(bkey, divisa)
 
                 # cuarentena: símbolo con datos corruptos recurrentes — saltear hasta que expire (24h)
-                _quarantine = read_json_tmp("quarantine_symbols.json")
+                _quarantine = read_json_tmp("cache_health").get("quarantine", {})
                 _q_ts = _quarantine.get(bkey, 0)
                 if _q_ts and (time.time() - _q_ts) < 86400:
                     while eof_book is not None and read[ix.index("simbolo")] == bkey:
