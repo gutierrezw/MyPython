@@ -36,6 +36,9 @@ EDGAR/
 .env
 node_modules/
 
+# Claude Code
+.claude/worktrees/
+
 # otros proyectos
 AppOliday/
 
