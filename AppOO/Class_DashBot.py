@@ -451,6 +451,28 @@ class ClassAgenteIA:
             except Exception as e:
                 self.logger.error(f"_flush_system_alerts: {e}")
 
+    async def _flush_reconcile_pending(self):
+        """Envía diffs IB pendientes de aprobación (DataHub.reconcile_pending) como botones Telegram."""
+        if not DataHub.reconcile_pending:
+            return
+        diffs = list(DataHub.reconcile_pending)
+        DataHub.reconcile_pending.clear()
+        write_json_tmp("ib_reconcile_pending", diffs)
+        lines = ["📋 *IB Reconcile — diffs detectados:*"]
+        for i, d in enumerate(diffs):
+            signo = "+" if d["diff"] > 0 else ""
+            lines.append(f"  {i+1}. {d['symbol']}: {d['bt_current']:.0f} → {d['expected']:.0f} ({signo}{d['diff']:.0f})")
+        lines.append("\n¿Aplicar ajustes de stock?")
+        texto = "\n".join(lines)
+        markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Aprobar todo", callback_data="reconcile_aprobar"),
+            InlineKeyboardButton("❌ Ignorar", callback_data="reconcile_rechazar"),
+        ]])
+        try:
+            await self.send_Telegram(texto, reply_markup=markup)
+        except Exception as e:
+            self.logger.error(f"_flush_reconcile_pending: {e}")
+
     # agente defensivo: protege ganancias con órdenes STOP dinámicas
     async def Agente_ManagerPreservation(self):
         """
@@ -1803,6 +1825,37 @@ class Telegram:
                 await query.edit_message_reply_markup(reply_markup=None)
                 await query.edit_message_text("🔓 Bloqueo FCI liberado. El agente reintentará en el próximo ciclo.")
 
+            elif accion == "reconcile_aprobar":
+                diffs = read_json_tmp("ib_reconcile_pending")
+                if not diffs:
+                    await query.edit_message_text("⚠️ No hay diffs pendientes (ya procesados o expirados).")
+                    return
+                write_json_tmp("ib_reconcile_pending", [])
+                db = RepositorioOportunidadesBuySell()
+                aplicados = []
+                for d in diffs:
+                    bt_id = d.get("bt_id")
+                    if bt_id is None:
+                        continue
+                    try:
+                        conn = db._conectar(tabla="reconcile_fix")
+                        cur  = conn.cursor()
+                        cur.execute("UPDATE booktrading SET stock = %s WHERE id = %s", (d["expected"], bt_id))
+                        conn.commit()
+                        cur.close()
+                        conn.close()
+                        aplicados.append(f"{d['symbol']}: {d['bt_current']:.0f} → {d['expected']:.0f}")
+                    except Exception as ex:
+                        self.logger.error(f"reconcile_aprobar {d['symbol']}: {ex}")
+                await query.edit_message_reply_markup(reply_markup=None)
+                resumen = "\n".join(aplicados) if aplicados else "Sin cambios aplicados (bt_id nulo)."
+                await query.edit_message_text(f"✅ Reconcile aplicado:\n{resumen}")
+
+            elif accion == "reconcile_rechazar":
+                write_json_tmp("ib_reconcile_pending", [])
+                await query.edit_message_reply_markup(reply_markup=None)
+                await query.edit_message_text("❌ Diffs IB ignorados.")
+
         except Exception as e:
             self.logger.error(f"handle_callback(): {e}\n{traceback.format_exc()}")
 
@@ -2769,6 +2822,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     self.Agente_SyncOrders()
                     self.Agente_OrderEodCleanup()
                     self.exec_modulo_async(self._flush_system_alerts())
+                    self.exec_modulo_async(self._flush_reconcile_pending())
                     time.sleep(15)
                     self.counter += 1
                     DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=self.counter)

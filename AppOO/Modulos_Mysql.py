@@ -5535,28 +5535,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             qry += "simbolo) VALUES ({});".format(",".join("%s" for _ in range(len(valuesins))))
             cursor.execute(qry, tuple(valuesins))
             conn.commit()
-            last_id = cursor.lastrowid
             cursor.close()
-
-            # Recalcula stock real desde BD para corregir desfase cuando se insertan
-            # múltiples transacciones del mismo símbolo en la misma fecha/hora
-            fix_cur = conn.cursor()
-            fix_cur.execute(
-                """
-                UPDATE booktrading b
-                JOIN (
-                    SELECT SUM(t.cantidad) AS stock_real
-                    FROM booktrading t
-                    WHERE t.cuenta = %s AND t.simbolo = %s
-                      AND (t.fechahora < %s OR (t.fechahora = %s AND t.sec <= %s))
-                ) calc ON 1=1
-                SET b.stock = calc.stock_real
-                WHERE b.id = %s
-                """,
-                (account, symbol, values["fechahora"], values["fechahora"], values["sec"], last_id),
-            )
-            conn.commit()
-            fix_cur.close()
 
             time.sleep(0.4)
             # update basico "otros_activos" e indicador "activa", cuando sea una venta (cantidad <0)
@@ -6208,6 +6187,269 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             if cursor:
                 cursor.close()
             conn.close()
+
+
+    def recalculate_stock_chain(self, account: str, symbol: str, divisa: str) -> int:
+        """
+        Recalcula el campo stock de TODOS los registros del símbolo usando
+        SUM(cantidad) acumulada ordenada por (fechahora, sec).
+        Retorna la cantidad de filas actualizadas.
+        """
+        conn = self._conectar(tabla="update.booktrading.recalc")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """UPDATE booktrading b
+                   JOIN (
+                       SELECT id,
+                              SUM(cantidad) OVER (
+                                  PARTITION BY cuenta, simbolo, divisa
+                                  ORDER BY fechahora, sec
+                              ) AS stock_real
+                       FROM booktrading
+                       WHERE cuenta = %s AND simbolo = %s AND divisa = %s
+                   ) calc ON b.id = calc.id
+                   SET b.stock = calc.stock_real
+                   WHERE b.cuenta = %s AND b.simbolo = %s AND b.divisa = %s""",
+                (account, symbol, divisa, account, symbol, divisa),
+            )
+            conn.commit()
+            return cursor.rowcount
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: recalculate_stock_chain()]: {e}")
+            return 0
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def exists_bt_trade(self, account: str, symbol: str, divisa: str,
+                        fechahora, cantidad: float, precio: float) -> bool:
+        """True si existe un registro en booktrading que coincida en fecha/qty/precio."""
+        conn = self._conectar(tabla="select.booktrading.exists")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT 1 FROM booktrading
+                   WHERE cuenta = %s AND simbolo = %s AND divisa = %s
+                     AND DATE(fechahora) = DATE(%s)
+                     AND ABS(cantidad - %s) < 0.001
+                     AND ABS(preciotrans - %s) < 0.001
+                   LIMIT 1""",
+                (account, symbol, divisa, fechahora, cantidad, precio),
+            )
+            return cursor.fetchone() is not None
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: exists_bt_trade()]: {e}")
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def exists_bt_trade_by_idtrans(self, account: str, symbol: str, divisa: str, idtrans: str) -> bool:
+        """True si existe un registro en booktrading con ese idtrans (match exacto — Flex format)."""
+        conn = self._conectar(tabla="select.booktrading.exists_idtrans")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT 1 FROM booktrading
+                   WHERE cuenta = %s AND simbolo = %s AND divisa = %s
+                     AND idtrans = %s
+                   LIMIT 1""",
+                (account, symbol, divisa, idtrans),
+            )
+            return cursor.fetchone() is not None
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: exists_bt_trade_by_idtrans()]: {e}")
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def raw_insert_bt_trade(self, account: str, symbol: str, divisa: str,
+                            fechahora, cantidad: float, precio: float,
+                            commission: float, categoria: str = "Stock",
+                            idtrans: str = None) -> bool:
+        """
+        Inserta un trade faltante en booktrading SIN calcular stock/basico.
+        El campo stock queda en 0 — debe llamarse recalculate_stock_chain() después.
+        idtrans: si se pasa (Flex format), se usa el TransactionID real de IB.
+                 Si no, se genera un ID sintético basado en hash.
+        """
+        conn = self._conectar(tabla="insert.booktrading.raw")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            codigo = "O" if cantidad > 0 else "C"
+            sec_next = 0
+            cursor.execute(
+                "SELECT COALESCE(MAX(sec),0)+1 FROM booktrading WHERE cuenta=%s AND simbolo=%s AND divisa=%s",
+                (account, symbol, divisa),
+            )
+            row = cursor.fetchone()
+            if row:
+                sec_next = int(row[0])
+
+            import hashlib as _hl
+            import datetime as _dt
+            if not idtrans:
+                idtrans = _hl.md5(
+                    f"IB_FLEX_{symbol}_{fechahora}_{cantidad}_{precio}".encode()
+                ).hexdigest()[:24]
+            cursor.execute(
+                """INSERT INTO booktrading
+                   (cuenta, simbolo, divisa, categoria, fechahora, cantidad,
+                    preciotrans, preciocierre, tarifacomision, producto, codigo,
+                    activa, stock, basico, gprealizadas, sec, split, idtrans, updateStamp)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'Y',0,%s,0,%s,1,%s,%s)""",
+                (account, symbol, divisa, categoria, fechahora, cantidad,
+                 precio, precio, commission, round(precio * abs(cantidad), 4),
+                 codigo, precio, sec_next, str(idtrans), _dt.datetime.now()),
+            )
+            conn.commit()
+            return True
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: raw_insert_bt_trade()]: {e}")
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def get_bt_stock_before(self, account: str, symbol: str, divisa: str, date: str):
+        """Stock más reciente en booktrading estrictamente antes de la fecha dada (cualquier activa)."""
+        conn = self._conectar(tabla="reconcile.bt_stock_before")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT stock FROM booktrading
+                   WHERE cuenta = %s AND simbolo = %s AND divisa = %s
+                     AND fechahora < %s AND delisted = 0
+                   ORDER BY fechahora DESC, sec DESC
+                   LIMIT 1""",
+                (account, symbol, divisa, date),
+            )
+            row = cursor.fetchone()
+            return float(row[0]) if row else None
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: get_bt_stock_before()]: {e}")
+            return None
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def get_bt_latest_stock(self, account: str, symbol: str, divisa: str):
+        """Retorna (id, stock) del último registro activo para el símbolo."""
+        conn = self._conectar(tabla="reconcile.bt_latest_stock")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT id, stock FROM booktrading
+                   WHERE cuenta = %s AND simbolo = %s AND divisa = %s
+                     AND activa = 'Y' AND delisted = 0
+                   ORDER BY fechahora DESC, sec DESC
+                   LIMIT 1""",
+                (account, symbol, divisa),
+            )
+            row = cursor.fetchone()
+            return (int(row[0]), float(row[1])) if row else (None, None)
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: get_bt_latest_stock()]: {e}")
+            return (None, None)
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def get_ib_trades(self, account_id: str, date_from: str, date_to: str = None) -> list:
+        """
+        Retorna trades de ib_flex_trades para el período dado.
+        date_from / date_to : 'YYYY-MM-DD'
+        Retorna lista de dicts con las columnas de la tabla.
+        """
+        conn = cursor = None
+        try:
+            conn = self._conectar(tabla="select.ib_flex_trades")
+            cursor = conn.cursor()
+            sql = """SELECT transaction_id, symbol, currency, trade_datetime,
+                            trade_date, quantity, price, commission, buy_sell
+                       FROM ib_flex_trades
+                      WHERE account_id = %s AND trade_date >= %s"""
+            params = [account_id, date_from]
+            if date_to:
+                sql += " AND trade_date <= %s"
+                params.append(date_to)
+            sql += " ORDER BY trade_datetime"
+            cursor.execute(sql, params)
+            cols = [c[0] for c in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: get_ib_trades()]: {e}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    def get_ib_trades_net(self, account_id: str, date_from: str, date_to: str = None) -> list:
+        """
+        Retorna neto de qty por symbol+currency en el período.
+        Retorna lista de dicts: {symbol, currency, ib_net}
+        """
+        conn = cursor = None
+        try:
+            conn = self._conectar(tabla="select.ib_flex_trades.net")
+            cursor = conn.cursor()
+            sql = """SELECT symbol, currency, SUM(quantity) AS ib_net
+                       FROM ib_flex_trades
+                      WHERE account_id = %s AND trade_date >= %s"""
+            params = [account_id, date_from]
+            if date_to:
+                sql += " AND trade_date <= %s"
+                params.append(date_to)
+            sql += " GROUP BY symbol, currency"
+            cursor.execute(sql, params)
+            cols = [c[0] for c in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: get_ib_trades_net()]: {e}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    def count_ib_trades(self, account_id: str) -> dict:
+        """Retorna {total, date_min, date_max} de ib_flex_trades para la cuenta."""
+        conn = cursor = None
+        try:
+            conn = self._conectar(tabla="select.ib_flex_trades.count")
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT COUNT(*), MIN(trade_date), MAX(trade_date)
+                     FROM ib_flex_trades WHERE account_id = %s""",
+                (account_id,),
+            )
+            row = cursor.fetchone()
+            return {"total": row[0], "date_min": str(row[1] or ""), "date_max": str(row[2] or "")}
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: count_ib_trades()]: {e}")
+            return {"total": 0, "date_min": "", "date_max": ""}
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
 
 class FinanceScreen(BDsystem):  # -------------------------------------------------------------------------------------

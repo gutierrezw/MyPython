@@ -227,7 +227,8 @@ class DataHub:
     manager_positions = {"Stock": [], "Crypto": []}  # posiciones vivas por vehículo para agentes
     rebalanceo = {}
     telegram_botcrypto = {}
-    system_alerts = []  # alertas de sistema para enviar a Telegram (DashMain → agentesIA)
+    system_alerts = []      # alertas de sistema para enviar a Telegram (DashMain → agentesIA)
+    reconcile_pending = []  # diffs IB pendientes de aprobación — list[dict] con keys: id, symbol, bt_id, bt_current, expected, diff
     procesos = []
     logger = {}
     orders = {}

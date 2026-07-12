@@ -14,6 +14,8 @@ from Modulos_Mysql import (
     IPerformance,
 )
 from Class_Finance import scan_extractos
+from Class_IbFlex import Class_IbFlex
+from Class_IbReconcile import Class_IbReconcile
 from Class_Screener import sync_market, sync_prices, audit_portfolio, refresh_consenso_tags
 from Class_InstitucionalScore import sync_institutional, sync_edgar_funds, sync_13f_scores
 from edgar_13f import sync_fund_filings, sync_13f_holdings
@@ -561,6 +563,60 @@ class AgentManager:
         except Exception as e:
             self._log_infra.error(f"Agente_NtpCheck(): {e}")
 
+    @wait_rate(604800, persist=True, desc="IB Flex — descarga semanal + import a ib_flex_trades (7d)", nivel=1)
+    def Agente_IbFlex(self):
+        try:
+            result = self._ib_flex_sync()
+            self._log_infra.warning(f"IbFlex: {result}")
+        except Exception as e:
+            self._log_infra.error(f"Agente_IbFlex(): {e}")
+
+    def _ib_flex_sync(self) -> str:
+        sesion     = BDsystem.get_sesion_by_vehiculo("Stock")
+        account_id = sesion.get("idcuentaIB") or sesion.get("idcuenta")
+        bt_account = sesion.get("idcuenta")
+        params_raw = sesion.get("parameters") or b"{}"
+        if isinstance(params_raw, (bytes, bytearray)):
+            params_raw = params_raw.decode("utf-8")
+        params   = json.loads(params_raw) if params_raw.strip() else {}
+        ib       = params.get("ib", {})
+        token    = str(ib.get("token") or "").strip()
+        query_id = str(ib.get("consulta_flex") or "").strip()
+        if not token or not query_id:
+            return "SKIP — token o consulta_flex no configurados en session.parameters['ib']"
+        db    = RepositorioOportunidadesBuySell()
+        flex  = Class_IbFlex(token=token, query_id=query_id)
+        result = flex.import_to_db(db, account_id)
+        stats  = db.count_ib_trades(account_id)
+        msg = (f"inserted={result['inserted']} skipped={result['skipped']} "
+               f"total_db={stats['total']} rango={stats['date_min']}→{stats['date_max']}")
+        if result["inserted"] > 0:
+            self._ib_reconcile_check(db, account_id, bt_account)
+        return msg
+
+    def _ib_reconcile_check(self, db, ib_account: str, bt_account: str):
+        """Corre reconcile tras import y pushea diffs a DataHub.reconcile_pending para aprobación Telegram."""
+        try:
+            period_start = (datetime.now().replace(year=datetime.now().year - 1)).strftime("%Y-01-01")
+            rec  = Class_IbReconcile(db)
+            df   = rec.reconcile_from_db(bt_account, period_start)
+            diffs = df[df["diff"].abs() > 0.001]
+            if diffs.empty:
+                return
+            pending = []
+            for _, row in diffs.iterrows():
+                pending.append({
+                    "symbol":     row["symbol"],
+                    "bt_id":      int(row["bt_id"]) if row["bt_id"] and str(row["bt_id"]) != "nan" else None,
+                    "bt_current": float(row["bt_current"]),
+                    "expected":   float(row["expected"]),
+                    "diff":       float(row["diff"]),
+                })
+            DataHub.reconcile_pending.extend(pending)
+            self._log_infra.warning(f"IbReconcile: {len(pending)} diffs pendientes de aprobación Telegram")
+        except Exception as e:
+            self._log_infra.error(f"_ib_reconcile_check(): {e}")
+
     def _check_ntp_drift(self):
         from DataHub import DataHub
         client = ntplib.NTPClient()
@@ -592,6 +648,7 @@ class AgentManager:
             ("Agente_MonitorBooktrading", self.Agente_MonitorBooktrading, 300),
             ("Agente_BrowserFCI", self.Agente_BrowserFCI, 300),
             ("Agente_NtpCheck", self.Agente_NtpCheck, 300),
+            ("Agente_IbFlex", self.Agente_IbFlex, 3600),
         ]
         for name, target, sleep in _threads:
             DataHub.procesos.append({"thread": {name: 1}})
