@@ -66,7 +66,6 @@ class ManagerEvents:
         t = threading.Thread(target=wrapper, name=name, daemon=True)
         t.start()
 
-        print(f"Start:({task_name})")
         self.threads[name] = t
         self.logger.warning(f"✅ Thread {name} iniciado.")
 
@@ -115,7 +114,6 @@ class ManagerEvents:
             t = threading.Thread(target=loopSchedule, name=task_name, args=(counter,), daemon=True)
             t.start()
 
-            print("Start:({})".format(task_name))
             self.logger.info("✅ Scheduler iniciado.")
         except Exception as e:
             self.logger.error(f"❌ Error al iniciar scheduler: {e}")
@@ -421,6 +419,9 @@ class Debugging:
         # manager logging
         self.logger.update({"Sentimiento": logging.getLogger("Sentimiento")})
         self.logger["Sentimiento"].setLevel(logging.WARNING)
+
+        self.logger.update({"IbFlex": logging.getLogger("IbFlex")})
+        self.logger["IbFlex"].setLevel(logging.WARNING)
 
         # restaurar niveles guardados por el usuario desde el panel Debugging
         self._apply_saved_levels()

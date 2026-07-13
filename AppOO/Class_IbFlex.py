@@ -1,7 +1,10 @@
 import io
+import logging
 import time
 
 from Modulos_python import ET, pd, requests
+
+_logger = logging.getLogger("IbFlex")
 
 
 _BASE_URL = "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService"
@@ -71,7 +74,7 @@ class Class_IbFlex:
         )
         resp.raise_for_status()
         text = resp.text.strip()
-        print(f"  [IbFlex] SendRequest respuesta: {text[:400]}")
+        _logger.debug(f"SendRequest respuesta: {text[:400]}")
         if "<Status>Success</Status>" not in text:
             raise RuntimeError(f"IB Flex SendRequest error: {text[:300]}")
         ref_start = text.find("<ReferenceCode>") + len("<ReferenceCode>")
@@ -82,7 +85,7 @@ class Class_IbFlex:
         url_start = text.find("<Url>") + len("<Url>")
         url_end   = text.find("</Url>")
         get_url   = text[url_start:url_end].strip() if url_start > len("<Url>") and url_end > 0 else _GET_URL
-        print(f"  [IbFlex] ReferenceCode={ref}  GetURL={get_url}")
+        _logger.debug(f"ReferenceCode={ref}  GetURL={get_url}")
         return ref, get_url
 
     def _get_statement(self, reference_code: str, get_url: str,
@@ -103,7 +106,7 @@ class Class_IbFlex:
                 raise RuntimeError(f"IB Flex 1020 — request inválido: {text[:300]}")
             # 1019 = reporte aún procesando — reintentar
             if "<ErrorCode>1019</ErrorCode>" in text:
-                print(f"  [IbFlex] intento {attempt}/{retries} — reporte procesando, reintentando...")
+                _logger.debug(f"intento {attempt}/{retries} — reporte procesando, reintentando...")
                 if attempt < retries:
                     time.sleep(delay)
                     continue

@@ -1903,7 +1903,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 # Start de positions -------------------------------------------------------------------------------
                 self.carga_inversion_en_positions()
                 self.conector_api_vehiclo()
-                print(f"Start:(run_positions({self.vehiculo},{len(self.positions)})")
+                self.logger.debug(f"run_positions({self.vehiculo},{len(self.positions)})")
 
                 # Start thread Websocket -----------------------------------------------------------------------------
                 TSocket, iteraStream = 7200, 1
@@ -2003,7 +2003,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # invoca API y actualiza inversiones
                     self.carga_inversion_en_positions()
                     self.conector_api_vehiclo()
-                    print(f"Start:(run_positions({self.vehiculo},{len(self.positions)})")
+                    self.logger.debug(f"run_positions({self.vehiculo},{len(self.positions)})")
 
                     # Start thread Websocket -----------------------------------------------------------------------------
                     TSocket, iteraStream = 7200, 1
