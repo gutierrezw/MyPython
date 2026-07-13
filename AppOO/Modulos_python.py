@@ -57,7 +57,9 @@ import pdfplumber
 from operator import itemgetter
 from pathlib import Path
 from zipfile import ZipFile
+import pymysql
 from pymysql import connect, Error
+from dbutils.pooled_db import PooledDB
 from dateutil import parser
 from dataclasses import dataclass
 from concurrent.futures import Future, ThreadPoolExecutor

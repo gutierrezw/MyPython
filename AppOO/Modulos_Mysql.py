@@ -15,6 +15,8 @@ from Modulos_python import (
     Optional,
     traceback,
     logging,
+    PooledDB,
+    pymysql,
 )
 from Modulos_Utilitarios import (
     is_none,
@@ -37,10 +39,12 @@ class BDsystem:  # -------------------------------------------------------------
         "host": "localhost",
         "database": "bdinv",
     }
+    _pool = None
 
     @staticmethod
     def configure(db_config: dict):
         BDsystem.DB_CONFIG.update(db_config)
+        BDsystem._pool = None  # fuerza recreación del pool con nueva config
 
     @staticmethod
     def get_sesion_by_vehiculo(vehiculo=None, principal=False) -> dict:
@@ -356,16 +360,21 @@ class BDsystem:  # -------------------------------------------------------------
     # conector a BaseDatos
     def connect_dbase(tabla, display=False) -> object:
         try:
-            conn = None
-            conn = connect(
-                host=BDsystem.DB_CONFIG.get("host"),
-                user=BDsystem.DB_CONFIG.get("user"),
-                password=BDsystem.DB_CONFIG.get("password"),
-                database=BDsystem.DB_CONFIG.get("database"),
-            )
+            if BDsystem._pool is None:
+                BDsystem._pool = PooledDB(
+                    creator=pymysql,
+                    maxconnections=12,
+                    mincached=2,
+                    maxcached=8,
+                    blocking=True,
+                    host=BDsystem.DB_CONFIG.get("host"),
+                    user=BDsystem.DB_CONFIG.get("user"),
+                    passwd=BDsystem.DB_CONFIG.get("password"),
+                    db=BDsystem.DB_CONFIG.get("database"),
+                )
+            conn = BDsystem._pool.connection()
             if display:
                 print("[Message]: connect a Mysql: " + tabla)
-
             return conn
         except (Exception, EncodingWarning, connect.Error) as e:
             print("[MySql:: connect_dbase()] ", e)
