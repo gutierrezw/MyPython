@@ -137,27 +137,10 @@ ALTER TABLE order_trader ADD INDEX idx_account_symbol (account, symbol);
 ## 6. Restaurar herramientas de monitoreo
 
 ### 6.1 Script de análisis de schema
-Ya está en el repo: `SchemasSQL/mysql_index_analyzer.py`
+Ya está en el repo (repo separado): `MyNode/mysql-weekly-report/report.js` + `analyze-fullscan.js`
 
-Edita las credenciales al inicio del script:
-```python
-CONFIG = {
-    "host":     "localhost",
-    "port":     3306,
-    "user":     "tu_usuario",
-    "password": "tu_contraseña",
-    "database": "bdinv",
-}
-```
-
-Ejecución:
-```powershell
-python SchemasSQL\mysql_index_analyzer.py
-```
-
-### 6.2 Archivo de credenciales para tarea recurrente
-Crea el archivo en:
-`C:\Users\InversionesWildaga\Documents\Claude\outputs\mysql_config.json`
+Configura las credenciales en:
+`C:\Users\InversionesWildaga\Documents\Claude-Cowork-Scripts\mysql_config.json`
 
 ```json
 {
@@ -169,18 +152,23 @@ Crea el archivo en:
 }
 ```
 
+Ejecución:
+```powershell
+node MyNode\mysql-weekly-report\report.js
+```
+
 ---
 
-## 7. Restaurar tareas recurrentes de Claude
+## 7. Restaurar tareas recurrentes (Windows Task Scheduler)
 
-Las tareas programadas se guardan en:
-`C:\Users\InversionesWildaga\Documents\Claude\Scheduled\`
+La tarea "Reporte Semanal MySQL" corre vía Windows Task Scheduler, no depende de sesión Claude activa.
 
-Si migraste la carpeta `Scheduled\` completa, Claude las retomará automáticamente.
+Si migraste de máquina, recrea la tarea:
+```powershell
+schtasks /create /tn "Reporte Semanal MySQL" /tr "node C:\Users\InversionesWildaga\Documents\MyNode\mysql-weekly-report\report.js" /sc weekly /d MON /st 08:00
+```
 
-Si no, recrear la tarea semanal de MySQL desde Claude:
-> "Crea una tarea recurrente que corra cada lunes a las 8am, conecte a MySQL bdinv,
-> analice el schema e índices, y mande el reporte HTML a gutierrez.madrid.wilmer@gmail.com"
+Conecta directo a MySQL (mismo equipo), guarda HTML local en `mysql-weekly-report/output/` — no envía email.
 
 ---
 
@@ -194,7 +182,7 @@ python --version
 pip list | findstr "mysql-connector"
 
 # 2. Verificar conexión MySQL
-python SchemasSQL\mysql_index_analyzer.py
+node MyNode\mysql-weekly-report\report.js
 
 # 3. Verificar buffer pool en Workbench
 # SHOW VARIABLES LIKE 'innodb_buffer_pool_size';

@@ -193,6 +193,7 @@ Claude debe ejecutar estos pasos antes de responder al primer mensaje de trabajo
 
 1. Leer `00-Home.md` → verificar estado actual de módulos y links relevantes
 2. Leer `10-Memoria/MEMORY.md` → ya cargado como contexto automático, confirmar que es coherente con lo anterior
+3. Antes de editar un repo que puede tener otra sesión Claude trabajando en paralelo (AppOO, vault Obsidian, `MyNode/server-api`) → correr `git log -3` / `git status` en ese repo primero. Si hay commits recientes que esta sesión no generó, revisar qué cambió antes de seguir editando — evita duplicar trabajo o pisar cambios. Repetir el chequeo cada vez que la sesión pasa a tocar un repo distinto, no solo al inicio. Caso real: 2026-07-12, una sesión VS Code comiteó cambios de OAuth junto con la implementación de `get_schema_health`/`get_slow_queries` que esta sesión acababa de escribir en `MyNode/server-api` — sin pérdida, pero por casualidad de timing, no por chequeo previo.
 
 ### Checklist al CERRAR sesión
 
