@@ -319,7 +319,7 @@ class Class_IbFlex:
                         skipped += 1
                 except Exception as e:
                     skipped += 1
-                    print(f"[IbFlex import] fila {total} ({r.get('symbol')}) error: {e}")
+                    _logger.error(f"[IbFlex import] fila {total} ({r.get('symbol')}) error: {e}")
             conn.commit()
         finally:
             if cursor:

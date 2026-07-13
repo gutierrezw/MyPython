@@ -4117,7 +4117,7 @@ class WidgetVehiculo(TickerInfo):
 
             return
         except Exception as e:
-            print("[set_header_panel()]: {}".format(e))
+            self.logger.error("[set_header_panel()]: {}".format(e))
 
     # escribe información en cabecera del panel
     def header_panel(self):
@@ -4179,7 +4179,7 @@ class WidgetVehiculo(TickerInfo):
             self.op3.config(text=message[2].replace("_", " "), state=estado)
 
         except Exception as e:
-            print("[header_panel()]: {}".format(e))
+            self.logger.error("[header_panel()]: {}".format(e))
 
     # totaliza y coloca información del header
     def header_total_positions(self, positions) -> list:

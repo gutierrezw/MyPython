@@ -83,7 +83,6 @@ class ManagerEvents:
             job.next_run = schedule.datetime.datetime.now()
         self.job_params[name] = (interval_sec, func, args, kwargs)  # Guarda parámetros
 
-        print(f"{name}")
         self.logger.warning(f"✅ Job {name} registrado cada {interval_sec}s.")
 
     def stop_job(self, name):
