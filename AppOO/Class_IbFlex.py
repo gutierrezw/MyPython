@@ -101,9 +101,10 @@ class Class_IbFlex:
             )
             resp.raise_for_status()
             text = resp.text.strip()
-            # 1020 = request inválido (token/código expirado) — no tiene sentido reintentar
+            # 1020 = token/código expirado — no tiene sentido reintentar
             if "<ErrorCode>1020</ErrorCode>" in text:
-                raise RuntimeError(f"IB Flex 1020 — request inválido: {text[:300]}")
+                _logger.error("IB Flex token vencido (1020) — renovar en IB Portal → Reports → Flex Queries → Settings")
+                raise RuntimeError(f"IB Flex 1020 — token vencido: {text[:300]}")
             # 1019 = reporte aún procesando — reintentar
             if "<ErrorCode>1019</ErrorCode>" in text:
                 _logger.debug(f"intento {attempt}/{retries} — reporte procesando, reintentando...")
