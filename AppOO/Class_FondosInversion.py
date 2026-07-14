@@ -731,7 +731,7 @@ class ArsFondosInversion(tk.Frame):
                     if keySymbol != symbol:
                         last_trader, ix = self.RepositorioOportunidades.select_booktrading(
                             accion="last",
-                            account=self.account_bbva,
+                            account=values["cuenta"],
                             idivisa="ARS",
                             symbol=symbol,
                         )
@@ -742,14 +742,14 @@ class ArsFondosInversion(tk.Frame):
                     # Fix 2: si idtrans ya existe actualizar precio ajustado, no duplicar
                     existing, _ = self.RepositorioOportunidades.select_booktrading(
                         accion="valida",
-                        account=self.account_bbva,
+                        account=values["cuenta"],
                         idivisa="ARS",
                         symbol=symbol,
                         idtrans=idtrans,
                     )
                     if existing:
                         self.RepositorioOportunidades.update_preciotrans_fci(
-                            account=self.account_bbva,
+                            account=values["cuenta"],
                             idivisa="ARS",
                             symbol=symbol,
                             idtrans=idtrans,
@@ -767,7 +767,7 @@ class ArsFondosInversion(tk.Frame):
                 # elimina archivo procesado
                 delete_file(ruta=self.archivo, display=True)
             except Exception as e:
-                print(f"[insert_values_in_booktrading()]: {e}")
+                _logger.error(f"[insert_values_in_booktrading()]: {e}")
 
         def fci_BBVA():
             try:
@@ -850,7 +850,7 @@ class ArsFondosInversion(tk.Frame):
                 # insert booktradin
                 insert_values_in_booktrading(trader)
             except Exception as e:
-                print(f"[fci_BBVA()]: {e}")
+                _logger.error(f"[fci_BBVA()]: {e}")
 
         def fci_santander():
             try:
@@ -952,7 +952,7 @@ class ArsFondosInversion(tk.Frame):
                 # valida e inserta booktrading
                 insert_values_in_booktrading(trader)
             except Exception as e:
-                print(f"[fci_santander()]: {e}")
+                _logger.error(f"[fci_santander()]: {e}")
 
         try:
             # carga información BBVA
@@ -969,7 +969,7 @@ class ArsFondosInversion(tk.Frame):
                 self.update_FCI_en_positions()
                 return self.account_sant
         except Exception as e:
-            print(f"load_positions_FCI(): {e}")
+            _logger.error(f"load_positions_FCI(): {e}")
 
     # carga de booktrading los movimientos USDT
     def get_tasa_cambio_USDT(self, fiat="ARS", date=None):
@@ -1113,7 +1113,7 @@ class ArsFondosInversion(tk.Frame):
 
                     # actualiza panel (via after — evita llamar Tkinter desde hilo de fondo)
                     account = self.load_positions_FCI()
-                    self.update_panel_fci()
+                    self.root.after(0, lambda: self.update_panel_fci())
                     self.root.after(0, lambda: self.ars.update_panelVehiculo(orden=self.ars.orden))
 
                     # si hay operaciones nuevas después de la última diaria → purga para regenerar limpio
