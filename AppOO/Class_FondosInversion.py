@@ -908,7 +908,8 @@ class ArsFondosInversion(tk.Frame):
                             account=self.account_sant, symbol=rows["Fondo"]
                         )
                         if not found:
-                            fecha_mv = datetime.strptime(rows["Fecha_liquidación"], "%d/%m/%Y").date()
+                            _fl = rows["Fecha_liquidación"]
+                            fecha_mv = (_fl.date() if hasattr(_fl, "date") else datetime.strptime(str(_fl), "%d/%m/%Y").date())
                             cafci, cafci_found = self.ClassCNV.select_CNV_by_precio(
                                 precio=ValorCuotaParte, fecha=fecha_mv
                             )
@@ -926,7 +927,8 @@ class ArsFondosInversion(tk.Frame):
 
                         if found:
                             cantidad = CuotaParte * (1 if codigo == "O" else -1)
-                            fecha = datetime.strptime(rows["Fecha_liquidación"], "%d/%m/%Y")
+                            _fl = rows["Fecha_liquidación"]
+                            fecha = (_fl if hasattr(_fl, "date") else datetime.strptime(str(_fl), "%d/%m/%Y"))
                             tasa_cambio = self.get_tasa_cambio_USDT(fiat="ARS", date=fecha.date())
                             producto = ValorCuotaParte * CuotaParte
                             values.update({"categoria": self.vehiculo})
