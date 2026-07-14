@@ -67,6 +67,7 @@ class ManagerEvents:
         t.start()
 
         self.threads[name] = t
+        print(f"Start:({task_name})")
         self.logger.warning(f"✅ Thread {name} iniciado.")
 
     def stop_thread(self, name):
@@ -113,6 +114,7 @@ class ManagerEvents:
             t = threading.Thread(target=loopSchedule, name=task_name, args=(counter,), daemon=True)
             t.start()
 
+            print(f"Start:({task_name})")
             self.logger.info("✅ Scheduler iniciado.")
         except Exception as e:
             self.logger.error(f"❌ Error al iniciar scheduler: {e}")
