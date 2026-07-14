@@ -586,7 +586,8 @@ class ArsFondosInversion(tk.Frame):
             # obtiene precio de mercado — fallback a preciocierre de booktrading si no está en CNV
             conid = activo[0]["idcrypto"]
             cnv, ix, cnv_found = self.ClassCNV.select_CNV(symbol=conid)
-            factor = last[0]["factor_cambio"] if last[0]["factor_cambio"] > 0 else 1
+            fc_booktrading = last[0]["factor_cambio"]
+            factor = fc_booktrading if fc_booktrading > 0 else (self.get_tasa_cambio_USDT(fiat="ARS", date=datetime.now().date()) or 1)
 
             if cnv_found:
                 fecha_cnv = cnv[ix.index("fecha")]
@@ -604,7 +605,7 @@ class ArsFondosInversion(tk.Frame):
             found, position = buscar_ticker(positions, ticket)
 
             p["exDividendDate"] = fecha_cnv
-            p["factor_cambio"] = last[0]["factor_cambio"]
+            p["factor_cambio"] = factor
             p["dividendYield"] = 0
             p["estrategia"] = "P05"
             p["dividendo"] = 0
@@ -634,7 +635,7 @@ class ArsFondosInversion(tk.Frame):
 
             return p
         except Exception as e:
-            print("struct_positions_fci(): {}".format(e))
+            _logger.error("struct_positions_fci(): {}".format(e))
 
     # update self.ars.positions
     def update_FCI_en_positions(self):
@@ -660,7 +661,8 @@ class ArsFondosInversion(tk.Frame):
                         datos = self.struct_positions_fci(
                             account=account, ticket=symbol, positions=in_positions, last=last_trader
                         )
-                        positions.append(datos)
+                        if datos is not None:
+                            positions.append(datos)
 
                 # actualiza tabla de inversiones con última información de la API
                 if positions:
