@@ -1114,7 +1114,7 @@ class ArsFondosInversion(tk.Frame):
                     # actualiza panel (via after — evita llamar Tkinter desde hilo de fondo)
                     account = self.load_positions_FCI()
                     self.update_panel_fci()
-                    self.ars.after(0, lambda: self.ars.update_panelVehiculo(orden=self.ars.orden))
+                    self.root.after(0, lambda: self.ars.update_panelVehiculo(orden=self.ars.orden))
 
                     # si hay operaciones nuevas después de la última diaria → purga para regenerar limpio
                     if account:
