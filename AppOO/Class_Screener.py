@@ -2700,7 +2700,7 @@ def sync_prices(account):
 
     tickers_str = " ".join(s.replace("^", "-") for s in sorted(all_syms))
     try:
-        df = yf.download(tickers_str, period="2d", threads=True, progress=False, auto_adjust=True)
+        df = yf.download(tickers_str, period="2d", threads=False, progress=False, auto_adjust=True)
     except Exception as e:
         _logger.error(f"sync_prices yf.download: {e}")
         return {"updated": 0, "errors": len(all_syms), "market": 0, "candidatos": 0}

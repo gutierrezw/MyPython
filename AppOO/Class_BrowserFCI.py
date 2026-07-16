@@ -81,16 +81,19 @@ class BrowserFCI:
     async def _bbva_dismiss_modals(self, page):
         """Cierra cualquier modal/banner promocional de BBVA."""
         for nombre in ("No me interesa", "Cerrar", "No, gracias"):
-            try:
-                btn = page.get_by_role("button", name=nombre)
-                await btn.wait_for(state="visible", timeout=_MODAL_WAIT)
-                await btn.click()
-                await page.wait_for_timeout(800)
-            except Exception:
-                pass
+            for role in ("button", "link"):
+                try:
+                    btn = page.get_by_role(role, name=nombre)
+                    await btn.wait_for(state="visible", timeout=_MODAL_WAIT)
+                    await btn.click()
+                    await page.wait_for_timeout(800)
+                    break
+                except Exception:
+                    pass
 
     async def _bbva_navegar_movimientos(self, page):
         """Desde el dashboard navega hasta la pantalla Movimientos de FCI."""
+        await self._bbva_dismiss_modals(page)
         card = page.get_by_role("button", name="Estás en la inversión 1 de 1")
         await card.wait_for(state="visible", timeout=_TIMEOUT)
         await card.click()

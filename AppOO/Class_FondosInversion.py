@@ -203,14 +203,11 @@ class ArsFondosInversion(tk.Frame):
     # Construye extractos de FCI
     def widgets_FCI(self):
         try:
-
-            # update widget ARS
             self.ars.update_panelVehiculo(orden=self.ars.orden)
-
-            self.root.after(5000, lambda: self.widgets_FCI())
         except Exception as e:
-            msg = traceback.print_exc()
-            print("widgets_FCI(): {}".format(msg))
+            _logger.error(f"widgets_FCI: {e}")
+        finally:
+            self.root.after(5000, lambda: self.widgets_FCI())
 
     def update_panel_fci(self):
         def change_a_ARS():
@@ -220,6 +217,7 @@ class ArsFondosInversion(tk.Frame):
             # obtiene tasa de cambio USDT-ARS
             hoy = datetime.now()
             tasa_cambio = self.get_tasa_cambio_USDT(fiat="ARS", date=hoy.date())
+            _logger.warning(f"change_a_ARS: tasa_cambio={tasa_cambio}, positions={len(self.ars.positions)}")
 
             self.cus.positions = self.ars.positions
             for keys in self.ars.positions:
@@ -228,14 +226,17 @@ class ArsFondosInversion(tk.Frame):
                 if keys["costobase"] <= 5 or keys["position"] <= 0:
                     continue
 
+                fc = keys.get("factor_cambio", 0)
+                _logger.warning(f"change_a_ARS: {keys.get('ticket')} fc={fc} mrkprice_pre={keys.get('mrkprice'):.6f}")
                 dgyp_usd += keys["dgyp"] * keys["position"]
-                keys["mrkprice"] = keys["mrkprice"] * keys["factor_cambio"]
+                keys["mrkprice"] = keys["mrkprice"] * fc
                 keys["mktvalue"] = keys["mrkprice"] * keys["position"]
-                keys["costobase"] = keys["costobase"] * keys["factor_cambio"]
-                keys["unrealizedpnl"] = keys["unrealizedpnl"] * keys["factor_cambio"]
-                keys["open"] = keys["open"] * keys["factor_cambio"]
-                keys["dgyp"] = keys["dgyp"] * keys["factor_cambio"]
-                fecha = keys["exDividendDate"].strftime("%d-%b-%Y")
+                keys["costobase"] = keys["costobase"] * fc
+                keys["unrealizedpnl"] = keys["unrealizedpnl"] * fc
+                keys["open"] = keys["open"] * fc
+                keys["dgyp"] = keys["dgyp"] * fc
+                ex = keys.get("exDividendDate")
+                fecha = ex.strftime("%d-%b-%Y") if hasattr(ex, "strftime") else str(ex)
 
                 nav += keys["mktvalue"]
                 unpyl += keys["unrealizedpnl"]
@@ -264,6 +265,7 @@ class ArsFondosInversion(tk.Frame):
                 self.cus.update_precio_DataHubInfo(symbol=symbol, conid=conid, precio=d_precio)
 
             per = costo / unprofit if unprofit > 0 else 0
+            _logger.warning(f"change_a_ARS: completado — nav={nav:.2f} ARS, unpyl={unpyl:.2f} ARS")
             DataHub.manager_GyP["Ars"]["dGyP"] = dgyp_usd
             self.ars.set_header_panel(
                 Dgyp=dgyp,
@@ -275,7 +277,10 @@ class ArsFondosInversion(tk.Frame):
             )
 
         # convierte a pesos y muestra positions
-        change_a_ARS()
+        try:
+            change_a_ARS()
+        except Exception as _e:
+            _logger.error(f"update_panel_fci/change_a_ARS: {_e}", exc_info=True)
 
         # ejecuta servicios de Trading
         self.cus.oportunidades_buy()
@@ -876,7 +881,11 @@ class ArsFondosInversion(tk.Frame):
                 df_santa = df[cond1 | cond2 | cond3 | cond4]
 
                 santa = df_santa.to_dict(orient="records")
-                santa_ord = sorted(santa, key=lambda x: x["Fecha_liquidación"])
+                santa_ord = sorted(
+                    [r for r in santa if not pd.isna(r.get("Fecha_liquidación"))],
+                    key=lambda x: x["Fecha_liquidación"],
+                )
+                _logger.warning(f"fci_santander: archivo={self.archivo}, filas_mov={len(santa_ord)}")
 
                 trader = []
                 for i, rows in enumerate(santa_ord):
@@ -937,7 +946,10 @@ class ArsFondosInversion(tk.Frame):
                             values.update({"divisa": "ARS"})
                             values.update({"cuenta": self.account_sant})
                             values.update({"fechahora": fecha})
-                            values.update({"idtrans": str(int(rows["N°_comprobante"]))})
+                            comprobante = rows.get("N°_comprobante")
+                            if pd.isna(comprobante):
+                                continue
+                            values.update({"idtrans": str(int(comprobante))})
                             values.update({"cantidad": cantidad})
                             values.update({"preciotrans": ValorCuotaParte})
                             values.update({"preciocierre": ValorCuotaParte})
@@ -956,22 +968,26 @@ class ArsFondosInversion(tk.Frame):
             except Exception as e:
                 _logger.error(f"[fci_santander()]: {e}")
 
+        account = None
         try:
             # carga información BBVA
             self.archivo = self.obtener_archivo_mas_reciente(p_path=self.path, prefijo=self.aliasExcel.get("BBVA"))
             if self.archivo is not None:
                 fci_BBVA()
-                self.update_FCI_en_positions()
-                return self.account_bbva
+                account = self.account_bbva
+        except Exception as e:
+            _logger.error(f"load_positions_FCI(BBVA): {e}")
 
+        try:
             # carga información santander
             self.archivo = self.obtener_archivo_mas_reciente(p_path=self.path, prefijo=self.aliasExcel.get("SANT"))
             if self.archivo is not None:
                 fci_santander()
-                self.update_FCI_en_positions()
-                return self.account_sant
+                account = account or self.account_sant
         except Exception as e:
-            _logger.error(f"load_positions_FCI(): {e}")
+            _logger.error(f"load_positions_FCI(SANT): {e}")
+
+        return account
 
     # carga de booktrading los movimientos USDT
     def get_tasa_cambio_USDT(self, fiat="ARS", date=None):
@@ -1037,10 +1053,13 @@ class ArsFondosInversion(tk.Frame):
             # laod diaria, actualiza panel y no forza actualzaición de peformance
             self.load_EXCEL_TBdiaria_CNV_()
 
-            # load new price in poistions and update panel()
-            self.update_FCI_en_positions()
-            self.update_panel_fci()
-            self.ars.update_panelVehiculo(orden=self.ars.orden)
+            # encadena update_FCI_en_positions + panel en una sola callback (evita race con widgets_FCI)
+            def _refresh_cnv():
+                self.update_FCI_en_positions()
+                self.update_panel_fci()
+                self.ars.update_panelVehiculo(orden=self.ars.orden)
+
+            self.root.after(0, _refresh_cnv)
             existe = False
 
         return existe
@@ -1113,10 +1132,15 @@ class ArsFondosInversion(tk.Frame):
                 # valida si hay nueva interfaz
                 if self.chequea_new_loadFile():
 
-                    # actualiza panel (via after — evita llamar Tkinter desde hilo de fondo)
+                    # encadena update_FCI_en_positions + panel en una sola callback (evita race con widgets_FCI)
                     account = self.load_positions_FCI()
-                    self.root.after(0, lambda: self.update_panel_fci())
-                    self.root.after(0, lambda: self.ars.update_panelVehiculo(orden=self.ars.orden))
+
+                    def _refresh_fci():
+                        self.update_FCI_en_positions()
+                        self.update_panel_fci()
+                        self.ars.update_panelVehiculo(orden=self.ars.orden)
+
+                    self.root.after(0, _refresh_fci)
 
                     # si hay operaciones nuevas después de la última diaria → purga para regenerar limpio
                     if account:

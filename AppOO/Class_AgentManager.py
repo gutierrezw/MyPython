@@ -618,7 +618,6 @@ class AgentManager:
             self._log_infra.error(f"_ib_reconcile_check(): {e}")
 
     def _check_ntp_drift(self):
-        from DataHub import DataHub
         client = ntplib.NTPClient()
         response = client.request("pool.ntp.org", version=3)
         offset_ms = abs(response.offset) * 1000

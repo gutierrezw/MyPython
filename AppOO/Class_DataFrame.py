@@ -368,6 +368,9 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
                 global _yf_rate_limit_until
                 _yf_rate_limit_until = time.time() + 1800
                 CacheHut.logger.warning(f"safe_get_info({key}) :: rate-limited — bloqueado 30 min")
+            elif "NoneType" in msg or "is not iterable" in msg or "not subscriptable" in msg:
+                _info_timeout_cache[key] = True
+                CacheHut.logger.warning(f"safe_get_info({key}) :: yf error transitorio — bloqueado 30 min: {e}")
             else:
                 CacheHut.logger.error(f"safe_get_info({key}) :: {e}")
             return {}
