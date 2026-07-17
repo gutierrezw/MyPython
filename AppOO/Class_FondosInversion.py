@@ -1143,8 +1143,11 @@ class ArsFondosInversion(tk.Frame):
                     self.root.after(0, _refresh_fci)
 
                     # si hay operaciones nuevas después de la última diaria → purga para regenerar limpio
+                    # se itera account_fci completo porque BBVA y SANT son cuentas independientes
                     if account:
-                        self._purgar_diaria_si_nueva_operacion(account)
+                        for _acc in self.account_fci:
+                            if _acc:
+                                self._purgar_diaria_si_nueva_operacion(_acc)
 
                 # actualiza diaria y performance siempre — independiente de carga de archivo
                 # (gprealizadas de ventas se capturan aunque no haya extracto nuevo ese día)

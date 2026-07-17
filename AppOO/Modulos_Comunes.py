@@ -624,7 +624,11 @@ def crea_dataframe_performa_Index(account=None, vehiculo=None, display=True, dia
     try:
         # define index a partir 1er dia de la diaria
         f_desde = diaria[0][iy.index("Date")]
-        indice, index_ref, rtn_index = crea_dataframe_index(vehiculo=vehiculo, desde=f_desde)
+        result = crea_dataframe_index(vehiculo=vehiculo, desde=f_desde)
+        if result is None:
+            print(f"crea_dataframe_performa_Index({vehiculo}): sin datos de índice para {vehiculo} desde {f_desde}")
+            return None
+        indice, index_ref, rtn_index = result
 
         # evalua calculo del retorno
         pdatos = crea_dataframe_diaria(diaria=diaria, ix=iy)
@@ -700,6 +704,9 @@ def proceso_update_performance(account=None, vehiculo=None):
                 diaria=diaria,
                 iy=iy,
             )
+
+            if df_performa is None:
+                return
 
             symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=vehiculo)
 
