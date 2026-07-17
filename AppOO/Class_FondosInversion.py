@@ -1085,22 +1085,31 @@ class ArsFondosInversion(tk.Frame):
 
         return update
 
-    def _purgar_diaria_si_nueva_operacion(self, account):
+    def _purgar_diaria_si_nueva_operacion(self, account, max_id_before=0):
         try:
             Performa = IPerformance()
             sql, ix = Performa.select_diaria_performance(account=account)
             if not sql:
                 return
-            ultima_diaria = max(row[ix.index("Date")] for row in sql)
+            fechas_diaria = {row[ix.index("Date")] for row in sql}
+            ultima_diaria = max(fechas_diaria)
 
             book, bix = self.RepositorioOportunidades.select_booktrading(accion="diaria_app", account=account)
             if not book:
                 return
-            ops_nuevas = [r for r in book if r[bix.index("fechahora")].date() > ultima_diaria]
-            if not ops_nuevas:
+
+            # ops recién insertadas por este archivo (id > snapshot previo al load)
+            ops_nuevas_insert = [r for r in book if max_id_before and r[bix.index("id")] > max_id_before]
+            # ops para fechas que ya tienen diaria pero llegaron tarde (archivo bloqueado)
+            ops_stale = [r for r in ops_nuevas_insert if r[bix.index("fechahora")].date() in fechas_diaria]
+            # ops más recientes que la última diaria
+            ops_post = [r for r in book if r[bix.index("fechahora")].date() > ultima_diaria]
+
+            ops_a_revisar = ops_stale + ops_post
+            if not ops_a_revisar:
                 return
 
-            desde = min(r[bix.index("fechahora")].date() for r in ops_nuevas)
+            desde = min(r[bix.index("fechahora")].date() for r in ops_a_revisar)
             result = Performa.purgar_desde(account=account, vehiculo=self.vehiculo, desde=desde)
             DataHub.last_process[self.vehiculo]["diaria_book_performance"] = None
             _logger.warning(f"_purgar_diaria ({account}): purga desde {desde} → {result}")
@@ -1132,6 +1141,13 @@ class ArsFondosInversion(tk.Frame):
                 # valida si hay nueva interfaz
                 if self.chequea_new_loadFile():
 
+                    # snapshot max id antes del load para detectar ops recién insertadas
+                    max_ids = {
+                        acc: self.RepositorioOportunidades.get_max_booktrading_id(acc)
+                        for acc in self.account_fci
+                        if acc
+                    }
+
                     # encadena update_FCI_en_positions + panel en una sola callback (evita race con widgets_FCI)
                     account = self.load_positions_FCI()
 
@@ -1147,7 +1163,7 @@ class ArsFondosInversion(tk.Frame):
                     if account:
                         for _acc in self.account_fci:
                             if _acc:
-                                self._purgar_diaria_si_nueva_operacion(_acc)
+                                self._purgar_diaria_si_nueva_operacion(_acc, max_id_before=max_ids.get(_acc, 0))
 
                 # actualiza diaria y performance siempre — independiente de carga de archivo
                 # (gprealizadas de ventas se capturan aunque no haya extracto nuevo ese día)

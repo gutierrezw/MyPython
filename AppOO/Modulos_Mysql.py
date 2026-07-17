@@ -6460,6 +6460,21 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             if conn:
                 conn.close()
 
+    def get_max_booktrading_id(self, account):
+        conn = self._conectar(tabla="get_max_booktrading_id")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COALESCE(MAX(id), 0) FROM booktrading WHERE cuenta = %s", (account,))
+            return cursor.fetchone()[0]
+        except Exception as e:
+            print(f"[Mysql:: get_max_booktrading_id()]: {e}")
+            return 0
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
 
 class FinanceScreen(BDsystem):  # -------------------------------------------------------------------------------------
     """
