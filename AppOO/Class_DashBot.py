@@ -705,6 +705,7 @@ class ClassAgenteIA:
                 s = data["sell"]
                 profit = float(s.get("profit", 0))
                 if profit > 0:
+                    costo_cum = float(s.get("costoCum", 0))
                     oport_sell.append(
                         {
                             "symbol": sym,
@@ -712,6 +713,7 @@ class ClassAgenteIA:
                             "roi": round(float(s.get("roi", 0)) * 100, 2),
                             "qty": round(float(s.get("cantidad sell", 0)), 4),
                             "lotes": int(s.get("cantidad lotes", 0)),
+                            "importe_total": round(costo_cum + profit, 2),
                         }
                     )
 
@@ -808,7 +810,8 @@ class ClassAgenteIA:
             if not rows:
                 return "  (ninguna)"
             return "\n".join(
-                f"  {r['symbol']}: profit=${r['profit']:.0f} ROI={r['roi']:+.1f}% qty={r['qty']} lotes={r['lotes']}"
+                f"  {r['symbol']}: profit=${r['profit']:.0f} ROI={r['roi']:+.1f}% "
+                f"importe_total=${r.get('importe_total', 0):.0f} qty={r['qty']} lotes={r['lotes']}"
                 for r in rows
             )
 
