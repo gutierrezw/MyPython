@@ -249,7 +249,9 @@ class AnalisisBase:
             canvas = FigureCanvasTkAgg(fg, master=frame_g)
             canvas.get_tk_widget().pack(fill="x", expand=True)
 
-            sin_benchmark = self.vehiculo == "BBVA.ARS"
+            # BBVA.ARS: sin benchmark por defecto (Merval en ARS no es comparable con cartera en USD)
+            # El botón [Idx] permite activarlo puntualmente
+            show_index = [self.vehiculo != "BBVA.ARS"]
 
             def _draw(dias):
                 """Filtra df_plot al período y redibuja."""
@@ -268,7 +270,7 @@ class AnalisisBase:
                 dates = df.index
                 cart = df["cartera_pct"].values
 
-                if sin_benchmark:
+                if not show_index[0]:
                     c_line = "#2ecc71" if last_c >= 0 else "#e74c3c"
                     ax.fill_between(dates, cart, 0, where=(cart >= 0), alpha=0.15, color="#2ecc71", interpolate=True)
                     ax.fill_between(dates, cart, 0, where=(cart < 0), alpha=0.15, color="#e74c3c", interpolate=True)
@@ -327,9 +329,12 @@ class AnalisisBase:
                 fg.subplots_adjust(left=0.05, right=0.90, top=0.85, bottom=0.20)
                 canvas.draw()
 
-            # Botones de intervalo — mismo estilo que gráfico principal
+            # Botones de intervalo + toggle índice
             frame_btns = tk.Frame(frame_g, bg=self.CG_COLOR)
             frame_btns.pack(anchor="e", padx=4)
+
+            dias_actual = [365]
+
             for label, dias in INTERVALOS.items():
                 d = dias
                 tk.Button(
@@ -339,11 +344,27 @@ class AnalisisBase:
                     bg=self.CG_COLOR,
                     fg=self.BG_COLOR,
                     relief=tk.FLAT,
-                    command=lambda d=d: _draw(d),
+                    command=lambda d=d: [dias_actual.__setitem__(0, d), _draw(d)],
                 ).pack(side="left")
 
+            def _toggle_idx():
+                show_index[0] = not show_index[0]
+                btn_idx.config(fg="#3498db" if show_index[0] else self.BG_COLOR)
+                _draw(dias_actual[0])
+
+            btn_idx = tk.Button(
+                frame_btns,
+                text="Idx",
+                width=3,
+                bg=self.CG_COLOR,
+                fg="#3498db" if show_index[0] else self.BG_COLOR,
+                relief=tk.FLAT,
+                command=_toggle_idx,
+            )
+            btn_idx.pack(side="left", padx=(4, 0))
+
             # Dibujo inicial: 1 año
-            _draw(90)
+            _draw(365)
 
             return row + 1
 
