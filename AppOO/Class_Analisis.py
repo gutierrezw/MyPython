@@ -1129,12 +1129,14 @@ class AnalisisFCI(AnalisisBase):
         try:
             df = self.df_historico.copy()
             df["fecha"] = pd.to_datetime(df["fecha"])
-            # deduplicar por codCAFCI+fecha — un fondo puede tener variantes de nombre (clases A/B/truncados)
-            df = df.sort_values(["codCAFCI", "fecha"]).drop_duplicates(subset=["codCAFCI", "fecha"], keep="last")
-            # nombre canónico = el más reciente por codCAFCI → evita duplicados por nombre
-            nombre_canon = df.groupby("codCAFCI")["fondo"].last()
-            df["fondo"] = df["codCAFCI"].map(nombre_canon)
-            df = df.sort_values(["fondo", "fecha"])
+            df = df.sort_values(["fondo", "fecha"]).drop_duplicates(subset=["fondo", "fecha"], keep="last")
+
+            # filtrar solo fondos en cartera + las bandas de referencia
+            fondos_cartera = set(self.df_lotes["fondo"].tolist()) if not self.df_lotes.empty else set()
+            bandas = {self._BANDA_PISO, self._BANDA_TECHO}
+            fondos_permitidos = fondos_cartera | bandas
+            df = df[df["fondo"].isin(fondos_permitidos)]
+
             df["rend"] = df.groupby("fondo")["valorActual"].transform(lambda x: (x / x.iloc[0] - 1) * 100)
 
             ultima = df.groupby("fondo")["rend"].last()
@@ -1223,11 +1225,8 @@ class AnalisisFCI(AnalisisBase):
         try:
             conn = BDsystem.connect_dbase("select.diaria_cnv", False)
             query = """
-                SELECT d.* FROM bdinv.diaria_cnv d
-                INNER JOIN (
-                    SELECT DISTINCT codCAFCI FROM bdinv.otros_activos WHERE codCAFCI IS NOT NULL AND codCAFCI != ''
-                ) c ON c.codCAFCI = d.codCAFCI
-                ORDER BY d.fecha DESC
+                SELECT * FROM bdinv.diaria_cnv
+                ORDER BY fecha DESC
             """
             cursor = conn.cursor()
             cursor.execute(query)
@@ -1442,6 +1441,11 @@ class AnalisisFCI(AnalisisBase):
 
             self.df_lotes["score_fondo"] = self.df_lotes["fondo"].map(score_map)
             self.df_lotes["posicion_fondo"] = self.df_lotes["fondo"].map(pos_map)
+
+        if "posicion_fondo" not in self.df_lotes.columns:
+            self.df_lotes["posicion_fondo"] = float("nan")
+        if "score_fondo" not in self.df_lotes.columns:
+            self.df_lotes["score_fondo"] = 0.0
 
         # Calcular prioridad de venta
         self.df_lotes["prioridad_venta"] = (
