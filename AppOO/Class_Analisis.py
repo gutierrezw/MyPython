@@ -1223,8 +1223,11 @@ class AnalisisFCI(AnalisisBase):
         try:
             conn = BDsystem.connect_dbase("select.diaria_cnv", False)
             query = """
-                SELECT * FROM bdinv.diaria_cnv
-                ORDER BY fecha DESC
+                SELECT d.* FROM bdinv.diaria_cnv d
+                INNER JOIN (
+                    SELECT DISTINCT codCAFCI FROM bdinv.otros_activos WHERE codCAFCI IS NOT NULL AND codCAFCI != ''
+                ) c ON c.codCAFCI = d.codCAFCI
+                ORDER BY d.fecha DESC
             """
             cursor = conn.cursor()
             cursor.execute(query)
