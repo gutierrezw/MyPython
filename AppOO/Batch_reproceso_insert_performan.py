@@ -1,5 +1,8 @@
+import os
+import json
+
 from Class_DataFrame import get_yfinance
-from Modulos_Mysql import IPerformance, RepositorioOportunidadesBuySell
+from Modulos_Mysql import IPerformance, RepositorioOportunidadesBuySell, BDsystem
 from Modulos_Utilitarios import vehiculo_parm, convierte_ticket_crypto, porcentaje
 from Modulos_Comunes import (
     detalle_book,
@@ -11,14 +14,19 @@ from Modulos_python import *
 """
  fecha:: 2024-08-24
  nota::: modulo para reconstruir  tabla performa inversión específicamente para Stock,  se hace pasos
-         1) se crea index de referencia 
-         2) se obtiene de booktrading, los símbolos  y Dataframe de  las operaciones 
+         1) se crea index de referencia
+         2) se obtiene de booktrading, los símbolos  y Dataframe de  las operaciones
          3) se actualiza el acumulado porcentual de cada simbolo en performa del stock (P_vehiculo) de acuerdo
             al peso para en momento de la operación.
          4) Eliminar manualmente la tablas performa_inversion
-         4) hay que cargar tabla diaria_performa antes de iniciar el paso (5) 
+         4) hay que cargar tabla diaria_performa antes de iniciar el paso (5)
          6) cambiar a False switch diaria para iniciar carga performa_inversion
 """
+
+_profile = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles", "main.json")
+with open(_profile, encoding="utf-8") as _f:
+    _cfg = json.load(_f)
+BDsystem.configure(_cfg.get("db", {}))
 
 ROp = RepositorioOportunidadesBuySell()
 Inv = IPerformance()
@@ -180,19 +188,24 @@ if __name__ == "__main__":
 
     # cuentas = {'Stock': {'account': 'U4214563', 'divisa': 'USD'}}
     # cuentas = {'Crypto':{'account': 'B0000001', 'divisa': 'USD'}}
-    cuentas = {"BBVA.ARS": {"account": "SANT0001", "divisa": "ARS"}}
-    cuentas = {"BBVA.ARS": {"account": "BBVA0001", "divisa": "ARS"}}
+    cuentas = {
+        "BBVA.ARS_BBVA": {"vehiculo_key": "BBVA.ARS", "account": "BBVA0001", "divisa": "ARS"},
+        "BBVA.ARS_SANT": {"vehiculo_key": "BBVA.ARS", "account": "SANT0001", "divisa": "ARS"},
+    }
 
     Performa = Performance()
 
-    for vehiculo, param in cuentas.items():
+    for _, param in cuentas.items():
+        vehiculo = param.get("vehiculo_key", param.get("vehiculo", _))
         account = param["account"]
         divisa = param["divisa"]
 
         symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=vehiculo)
         hoy = datetime.now().date()
 
+        print(f"\n{'='*60}\nProcesando {vehiculo} — cuenta {account}\n{'='*60}")
         procesar_cuenta_desde_inicio(new_diaria=True, insert=True)
         # procesar_cuenta_desde_app(new_diaria=True, insert=True)
 
+    win.after(500, win.destroy)
     win.mainloop()

@@ -500,6 +500,9 @@ def actualiza_performa_inversion(account=None, vehiculo=None):
             pdatos = datos.groupby("Date")[columnas].sum()
             pdatos.index = pdatos.index.date
 
+            # excluir días donde costo_base es residual (<$1) — evita ratio infinito por posición cerrada
+            pdatos = pdatos[pdatos["costo_base"] >= 1.0]
+
             # Normalizar para crear índice
             pdatos["performa"] = pdatos["value Portafolio"] / pdatos["costo_base"]
 
@@ -610,6 +613,9 @@ def crea_dataframe_diaria(diaria=None, ix=None):
             "value Portafolio",
         ]
         pdatos = datos.groupby("Date")[columnas].sum()
+
+        # excluir días donde costo_base es residual — evita ratio infinito por posición cerrada
+        pdatos = pdatos[pdatos["costo_base"] >= 1.0]
 
         pdatos["performa"] = pdatos["value Portafolio"] / pdatos["costo_base"]
 

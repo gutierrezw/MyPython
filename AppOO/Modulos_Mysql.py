@@ -4326,11 +4326,11 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             # inversion.iactiva='N' pero booktrading sigue con activa='Y' — desincronizado
             cursor.execute("""
                 SELECT i.ticket, i.useraccount, i.tipoinv,
-                       COALESCE(b.stock, 0) AS book_stock,
-                       COALESCE(b.value, 0) AS mktvalue
+                       COALESCE(b.stock, 0)                        AS book_stock,
+                       COALESCE(b.stock * b.preciocierre, 0)       AS mktvalue
                 FROM bdinv.inversion i
                 INNER JOIN (
-                    SELECT b1.simbolo, b1.cuenta, b1.stock, b1.value
+                    SELECT b1.simbolo, b1.cuenta, b1.stock, b1.preciocierre
                     FROM booktrading b1
                     INNER JOIN (
                         SELECT simbolo, cuenta, MAX(fechahora) AS max_fh
@@ -4389,6 +4389,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                         "book_stock": float(book_stock or 0),
                         "mktvalue": float(mktvalue or 0),
                         "motivo": f"residual_fci ${float(mktvalue or 0):.4f}",
+                        "source": "desync",
                     }
                 )
 
@@ -4399,10 +4400,23 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         conn = self._conectar(tabla="close_residual_fci")
         try:
             cursor = conn.cursor()
+            # activa='N' en todos los rows — señal para monitoreo y write_csv
             cursor.execute(
-                "UPDATE booktrading SET activa = 'N', stock = 0 "
+                "UPDATE booktrading SET activa = 'N' "
                 "WHERE cuenta = %s AND simbolo = %s AND divisa = 'ARS' AND delisted = 0",
                 (account, symbol),
+            )
+            # stock=0 solo en el último row — impide extrapolación hacia adelante sin borrar historia
+            cursor.execute(
+                """UPDATE booktrading SET stock = 0
+                   WHERE cuenta = %s AND simbolo = %s AND divisa = 'ARS' AND delisted = 0
+                   AND fechahora = (
+                       SELECT max_fh FROM (
+                           SELECT MAX(fechahora) AS max_fh FROM booktrading
+                           WHERE cuenta = %s AND simbolo = %s AND divisa = 'ARS' AND delisted = 0
+                       ) AS t
+                   )""",
+                (account, symbol, account, symbol),
             )
             cursor.execute(
                 "UPDATE inversion SET iactiva = 'N', position = 0, timestamp = %s "
