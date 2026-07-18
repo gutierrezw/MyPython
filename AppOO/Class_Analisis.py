@@ -1130,13 +1130,6 @@ class AnalisisFCI(AnalisisBase):
             df = self.df_historico.copy()
             df["fecha"] = pd.to_datetime(df["fecha"])
             df = df.sort_values(["fondo", "fecha"]).drop_duplicates(subset=["fondo", "fecha"], keep="last")
-
-            # filtrar solo fondos en cartera + las bandas de referencia
-            fondos_cartera = set(self.df_lotes["fondo"].tolist()) if not self.df_lotes.empty else set()
-            bandas = {self._BANDA_PISO, self._BANDA_TECHO}
-            fondos_permitidos = fondos_cartera | bandas
-            df = df[df["fondo"].isin(fondos_permitidos)]
-
             df["rend"] = df.groupby("fondo")["valorActual"].transform(lambda x: (x / x.iloc[0] - 1) * 100)
 
             ultima = df.groupby("fondo")["rend"].last()
@@ -1225,8 +1218,11 @@ class AnalisisFCI(AnalisisBase):
         try:
             conn = BDsystem.connect_dbase("select.diaria_cnv", False)
             query = """
-                SELECT * FROM bdinv.diaria_cnv
-                ORDER BY fecha DESC
+                SELECT d.* FROM bdinv.diaria_cnv d
+                INNER JOIN (
+                    SELECT DISTINCT symbol FROM bdinv.otros_activos
+                ) c ON c.symbol = d.fondo
+                ORDER BY d.fecha DESC
             """
             cursor = conn.cursor()
             cursor.execute(query)
