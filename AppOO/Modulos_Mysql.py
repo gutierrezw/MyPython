@@ -3683,7 +3683,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                         WHERE ticket ='%s' AND useraccount ='%s';"""
 
                 factor = keys["factor_cambio"] if "factor_cambio" in keys else 1
-                xlistvalues.append(keys["position"])
+                xlistvalues.append(max(0, keys["position"]))
                 xlistvalues.append(keys["peso"])
                 xlistvalues.append(keys["costobase"])
                 xlistvalues.append(keys["conid"])
@@ -3707,8 +3707,10 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 xlistvalues.append(keys["open"])
                 xlistvalues.append(keys["dgyp"])
 
-                # da baja si position == 0 or retorno < .001
-                Debaja = keys["position"] <= 0 or (1 - keys["retorno"]) < 0.001
+                # da baja si valor de mercado < $5 USD
+                Debaja = keys["mrkprice"] * keys["position"] < 5.0
+                if Debaja:
+                    xlistvalues[0] = 0  # position[0] = 0 cuando iactiva='N'
                 xlistvalues.append("N" if Debaja else "Y")
                 if Debaja:
                     cursor.execute(
@@ -3773,7 +3775,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         def baja(keys):
             try:
                 xlistvalues = []
-                qry = """UPDATE inversion  SET  iactiva = '%s', timestamp = '%s' 
+                qry = """UPDATE inversion SET iactiva = '%s', position = 0, timestamp = '%s'
                         WHERE ticket ='%s' AND useraccount ='%s';"""
 
                 xlistvalues.append("N")
@@ -4319,13 +4321,35 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 ) b ON i.ticket = b.simbolo AND i.useraccount = b.cuenta
                 WHERE i.iactiva = 'Y'
             """)
-            rows = cursor.fetchall()
+            rows_activas = cursor.fetchall()
+
+            # inversion.iactiva='N' pero booktrading sigue con activa='Y' — desincronizado
+            cursor.execute("""
+                SELECT i.ticket, i.useraccount, i.tipoinv,
+                       COALESCE(b.stock, 0) AS book_stock,
+                       COALESCE(b.value, 0) AS mktvalue
+                FROM bdinv.inversion i
+                INNER JOIN (
+                    SELECT b1.simbolo, b1.cuenta, b1.stock, b1.value
+                    FROM booktrading b1
+                    INNER JOIN (
+                        SELECT simbolo, cuenta, MAX(fechahora) AS max_fh
+                        FROM booktrading WHERE delisted = 0 AND activa = 'Y'
+                        GROUP BY simbolo, cuenta
+                    ) b2 ON b1.simbolo = b2.simbolo
+                         AND b1.cuenta  = b2.cuenta
+                         AND b1.fechahora = b2.max_fh
+                ) b ON b.simbolo = i.ticket AND b.cuenta = i.useraccount
+                WHERE i.iactiva = 'N'
+                  AND i.tipoinv NOT IN ('Stock', 'Crypto', 'BotCrypto')
+            """)
+            rows_book = cursor.fetchall()
         finally:
             cursor.close()
             conn.close()
 
         alertas = []
-        for ticket, account, tipoin, position, mktvalue, book_stock in rows:
+        for ticket, account, tipoin, position, mktvalue, book_stock in rows_activas:
             book_stock = float(book_stock or 0)
             mktvalue = float(mktvalue or 0)
             es_fci = tipoin not in ("Stock", "Crypto", "BotCrypto")
@@ -4352,6 +4376,22 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                         "motivo": f"residual_fci ${mktvalue:.2f}",
                     }
                 )
+
+        # inversion inactiva pero booktrading sigue activo — desincronizado
+        simbolos_ya = {(a["symbol"], a["account"]) for a in alertas}
+        for ticket, account, tipoin, book_stock, mktvalue in rows_book:
+            if (ticket, account) not in simbolos_ya:
+                alertas.append(
+                    {
+                        "symbol": ticket,
+                        "account": account,
+                        "tipoin": tipoin,
+                        "book_stock": float(book_stock or 0),
+                        "mktvalue": float(mktvalue or 0),
+                        "motivo": f"residual_fci ${float(mktvalue or 0):.4f}",
+                    }
+                )
+
         return alertas
 
     def close_residual_fci(self, account: str, symbol: str) -> bool:

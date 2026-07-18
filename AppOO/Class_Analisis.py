@@ -21,6 +21,7 @@ from Modulos_python import (
     datetime,
     pd,
     np,
+    re,
     mpatches,
     mdates,
     traceback,
@@ -376,6 +377,8 @@ class AnalisisBase:
     # Fondos que forman la banda de referencia (piso y techo)
     _BANDA_PISO = "FBA Horizonte"
     _BANDA_TECHO = "Supergestion Mix VI - Clase A"
+    # Prefijos de familias de fondos disponibles en los bancos del usuario
+    _FUND_PREFIXES = ("FBA", "Super")
     # Fondos de renta variable a graficar sobre la banda
     _EQUITY_FONDOS = [
         "FBA Acciones Argentinas - Clase A",
@@ -1130,6 +1133,12 @@ class AnalisisFCI(AnalisisBase):
             df = self.df_historico.copy()
             df["fecha"] = pd.to_datetime(df["fecha"])
             df = df.sort_values(["fondo", "fecha"]).drop_duplicates(subset=["fondo", "fecha"], keep="last")
+
+            # normalizar todos los fondos al mismo punto de inicio
+            # para que el Rend% sea comparable (se usa el máximo de los mínimos de fecha)
+            fecha_inicio = df.groupby("fondo")["fecha"].min().max()
+            df = df[df["fecha"] >= fecha_inicio]
+
             df["rend"] = df.groupby("fondo")["valorActual"].transform(lambda x: (x / x.iloc[0] - 1) * 100)
 
             ultima = df.groupby("fondo")["rend"].last()
@@ -1217,21 +1226,31 @@ class AnalisisFCI(AnalisisBase):
         """Carga historial de precios desde diaria_cnv"""
         try:
             conn = BDsystem.connect_dbase("select.diaria_cnv", False)
-            query = """
-                SELECT d.* FROM bdinv.diaria_cnv d
-                INNER JOIN (
-                    SELECT DISTINCT symbol FROM bdinv.otros_activos
-                ) c ON c.symbol = d.fondo
-                ORDER BY d.fecha DESC
-            """
             cursor = conn.cursor()
-            cursor.execute(query)
+
+            # empresa = nombre completo que coincide con diaria_cnv.fondo
+            cursor.execute(
+                "SELECT DISTINCT empresa, position, iactiva FROM bdinv.inversion WHERE tipoinv = %s AND empresa IS NOT NULL",
+                (self.vehiculo,),
+            )
+            rows_inv = cursor.fetchall()
+            fondos_cargar = list(
+                {r[0] for r in rows_inv}
+                | {self._BANDA_PISO, self._BANDA_TECHO}
+                | set(self._EQUITY_FONDOS)
+            )
+
+            placeholders = ",".join(["%s"] * len(fondos_cargar))
+            cursor.execute(
+                f"SELECT * FROM bdinv.diaria_cnv WHERE fondo IN ({placeholders}) ORDER BY fecha DESC",
+                fondos_cargar,
+            )
             rows = cursor.fetchall()
             cols = [d[0] for d in cursor.description]
             cursor.close()
             conn.close()
-            self.df_historico = pd.DataFrame(rows, columns=cols)
 
+            self.df_historico = pd.DataFrame(rows, columns=cols)
             if not self.df_historico.empty:
                 self.df_historico["fecha"] = pd.to_datetime(self.df_historico["fecha"])
                 ultima_fecha = self.df_historico["fecha"].max()

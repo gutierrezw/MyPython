@@ -401,7 +401,7 @@ class ArsFondosInversion(tk.Frame):
                 if not df_fci.empty:
                     for keys in df_fci.itertuples():
                         try:
-                            # valida existencia del fondo — primero por CAFCI, fallback por nombre
+                            # Sincroniza codCAFCI en otros_activos si existe — sin gate: siempre inserta
                             activo, found = self.RepositorioOportunidades.select_otros_activos(
                                 idSymbol=keys.Código_CAFCI
                             )
@@ -416,9 +416,6 @@ class ArsFondosInversion(tk.Frame):
                                         symbol=keys.fondo,
                                         values={"idcrypto": keys.Código_CAFCI},
                                     )
-                                    activo[0]["idcrypto"] = keys.Código_CAFCI
-                            if not found:
-                                continue
 
                             values = {}
                             symbol = keys.Código_CAFCI
@@ -563,7 +560,7 @@ class ArsFondosInversion(tk.Frame):
                     try:
                         df = pd.read_excel(resultado["archivo"], skiprows=11, header=None, names=names_list)
                         df.fillna(0, inplace=True)
-                        fila = df[df["Código_CAFCI"] == codCAFCI]
+                        fila = df[df["Código_CAFCI"] == int(codCAFCI)]
                         if not fila.empty:
                             keys = next(fila.itertuples())
                             values, symbol = self._parse_cnv_row(keys)
@@ -581,7 +578,7 @@ class ArsFondosInversion(tk.Frame):
         threading.Thread(target=_run, daemon=True).start()
 
     # define position en moneda base USD
-    def struct_positions_fci(self, account=None, ticket=None, positions=None, last=None):
+    def struct_positions_fci(self, account=None, ticket=None, last=None):
         try:
             p = {}
 
@@ -605,9 +602,6 @@ class ArsFondosInversion(tk.Frame):
                 precio_cierre = last[0].get("preciocierre") or 0
                 valor_actual = precio_cierre / factor if precio_cierre else 0
                 valor_anterior = valor_actual
-
-            # obtiene valor anterior de la posición
-            found, position = buscar_ticker(positions, ticket)
 
             p["exDividendDate"] = fecha_cnv
             p["factor_cambio"] = factor
@@ -645,7 +639,6 @@ class ArsFondosInversion(tk.Frame):
     # update self.ars.positions
     def update_FCI_en_positions(self):
         try:
-            in_positions = self.RepositorioOportunidades.select_inversion(tipoin=self.vehiculo, ticket="all")
             iupdate = False
 
             for account in self.account_fci:
@@ -661,12 +654,9 @@ class ArsFondosInversion(tk.Frame):
                         symbol=symbol,
                     )
 
-                    # valida que position sea mayor que el umbral
-                    if last_trader and abs(last_trader[0]["stock"]) > 0.01:
-                        datos = self.struct_positions_fci(
-                            account=account, ticket=symbol, positions=in_positions, last=last_trader
-                        )
-                        if datos is not None:
+                    if last_trader:
+                        datos = self.struct_positions_fci(account=account, ticket=symbol, last=last_trader)
+                        if datos is not None and datos["mrkprice"] * datos["position"] > 5.0:
                             positions.append(datos)
 
                 # actualiza tabla de inversiones con última información de la API
