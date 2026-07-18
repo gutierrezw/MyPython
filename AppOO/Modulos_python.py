@@ -53,6 +53,7 @@ import threading as threading
 
 
 from decimal import Decimal, InvalidOperation
+from scipy.optimize import brentq
 import pdfplumber
 from operator import itemgetter
 from pathlib import Path

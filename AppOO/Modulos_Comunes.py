@@ -7,7 +7,7 @@ from Modulos_Utilitarios import (
     define_FileCache,
     read_json_tmp,
 )
-from Modulos_python import datetime, date, pd, timedelta, os, csv, traceback, logging, time
+from Modulos_python import datetime, date, pd, timedelta, os, csv, traceback, logging, time, brentq
 
 _logger = logging.getLogger("ClassMyOrders")
 
@@ -694,6 +694,70 @@ def crea_dataframe_performa_Index(account=None, vehiculo=None, display=True, dia
 
     except (Exception, ValueError, EncodingWarning) as e:
         print(f"crea_dataframe_performa_Index({vehiculo}): error: {e}")
+
+
+def calcular_tir(account=None, vehiculo=None):
+    """
+    Calcula TIR anualizada en USD desde performa_inversion.
+    Flujos: Δcosto_base por fecha (negativo = aporte, positivo = retiro).
+    Flujo terminal: value del último día (liquidación hipotética hoy).
+    Cuando account=None agrupa por fecha para consolidar múltiples cuentas.
+    Retorna tasa anualizada (ej: 0.183 = 18.3%) o None si no hay datos suficientes.
+    """
+    try:
+        Performa = IPerformance()
+        sql, iy = Performa.select_performa_inversion(account=account, vehiculo=vehiculo)
+        if not sql or len(sql) < 2:
+            return None
+
+        df = pd.DataFrame(sql, columns=iy)
+        df["fechaclose"] = pd.to_datetime(df["fechaclose"])
+        df["costo_base"] = pd.to_numeric(df["costo_base"], errors="coerce").fillna(0)
+        df["value"] = pd.to_numeric(df["value"], errors="coerce").fillna(0)
+
+        # consolidar múltiples cuentas sumando por fecha
+        df = df.groupby("fechaclose")[["costo_base", "value"]].sum().reset_index()
+        df.sort_values("fechaclose", inplace=True)
+        df.reset_index(drop=True, inplace=True)
+
+        # Flujos: solo días con movimiento de costo_base + día terminal
+        flujos, fechas = [], []
+        cb_prev = 0.0
+        for _, row in df.iterrows():
+            delta = float(row["costo_base"]) - cb_prev
+            if abs(delta) > 0.01:
+                flujos.append(-delta)
+                fechas.append(row["fechaclose"])
+            cb_prev = float(row["costo_base"])
+
+        if not flujos:
+            return None
+
+        # Flujo terminal: valor de mercado del último día
+        last_date = df.iloc[-1]["fechaclose"]
+        last_value = float(df.iloc[-1]["value"])
+        if fechas and fechas[-1] == last_date:
+            flujos[-1] += last_value
+        else:
+            flujos.append(last_value)
+            fechas.append(last_date)
+
+        if len(flujos) < 2 or last_value <= 0:
+            return None
+
+        # XIRR: tasa anual que hace VPN = 0 con fechas irregulares
+        t0 = fechas[0]
+
+        def xnpv(rate):
+            return sum(cf / (1 + rate) ** ((d - t0).days / 365.0)
+                       for cf, d in zip(flujos, fechas))
+
+        tir_anual = brentq(xnpv, -0.99, 100.0, maxiter=500)
+        return tir_anual
+
+    except Exception as e:
+        print(f"calcular_tir({vehiculo}): {e}")
+        return None
 
 
 # orquesta la construcción del performance a partir de la diaria

@@ -229,6 +229,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     crypto, found = self.RepositorioOportunidades.select_otros_activos(
                         account=self.account, symbol=symbol
                     )
+                    if not crypto:
+                        return
                     conid = crypto[0]["idcrypto"]
 
                     # procesa_crypto(symbol, d_precio)

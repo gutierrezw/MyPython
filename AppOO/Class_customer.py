@@ -62,6 +62,7 @@ from Modulos_Comunes import (
     diaria_book_performance,
     performa_asset,
     proceso_update_performance,
+    calcular_tir,
 )
 from Class_DataFrame import (
     get_ultimo_dia_mercado,
@@ -5706,6 +5707,8 @@ class WidgetVehiculo(TickerInfo):
             unpnl = float(data.get("UnP&l", 0.0))
             unprofit = float(data.get("UnProfit", unpnl))
             cash = float(data.get("Cash", 0.0))
+            tir = data.get("TIR")
+            titulo_roi = parm.get("titulo", "")
 
             # Preparar etiquetas y valores (excluimos UnProfit de las barras porque lo pintaremos como línea)
             labels = []
@@ -5731,7 +5734,15 @@ class WidgetVehiculo(TickerInfo):
 
             # Configuración del gráfico
             self.graph[0][1].clear()
-            self.graph[0][1].suptitle(parm.get("titulo", ""), color=self.cchart["titulo"], fontsize="medium")
+            self.graph[0][1].suptitle(titulo_roi, color=self.cchart["titulo"], fontsize="medium")
+            if tir is not None:
+                tir_color = self.cchart.get("plot1", "green") if tir >= 0 else self.cchart.get("plot2", "red")
+                self.graph[0][1].text(
+                    0.5, 0.91, f"TIR: {tir:+.1%} USD/año",
+                    ha="center", va="top",
+                    transform=self.graph[0][1].transFigure,
+                    fontsize=7, color=tir_color,
+                )
             ax = self.graph[0][1].add_subplot()
             # ax.set_box_aspect(parm.get("aspect", 0.8))
             ax.set_facecolor(self.cchart["fondo_fig"])
@@ -6231,11 +6242,14 @@ class WidgetVehiculo(TickerInfo):
             if self.vehiculo in ("Stock", "BBVA.ARS"):
                 if self.resumen:
                     cash = float(self.resumen[" Cash       :"])
+                account_tir = None if self.vehiculo == "BBVA.ARS" else self.account
+                tir = calcular_tir(account=account_tir, vehiculo=self.vehiculo)
                 pdatos = {
                     "Inversión": tcos,
                     "UnProfit": tpro,
                     "UnP&l": tunr,
                     "Cash": cash,
+                    "TIR": tir,
                 }
 
             elif self.vehiculo == "Crypto":

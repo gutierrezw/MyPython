@@ -4010,6 +4010,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             return xlis, found
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: select_otros_activos()]: {}".format(error))
+            return [], False
         finally:
             cursor.close()
             conn.close()
