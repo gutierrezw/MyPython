@@ -249,6 +249,8 @@ class AnalisisBase:
             canvas = FigureCanvasTkAgg(fg, master=frame_g)
             canvas.get_tk_widget().pack(fill="x", expand=True)
 
+            sin_benchmark = self.vehiculo == "BBVA.ARS"
+
             def _draw(dias):
                 """Filtra df_plot al período y redibuja."""
                 fecha_desde = df_plot.index.max() - pd.Timedelta(days=dias)
@@ -256,14 +258,8 @@ class AnalisisBase:
                 if df.empty:
                     return
 
-                # Re-normalizar desde la raíz del intervalo seleccionado
                 df["cartera_pct"] = (df["CumPort"] - df["CumPort"].iloc[0]) * 100
-                df["indice_pct"] = (df[cum_index] - df[cum_index].iloc[0]) * 100
-
                 last_c = float(df["cartera_pct"].iloc[-1])
-                last_i = float(df["indice_pct"].iloc[-1])
-                alpha = last_c - last_i
-                c_alpha = "#2ecc71" if alpha >= 0 else "#e74c3c"
 
                 fg.clear()
                 ax = fg.add_subplot(111)
@@ -271,12 +267,37 @@ class AnalisisBase:
 
                 dates = df.index
                 cart = df["cartera_pct"].values
-                indx = df["indice_pct"].values
 
-                ax.fill_between(dates, cart, indx, where=(cart >= indx), alpha=0.18, color="#2ecc71", interpolate=True)
-                ax.fill_between(dates, cart, indx, where=(cart < indx), alpha=0.18, color="#e74c3c", interpolate=True)
-                ax.plot(dates, cart, color="#27ae60", linewidth=1.2)
-                ax.plot(dates, indx, color="#3498db", linewidth=1.2, linestyle="--")
+                if sin_benchmark:
+                    c_line = "#2ecc71" if last_c >= 0 else "#e74c3c"
+                    ax.fill_between(dates, cart, 0, where=(cart >= 0), alpha=0.15, color="#2ecc71", interpolate=True)
+                    ax.fill_between(dates, cart, 0, where=(cart < 0), alpha=0.15, color="#e74c3c", interpolate=True)
+                    ax.plot(dates, cart, color=c_line, linewidth=1.2)
+                    p_legend = [mpatches.Patch(label=f"Cartera ({last_c:+.1f}%)", color=c_line)]
+                    titulo = f"Performance {self.vehiculo}"
+                else:
+                    df["indice_pct"] = (df[cum_index] - df[cum_index].iloc[0]) * 100
+                    last_i = float(df["indice_pct"].iloc[-1])
+                    alpha = last_c - last_i
+                    c_alpha = "#2ecc71" if alpha >= 0 else "#e74c3c"
+                    indx = df["indice_pct"].values
+                    ax.fill_between(dates, cart, indx, where=(cart >= indx), alpha=0.18, color="#2ecc71", interpolate=True)
+                    ax.fill_between(dates, cart, indx, where=(cart < indx), alpha=0.18, color="#e74c3c", interpolate=True)
+                    ax.plot(dates, cart, color="#27ae60", linewidth=1.2)
+                    ax.plot(dates, indx, color="#3498db", linewidth=1.2, linestyle="--")
+                    ax.annotate(
+                        f"Alpha: {alpha:+.1f}%",
+                        xy=(0.02, 0.93),
+                        xycoords="axes fraction",
+                        fontsize=7,
+                        color=c_alpha,
+                        fontweight="bold",
+                    )
+                    p_legend = [
+                        mpatches.Patch(label=f"Cartera ({last_c:+.1f}%)", color="#27ae60"),
+                        mpatches.Patch(label=f"{symbol} ({last_i:+.1f}%)", color="#3498db"),
+                    ]
+                    titulo = f"Cartera vs {symbol}"
 
                 ax.axhline(y=0, color="gray", linewidth=0.5)
                 ax.set_ylabel("Rend. Acum. (%)", fontsize=7, color="white")
@@ -292,19 +313,6 @@ class AnalisisBase:
                 for spine in ax.spines.values():
                     spine.set_color("gray")
 
-                ax.annotate(
-                    f"Alpha: {alpha:+.1f}%",
-                    xy=(0.02, 0.93),
-                    xycoords="axes fraction",
-                    fontsize=7,
-                    color=c_alpha,
-                    fontweight="bold",
-                )
-
-                p_legend = [
-                    mpatches.Patch(label=f"Cartera ({last_c:+.1f}%)", color="#27ae60"),
-                    mpatches.Patch(label=f"{symbol} ({last_i:+.1f}%)", color="#3498db"),
-                ]
                 fg.legend(
                     handles=p_legend,
                     loc="outside upper left",
@@ -315,7 +323,7 @@ class AnalisisBase:
                 )
                 _DIAS_LABEL = {30: "1m", 90: "3m", 180: "6m", 365: "1y", 1825: "5y"}
                 periodo = _DIAS_LABEL.get(dias, f"{dias}d")
-                fg.suptitle(f"Cartera vs {symbol} — {periodo}", fontsize=10, color="white")
+                fg.suptitle(f"{titulo} — {periodo}", fontsize=10, color="white")
                 fg.subplots_adjust(left=0.05, right=0.90, top=0.85, bottom=0.20)
                 canvas.draw()
 

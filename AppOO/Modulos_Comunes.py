@@ -631,10 +631,10 @@ def crea_dataframe_performa_Index(account=None, vehiculo=None, display=True, dia
         # define index a partir 1er dia de la diaria
         f_desde = diaria[0][iy.index("Date")]
         result = crea_dataframe_index(vehiculo=vehiculo, desde=f_desde)
-        if result is None:
-            print(f"crea_dataframe_performa_Index({vehiculo}): sin datos de índice para {vehiculo} desde {f_desde}")
-            return None
-        indice, index_ref, rtn_index = result
+        indice = None
+        index_ref, rtn_index = None, None
+        if result is not None:
+            indice, index_ref, rtn_index = result
 
         # evalua calculo del retorno
         pdatos = crea_dataframe_diaria(diaria=diaria, ix=iy)
@@ -643,8 +643,17 @@ def crea_dataframe_performa_Index(account=None, vehiculo=None, display=True, dia
             pdatos["retorno"] = pdatos["performa"].pct_change()
             pdatos["CumPort"] = (1 + pdatos["retorno"]).cumprod() - 1
 
-            c_pdatos = pd.merge(indice, pdatos, on="Date", how="inner")
-            c_pdatos.fillna(0, inplace=True)
+            if indice is not None:
+                # left join — pdatos es la tabla maestra, el índice es opcional
+                pdatos.index = pd.to_datetime(pdatos.index)
+                indice.index = pd.to_datetime(indice.index)
+                c_pdatos = pdatos.join(indice, how="left")
+                c_pdatos.fillna(0, inplace=True)
+            else:
+                # sin índice externo disponible — igual se construye performa_inversion
+                c_pdatos = pdatos.copy()
+                if rtn_index:
+                    c_pdatos[rtn_index] = 0.0
 
         if display:
             hoy = datetime.now().date()
@@ -718,12 +727,13 @@ def proceso_update_performance(account=None, vehiculo=None):
 
             for date, rows in df_performa.iterrows():
                 if hasta is None or date > hasta:
+                    p_ref = float(rows[rtn_index]) if rtn_index and rtn_index in rows.index else 0.0
                     values = {
                         "idcuenta": account,
                         "vehiculo": vehiculo,
                         "fechaclose": date,
                         "referencia": index_ref,
-                        "p_referencia": float(rows[rtn_index]),
+                        "p_referencia": p_ref,
                         "p_vehiculo": float(rows["retorno"]),
                         "gyp_dia": float(rows["gyp_dia"]),
                         "nr_gyp": float(rows["nr_gyp"]),
