@@ -497,10 +497,10 @@ def vehiculo_parm(vehiculo=None):
         index_ref = "SPX++index"
 
     elif vehiculo == "BBVA.ARS":
-        symbol = "^MERV"
-        rtn_index = "Return MRV"
-        cum_index = "Cum MRV"
-        index_ref = "MRV++index"
+        symbol = "ARS=X"
+        rtn_index = "Return ARS"
+        cum_index = "Cum ARS"
+        index_ref = "USD/ARS"
 
     return symbol, rtn_index, cum_index, index_ref
 
