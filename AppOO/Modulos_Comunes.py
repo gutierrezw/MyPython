@@ -57,20 +57,37 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
     try:
         symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=vehiculo)
 
-        # FCI (BBVA.ARS): usa performa_inversion consolidada — recalcula retorno desde value/costo_base sumados
+        # FCI (BBVA.ARS): TWR usando flujos reales de capital desde booktrading
         if tipo == "BBVA.ARS":
             sql, iy = Performa.select_performa_inversion(account=None, vehiculo=vehiculo)
             if sql and iy:
                 df = pd.DataFrame(sql, columns=iy)
                 df["fechaclose"] = pd.to_datetime(df["fechaclose"])
-                df.set_index("fechaclose", inplace=True)
-                df.sort_index(inplace=True)
                 for col in ["p_referencia", "value", "costo_base", "gyp_dia", "dividends"]:
                     if col in df.columns:
                         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-                # Replica crea_dataframe_diaria: ratio portfolio consolidado → retorno diario → acumulado
-                df["performa"] = (df["value"] + df["dividends"] + df["gyp_dia"]) / df["costo_base"]
-                df["CumPort"] = (1 + df["performa"].pct_change()).cumprod() - 1
+                df = df.groupby("fechaclose").agg(
+                    value=("value", "sum"),
+                    costo_base=("costo_base", "sum"),
+                    gyp_dia=("gyp_dia", "sum"),
+                    dividends=("dividends", "sum"),
+                    p_referencia=("p_referencia", "mean"),
+                ).sort_index()
+                # Flujos reales de capital: delta_units × basico / factor por transacción
+                # evita que basico reseteado en cada compra distorsione el costo_base
+                cf_rows = Performa.select_bbva_ars_cashflows()
+                if cf_rows:
+                    cf_df = pd.DataFrame(cf_rows, columns=["fecha", "usd_invested"])
+                    cf_df["fecha"] = pd.to_datetime(cf_df["fecha"])
+                    cf_series = cf_df.set_index("fecha")["usd_invested"].astype(float)
+                    new_capital = cf_series.reindex(df.index, fill_value=0.0)
+                else:
+                    new_capital = pd.Series(0.0, index=df.index)
+                denom = (df["value"].shift(1) + new_capital).replace(0, float("nan"))
+                df["daily_twr"] = (df["value"] / denom - 1).fillna(0)
+                # Anular días con saltos imposibles para FCI: >30% diario indica precio CNV faltante
+                df.loc[df["daily_twr"].abs() > 0.30, "daily_twr"] = 0.0
+                df["CumPort"] = (1 + df["daily_twr"]).cumprod() - 1
                 df[cum_index] = (1 + df["p_referencia"]).cumprod() - 1
                 datos = df[["CumPort"] + [c for c in ("value", "costo_base") if c in df.columns] + [cum_index]].copy()
                 datos[index_ref] = datos[cum_index]

@@ -767,6 +767,39 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+    def select_bbva_ars_cashflows(self):
+        """
+        Retorna flujos netos diarios de capital (USD) inyectado en FCI BBVA.ARS.
+        Calcula delta_stock × basico / factor_cambio por transacción para reconstruir
+        el costo real sin que basico reseteado distorsione el costo_base acumulado.
+        """
+        conn = self._conectar(tabla="select.bbva_ars_cashflows")
+        try:
+            cursor = conn.cursor()
+            qry = """
+                WITH bt_lag AS (
+                    SELECT cuenta, simbolo, DATE(fechahora) AS fecha,
+                           basico, stock, factor_cambio,
+                           LAG(stock, 1, 0) OVER (PARTITION BY cuenta, simbolo ORDER BY fechahora) AS prev_stock
+                    FROM booktrading
+                    WHERE cuenta IN ('BBVA0001','SANT0001') AND categoria = 'BBVA.ARS'
+                )
+                SELECT fecha,
+                       SUM((stock - prev_stock) * basico / NULLIF(factor_cambio, 0)) AS usd_invested
+                FROM bt_lag
+                GROUP BY fecha
+                ORDER BY fecha ASC
+            """
+            cursor.execute(qry)
+            rows = cursor.fetchall()
+            return rows if rows else []
+        except Exception as e:
+            print(f"Mysql:: select_bbva_ars_cashflows(): {e}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
     def select_resumen_por_vehiculo(self, account=None):
         """Retorna G/P+Div acumulados por vehículo para 30, 60 y 90 días."""
         conn = self._conectar(tabla="select.resumen_por_vehiculo")
@@ -1331,6 +1364,103 @@ class DiariaCNV(BDsystem):  # --------------------------------------------------
         except Exception as e:
             _logger.error(f"select_fci_rf_candidato({cuenta_fci}): {e}")
         return {}
+
+    def get_fci_contexto(self, cuentas: list) -> dict:
+        """Retorna contexto FCI completo para el agente IA: holdings, alpha vs ARS=X, señal RF/RV.
+        @param cuentas: lista de cuentas FCI, ej. ['BBVA0001', 'SANT0001']
+        @return: dict con fondos[], arsx_30d, señal, candidatos_rf{}"""
+        try:
+            conn = self._conectar(tabla="select.diaria_cnv.fci_contexto")
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT ROUND(SUM(p_referencia) * 100, 2)
+                FROM bdinv.performa_inversion
+                WHERE vehiculo = 'BBVA.ARS'
+                  AND idcuenta = 'BBVA0001'
+                  AND fechaclose >= DATE_SUB(CURDATE(), INTERVAL 32 DAY)
+            """)
+            row = cursor.fetchone()
+            arsx_30d = float(row[0] or 0) if row else 0.0
+
+            # Valor USD real por cuenta desde performa_inversion (evita cálculos con cuotaparte/factor)
+            placeholders = ", ".join(["%s"] * len(cuentas))
+            cursor.execute(
+                f"""
+                SELECT idcuenta, ROUND(SUM(value), 2)
+                FROM bdinv.performa_inversion
+                WHERE vehiculo = 'BBVA.ARS'
+                  AND idcuenta IN ({placeholders})
+                  AND fechaclose = (
+                      SELECT MAX(fechaclose) FROM bdinv.performa_inversion
+                      WHERE vehiculo = 'BBVA.ARS'
+                  )
+                GROUP BY idcuenta
+                """,
+                cuentas,
+            )
+            valor_usd_por_cuenta = {r[0]: float(r[1] or 0) for r in cursor.fetchall()}
+
+            # Holdings activos con rendimientos — GROUP BY para evitar duplicados por clase de fondo
+            cursor.execute(
+                f"""
+                SELECT o.cuenta, o.symbol,
+                       AVG(d.variacion30dias) AS v30d,
+                       AVG(d.variacion90dias) AS v90d
+                FROM bdinv.otros_activos o
+                JOIN bdinv.inversion i ON i.ticket = o.symbol AND i.iactiva = 'Y'
+                JOIN bdinv.diaria_cnv d
+                  ON d.fondo = i.ticket
+                  AND d.fecha = (SELECT MAX(fecha) FROM bdinv.diaria_cnv)
+                WHERE o.cuenta IN ({placeholders})
+                GROUP BY o.cuenta, o.symbol
+                ORDER BY o.cuenta, o.symbol
+                """,
+                cuentas,
+            )
+            fondos = []
+            for r in cursor.fetchall():
+                cuenta, simbolo = r[0], r[1]
+                v30d = float(r[2] or 0)
+                v90d = float(r[3] or 0)
+                es_rv = any(k in simbolo for k in ("Acciones", "Renta Variable"))
+                fondos.append({
+                    "cuenta": cuenta,
+                    "fondo": simbolo,
+                    "rend_30d": round(v30d, 2),
+                    "rend_90d": round(v90d, 2),
+                    "alpha_30d": round(v30d - arsx_30d, 2),
+                    "tipo": "RV" if es_rv else "RF/Mix",
+                })
+            cursor.close()
+            conn.close()
+
+            rv = [f["rend_30d"] for f in fondos if f["tipo"] == "RV"]
+            rf = [f["rend_30d"] for f in fondos if f["tipo"] != "RV"]
+            señal = "NEUTRO"
+            if rv and rf:
+                spread = sum(rv) / len(rv) - sum(rf) / len(rf)
+                if spread < -3:
+                    señal = "RV_OPORTUNIDAD"
+                elif spread > 5:
+                    señal = "RF_CAUTELA"
+
+            candidatos_rf = {}
+            for cuenta in cuentas:
+                c = self.select_fci_rf_candidato(cuenta)
+                if c:
+                    candidatos_rf[cuenta] = c
+
+            return {
+                "fondos": fondos,
+                "arsx_30d": round(arsx_30d, 2),
+                "señal": señal,
+                "candidatos_rf": candidatos_rf,
+                "valor_usd_cuentas": valor_usd_por_cuenta,
+            }
+        except Exception as e:
+            _logger.error(f"get_fci_contexto(): {e}")
+            return {}
 
 
 class EstrategiaInversion(BDsystem):  # ------------------------------------------------------------------------------

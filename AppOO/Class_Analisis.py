@@ -891,6 +891,8 @@ class AnalisisFCI(AnalisisBase):
         self.df_historico = pd.DataFrame()
         self.df_ultimo = pd.DataFrame()
         self.metricas = pd.DataFrame()
+        self.fondos_en_cartera: set = set()
+        self.fondo_a_ticket: dict = {}
 
     def _poblar_contenido(self, frame):
         """Implementación específica para FCI"""
@@ -1184,21 +1186,29 @@ class AnalisisFCI(AnalisisBase):
                 rend = ultima[fondo]
                 vs_piso = round(rend - rend_piso, 1)
                 vs_techo = round(rend - rend_techo, 1)
+                en_cartera = fondo in self.fondos_en_cartera
                 if vs_piso < 0:
                     señal = "COMPRA"
                 elif vs_techo > 0:
-                    señal = "CAUTELA"
+                    señal = "CAUTELA" if en_cartera else "NEUTRO"
                 else:
-                    señal = "MANTENER"
-                filas.append(
-                    {"fondo": fondo, "rend": round(rend, 1), "vs_piso": vs_piso, "vs_techo": vs_techo, "senal": señal}
-                )
+                    señal = "MANTENER" if en_cartera else "NEUTRO"
+                nombre = self.fondo_a_ticket.get(fondo, fondo)
+                label = ("💼 " + nombre) if en_cartera else nombre
+                filas.append({
+                    "fondo": label,
+                    "fondo_key": fondo,
+                    "rend": round(rend, 1),
+                    "vs_piso": vs_piso,
+                    "vs_techo": vs_techo,
+                    "senal": señal,
+                })
 
             if not filas:
                 return row, primera_fondo
 
             df_spread = pd.DataFrame(filas).sort_values("vs_piso").reset_index(drop=True)
-            primera_fondo = df_spread.iloc[0]["fondo"]
+            primera_fondo = df_spread.iloc[0]["fondo_key"]
 
             # ── treeview inline para poder bindear selección ──────────────────
             row = self.crear_seccion(parent, "Spread vs Banda de Referencia", row)
@@ -1231,7 +1241,7 @@ class AnalisisFCI(AnalisisBase):
                     values=(fila["fondo"], fila["rend"], fila["vs_piso"], fila["vs_techo"], fila["senal"]),
                     tags=(tag,),
                 )
-                _iid_fondo[iid] = fila["fondo"]
+                _iid_fondo[iid] = fila["fondo_key"]
 
             if on_select:
 
@@ -1257,12 +1267,15 @@ class AnalisisFCI(AnalisisBase):
             conn = BDsystem.connect_dbase("select.diaria_cnv", False)
             cursor = conn.cursor()
 
-            # empresa = nombre completo que coincide con diaria_cnv.fondo
+            # empresa = nombre CNV largo (coincide con diaria_cnv.fondo), ticket = nombre corto del usuario
             cursor.execute(
-                "SELECT DISTINCT empresa, position, iactiva FROM bdinv.inversion WHERE tipoinv = %s AND empresa IS NOT NULL",
+                "SELECT DISTINCT empresa, position, iactiva, ticket FROM bdinv.inversion"
+                " WHERE tipoinv = %s AND empresa IS NOT NULL",
                 (self.vehiculo,),
             )
             rows_inv = cursor.fetchall()
+            self.fondos_en_cartera = {r[0] for r in rows_inv if r[2] == "Y"}
+            self.fondo_a_ticket = {r[0]: (r[3] or r[0]) for r in rows_inv if r[2] == "Y"}
             fondos_cargar = list(
                 {r[0] for r in rows_inv}
                 | {self._BANDA_PISO, self._BANDA_TECHO}

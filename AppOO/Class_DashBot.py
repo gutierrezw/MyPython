@@ -732,6 +732,7 @@ class ClassAgenteIA:
                 candidato = cnv_db.select_fci_rf_candidato(cuenta)
                 if candidato:
                     fci_rotacion[cuenta] = candidato
+        fci_contexto = cnv_db.get_fci_contexto(list(_FCI_ENTIDADES.keys()))
 
         return {
             "portfolio": portfolio,
@@ -741,6 +742,7 @@ class ClassAgenteIA:
             "oport_buy": oport_buy[:8],
             "oport_sell": oport_sell[:5],
             "fci_rotacion": fci_rotacion,
+            "fci_contexto": fci_contexto,
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "pinvertir": pinvertir,
             "min_ganancia": min_ganancia,
@@ -835,6 +837,30 @@ class ClassAgenteIA:
                 lineas.append(f"  {entidad} → {c['fondo']} (rend30d: {v30:+.2f}% | rend90d: {v90:+.2f}%)")
             return "\n".join(lineas) + "\n\n"
 
+        def _fci_contexto_txt():
+            fci = ctx.get("fci_contexto", {})
+            fondos = fci.get("fondos", [])
+            if not fondos:
+                return ""
+            arsx = fci.get("arsx_30d", 0)
+            señal = fci.get("señal", "NEUTRO")
+            candidatos = fci.get("candidatos_rf", {})
+            valor_cuentas = fci.get("valor_usd_cuentas", {})
+            total_usd = sum(valor_cuentas.values())
+            header_usd = f" | total ${total_usd:.0f}" if total_usd > 0 else ""
+            lineas = [f"Cartera FCI (ARS=X 30d: {arsx:+.2f}% | señal: {señal}{header_usd}):"]
+            for f in fondos:
+                alpha_mark = "✓" if f["alpha_30d"] >= 0 else "✗"
+                lineas.append(
+                    f"  [{f['tipo']}] {f['fondo']} | "
+                    f"30d: {f['rend_30d']:+.2f}% | alpha vs USD: {f['alpha_30d']:+.2f}% {alpha_mark}"
+                )
+            for cuenta, c in candidatos.items():
+                entidad = "BBVA" if "BBVA" in cuenta else "Santander"
+                v30 = c.get("variacion30dias", 0) or 0
+                lineas.append(f"  RF deprimido {entidad}: {c['fondo']} (30d: {v30:+.2f}%)")
+            return "\n".join(lineas) + "\n\n"
+
         gains_symbols = [p["symbol"] for p in ctx.get("portfolio", []) if p.get("gains_candidate")]
         gains_txt = f"Posiciones con ganancia ≥${ctx.get('min_ganancia', 100):.0f} (candidatas a captura): " + (
             ", ".join(gains_symbols) if gains_symbols else "(ninguna)"
@@ -857,6 +883,7 @@ class ClassAgenteIA:
             f"Oportunidades BUY detectadas por el sistema:\n{_oport_buy_txt()}\n\n"
             f"Oportunidades SELL detectadas por el sistema:\n{_oport_sell_txt()}\n\n"
             f"Candidatos externos (consenso ≥ {ia_config.get('gate_consenso_min', 4)}):\n{_candidatos_txt()}\n\n"
+            f"{_fci_contexto_txt()}"
             f"{_fci_rotacion_txt()}"
             f"Límites: monto_base=${ctx.get('pinvertir', 170):.0f} (se ajusta al precio del activo) | "
             f"leverage_max={ia_config.get('leverage_max', 1.8)}x | "

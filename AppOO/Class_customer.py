@@ -5696,6 +5696,9 @@ class WidgetVehiculo(TickerInfo):
         if self.Ddatos is None or self.Ddatos.empty or not isinstance(self.Ddatos.index, pd.DatetimeIndex):
             return
         df_plot = self.Ddatos[self.Ddatos.index >= hoy - periodos[tipo]]
+        if self.vehiculo == "BBVA.ARS":
+            df_plot = df_plot.rename(columns={"++ Portafolio": "TWR Cartera"})
+            parm["++ index"] = "TWR Cartera"
         self.graph_performace_portafolio(fg=self.graph[2][1], data=df_plot, parm=parm)
         self.graph[2][0].draw()
 
