@@ -1361,13 +1361,14 @@ def setup_fear_greed(fg: object, parm=None):
             return wfear, vix
 
         try:
-            hoy = datetime.now().date()
+            now = datetime.now()
+            slot = now.replace(minute=(now.minute // 30) * 30, second=0, microsecond=0)
             cached = read_json_tmp("kpi_snapshot")
-            if cached.get("fear_date") == str(hoy) and is_none(fear):
+            if cached.get("fear_ts") == str(slot) and is_none(fear):
                 return cached.get("fear", 50), cached.get("vix", 50)
 
             BASE_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata/"
-            START_DATE = hoy.strftime("%Y-%m-%d")
+            START_DATE = now.date().strftime("%Y-%m-%d")
             ua = UserAgent()
 
             headers = {
@@ -1383,7 +1384,7 @@ def setup_fear_greed(fg: object, parm=None):
             wfear = data["fear_and_greed"]["score"] if is_none(fear) else fear
             ind_wix = data["market_volatility_vix"]["score"]
             _kpi = read_json_tmp("kpi_snapshot")
-            _kpi.update({"fear": wfear, "vix": ind_wix, "fear_date": str(hoy)})
+            _kpi.update({"fear": wfear, "vix": ind_wix, "fear_ts": str(slot)})
             write_json_tmp("kpi_snapshot", _kpi)
             return wfear, ind_wix
         except (requests.exceptions.RequestException, ValueError, KeyError) as e:
