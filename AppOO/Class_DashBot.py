@@ -3217,6 +3217,10 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 mensaje += f"{'-' * 37}\n"
                 mensaje += f"{'Consenso':<12} {tag} ({suma:+d})\n"
 
+            if row.get("rsi_alerta"):
+                mensaje += f"{'-' * 37}\n"
+                mensaje += f"⚠️ RSI elevado en ambos TF (d≥60 + w≥55)\n"
+
             mensaje += "```"
             return mensaje
         except Exception as e:

@@ -3401,6 +3401,19 @@ class TickerInfo(MyOrders):
                         position["exDividendDate"].strftime("%d-%b'%y") if position["exDividendDate"] else "N/A"
                     )
 
+                    # Gate RSI: hard (≥65 bloquea) + soft (≥60+≥55w agrega alerta)
+                    # Análisis histórico (n=49): RSI sano 35-55, casos RSI>64 con RSI_w>55 → pérdidas -574/-1177
+                    _tec = self.info.get(symbol, {}).get("datos_tecnicos", {})
+                    _rsi_d = _tec.get("diaria", {}).get("rsi")
+                    _rsi_w = _tec.get("semanal", {}).get("rsi")
+                    if _rsi_d is not None and _rsi_d >= 65:
+                        continue  # hard gate: RSI diario sobrecomprado
+
+                    _rsi_alerta = (
+                        _rsi_d is not None and _rsi_w is not None
+                        and _rsi_d >= 60 and _rsi_w >= 55
+                    )
+
                     datos = {}
                     if (gypPrecio < self.sesion["gypPrecio"]) and (gainInversion < self.sesion["gainInversion"]):
                         # Clasificar como "dividends" solo si dividendYield > 0
@@ -3422,6 +3435,7 @@ class TickerInfo(MyOrders):
                                 "post dividendos": dividendo * stockNew,
                                 "pre costobase": position["costobase"],
                                 "post costobase": precioNew * stockNew,
+                                "rsi_alerta": _rsi_alerta,
                             }
                         }
 
