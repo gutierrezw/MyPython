@@ -249,9 +249,7 @@ class AnalisisBase:
             canvas = FigureCanvasTkAgg(fg, master=frame_g)
             canvas.get_tk_widget().pack(fill="x", expand=True)
 
-            # BBVA.ARS: sin benchmark por defecto (Merval en ARS no es comparable con cartera en USD)
-            # El botón [Idx] permite activarlo puntualmente
-            show_index = [self.vehiculo != "BBVA.ARS"]
+            show_index = [True]
 
             def _draw(dias):
                 """Filtra df_plot al período y redibuja."""
@@ -894,6 +892,75 @@ class AnalisisFCI(AnalisisBase):
         self.fondos_en_cartera: set = set()
         self.fondo_a_ticket: dict = {}
 
+    def _rf_rv_split(self, total_ars: float, factor: float) -> dict:
+        """Calcula % RF vs RV usando df_lotes (ya poblado por obtener_lotes_desde_info).
+        symbol en df_lotes = ticket = nombre corto; clasifica por keywords en el nombre."""
+        try:
+            if self.df_lotes.empty:
+                return {}
+            rf_w = rv_w = 0.0
+            for _, row in self.df_lotes.iterrows():
+                simbolo = str(row.get("symbol", ""))
+                valor = float(row.get("valor_actual", 0) or 0)
+                if any(k in simbolo for k in ("Acciones", "Renta Variable")):
+                    rv_w += valor
+                else:
+                    rf_w += valor
+            total_w = rf_w + rv_w
+            if total_w == 0:
+                return {}
+            rf_pct = rf_w / total_w * 100
+            rv_pct = rv_w / total_w * 100
+            return {
+                "rf_pct": round(rf_pct, 1),
+                "rv_pct": round(rv_pct, 1),
+                "rf_ars": round(total_ars * rf_pct / 100, 0),
+                "rv_ars": round(total_ars * rv_pct / 100, 0),
+            }
+        except Exception as e:
+            _logger.error(f"_rf_rv_split(): {e}")
+            return {}
+
+    def _crear_barra_rf_rv(self, parent, row: int, resumen: dict) -> int:
+        """Barra horizontal RF/RV en el bloque Resumen."""
+        split = self._rf_rv_split(resumen.get("total_valor", 0), resumen.get("factor_cambio", 1))
+        if not split:
+            return row
+        rf_pct = split["rf_pct"]
+        rv_pct = split["rv_pct"]
+        rf_ars = split["rf_ars"]
+        rv_ars = split["rv_ars"]
+
+        outer = tk.Frame(parent, bg=self.BG_COLOR)
+        outer.grid(row=row, column=0, columnspan=2, padx=10, pady=(2, 6), sticky="ew")
+
+        BAR_W, BAR_H = 390, 20
+        COLOR_RF = "#2980b9"
+        COLOR_RV = "#e67e22"
+
+        canvas = tk.Canvas(outer, width=BAR_W, height=BAR_H + 22, bg=self.BG_COLOR, highlightthickness=0)
+        canvas.pack(anchor="w")
+
+        rf_px = max(1, int(BAR_W * rf_pct / 100))
+        rv_px = BAR_W - rf_px
+
+        canvas.create_rectangle(0, 0, rf_px, BAR_H, fill=COLOR_RF, outline="")
+        canvas.create_rectangle(rf_px, 0, BAR_W, BAR_H, fill=COLOR_RV, outline="")
+
+        if rf_px > 40:
+            canvas.create_text(rf_px // 2, BAR_H // 2, text=f"RF {rf_pct:.0f}%",
+                                fill="white", font=("Helvetica", 8, "bold"))
+        if rv_px > 40:
+            canvas.create_text(rf_px + rv_px // 2, BAR_H // 2, text=f"RV {rv_pct:.0f}%",
+                                fill="white", font=("Helvetica", 8, "bold"))
+
+        canvas.create_text(rf_px // 2, BAR_H + 11,
+                            text=f"${rf_ars:,.0f} ARS", fill="white", font=("Helvetica", 8))
+        canvas.create_text(rf_px + rv_px // 2, BAR_H + 11,
+                            text=f"${rv_ars:,.0f} ARS", fill="white", font=("Helvetica", 8))
+
+        return row + 1
+
     def _poblar_contenido(self, frame):
         """Implementación específica para FCI"""
         # Cargar datos históricos primero (necesario para precios en df_ultimo)
@@ -928,6 +995,7 @@ class AnalisisFCI(AnalisisBase):
             row,
             fg_valor=color_gan,
         )
+        row = self._crear_barra_rf_rv(frame, row, resumen)
 
         # ========== GRÁFICO BANDA + RENTA VARIABLE ==========
         row = self.crear_seccion(frame, "Renta Variable vs Banda de Referencia:", row)

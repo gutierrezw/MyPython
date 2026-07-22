@@ -696,11 +696,14 @@ class system_status(tk.Frame):
                     open=False,
                     tags=("grupo",),
                 )
+                tickers_en_grupo = [x[1]["ticker"] for x in items]
                 for k, p in sorted(items, key=lambda x: x[1]["ticker"]):
+                    duplicado = tickers_en_grupo.count(p["ticker"]) > 1
+                    label = f"{p['ticker']} ({p['vehiculo_raw']})" if duplicado else p["ticker"]
                     iid = lista.insert(
                         parent,
                         "end",
-                        text=p["ticker"],
+                        text=label,
                         values=(p["period"], p["interval"], _ttl_str(k)),
                         tags=("item",),
                     )

@@ -1,4 +1,5 @@
 SELECT * FROM bdinv.otros_activos
-Where cuenta = 'SANT0001'
+where base_asset = 'ARS'
+and cuenta = 'BBVA0001'
 ;
 
