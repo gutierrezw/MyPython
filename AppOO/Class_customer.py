@@ -228,7 +228,26 @@ class DataHub:
     manager_positions = {"Stock": [], "Crypto": []}  # posiciones vivas por vehículo para agentes
     rebalanceo = {}
     telegram_botcrypto = {}
-    system_alerts = []      # alertas de sistema para enviar a Telegram (DashMain → agentesIA)
+    system_alerts = []      # alertas de sistema: list[{"msg": str, "telegram": bool}]
+
+    @classmethod
+    def add_alert(cls, msg: str, telegram: bool = True, tipo: str = None):
+        incidencia_id = 0
+        try:
+            incidencia_id = BDsystem.insert_incidencia(msg, telegram, tipo)
+        except Exception:
+            pass
+        cls.system_alerts.append({"msg": msg, "telegram": telegram, "id": incidencia_id})
+
+    @classmethod
+    def load_pending_alerts(cls):
+        """Carga al arranque las alertas pendientes de enviar a Telegram desde BD."""
+        try:
+            pending = BDsystem.get_incidencias_pending_telegram()
+            for row in pending:
+                cls.system_alerts.append({"msg": row["msg"], "telegram": True, "id": row["id"]})
+        except Exception:
+            pass
     reconcile_pending = []  # diffs IB pendientes de aprobación — list[dict] con keys: id, symbol, bt_id, bt_current, expected, diff
     procesos = []
     logger = {}

@@ -685,6 +685,104 @@ class BDsystem:  # -------------------------------------------------------------
             print(f"[Mysql::delete_modelo_ia()]: {error}")
             return False
 
+    @staticmethod
+    def insert_incidencia(msg: str, telegram: bool = True, tipo: str = None) -> int:
+        conn = cursor = None
+        try:
+            conn = BDsystem.connect_dbase("insert.incidencias")
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO incidencias (msg, telegram, tipo) VALUES (%s, %s, %s)",
+                (msg, int(telegram), tipo),
+            )
+            conn.commit()
+            return cursor.lastrowid
+        except (Exception, connect.Error) as e:
+            _logger.error(f"[Mysql::insert_incidencia()]: {e}")
+            return 0
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def mark_incidencia_sent(incidencia_id: int):
+        conn = cursor = None
+        try:
+            conn = BDsystem.connect_dbase("update.incidencias.sent")
+            cursor = conn.cursor()
+            cursor.execute("UPDATE incidencias SET enviado_tg=1 WHERE id=%s", (incidencia_id,))
+            conn.commit()
+        except (Exception, connect.Error) as e:
+            _logger.error(f"[Mysql::mark_incidencia_sent()]: {e}")
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def mark_incidencias_leidas(incidencia_id: int = None):
+        conn = cursor = None
+        try:
+            conn = BDsystem.connect_dbase("update.incidencias.leidas")
+            cursor = conn.cursor()
+            if incidencia_id:
+                cursor.execute("UPDATE incidencias SET leida=1 WHERE id=%s", (incidencia_id,))
+            else:
+                cursor.execute("UPDATE incidencias SET leida=1 WHERE leida=0")
+            conn.commit()
+        except (Exception, connect.Error) as e:
+            _logger.error(f"[Mysql::mark_incidencias_leidas()]: {e}")
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def get_incidencias(leida: bool = False) -> list:
+        conn = cursor = None
+        try:
+            conn = BDsystem.connect_dbase("select.incidencias")
+            cursor = conn.cursor()
+            sql = "SELECT id, timestamp, tipo, msg, telegram, enviado_tg, leida FROM incidencias"
+            if not leida:
+                sql += " WHERE leida=0"
+            sql += " ORDER BY timestamp DESC LIMIT 200"
+            cursor.execute(sql)
+            cols = [c[0] for c in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as e:
+            _logger.error(f"[Mysql::get_incidencias()]: {e}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def get_incidencias_pending_telegram() -> list:
+        conn = cursor = None
+        try:
+            conn = BDsystem.connect_dbase("select.incidencias.pending")
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, msg FROM incidencias WHERE telegram=1 AND enviado_tg=0 AND leida=0 ORDER BY timestamp"
+            )
+            cols = [c[0] for c in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as e:
+            _logger.error(f"[Mysql::get_incidencias_pending_telegram()]: {e}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
 
 class IPerformance(BDsystem):  # ------------------------------------------------------------------------------------
     """
@@ -4562,6 +4660,57 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         finally:
             cursor.close()
             conn.close()
+
+    def check_lotes_vs_position(self, account: str) -> list:
+        """
+        Compara lotes activos en booktrading vs position en inversion para la cuenta.
+        Retorna lista de dicts con delta != 0: {simbolo, lotes_book, ib_position, delta}
+        Excluye: divisa ARS (FCI), codigo != 'O', delisted, inversion no Stock.
+        """
+        conn = cursor = None
+        try:
+            conn = self._conectar(tabla="select.booktrading.lotes_reconcile")
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT simbolo, SUM(cantidad) AS lotes_book
+                     FROM booktrading
+                    WHERE cuenta = %s
+                      AND activa = 'Y'
+                      AND codigo = 'O'
+                      AND delisted = 0
+                      AND divisa <> 'ARS'
+                    GROUP BY simbolo""",
+                (account,),
+            )
+            cols = [c[0] for c in cursor.description]
+            book_map = {r["simbolo"]: float(r["lotes_book"]) for r in (dict(zip(cols, row)) for row in cursor.fetchall())}
+
+            cursor.execute(
+                """SELECT ticket, COALESCE(position, 0) AS position
+                     FROM inversion
+                    WHERE useraccount = %s AND iactiva = 'Y' AND tipoinv = 'Stock'""",
+                (account,),
+            )
+            cols2 = [c[0] for c in cursor.description]
+            inv_map = {r["ticket"]: float(r["position"]) for r in (dict(zip(cols2, row)) for row in cursor.fetchall())}
+
+            all_symbols = set(book_map) | set(inv_map)
+            deltas = []
+            for sym in sorted(all_symbols):
+                lotes_book = book_map.get(sym, 0.0)
+                ib_position = inv_map.get(sym, 0.0)
+                delta = round(lotes_book - ib_position, 6)
+                if abs(delta) >= 0.01:
+                    deltas.append({"simbolo": sym, "lotes_book": lotes_book, "ib_position": ib_position, "delta": delta})
+            return deltas
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: check_lotes_vs_position()]: {e}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
 
 class RepositorioOportunidadesBuySell(PlanInversion):  # -------------------------------------------------------------

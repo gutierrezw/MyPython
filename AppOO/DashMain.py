@@ -1990,13 +1990,13 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             f"websocket_stream(Stock): websocket_loop() terminó (iter={iteraStream}), esperando 30s antes de reconectar"
                         )
                         if not _gw_down_alerted:
-                            DataHub.system_alerts.append("⚠️ IB Gateway caído — reconectando en 30s")
+                            DataHub.add_alert("⚠️ IB Gateway caído — reconectando en 30s", telegram=True)
                             _gw_down_alerted = True
                         time.sleep(30)
 
                 except Exception as e:
                     _log.error(f"websocket_stream(Stock): excepción fatal — {e}")
-                    DataHub.system_alerts.append(f"🔴 IB Gateway error fatal: {e}")
+                    DataHub.add_alert(f"🔴 IB Gateway error fatal: {e}", telegram=True)
 
             try:
                 self.ib_connection = self.IClient.create_session()
@@ -2648,7 +2648,7 @@ class DashMain:
                     self.root.after(100, lambda: self.stock.run_graficos())
                     self.root.after(200, lambda: self.update_widget(vehiculo=vehiculo))
                     _log.warning("✅ IB reconnect: WebSocket + posiciones levantados desde offline")
-                    DataHub.system_alerts.append("✅ IB Gateway reconectado")
+                    DataHub.add_alert("✅ IB Gateway reconectado", telegram=True)
 
                 # en ambos casos la sesión ya está activa
                 DataHub.manager_sesion.update({"Stock": True})
@@ -2773,6 +2773,8 @@ class DashMain:
         try:
             # Importar Chatbot y BotonFlotante
             from Class_DashBot import Chatbot, BotonFlotante
+
+            DataHub.load_pending_alerts()
 
             # Crear instancias
             self.chatbot = Chatbot(master=self.root, on_minimizar=mostrar_boton)

@@ -1103,8 +1103,8 @@ def write_json_tmp(name: str, data: dict) -> None:
     try:
         with open(define_FileCache(name), "w") as f:
             json.dump(data, f, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).error(f"write_json_tmp({name}): {e}")
 
 
 def load_vehiculo_params(vehiculo: str, cache: dict, plan_inversion) -> dict:

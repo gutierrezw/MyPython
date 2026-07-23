@@ -436,18 +436,25 @@ class ClassAgenteIA:
             self.logger.error(f"Agente_OrderEodCleanup(): {e}")
 
     async def _flush_system_alerts(self):
-        """Envía alertas de sistema acumuladas en DataHub.system_alerts a Telegram."""
+        """Envía a Telegram las alertas de DataHub.system_alerts con telegram=True."""
         while DataHub.system_alerts:
-            msg = DataHub.system_alerts.pop(0)
+            item = DataHub.system_alerts.pop(0)
+            msg = item["msg"] if isinstance(item, dict) else item
+            send = item.get("telegram", True) if isinstance(item, dict) else True
+            incidencia_id = item.get("id", 0) if isinstance(item, dict) else 0
             try:
+                if not send:
+                    continue
                 if msg.startswith("[FCI_BLOCKED]"):
-                    texto = msg[len("[FCI_BLOCKED]") :]
+                    texto = msg[len("[FCI_BLOCKED]"):]
                     markup = InlineKeyboardMarkup(
                         [[InlineKeyboardButton("🔓 Liberar bloqueo FCI", callback_data="fci_reset_blocked")]]
                     )
                     await self.send_Telegram(texto, reply_markup=markup)
                 else:
                     await self.send_Telegram(msg)
+                if incidencia_id:
+                    BDsystem.mark_incidencia_sent(incidencia_id)
             except Exception as e:
                 self.logger.error(f"_flush_system_alerts: {e}")
 
@@ -1030,7 +1037,7 @@ class ClassAgenteIA:
                     f"{razon}\n"
                     f"/ok\\_{symbol}  |  /no\\_{symbol}"
                 )
-                DataHub.system_alerts.append(msg)
+                DataHub.add_alert(msg, telegram=True)
                 self.gains_capture_state[symbol] = {
                     **state,
                     "estado": "pendiente_autorizacion",
@@ -1072,9 +1079,10 @@ class ClassAgenteIA:
                     )
                 except Exception as _e:
                     _gc_logger.error(f"GainsCapture({symbol}): insert_preservation_order → {_e}")
-                DataHub.system_alerts.append(
+                DataHub.add_alert(
                     f"📈 GainsCapture {symbol}: vendiendo {vender_qty} acc LMT ${lmt_price:.2f} "
-                    f"escenario={escenario_key.strip()} — order_id={order_id}"
+                    f"escenario={escenario_key.strip()} — order_id={order_id}",
+                    telegram=True,
                 )
                 _gc_logger.warning(
                     f"GainsCapture({symbol}): LMT SELL {vender_qty} acc @ {lmt_price:.2f} "
@@ -1390,10 +1398,10 @@ class ClassAgenteIA:
                                 "atr": round(float(atr), 4),
                                 "stop_calculado_reglas": round(float(stop_calculado), 4),
                                 "consenso_tag": ctx.get("consenso_tag") if claude_result else None,
-                                "inst_score": ctx.get("inst_score") if claude_result else None,
-                                "fh_buy_ratio": ctx.get("fh_buy_ratio") if claude_result else None,
+                                "inst_score": float(ctx["inst_score"]) if claude_result and ctx.get("inst_score") is not None else None,
+                                "fh_buy_ratio": float(ctx["fh_buy_ratio"]) if claude_result and ctx.get("fh_buy_ratio") is not None else None,
                                 "sentiment_patron": ctx.get("patron") if claude_result else None,
-                                "rsi_d": ctx.get("rsi_d") if claude_result else None,
+                                "rsi_d": float(ctx["rsi_d"]) if claude_result and ctx.get("rsi_d") is not None else None,
                                 "macd_estado": ctx.get("macd_estado") if claude_result else None,
                                 "base_limit": round(float(base_limit), 4),
                             },
@@ -1435,7 +1443,14 @@ class ClassAgenteIA:
                 "order_id": order_id,
                 "vehiculo": vehiculo,
             }
-            write_json_tmp("preservation_state.json", self.preservation_state)
+            # Snapshot serializable: convierte datetime→str en todos los símbolos + incluye _last_run_
+            _snap = {}
+            for _sym, _sd in self.preservation_state.items():
+                _lc = _sd.get("last_check")
+                _snap[_sym] = {**_sd, "last_check": _lc.isoformat() if isinstance(_lc, datetime) else _lc}
+            for _veh, _lr in self.preservation_last_run.items():
+                _snap[f"_last_run_{_veh}"] = _lr.isoformat() if isinstance(_lr, datetime) else str(_lr)
+            write_json_tmp("preservation_state.json", _snap)
 
 
 # Admistrador de mensajeria Telegram
@@ -2904,6 +2919,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             mensaje += f"{'ROI (%)'         :<18} {row['%Roi'] * 100:>12.2f}\n"
             _cant = f"{row['CantidadSell']:.1f}/{row['Disponible']:.1f}"
             mensaje += f"{'Cant Sell'        :<18} {_cant:>12}\n"
+            _importe_sell = row['CantidadSell'] * row['PriceMarket']
+            mensaje += f"{'Importe'          :<18} {_importe_sell:>12.2f}\n"
             mensaje += f"{'CostoAcum'        :<18} {row['CostoCum']:>12.2f}\n"
             mensaje += f"{'Prec. posVenta'   :<18} {row['PosAvgCost']:>12.4f}\n"
             mensaje += f"{'Pos. posVenta'    :<18} {row['PosPosition']:>12.4f}\n"
@@ -2919,6 +2936,19 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             if tag:
                 mensaje += f"{'-' * 37}\n"
                 mensaje += f"{'Consenso'         :<18} {tag} ({suma:+d})\n"
+
+            _raw_tec = row.get("Datostecnicos") or row.get("datos_tecnicos")
+            if _raw_tec:
+                _tec = json.loads(_raw_tec) if isinstance(_raw_tec, str) else _raw_tec
+                _rsi_d = _tec.get("diaria", {}).get("rsi")
+                _rsi_w = _tec.get("semanal", {}).get("rsi")
+                if _rsi_d is not None:
+                    _emoji = "💚" if _rsi_d >= 70 else "🟢" if _rsi_d >= 60 else "🟡" if _rsi_d >= 50 else "🟠" if _rsi_d >= 40 else "🔴"
+                    _rsi_w_str = f"{_rsi_w:.1f}" if _rsi_w is not None else "N/A"
+                    mensaje += f"{'-' * 37}\n"
+                    mensaje += f"{'RSI d/w':<18} {_emoji} {_rsi_d:.1f} / {_rsi_w_str}\n"
+                    if _rsi_d < 45:
+                        mensaje += f"⚠️ Vendiendo en debilidad (RSI<45)\n"
 
             mensaje += "```"
 
@@ -3202,10 +3232,23 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             mensaje += f"{'Dividend Yield'   :<18} {row.get('dividend_yield', 0):>12.2%}\n"
             mensaje += f"{'Monto Invertir'   :<18} {row.get('pinvertir', 0):>12.2f}\n"
             mensaje += f"{'Cantidad Buy'     :<18} {row.get('cantidad_buy', 0):>12.1f}\n"
+            _importe_buy = row.get("cantidad_buy", 0) * last
+            mensaje += f"{'Importe'          :<18} {_importe_buy:>12.2f}\n"
             mensaje += f"{'Prec. preBuy'     :<18} {row.get('avgcost', 0):>12.4f}\n"
             mensaje += f"{'Prec. posBuy'     :<18} {row.get('avgcost_post', 0):>12.4f}\n"
             mensaje += f"{'Objetivo'         :<18} {row.get('objetivo', 0):>12.4f}\n"
             mensaje += f"{'Valoracion'       :<18} {""}\n"
+
+            _raw_tec = row.get("Datostecnicos") or row.get("datos_tecnicos")
+            if _raw_tec:
+                _tec = json.loads(_raw_tec) if isinstance(_raw_tec, str) else _raw_tec
+                _rsi_d = _tec.get("diaria", {}).get("rsi")
+                _rsi_w = _tec.get("semanal", {}).get("rsi")
+                if _rsi_d is not None:
+                    _emoji = "💚" if _rsi_d < 30 else "🟢" if _rsi_d < 45 else "🟡" if _rsi_d < 60 else "🟠"
+                    _rsi_w_str = f"{_rsi_w:.1f}" if _rsi_w is not None else "N/A"
+                    mensaje += f"{'-' * 37}\n"
+                    mensaje += f"{'RSI d/w':<18} {_emoji} {_rsi_d:.1f} / {_rsi_w_str}\n"
 
             confianza = row.get("confianza") if modo != "ia" else confianza
             if confianza is not None:

@@ -3,7 +3,7 @@ Class_AgentManager.py - Administrador de agentes síncronos
 Dominios: Stock | Crypto | IA | Infra
 """
 
-from Modulos_python import logging, json, datetime, yf, requests, textwrap, Path, ntplib
+from Modulos_python import logging, json, datetime, timedelta, yf, requests, textwrap, Path, ntplib
 from Modulos_Utilitarios import wait_rate, read_json_tmp, write_json_tmp, track_claude_usage, load_vehiculo_params
 from Modulos_Mysql import (
     RepositorioOportunidadesBuySell,
@@ -495,7 +495,7 @@ class AgentManager:
                     f"{a['symbol']}({a['account']}) stock={a['book_stock']:.4f} [{a['motivo']}]" for a in pendientes
                 )
                 self._log_infra.warning(f"Agente_MonitorBooktrading: {len(pendientes)} residuales manuales → {resumen}")
-                DataHub.system_alerts.append(
+                DataHub.add_alert(
                     "⚠️ Monitor Booktrading: {} residuales\n{}".format(
                         len(pendientes),
                         "\n".join(
@@ -504,7 +504,8 @@ class AgentManager:
                             )
                             for a in pendientes
                         ),
-                    )
+                    ),
+                    telegram=True,
                 )
         except Exception as e:
             self._log_infra.error(f"Agente_MonitorBooktrading(): {e}")
@@ -526,8 +527,8 @@ class AgentManager:
             f"Desde: {data.get('timestamp', '?')}\n"
             f"FCI desactualizado."
         )
-        if alerta not in DataHub.system_alerts:
-            DataHub.system_alerts.append(alerta)
+        if not any(isinstance(a, dict) and a.get("msg") == alerta for a in DataHub.system_alerts):
+            DataHub.add_alert(alerta, telegram=True)
 
     @wait_rate(3600, persist=True, desc="BrowserFCI descarga FCI BBVA+Santander (L-V 8:30)", nivel=2)
     def Agente_BrowserFCI(self):
@@ -622,10 +623,45 @@ class AgentManager:
         response = client.request("pool.ntp.org", version=3)
         offset_ms = abs(response.offset) * 1000
         if offset_ms > 500:
-            DataHub.system_alerts.append(
-                f"⏱ NTP: reloj deriva {offset_ms:.0f}ms — riesgo de rechazo de órdenes IB/Binance"
+            DataHub.add_alert(
+                f"⏱ NTP: reloj deriva {offset_ms:.0f}ms — riesgo de rechazo de órdenes IB/Binance",
+                telegram=True,
             )
         return {"offset_ms": offset_ms, "server": "pool.ntp.org"}
+
+    @wait_rate(86400, persist=True, desc="Reconcile lotes vs IB (24h)", nivel=2)
+    def Agente_LotesReconcile(self):
+        try:
+            sesion = BDsystem.get_sesion_by_vehiculo("Stock")
+            ib_account = sesion.get("idcuentaIB") or sesion.get("idcuenta")
+            deltas = self.PlanInversion.check_lotes_vs_position(account=self.account)
+            if not deltas:
+                self._log_infra.warning("Agente_LotesReconcile: OK — sin diferencias lotes vs IB")
+                return
+            date_from = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+            ib_net = {
+                r["symbol"]: float(r["ib_net"])
+                for r in self.RepositorioOportunidades.get_ib_trades_net(ib_account, date_from)
+            }
+            lineas = []
+            for d in deltas:
+                sym = d["simbolo"]
+                flex_net = ib_net.get(sym)
+                diag = f"Flex 90d={flex_net:+.2f}" if flex_net is not None else "sin datos Flex"
+                self._log_infra.warning(
+                    f"Agente_LotesReconcile: {sym} Δ={d['delta']:+.2f} "
+                    f"book={d['lotes_book']:.2f} IB={d['ib_position']:.2f} [{diag}]"
+                )
+                lineas.append(f"{sym}: book={d['lotes_book']:.2f} IB={d['ib_position']:.2f} Δ={d['delta']:+.2f} [{diag}]")
+            DataHub.add_alert(
+                "⚠️ Reconcile Lotes: {} dif\n{}".format(
+                    len(deltas),
+                    "\n".join(f"  • {l}" for l in lineas),
+                ),
+                telegram=True,
+            )
+        except Exception as e:
+            self._log_infra.error(f"Agente_LotesReconcile(): {e}")
 
     def register_threads(self):
         """Registra agentes de larga duración como threads independientes."""
@@ -648,6 +684,7 @@ class AgentManager:
             ("Agente_BrowserFCI", self.Agente_BrowserFCI, 300),
             ("Agente_NtpCheck", self.Agente_NtpCheck, 300),
             ("Agente_IbFlex", self.Agente_IbFlex, 3600),
+            ("Agente_LotesReconcile", self.Agente_LotesReconcile, 3600),
         ]
         for name, target, sleep in _threads:
             DataHub.procesos.append({"thread": {name: 1}})

@@ -68,6 +68,7 @@ class system_status(tk.Frame):
         self.agentes = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.apicost = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.iatrace = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
+        self.alertas = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
 
         # Frames para la derecha
         self.connect = ttk.Frame(self.right, padding=(1, 1, 1, 1), style="C.TFrame")
@@ -92,6 +93,7 @@ class system_status(tk.Frame):
         self.bottom.add(self.agentes, text="Agentes")
         self.bottom.add(self.apicost, text="IA Cost")
         self.bottom.add(self.iatrace, text="IA Trace")
+        self.bottom.add(self.alertas, text="Alertas")
 
         self.bottom.pack(side=tk.BOTTOM, fill=tk.BOTH, ipady=0)
         self.bottom.configure(height=340)
@@ -345,6 +347,7 @@ class system_status(tk.Frame):
             self.debugging_system()
             self.agentes_system()
             self.api_cost_system()
+            self.alertas_system()
 
             # bloqueado hasta que mejore consumo CPU
             # self.monitor_realtime()  # Activado con optimizaciones (actualiza cada 10s)
@@ -2851,6 +2854,89 @@ class system_status(tk.Frame):
         except Exception as e:
             traceback.print_exc()
             print(f"ia_trace_system(): {e}")
+
+    def alertas_system(self):
+        try:
+            from Modulos_Mysql import BDsystem as _BDsystem
+
+            _AUTO_REFRESH_MS = 10_000
+            _COLS = ("ID", "Fecha", "Tipo", "Mensaje", "TG", "Enviado")
+            _COL_W = (40, 120, 70, 400, 35, 55)
+            frame = self.alertas
+
+            top = tk.Frame(frame, bg="black")
+            top.pack(fill=tk.X, pady=(2, 0))
+
+            lbl_status = tk.Label(
+                top, text="Incidencias pendientes", bg="black", fg="cyan", font=("Consolas", 9, "bold")
+            )
+            lbl_status.pack(side=tk.LEFT, padx=6)
+
+            btn_clear = ttk.Button(top, text="✓ Marcar todas leídas", width=20)
+            btn_clear.pack(side=tk.RIGHT, padx=4)
+
+            tree_frame = tk.Frame(frame, bg="black")
+            tree_frame.pack(fill=tk.BOTH, expand=True)
+
+            vsb = ttk.Scrollbar(tree_frame, orient="vertical")
+            vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+            tree = ttk.Treeview(
+                tree_frame, columns=_COLS, show="headings", yscrollcommand=vsb.set, height=10
+            )
+            vsb.configure(command=tree.yview)
+
+            for col, w in zip(_COLS, _COL_W):
+                tree.heading(col, text=col)
+                tree.column(col, width=w, anchor="w", stretch=(col == "Mensaje"))
+
+            tree.pack(fill=tk.BOTH, expand=True)
+            tree.tag_configure("tg", foreground="#FFB347")
+            tree.tag_configure("no_tg", foreground="#888888")
+
+            def _refresh():
+                for row in tree.get_children():
+                    tree.delete(row)
+                try:
+                    rows = _BDsystem.get_incidencias(leida=False)
+                    for r in rows:
+                        tg = bool(r.get("telegram"))
+                        enviado = "✓" if r.get("enviado_tg") else "—"
+                        tg_txt = "📨" if tg else "🖥"
+                        ts = str(r.get("timestamp", ""))[:16]
+                        msg = str(r.get("msg", ""))[:120]
+                        tree.insert(
+                            "", "end",
+                            iid=str(r["id"]),
+                            values=(r["id"], ts, r.get("tipo") or "—", msg, tg_txt, enviado),
+                            tags=("tg" if tg else "no_tg",),
+                        )
+                    lbl_status.config(text=f"Incidencias pendientes — {len(rows)}")
+                except Exception as e:
+                    lbl_status.config(text=f"Incidencias — error: {e}")
+                if self.is_running:
+                    after_id = frame.after(_AUTO_REFRESH_MS, _refresh)
+                    self.after_ids.append(after_id)
+
+            def _mark_read(event=None):
+                sel = tree.selection()
+                if sel:
+                    for iid in sel:
+                        _BDsystem.mark_incidencias_leidas(int(iid))
+                else:
+                    _BDsystem.mark_incidencias_leidas()
+                _refresh()
+
+            def _mark_all():
+                _BDsystem.mark_incidencias_leidas()
+                _refresh()
+
+            tree.bind("<Double-1>", _mark_read)
+            btn_clear.configure(command=_mark_all)
+            _refresh()
+
+        except Exception as e:
+            print(f"alertas_system(): {e}")
 
     def sell_ia_monitor(self, chatbot=None):
         """
