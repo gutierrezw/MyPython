@@ -1127,7 +1127,7 @@ def chart_symbol(fg=None, datos=None, keys=None):
             )
             ae.plot(l_ix, keys["mkPrice"], marker=">", color=keys["pcolor"])
 
-            y = float(keys["avgCost"]) * 1.1
+            y = float(keys["avgCost"]) * 1.003
             ax.axhline(keys["avgCost"], linewidth=0.6, ls="--", color="yellow")
             ax.text(
                 0,
@@ -1138,6 +1138,16 @@ def chart_symbol(fg=None, datos=None, keys=None):
                 color="yellow",
             )
             ae.plot(l_ix, keys["avgCost"], marker=">", color="yellow")
+
+            for p in keys.get("sell_orders") or []:
+                ax.axhline(p, linewidth=0.9, ls="-", color="tomato", alpha=0.85)
+                ax.text(0, float(p) * 1.003, f"stop: {currency(p)}", fontsize=5, ha="left", color="tomato")
+                ae.plot(l_ix, p, marker=">", color="tomato")
+
+            for p in keys.get("buy_orders") or []:
+                ax.axhline(p, linewidth=0.9, ls="-", color="deepskyblue", alpha=0.8)
+                ax.text(0, float(p) * 1.003, f"buy: {currency(p)}", fontsize=5, ha="left", color="deepskyblue")
+                ae.plot(l_ix, p, marker=">", color="deepskyblue")
 
             if keys["position"]:
                 ae.text(

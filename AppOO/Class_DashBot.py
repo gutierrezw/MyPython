@@ -1356,6 +1356,14 @@ class ClassAgenteIA:
                         f"urgencia={claude_result.get('urgencia')} razon={claude_result.get('razon')}"
                     )
 
+            # Techo: el stop nunca puede quedar a menos de 1 ATR del precio actual
+            stop_max = round(last - atr, 2)
+            if stop_final > stop_max:
+                self._preservation_logger.info(
+                    f"[ATR-CAP] {symbol}: stop {stop_final:.2f} recortado a {stop_max:.2f} (last={last:.2f} − ATR={atr:.2f})"
+                )
+                stop_final = stop_max
+
             # 9. Cantidad a proteger (DataHub — respeta lotSize en Crypto)
             qty = DataHub.preservation_calc_qty(self.account, vehiculo, symbol, last, base_limit)
             if qty <= 0:

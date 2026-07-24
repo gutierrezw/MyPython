@@ -2861,8 +2861,9 @@ class system_status(tk.Frame):
 
             _AUTO_REFRESH_MS = 10_000
             _COLS = ("ID", "Fecha", "Tipo", "Mensaje", "TG", "Enviado")
-            _COL_W = (40, 120, 70, 400, 35, 55)
+            _COL_W = (40, 120, 70, 500, 35, 55)
             frame = self.alertas
+            _cache = {}  # id → msg completo
 
             top = tk.Frame(frame, bg="black")
             top.pack(fill=tk.X, pady=(2, 0))
@@ -2894,7 +2895,19 @@ class system_status(tk.Frame):
             tree.tag_configure("tg", foreground="#FFB347")
             tree.tag_configure("no_tg", foreground="#888888")
 
+            # panel de detalle — muestra mensaje completo al seleccionar fila
+            detail_frame = tk.Frame(frame, bg="#0D0D0D", bd=1, relief="sunken")
+            detail_frame.pack(fill=tk.X, pady=(4, 2), padx=2)
+
+            detail_lbl = tk.Label(
+                detail_frame, text="Seleccionar fila para ver detalle completo",
+                bg="#0D0D0D", fg="#888888", font=("Consolas", 8), anchor="w",
+                wraplength=1100, justify="left", padx=6, pady=4
+            )
+            detail_lbl.pack(fill=tk.X)
+
             def _refresh():
+                _cache.clear()
                 for row in tree.get_children():
                     tree.delete(row)
                 try:
@@ -2904,11 +2917,13 @@ class system_status(tk.Frame):
                         enviado = "✓" if r.get("enviado_tg") else "—"
                         tg_txt = "📨" if tg else "🖥"
                         ts = str(r.get("timestamp", ""))[:16]
-                        msg = str(r.get("msg", ""))[:120]
+                        msg_full = str(r.get("msg", ""))
+                        msg_preview = msg_full[:100] + ("…" if len(msg_full) > 100 else "")
+                        _cache[str(r["id"])] = msg_full
                         tree.insert(
                             "", "end",
                             iid=str(r["id"]),
-                            values=(r["id"], ts, r.get("tipo") or "—", msg, tg_txt, enviado),
+                            values=(r["id"], ts, r.get("tipo") or "—", msg_preview, tg_txt, enviado),
                             tags=("tg" if tg else "no_tg",),
                         )
                     lbl_status.config(text=f"Incidencias pendientes — {len(rows)}")
@@ -2918,19 +2933,28 @@ class system_status(tk.Frame):
                     after_id = frame.after(_AUTO_REFRESH_MS, _refresh)
                     self.after_ids.append(after_id)
 
+            def _show_detail(event=None):
+                sel = tree.selection()
+                if not sel:
+                    return
+                iid = sel[0]
+                msg = _cache.get(iid, "")
+                detail_lbl.config(text=msg, fg="#00FFCC")
+
             def _mark_read(event=None):
                 sel = tree.selection()
                 if sel:
                     for iid in sel:
                         _BDsystem.mark_incidencias_leidas(int(iid))
-                else:
-                    _BDsystem.mark_incidencias_leidas()
+                    detail_lbl.config(text="Seleccionar fila para ver detalle completo", fg="#888888")
                 _refresh()
 
             def _mark_all():
                 _BDsystem.mark_incidencias_leidas()
+                detail_lbl.config(text="Seleccionar fila para ver detalle completo", fg="#888888")
                 _refresh()
 
+            tree.bind("<<TreeviewSelect>>", _show_detail)
             tree.bind("<Double-1>", _mark_read)
             btn_clear.configure(command=_mark_all)
             _refresh()

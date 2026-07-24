@@ -1099,12 +1099,20 @@ def read_json_tmp(name: str) -> dict:
 
 
 def write_json_tmp(name: str, data: dict) -> None:
-    """Escribe un dict como JSON en el directorio tmp."""
+    """Escribe un dict como JSON en el directorio tmp (escritura atómica vía .tmp + replace)."""
+    target = define_FileCache(name)
+    tmp_path = target + ".tmp"
     try:
-        with open(define_FileCache(name), "w") as f:
+        with open(tmp_path, "w") as f:
             json.dump(data, f, indent=2)
+        os.replace(tmp_path, target)
     except Exception as e:
         logging.getLogger(__name__).error(f"write_json_tmp({name}): {e}")
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 
 def load_vehiculo_params(vehiculo: str, cache: dict, plan_inversion) -> dict:

@@ -6052,12 +6052,12 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             cursor = conn.cursor()
             if stamp_submit:
                 cursor.execute(
-                    "UPDATE order_trader SET status=%s, stampSubmit=%s WHERE clientOrderId=%s AND account=%s",
+                    "UPDATE order_trader SET status=%s, stampSubmit=%s WHERE clientOrderId=%s AND account=%s AND tif IS NOT NULL",
                     (status, stamp_submit, client_order_id, account),
                 )
             else:
                 cursor.execute(
-                    "UPDATE order_trader SET status=%s WHERE clientOrderId=%s AND account=%s",
+                    "UPDATE order_trader SET status=%s WHERE clientOrderId=%s AND account=%s AND tif IS NOT NULL",
                     (status, client_order_id, account),
                 )
             conn.commit()
@@ -6509,17 +6509,27 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         qty: float,
         json_detalle: str,
     ) -> bool:
-        """Registra una orden STOP de preservation en order_trader con json_detalle."""
+        """Enriquece la fila ya insertada por place_OrderStock con el detalle de la decisión.
+        Cancela registros previos activos del mismo símbolo (excluyendo el order_id actual).
+        """
+        _ACTIVE = ("New", "NEW", "Submitted", "PreSubmitted", "PendingSubmit")
         conn = self._conectar(tabla="insert.order_trader")
         cursor = None
         try:
             cursor = conn.cursor()
+            placeholders = ",".join(["%s"] * len(_ACTIVE))
             cursor.execute(
-                "INSERT INTO order_trader "
-                "(account, vehiculo, symbol, conid, clientOrderId, side, orderType, "
-                "price, quantity, status, json_detalle, stampPlace) "
-                "VALUES (%s, %s, %s, %s, %s, 'SELL', 'STP LMT', %s, %s, 'New', %s, NOW())",
-                (account, vehiculo, symbol, conid, order_id, stop_price, qty, json_detalle),
+                f"UPDATE order_trader SET status='Cancelled' "
+                f"WHERE account=%s AND vehiculo=%s AND symbol=%s "
+                f"AND (intent='PRESERV' OR (orderType='STP LMT' AND side='SELL' AND intent IS NULL)) "
+                f"AND status IN ({placeholders}) "
+                f"AND (clientOrderId != %s OR clientOrderId IS NULL)",
+                (account, vehiculo, symbol, *_ACTIVE, str(order_id)),
+            )
+            cursor.execute(
+                "UPDATE order_trader SET json_detalle=%s "
+                "WHERE clientOrderId=%s AND account=%s",
+                (json_detalle, str(order_id), account),
             )
             conn.commit()
             return True
@@ -6530,7 +6540,6 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             if cursor:
                 cursor.close()
             conn.close()
-
 
     def recalculate_stock_chain(self, account: str, symbol: str, divisa: str) -> int:
         """

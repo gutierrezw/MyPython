@@ -4822,6 +4822,36 @@ class WidgetVehiculo(TickerInfo):
                 self.gchar["periodo"] = periodo if accion == "p" else self.gchar["periodo"]
                 self.gchar["tipo"] = tipo if accion == "t" else self.gchar["tipo"]
 
+                _account = self.gchar.get("account") or ""
+                _sell_prices, _buy_prices = [], []
+                if _account and str(_account) != "0":
+                    try:
+                        _rows, _ix = self.RepositorioOportunidades.select_order_trader_today(
+                            _account, self.vehiculo
+                        )
+                        for _row in _rows:
+                            _r = dict(zip(_ix, _row))
+                            if _r.get("symbol") != self.symbol:
+                                continue
+                            _status = (_r.get("status") or "").lower()
+                            if any(s in _status for s in ("cancel", "fill", "inactive")):
+                                continue
+                            try:
+                                _price = float(_r.get("price") or 0)
+                            except Exception:
+                                continue
+                            if _price <= 0:
+                                continue
+                            _side = (_r.get("side") or "").upper()
+                            if _side == "SELL":
+                                _sell_prices.append(_price)
+                            elif _side == "BUY":
+                                _buy_prices.append(_price)
+                    except Exception as _e:
+                        print(f"chart_setup orders: {_e}")
+                self.gchar["sell_orders"] = _sell_prices
+                self.gchar["buy_orders"] = _buy_prices
+
                 chart_symbol(fg=fg, datos=pdatos, keys=self.gchar)
                 cv.draw()
             except Exception as e:

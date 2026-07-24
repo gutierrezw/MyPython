@@ -3887,9 +3887,10 @@ class DashMain:
                     style="Treeview",
                 )
 
-                tree.tree_fixed.bind(
+                tree.tree_scroll.bind(
                     "<<TreeviewSelect>>",
                     lambda event: item_selected(event, tree.tree_fixed, windows),
+                    "+",
                 )
 
                 # construye e inserta symbol y proyecta los dividends
@@ -3973,9 +3974,10 @@ class DashMain:
                     style="Treeview",
                 )
 
-                tree.tree_fixed.bind(
+                tree.tree_scroll.bind(
                     "<<TreeviewSelect>>",
                     lambda event: item_selected(event, tree.tree_fixed, windows),
+                    "+",
                 )
 
                 # construye e inserta symbol y proyecta los dividends
@@ -4061,9 +4063,10 @@ class DashMain:
                     style="Treeview",
                 )
 
-                tree.tree_fixed.bind(
+                tree.tree_scroll.bind(
                     "<<TreeviewSelect>>",
                     lambda event: item_selected(event, tree.tree_fixed, windows),
+                    "+",
                 )
 
                 # construye e inserta symbol y proyecta los dividends
@@ -4155,9 +4158,10 @@ class DashMain:
                     style="Treeview",
                 )
 
-                tree.tree_fixed.bind(
+                tree.tree_scroll.bind(
                     "<<TreeviewSelect>>",
                     lambda event: item_selected(event, tree.tree_fixed, windows),
+                    "+",
                 )
 
                 tree.tag_configure("country_hdr", background="#1A3A5C", foreground="white")
