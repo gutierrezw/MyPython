@@ -1270,6 +1270,7 @@ class ClassAgenteIA:
         proteccion_base = pconfig.get("proteccion_base", 0.50)
         correccion_pct = pconfig.get("correccion_pct", 0.08)
         atr_mult = pconfig.get("atr_mult", 2.0)
+        proteccion_qty_pct = pconfig.get("proteccion_qty_pct", 0.33)
 
         _claude_key = None
         try:
@@ -1365,7 +1366,7 @@ class ClassAgenteIA:
                 stop_final = stop_max
 
             # 9. Cantidad a proteger (DataHub — respeta lotSize en Crypto)
-            qty = DataHub.preservation_calc_qty(self.account, vehiculo, symbol, last, base_limit)
+            qty = DataHub.preservation_calc_qty(self.account, vehiculo, symbol, last, base_limit, proteccion_qty_pct)
             if qty <= 0:
                 continue
 

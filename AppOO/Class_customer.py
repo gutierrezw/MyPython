@@ -1026,21 +1026,13 @@ class DataHub:
         return float(datos[close_col].tail(period).mean()), None
 
     @staticmethod
-    def preservation_calc_qty(account, vehiculo, symbol, last, base_limit):
-        """Calcula qty a proteger, respetando lotSize en Crypto."""
+    def preservation_calc_qty(account, vehiculo, symbol, last, base_limit, pct=0.33):
+        """Calcula qty a proteger como porcentaje de acciones en ganancia."""
 
         def cantidad_lote():
-            """Calcula qty a proteger desde booktranding."""
-            value, qty_raw = 0.0, 0
             book = DataHub.get_lotesGainLost(opcion="gain", account=account, symbol=symbol, last=last)
-            for keys in book:
-                if value + keys.get("gyp", 0) > base_limit:
-                    break
-
-                value += keys.get("gyp", 0)
-                qty_raw += keys.get("cantidad", 0)
-
-            return qty_raw
+            total_qty = sum(k.get("cantidad", 0) for k in book)
+            return round(total_qty * pct)
 
         qty_raw = cantidad_lote()
         if vehiculo == "Crypto":
