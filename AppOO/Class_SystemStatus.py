@@ -1657,6 +1657,18 @@ class system_status(tk.Frame):
                 tree.item(iid, tags=(_tag_for(active, run_count, proxima),))
                 _save_agents()
 
+            def _force_agent():
+                sel = tree.selection()
+                if not sel:
+                    return
+                name = tree.item(sel[0], "text")
+                cfg = AGENTES_SCHEDULE.get(name)
+                if cfg is None:
+                    return
+                cfg["force"] = True
+                tree.set(sel[0], "Próxima", "Pendiente")
+                tree.item(sel[0], tags=("Pendiente",))
+
             frame = ttk.Frame(self.agentes, style="C.TFrame")
             frame.pack(expand=True, fill="both", padx=5, pady=(5, 0))
 
@@ -1712,6 +1724,8 @@ class system_status(tk.Frame):
             menu = tk.Menu(tree, tearoff=0)
             menu.add_command(label="Activar", command=lambda: _set_agent_active(True))
             menu.add_command(label="Desactivar", command=lambda: _set_agent_active(False))
+            menu.add_separator()
+            menu.add_command(label="Forzar ejecución", command=_force_agent)
 
             tree.bind("<Button-3>", _show_menu)
             tree.bind("<Double-1>", _on_double_click)

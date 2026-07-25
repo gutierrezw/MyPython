@@ -761,7 +761,6 @@ class ArsFondosInversion(tk.Frame):
 
                     eof_book, values = next(ebook, (None, None))
 
-                # elimina archivo procesado
                 delete_file(ruta=self.archivo, display=True)
             except Exception as e:
                 _logger.error(f"[insert_values_in_booktrading()]: {e}")

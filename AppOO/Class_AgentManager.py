@@ -531,7 +531,7 @@ class AgentManager:
             DataHub.add_alert(alerta, telegram=True)
 
     @wait_rate(3600, persist=True, desc="BrowserFCI descarga FCI BBVA+Santander (L-V 8:30)", nivel=2)
-    def Agente_BrowserFCI(self):
+    def Agente_BrowserFCI(self, forced=False):
         from Class_BrowserFCI import BrowserFCI  # import diferido — evita ciclo
 
         # Siempre verificar bloqueo — notificar aunque sea fuera del horario
@@ -544,9 +544,9 @@ class AgentManager:
             return
 
         now = datetime.now()
-        if now.weekday() >= 5:  # sábado=5, domingo=6
+        if now.weekday() >= 5 and not forced:
             return
-        if not (now.hour == 8 and now.minute >= 30) and not (now.hour == 9):
+        if not (now.hour == 8 and now.minute >= 30) and not (now.hour == 9) and not forced:
             return
         try:
             from Class_FondosInversion import sync_fci_browser  # import diferido — evita ciclo

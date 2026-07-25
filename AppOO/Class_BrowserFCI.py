@@ -186,6 +186,7 @@ class BrowserFCI:
     ) -> str | None:
         from playwright.async_api import async_playwright, TimeoutError as AsyncTimeout
 
+        page = None
         try:
             async with async_playwright() as pw:
                 ctx = await pw.chromium.launch_persistent_context(
@@ -197,12 +198,9 @@ class BrowserFCI:
                 page = await ctx.new_page()
                 await self._sant_login(page, usuario, clave)
                 await self._sant_navegar_descarga(page)
-                nombre = f"{prefijo}{date.today().strftime('%Y%m%d')}.xlsx"
-                ruta = os.path.join(destino, nombre)
                 async with page.expect_download(timeout=_TIMEOUT) as dl_info:
                     await page.locator('[data-testid="downloadLink"]').click()
                 download = await dl_info.value
-                # Conservar nombre original de Santander (movimientos-de-superfondos-*.xlsx)
                 nombre = download.suggested_filename or f"{prefijo}{date.today().strftime('%Y-%m-%d')}.xlsx"
                 ruta = os.path.join(destino, nombre)
                 await download.save_as(ruta)
@@ -210,8 +208,16 @@ class BrowserFCI:
                 _logger.warning(f"download_santander: guardado en {ruta}")
                 return ruta
         except AsyncTimeout as e:
+            try:
+                shot = os.path.join(os.environ.get("APPOO_TMP", "tmp"), "sant_timeout.png")
+                if page:
+                    await page.screenshot(path=shot, full_page=True)
+                    _logger.error(f"Santander timeout screenshot: {shot}")
+            except Exception:
+                pass
             self._set_blocked(f"Santander timeout: {e}")
         except Exception as e:
+            _logger.error(f"Santander: {type(e).__name__}: {e}")
             self._set_blocked(f"Santander: {e}")
         return None
 

@@ -161,6 +161,7 @@ def wait_rate(intervalo_segundos: int, persist: bool = False, initial_delay: int
         @wraps(func)
         def wrapper(*args, **kwargs):
             ahora = time.time()
+            forced = AGENTES_SCHEDULE.get(func.__name__, {}).get("force", False)
             if func.last_run == 0:
                 if persist:
                     with _SCHEDULE_LOCK:
@@ -168,14 +169,19 @@ def wait_rate(intervalo_segundos: int, persist: bool = False, initial_delay: int
                 if func.last_run == 0 and initial_delay > 0:
                     func.last_run = ahora - intervalo_segundos + initial_delay
             transcurrido = ahora - func.last_run
-            if transcurrido < intervalo_segundos:
+            if not forced and transcurrido < intervalo_segundos:
                 logging.getLogger("ClassAgenteIA").debug(
                     f"wait_rate: '{func.__name__}' bloqueado — faltan {int(intervalo_segundos - transcurrido)}s"
                 )
                 wrapper._overdue = False
                 return None
             wrapper._overdue = transcurrido > intervalo_segundos * 1.5
-            resultado = func(*args, **kwargs)
+            import inspect  # import diferido — evita ciclo de inicialización con módulos que importan wait_rate
+            if "forced" in inspect.signature(func).parameters:
+                resultado = func(*args, forced=forced, **kwargs)
+            else:
+                resultado = func(*args, **kwargs)
+            AGENTES_SCHEDULE.get(func.__name__, {}).pop("force", None)
             func.last_run = ahora
             if func.__name__ in AGENTES_SCHEDULE:
                 AGENTES_SCHEDULE[func.__name__]["run_count"] = AGENTES_SCHEDULE[func.__name__].get("run_count", 0) + 1
@@ -190,6 +196,7 @@ def wait_rate(intervalo_segundos: int, persist: bool = False, initial_delay: int
         return wrapper
 
     return decorator
+
 
 
 def track_claude_usage(vehiculo: str, tokens_in: int, tokens_out: int):
