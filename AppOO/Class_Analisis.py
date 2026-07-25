@@ -550,10 +550,19 @@ class AnalisisBase:
 
                 # Marcadores explícitos en puntos de quiebre (cruce del spread por 0)
                 # ▼ RF en la parte superior, ▲ RV en la inferior — evita solapamiento
+                # Filtro de distancia mínima: elimina señales intermedias de clusters
                 if not spread.empty and len(spread) > 1:
                     sign = spread >= 0
                     cruces = sign[sign != sign.shift(1)].iloc[1:]
+                    dias_ventana = (spread.index[-1] - spread.index[0]).days
+                    min_dias = max(20, dias_ventana // 25)
+                    cruces_filtradas = []
+                    last_fecha = None
                     for fecha, hacia_pos in cruces.items():
+                        if last_fecha is None or (fecha - last_fecha).days >= min_dias:
+                            cruces_filtradas.append((fecha, hacia_pos))
+                            last_fecha = fecha
+                    for fecha, hacia_pos in cruces_filtradas:
                         tag = "▼ RF" if hacia_pos else "▲ RV"
                         col_tag = "#e74c3c" if hacia_pos else "#27ae60"
                         y_pos = 0.98 if hacia_pos else 0.04
