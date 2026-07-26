@@ -16,7 +16,7 @@ from Modulos_python import (
 )
 
 _logger = logging.getLogger("FondosInversion")
-from Modulos_Mysql import RepositorioOportunidadesBuySell, DiariaCNV, IPerformance
+from Modulos_Mysql import RepositorioOportunidadesBuySell, DiariaCNV, FinanceScreen, IPerformance
 from Class_customer import WidgetVehiculo, TickerInfo, DataHub
 from Modulos_Utilitarios import delete_file, buscar_ticker, define_FileCache, is_numeric
 from Modulos_Comunes import diaria_book_performance, proceso_update_performance
@@ -123,26 +123,47 @@ def sync_cnv_superfondos(df) -> int:
 def sync_fci_browser(account_bbva: str = None) -> list:
     """Descarga extractos FCI de BBVA y Santander y los procesa en booktrading.
     Función standalone para uso desde agentes (sin UI).
+    Solo descarga el banco si tiene credenciales cargadas en fin_banks.
     """
     from Class_BrowserFCI import BrowserFCI  # import diferido — evita ciclo con Modulos_Mysql
 
     repo = RepositorioOportunidadesBuySell()
     cnv = DiariaCNV()
+    finance = FinanceScreen()
 
-    ses_bbva = cnv.get_sesion_by_vehiculo("BBVA.ARS")
-    acc_bbva = account_bbva or ses_bbva["idcuenta"]
+    tiene_bbva = bool(finance.get_bank_credentials("BBVA"))
+    tiene_sant = bool(finance.get_bank_credentials("Santander"))
+
+    if not tiene_bbva and not tiene_sant:
+        return []
+
+    acc_bbva = None
+    acc_sant = None
+    if tiene_bbva:
+        try:
+            ses = cnv.get_sesion_by_vehiculo("BBVA.ARS")
+            acc_bbva = account_bbva or ses["idcuenta"]
+        except ValueError:
+            pass
+    if tiene_sant:
+        try:
+            ses = cnv.get_sesion_by_vehiculo("SANT.ARS")
+            acc_sant = ses["idcuenta"]
+        except ValueError:
+            pass
 
     path = (os.environ.get("APPOO_TMP") or os.path.join(os.getcwd(), "tmp")).rstrip("\\/") + os.sep
     os.makedirs(path, exist_ok=True)
 
-    last, _ = repo.select_booktrading(accion="last", account=acc_bbva, idivisa="ARS")
+    ref_account = acc_bbva or acc_sant
+    last, _ = repo.select_booktrading(accion="last", account=ref_account, idivisa="ARS")
     desde = last[0]["fechahora"].date() if last else date.today() - timedelta(days=90)
 
     browser = BrowserFCI()
     procesados = []
-    if browser.download_bbva(desde=desde, destino=path, prefijo="BBVA_Comprobante_"):
+    if tiene_bbva and browser.download_bbva(desde=desde, destino=path, prefijo="BBVA_Comprobante_"):
         procesados.append("BBVA")
-    if browser.download_santander(desde=desde, destino=path, prefijo="movimientos-de-superfondos-"):
+    if tiene_sant and browser.download_santander(desde=desde, destino=path, prefijo="movimientos-de-superfondos-"):
         procesados.append("SANT")
 
     return procesados

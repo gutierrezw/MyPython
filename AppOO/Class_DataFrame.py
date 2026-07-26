@@ -1852,12 +1852,15 @@ def Agente_income_Manager(fg: object, parm=None):
         ax.spines["left"].set_color(cchart["asy"])
 
         ax.set_xticks(xlabel, clave)
-        if dlabl["periodo"] == 3:
+        n = len(xlabel)
+        if n <= 1:
+            xsti = xlabel.tolist()
+        elif n <= 3:
+            xsti = [xlabel[0], xlabel[-1]]
+        elif str(dlabl.get("periodo", "")) == "3":
             xsti = [xlabel[0], xlabel[1], xlabel[-1]]
-        elif dlabl["periodo"] in (6, 12):
-            xsti = [xlabel[0], xlabel[1], xlabel[2], xlabel[-1]]
         else:
-            xsti = [xlabel[0], xlabel[2], xlabel[-1]]
+            xsti = [xlabel[0], xlabel[1], xlabel[2], xlabel[-1]]
 
         ax.set_xticks(xsti)
         ax.set(xlim=[xlabel[0], xlabel[-1]])
@@ -1996,7 +1999,9 @@ def grupo_sector(fig: object, positions=None, parm=None):
         mean = pdatos["Peso"].mean()
         media = f" μ = {mean:.1%}"
         av.axhline(mean, linewidth=0.6, ls="--", color=cchart["texto"])
-        av.text(x[6], mean * 1.2, media, fontsize=6, ha="center", color=cchart["texto"])
+        x_mid = x[min(6, len(x) - 1)]
+        y_mid = mean * 1.2 if mean != 0 else 0.01
+        av.text(x_mid, y_mid, media, fontsize=6, ha="center", color=cchart["texto"])
 
         tlabels = av.get_yticklabels()
         plt.setp(tlabels, ha="left", fontsize=6, color=cchart["texto"])
@@ -2238,7 +2243,9 @@ def grupo_dividendo(fg: object, parm=None):
             mean = datos["cobrados"].mean()
             ax.axhline(mean, linewidth=0.6, ls="--", color=cchart["texto"])
             media = f" μ = {mean:.0f}$"
-            ax.text(x[6], mean * 1.2, media, fontsize=6, ha="center", color=cchart["texto"])
+            x_mid = x[min(6, len(x) - 1)]
+            y_mid = mean * 1.2 if mean != 0 else 0.01
+            ax.text(x_mid, y_mid, media, fontsize=6, ha="center", color=cchart["texto"])
 
             return {
                 "datos": datos,

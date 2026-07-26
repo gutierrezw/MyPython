@@ -40,7 +40,7 @@ from Modulos_python import (
     datetime,
 )
 import pathlib
-from Modulos_Mysql import BDsystem
+from Modulos_Mysql import BDsystem, RepositorioOportunidadesBuySell
 import logging
 from typing import Dict, List
 
@@ -493,6 +493,77 @@ class BinanceClient:
         if data.get("code") != "000000":
             raise ValueError(f"Binance Pay API: {data.get('message')} (code={data.get('code')})")
         return data.get("data", [])
+
+    def sync_trades(self, account: str, symbols: list, desde=None) -> dict:
+        """Descarga trades de Binance e inserta los nuevos en booktrading.
+
+        Args:
+            account:  cuenta de inversión (ej: "B0000001")
+            symbols:  lista de pares (ej: ["BTCUSDT", "ETHUSDT"])
+            desde:    date desde donde descargar. Si es None usa la última fecha
+                      en booktrading para esta cuenta, o 90 días atrás.
+
+        Returns:
+            {"insertados": int, "simbolos": list[str]}
+        """
+        from datetime import date, datetime, timedelta
+
+        repo = RepositorioOportunidadesBuySell()
+
+        if desde is None:
+            last, _ = repo.select_booktrading(accion="last", account=account, idivisa="USD")
+            desde = last[0]["fechahora"].date() if last else date.today() - timedelta(days=90)
+
+        hoy = date.today()
+        insertados = 0
+        simbolos_con_trades = []
+
+        for symbol in symbols:
+            cursor_fecha = desde
+            while cursor_fecha <= hoy:
+                sfecha = cursor_fecha
+                efecha = cursor_fecha + timedelta(days=1)
+                stime = int(datetime.combine(sfecha, datetime.min.time()).timestamp() * 1000)
+                etime = int(datetime.combine(efecha, datetime.min.time()).timestamp() * 1000)
+
+                try:
+                    trades = self.spot.get_my_trades(symbol, limit=100, startTime=stime, endTime=etime)
+                except Exception as e:
+                    self.logger.warning(f"sync_trades {symbol} {sfecha}: {e}")
+                    trades = []
+
+                for t in trades:
+                    try:
+                        qty = float(t.get("qty", 0))
+                        qty = qty if t["isBuyer"] else -qty
+                        price = float(t.get("price", 0))
+                        registro = {
+                            "categoria": self.vehiculo,
+                            "divisa": "USD",
+                            "cuenta": account,
+                            "cantidad": qty,
+                            "producto": float(t.get("quoteQty", 0)),
+                            "idtrans": str(t.get("id")),
+                            "preciotrans": price,
+                            "preciocierre": price,
+                            "tarifacomision": float(t.get("commission", 0)) * price,
+                            "mtmgp": 0.0,
+                            "fechahora": datetime.fromtimestamp(t.get("time", 0) / 1000),
+                            "indicadores": "{}",
+                        }
+                        ya_existe = repo.get_hash_booktrading(accion="valida", values=registro, symbol=symbol)
+                        if not ya_existe:
+                            repo.insert_booktrading(values=registro, symbol=symbol)
+                            insertados += 1
+                            if symbol not in simbolos_con_trades:
+                                simbolos_con_trades.append(symbol)
+                    except Exception as e:
+                        self.logger.error(f"sync_trades registro {symbol} id={t.get('id')}: {e}")
+
+                cursor_fecha = efecha
+                time.sleep(0.3)
+
+        return {"insertados": insertados, "simbolos": simbolos_con_trades}
 
 
 # =============================================================================
