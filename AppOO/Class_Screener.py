@@ -1075,11 +1075,17 @@ class Screener(tk.Frame):
         self._analisis_win = win
         win.protocol("WM_DELETE_WINDOW", lambda: (win.destroy(), setattr(self, "_analisis_win", None)))
 
+        try:
+            px = self.winfo_rootx() + 550
+            py = self.winfo_rooty() + 60
+        except Exception:
+            px, py = 550, 60
+
         if tiene_div:
-            win.geometry("870x360+0+775")
+            win.geometry(f"870x360+{px}+{py}")
             fg = Figure(figsize=(8.5, 3.4), dpi=100, layout="tight")
         else:
-            win.geometry("560x230+0+775")
+            win.geometry(f"560x230+{px}+{py}")
             fg = Figure(figsize=(5.5, 2.1), dpi=100, layout="tight")
 
         fg.set_facecolor(cgcolor)
@@ -1146,6 +1152,10 @@ class Screener(tk.Frame):
             ax.spines["left"].set_color("gray")
             cv.draw()
 
+        def _safe_render(fn):
+            if win.winfo_exists():
+                win.after(0, fn)
+
         def _fetch():
             try:
                 if tiene_div:
@@ -1166,14 +1176,14 @@ class Screener(tk.Frame):
                                 y_datos.loc[y_datos.index[-1], "Close"] = last_price
                                 dlabl = {"symbol": symbol, "buy": "Zona buy", "sell": "Zona sell", "legend": "outside upper left"}
                                 asset = {"ticket": symbol, "forward": forward_yield, "name": shortName or symbol, "aspect": 0.25}
-                                win.after(0, lambda: (chart_rendimiento_dividendos(fg=fg, datos=y_datos, dlabl=dlabl, asset=asset, cchart=cchart), cv.draw()))
+                                _safe_render(lambda: (chart_rendimiento_dividendos(fg=fg, datos=y_datos, dlabl=dlabl, asset=asset, cchart=cchart), cv.draw()))
                                 return
                     # fallback: sin datos de dividendos → rentabilidad
                     _, hist = get_yfinance(ticket=symbol, vehiculo="hist")
-                    win.after(0, lambda: _draw_rentabilidad(hist))
+                    _safe_render(lambda h=hist: _draw_rentabilidad(h))
                 else:
                     _, hist = get_yfinance(ticket=symbol, vehiculo="hist")
-                    win.after(0, lambda: _draw_rentabilidad(hist))
+                    _safe_render(lambda h=hist: _draw_rentabilidad(h))
             except Exception as e:
                 _logger.warning(f"_show_analisis_popup({symbol}): {e}")
 
