@@ -6245,7 +6245,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "DELETE FROM order_trader WHERE account = %s AND DATE(stampPlace) = CURDATE() "
+                "DELETE FROM order_trader WHERE account = %s AND DATE(stampPlace) < CURDATE() "
                 "AND status IN ('CANCELED', 'Inactive')",
                 (account,),
             )
