@@ -623,10 +623,15 @@ class AgentManager:
         response = client.request("pool.ntp.org", version=3)
         offset_ms = abs(response.offset) * 1000
         if offset_ms > 500:
-            DataHub.add_alert(
-                f"⏱ NTP: reloj deriva {offset_ms:.0f}ms — riesgo de rechazo de órdenes IB/Binance",
-                telegram=True,
-            )
+            import time as _time
+            _now = _time.time()
+            _last = getattr(self, "_ntp_last_alert_ts", 0)
+            if _now - _last > 3600:
+                DataHub.add_alert(
+                    f"⏱ NTP: reloj deriva {offset_ms:.0f}ms — riesgo de rechazo de órdenes IB/Binance",
+                    telegram=True,
+                )
+                self._ntp_last_alert_ts = _now
         return {"offset_ms": offset_ms, "server": "pool.ntp.org"}
 
     @wait_rate(86400, persist=True, desc="Reconcile lotes vs IB (24h)", nivel=2)

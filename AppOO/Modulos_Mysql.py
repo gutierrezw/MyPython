@@ -1843,6 +1843,22 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             print(f"[MarketScreen.select_all]: {e}")
             return [], []
 
+    def load_booktrading_symbols(self, account: str) -> set:
+        """Retorna set de símbolos con historial en booktrading para la cuenta (ex-cartera)."""
+        conn = self._conectar(tabla="select.booktrading")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT DISTINCT simbolo FROM booktrading WHERE cuenta = %s AND delisted = 0",
+                (account,),
+            )
+            return {row[0] for row in cursor.fetchall()}
+        except (Exception, connect.Error) as e:
+            _logger.error(f"load_booktrading_symbols: {e}")
+            return set()
+        finally:
+            conn.close()
+
     def insert(self, upd=None, val=None, symbol=None):
         """
         @param upd:  list() de campos para insertar en market
@@ -6512,6 +6528,12 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         """Enriquece la fila ya insertada por place_OrderStock con el detalle de la decisión.
         Cancela registros previos activos del mismo símbolo (excluyendo el order_id actual).
         """
+        if not order_id or str(order_id) in ("None", "null", ""):
+            _logger.error(
+                f"[Mysql::insert_preservation_order({symbol})]: order_id inválido ({order_id!r}) — "
+                "se omite actualización para no cancelar registros activos por error"
+            )
+            return False
         _ACTIVE = ("New", "NEW", "Submitted", "PreSubmitted", "PendingSubmit")
         conn = self._conectar(tabla="insert.order_trader")
         cursor = None

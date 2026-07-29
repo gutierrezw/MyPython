@@ -497,13 +497,13 @@ class ClassAgenteIA:
                 self.logger.error(f"Agente_ManagerPreservation({vehiculo}): {e}")
 
     # agente especulativo: captura ganancias en activos volátiles con ventas parciales por niveles ROI
-    @wait_rate(3600, persist=True)
+    @wait_rate(1800, persist=True)
     async def Agente_GainsCapture(self):
         try:
             if DataHub.manager_sesion.get("Stock"):
                 self._gains_capture_run()
             else:
-                self.logger.debug("Agente_GainsCapture: sesion Stock no activa → SKIP")
+                self.logger.warning("Agente_GainsCapture: sesion Stock no activa → SKIP (timer consumido)")
         except Exception as e:
             self.logger.error(f"Agente_GainsCapture(): {e}")
 
@@ -914,7 +914,7 @@ class ClassAgenteIA:
             return
         gc_config = params.get("gains_capture")
         if not gc_config:
-            _gc_logger.debug("_gains_capture_run: gains_capture no configurado en sesion → SKIP")
+            _gc_logger.warning("_gains_capture_run: gains_capture no configurado en sesion Stock → SKIP")
             return
 
         min_roi = gc_config.get("min_roi", 0.20)
@@ -932,9 +932,13 @@ class ClassAgenteIA:
         conid_map = {p.get("ticket"): (p.get("conid"), p.get("useraccount")) for p in positions}
         symbols_gain = DataHub.get_info_symbols_gain()
 
+        symbols_in_gain = [s.get("symbol") for s in symbols_gain if s.get("symbol")]
+        _gc_logger.warning(f"GainsCapture: evaluando {len(symbols_in_gain)} símbolos en ganancia: {symbols_in_gain}")
         for sym_data in symbols_gain:
             symbol = sym_data.get("symbol")
-            if categories.get(symbol) != "N":
+            categ = categories.get(symbol)
+            if categ != "N":
+                _gc_logger.warning(f"GainsCapture({symbol}): categoriaActivo={categ!r} != 'N' → SKIP")
                 continue
 
             list_gain = sym_data.get("list_gain", [])
@@ -975,10 +979,10 @@ class ClassAgenteIA:
                 ts_raw = state.get("pendiente_ts")
                 if ts_raw:
                     elapsed = (datetime.now() - datetime.fromisoformat(ts_raw)).total_seconds()
-                    if elapsed > 1800:
+                    if elapsed > 7200:
                         self.gains_capture_state[symbol] = {**state, "estado": "normal", "pendiente": None}
                         write_json_tmp("gains_capture_state.json", self.gains_capture_state)
-                        _gc_logger.warning(f"GainsCapture({symbol}): propuesta expirada (30 min) → cancelada")
+                        _gc_logger.warning(f"GainsCapture({symbol}): propuesta expirada (2h) → cancelada")
                         estado = "normal"
                     else:
                         _gc_logger.debug(
@@ -1395,6 +1399,29 @@ class ClassAgenteIA:
                         DataHub.preservation_cancel_order(vehiculo, account, order_id_prev, symbol)
                     response = DataHub.preservation_send_order(vehiculo, trama)
                     order_id = DataHub.preservation_extract_order_id(response)
+                    if not order_id and vehiculo == "Stock":
+                        # IB a veces tarda en confirmar — reintento leyendo live orders
+                        time.sleep(3)
+                        try:
+                            ib_client = DataHub.clients.get("Stock")
+                            if ib_client:
+                                stops = ib_client.get_preservation_stops()
+                                matched = next(
+                                    (s for s in stops if s.get("symbol") == symbol and abs((s.get("stop_price") or 0) - stop_final) < 0.02),
+                                    None,
+                                )
+                                if matched:
+                                    order_id = matched.get("order_id")
+                                    self._preservation_logger.warning(
+                                        f"[RETRY-OK] {symbol}: order_id recuperado de live orders → {order_id}"
+                                    )
+                                else:
+                                    self._preservation_logger.error(
+                                        f"[RETRY-FAIL] {symbol}: order_id sigue None tras reintento — "
+                                        "se preserva estado anterior sin actualizar order_trader"
+                                    )
+                        except Exception as _retry_e:
+                            self._preservation_logger.error(f"[RETRY-ERR] {symbol}: {_retry_e}")
                     self._preservation_logger.info(f"[ENVIADA] {msg} | order_id={order_id}")
                     self.logger.warning(f"[ENVIADA] {msg} | order_id={order_id}")
                     try:
@@ -1762,6 +1789,12 @@ class Telegram:
             self.logger.error(f"put_order_aprovate_telegram(): {e}\n{traceback.format_exc()}")
             return {}, None, None
 
+    async def _safe_remove_buttons(self, query):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
     # Maneja los callbacks de los botones de aprobación/rechazo
     async def handle_callback(self, update, context):
         try:
@@ -1774,7 +1807,7 @@ class Telegram:
 
             # solicita put Order & wait response de ManagerOrderQueue
             if accion == "aprobar":
-                await query.edit_message_reply_markup(reply_markup=None)
+                await self._safe_remove_buttons(query)
                 response, symbol, vehiculo = self.put_order_aprovate_telegram(hash_id=args[0])
 
                 if response.get("status") == "ya_ejecutada":
@@ -1857,7 +1890,7 @@ class Telegram:
             elif accion == "ia_ejecutar":
                 trace_id = int(args[0])
                 self.IaTrace.update_trace_estado(trace_id, estado="APROBADO")
-                await query.edit_message_reply_markup(reply_markup=None)
+                await self._safe_remove_buttons(query)
                 await query.edit_message_text(
                     f"✅ Propuesta IA aprobada (trace #{trace_id})\n_Ejecución manual por ahora — AUTONOMO pendiente._",
                     parse_mode="Markdown",
@@ -1866,7 +1899,7 @@ class Telegram:
             elif accion == "ia_diferir":
                 trace_id = int(args[0])
                 self.IaTrace.update_trace_estado(trace_id, estado="DIFERIDO")
-                await query.edit_message_reply_markup(reply_markup=None)
+                await self._safe_remove_buttons(query)
                 await query.edit_message_text(
                     f"⏸ Propuesta diferida (trace #{trace_id})",
                     parse_mode="Markdown",
@@ -1876,7 +1909,7 @@ class Telegram:
                 from Class_BrowserFCI import BrowserFCI  # import diferido — evita ciclo
 
                 BrowserFCI().reset_blocked()
-                await query.edit_message_reply_markup(reply_markup=None)
+                await self._safe_remove_buttons(query)
                 await query.edit_message_text("🔓 Bloqueo FCI liberado. El agente reintentará en el próximo ciclo.")
 
             elif accion == "reconcile_aprobar":
@@ -1901,13 +1934,13 @@ class Telegram:
                         aplicados.append(f"{d['symbol']}: {d['bt_current']:.0f} → {d['expected']:.0f}")
                     except Exception as ex:
                         self.logger.error(f"reconcile_aprobar {d['symbol']}: {ex}")
-                await query.edit_message_reply_markup(reply_markup=None)
+                await self._safe_remove_buttons(query)
                 resumen = "\n".join(aplicados) if aplicados else "Sin cambios aplicados (bt_id nulo)."
                 await query.edit_message_text(f"✅ Reconcile aplicado:\n{resumen}")
 
             elif accion == "reconcile_rechazar":
                 write_json_tmp("ib_reconcile_pending", [])
-                await query.edit_message_reply_markup(reply_markup=None)
+                await self._safe_remove_buttons(query)
                 await query.edit_message_text("❌ Diffs IB ignorados.")
 
         except Exception as e:

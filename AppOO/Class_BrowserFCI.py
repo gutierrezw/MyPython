@@ -5,6 +5,11 @@ import re
 
 from datetime import date, datetime
 
+os.environ.setdefault(
+    "PLAYWRIGHT_BROWSERS_PATH",
+    os.path.join(os.environ.get("LOCALAPPDATA", ""), "ms-playwright"),
+)
+
 from Modulos_Mysql import FinanceScreen
 from Modulos_Utilitarios import read_json_tmp, write_json_tmp
 

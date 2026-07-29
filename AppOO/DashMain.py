@@ -1957,6 +1957,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 try:
                     url = f"wss://localhost:{DataHub.ib_gateway_port}/v1/api/ws"
                     _gw_down_alerted = False
+                    _gw_last_alert_ts = 0
                     while True:
 
                         if iteraStream > 1:
@@ -1990,7 +1991,11 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             f"websocket_stream(Stock): websocket_loop() terminó (iter={iteraStream}), esperando 30s antes de reconectar"
                         )
                         if not _gw_down_alerted:
-                            DataHub.add_alert("⚠️ IB Gateway caído — reconectando en 30s", telegram=True)
+                            import time as _time
+                            _now = _time.time()
+                            if _now - _gw_last_alert_ts > 1800:
+                                DataHub.add_alert("⚠️ IB Gateway caído — reconectando en 30s", telegram=True)
+                                _gw_last_alert_ts = _now
                             _gw_down_alerted = True
                         time.sleep(30)
 
@@ -3109,7 +3114,12 @@ class DashMain:
             try:
                 for i, orden in enumerate(_load_stock_orders_today()):
                     st = orden["status"]
-                    tag = "red" if "cancel" in st.lower() else "blue" if orden["side"].upper() == "SELL" else "green"
+                    if "cancel" in st.lower():
+                        tag = "red"
+                    elif "fill" in st.lower():
+                        tag = "green"
+                    else:
+                        tag = ""
                     price = orden["price"]
                     qty = orden["quantity"]
                     jd = orden.get("json_detalle") or ""
@@ -3145,7 +3155,12 @@ class DashMain:
                 for i, row in enumerate(rows):
                     r = dict(zip(ix, row))
                     st = r.get("status", "")
-                    tag = "red" if "cancel" in st.lower() else "blue" if r.get("side", "").upper() == "SELL" else "green"
+                    if "cancel" in st.lower():
+                        tag = "red"
+                    elif "fill" in st.lower():
+                        tag = "green"
+                    else:
+                        tag = ""
                     price = r.get("price", "")
                     qty = r.get("quantity", "")
                     tree.insert(
@@ -3622,7 +3637,7 @@ class DashMain:
                     "Precio": f"{inicial:.2f}  →  {final:.2f}",
                     "Growth 5y": f"{growth_total:+.1%}",
                     "APR": f"{apr:+.1%}",
-                    "Div Yield": f"{(lambda v: v / 100 if v > 1 else v)(activo.get('dividendYield') or 0):.2%}",
+                    "Div Yield": f"{activo.get('dividendYield') or 0:.2f}%",
                     "Div Rate": f"{activo.get('dividendRate') or 0:.2f}",
                     "P/E": f"{activo.get('trailingPE') or 0:.1f}",
                     "Beta": f"{activo.get('beta') or 0:.2f}",

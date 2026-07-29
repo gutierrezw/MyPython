@@ -1,5 +1,5 @@
 from Modulos_Mysql import MarketScreen, BDsystem
-from Class_DataFrame import set_yf_rate_limited, get_yf_status
+from Class_DataFrame import set_yf_rate_limited, get_yf_status, get_yfinance, chart_rendimiento_dividendos
 from Modulos_Utilitarios import (
     style_app,
     is_null,
@@ -23,6 +23,8 @@ from AppValuations.consenso_score import (
 from Modulos_python import (
     tk,
     ttk,
+    Figure,
+    FigureCanvasTkAgg,
     W,
     S,
     N,
@@ -90,8 +92,8 @@ _ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
 _ETF_NAME_KEYWORDS = {"etf", "trust", "fund", "physical gold", "index fund", "reit index"}
 
 
-def bind_tv_web_menu(tree, win, colors=None, col_symbol="#1", get_url=None):
-    """Agrega menú contextual TradingView/Web al hacer click en columna Symbol de un Treeview.
+def bind_tv_web_menu(tree, win, colors=None, col_symbol="#1", get_url=None, on_analisis=None):
+    """Agrega menú contextual TradingView/Web/Análisis al hacer click en columna Symbol de un Treeview.
 
     Args:
         tree: ttk.Treeview al que se aplica el binding.
@@ -99,6 +101,7 @@ def bind_tv_web_menu(tree, win, colors=None, col_symbol="#1", get_url=None):
         colors: dict con 'bgcolor' y 'cgcolor' (opcional).
         col_symbol: columna que activa el menú (default '#1').
         get_url: callable(symbol) → url str | None (opcional).
+        on_analisis: callable(symbol) → None (opcional). Si se pasa, agrega opción "Análisis".
     """
     bgcolor = (colors or {}).get("bgcolor", "black")
     cgcolor = (colors or {}).get("cgcolor", "DarkCyan")
@@ -159,6 +162,15 @@ def bind_tv_web_menu(tree, win, colors=None, col_symbol="#1", get_url=None):
 
         tk.Frame(menu, bg="white", height=1).pack(fill=tk.X, padx=2)
         tk.Button(menu, text="Web", command=_web, **btn_cfg).pack(fill=tk.X, padx=1, pady=(0, 1))
+
+        if on_analisis:
+            tk.Frame(menu, bg="white", height=1).pack(fill=tk.X, padx=2)
+            tk.Button(
+                menu,
+                text="Análisis",
+                command=lambda sym=symbol: (menu.destroy(), on_analisis(sym)),
+                **btn_cfg,
+            ).pack(fill=tk.X, padx=1, pady=(0, 1))
 
         menu.geometry(f"+{win.winfo_pointerx() + 5}+{win.winfo_pointery()}")
         menu.update_idletasks()
@@ -254,6 +266,7 @@ class Screener(tk.Frame):
         self.s_market = None
         self.s_entry = None
         self.s_encartera = False
+        self.s_excartera = False
         self.tree = None
         self.panel = None
         self.options = None
@@ -264,6 +277,7 @@ class Screener(tk.Frame):
         self._inst_win = None
         self._cand_win = None
         self._exp_win = None
+        self._analisis_win = None
         self.ix = []
         self.ctree = []  # poblado en widgets_screener vía _COL_DEFS
         self.ctree_widget = None  # instancia CustomTreeview
@@ -320,6 +334,16 @@ class Screener(tk.Frame):
             self.s_entry = entry.get()
             self.s_market = mkt_c.get()
             self.s_encartera = encartera_var.get()
+            self.s_excartera = excartera_var.get()
+
+            # mutuamente excluyentes: el último activado desactiva el otro
+            if self.s_encartera and self.s_excartera:
+                if encartera_var.get():
+                    self.s_excartera = False
+                    excartera_var.set(False)
+                else:
+                    self.s_encartera = False
+                    encartera_var.set(False)
 
             self.s_beta = self.s_beta if not is_null(self.s_beta) else None
             self.s_entry = self.s_entry if not is_null(self.s_entry) else None
@@ -335,7 +359,9 @@ class Screener(tk.Frame):
                 self.s_market = None
                 self.s_entry = None
                 self.s_encartera = False
+                self.s_excartera = False
                 encartera_var.set(False)
+                excartera_var.set(False)
 
             self.after(1, self.update_screener)
 
@@ -403,10 +429,8 @@ class Screener(tk.Frame):
                 ("fiftyTwoWeekLow", "52W L", 70, "e"),
                 ("fiftyDayAverage", "50D Avg", 70, "e"),
                 ("twoHundredDayAverage", "200D Avg", 70, "e"),
-                ("ema20", "EMA20", 70, "e"),
-                ("ema50", "EMA50", 70, "e"),
-                ("ema100", "EMA100", 70, "e"),
-                ("ema200", "EMA200", 70, "e"),
+                ("_50d_vs_price", "50D %", 65, "e"),
+                ("_200d_vs_price", "200D %", 65, "e"),
                 ("marketCap", "Mkt Cap", 85, "e"),
                 ("beta", "Beta", 55, "e"),
                 ("trailingPE", "P/E", 60, "e"),
@@ -528,7 +552,8 @@ class Screener(tk.Frame):
                     webbrowser.open(str(url))
 
             self.ctree_widget.tree_scroll.bind("<Double-1>", _open_website)
-            bind_tv_web_menu(self.ctree_widget.tree_fixed, self.root, colors=self.colors)
+
+            bind_tv_web_menu(self.ctree_widget.tree_fixed, self.root, colors=self.colors, on_analisis=self._analisis_for_symbol)
 
             # set position of all above objects by pack panel
             imagen_tk = BDsystem.select_image(idd=200, size=(32, 32))
@@ -581,6 +606,9 @@ class Screener(tk.Frame):
             encartera_var = tk.BooleanVar()
             encartera_var.set(self.s_encartera)
             encartera_var.trace("w", get_select)
+            excartera_var = tk.BooleanVar()
+            excartera_var.set(self.s_excartera)
+            excartera_var.trace("w", get_select)
             tp1 = ttk.Label(self.options, text="TIPO DE ACTIVO ::", style="C.TLabel")
             tp2 = ttk.Radiobutton(
                 self.options,
@@ -602,11 +630,18 @@ class Screener(tk.Frame):
                 variable=encartera_var,
                 style="C.TRadiobutton",
             )
+            tp6 = ttk.Checkbutton(
+                self.options,
+                text="Ex Cartera",
+                variable=excartera_var,
+                style="C.TRadiobutton",
+            )
 
             tp1.grid(column=0, row=0, sticky=W, pady=1)
             tp2.grid(column=0, row=1, sticky=W, padx=10)
             tp3.grid(column=0, row=2, sticky=W, padx=10)
             tp5.grid(column=0, row=3, sticky=W, padx=10)
+            tp6.grid(column=0, row=4, sticky=W, padx=10)
 
             # filtro Beta de activo rnb2
             beta = tk.StringVar()
@@ -751,6 +786,7 @@ class Screener(tk.Frame):
                 command=self._show_youtube_candidatos,
             ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
 
+
             ttk.Button(
                 btn_frame,
                 text="Modelo",
@@ -824,6 +860,17 @@ class Screener(tk.Frame):
 
         def _pct(v):
             return f"{v:.1%}" if v is not None else ""
+
+        def _yield(v):
+            # dividendYield almacenado como porcentaje (7.44 = 7.44%), no decimal
+            return f"{float(v):.1f}%" if v is not None else ""
+
+        def _sma_pct(price, sma):
+            try:
+                p, s = float(price), float(sma)
+                return f"{(p - s) / s * 100:+.1f}%" if s else ""
+            except (TypeError, ValueError):
+                return ""
 
         def _shares_m(v):
             return f"{float(v) / 1_000_000:.1f}M" if v and float(v) > 0 else ""
@@ -899,10 +946,8 @@ class Screener(tk.Frame):
                     _price(_g("fiftyTwoWeekLow")),
                     _price(_g("fiftyDayAverage")),
                     _price(_g("twoHundredDayAverage")),
-                    _price(_g("ema20")),
-                    _price(_g("ema50")),
-                    _price(_g("ema100")),
-                    _price(_g("ema200")),
+                    _sma_pct(_g("lastPrice"), _g("fiftyDayAverage")),
+                    _sma_pct(_g("lastPrice"), _g("twoHundredDayAverage")),
                     _big(_g("marketCap")),
                     _price(_g("beta")),
                     _price(_g("trailingPE")),
@@ -913,12 +958,12 @@ class Screener(tk.Frame):
                     _price(_g("trailingEps")),
                     _price(_g("forwardEps")),
                     _price(_g("dividendRate")),
-                    _pct(_g("dividendYield")),
+                    _yield(_g("dividendYield")),
                     _date(_g("exDividendDate")),
                     _pct(_g("payoutRatio")),
                     _price(_g("fiveYearAvgDividendYield")),
                     _price(_g("trailingAnnualDividendRate")),
-                    _pct(_g("trailingAnnualDividendYield")),
+                    _yield(_g("trailingAnnualDividendYield")),
                     _price(_g("lastDividendValue")),
                     _price(_g("nextDividend")),
                     _price(_g("ttmDividends")),
@@ -963,6 +1008,12 @@ class Screener(tk.Frame):
             ec_idx = self.ix.index("encartera")
             self.market = [row for row in self.market if row[ec_idx] == "Y"]
 
+        if self.s_excartera:
+            ec_idx = self.ix.index("encartera")
+            sym_idx = self.ix.index("symbol")
+            bt_syms = self.ScMarket.load_booktrading_symbols(self.account)
+            self.market = [row for row in self.market if row[ec_idx] != "Y" and row[sym_idx] in bt_syms]
+
         self.delete_items_treeview()
         self.insert_treeview()
 
@@ -993,6 +1044,138 @@ class Screener(tk.Frame):
             self._health_labels["por_renovar"].config(text=f"🔄 {v} por renovar", fg=c)
             c, v = _color_count(inconsistencias)
             self._health_labels["inconsistencias"].config(text=f"⚠ {v} inconsistencias", fg=c)
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _analisis_for_symbol(self, sym):
+        row_data = next((r for r in (self.market or []) if self.ix and r[self.ix.index("symbol")] == sym), None)
+        if row_data and self.ix:
+            short_name = row_data[self.ix.index("shortName")] if "shortName" in self.ix else sym
+            categ = row_data[self.ix.index("categoriaActivo")] if "categoriaActivo" in self.ix else ""
+        else:
+            short_name = sym
+            categ = ""
+        self._show_analisis_popup(sym, short_name, categ)
+
+    def _show_analisis_popup(self, symbol, shortName, categoriaActivo):
+        if self._analisis_win is not None and self._analisis_win.winfo_exists():
+            self._analisis_win.destroy()
+
+        _DIV_CATS = ("I", "N", "S")
+        tiene_div = categoriaActivo in _DIV_CATS
+
+        cchart = self.colors.get("cchart", {})
+        cgcolor = self.colors.get("cgcolor", "black")
+
+        win = tk.Toplevel(self)
+        win.title(f"Análisis {symbol}")
+        win.configure(bg=cgcolor)
+        win.resizable(False, False)
+        win.attributes("-toolwindow", 1)
+        self._analisis_win = win
+        win.protocol("WM_DELETE_WINDOW", lambda: (win.destroy(), setattr(self, "_analisis_win", None)))
+
+        if tiene_div:
+            win.geometry("870x360+0+775")
+            fg = Figure(figsize=(8.5, 3.4), dpi=100, layout="tight")
+        else:
+            win.geometry("560x230+0+775")
+            fg = Figure(figsize=(5.5, 2.1), dpi=100, layout="tight")
+
+        fg.set_facecolor(cgcolor)
+        frm = tk.Frame(win, bg=cgcolor)
+        frm.pack(fill=tk.BOTH, expand=True)
+        cv = FigureCanvasTkAgg(fg, master=frm)
+        cv.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        def _draw_rentabilidad(datos):
+            fg.clear()
+            ax = fg.add_subplot(111)
+            ax.set_facecolor(cgcolor)
+            fg.set_facecolor(cgcolor)
+            if datos is None or datos.empty:
+                return
+            now = datos.index[-1]
+            price_now = float(datos["Close"].iloc[-1])
+            tz = datos.index.tz
+
+            def _price_at(offset):
+                sub = datos[datos.index <= offset]
+                return float(sub["Close"].iloc[-1]) if not sub.empty else None
+
+            periodos = [
+                ("1S", now - pd.DateOffset(weeks=1)),
+                ("1M", now - pd.DateOffset(months=1)),
+                ("3M", now - pd.DateOffset(months=3)),
+                ("6M", now - pd.DateOffset(months=6)),
+                ("YTD", pd.Timestamp(now.year, 1, 1, tz=tz)),
+                ("1A", now - pd.DateOffset(years=1)),
+                ("3A", now - pd.DateOffset(years=3)),
+            ]
+            labels, returns, colors_bar = [], [], []
+            for lbl, desde in periodos:
+                p = _price_at(desde)
+                if p is None or p == 0:
+                    continue
+                ret = (price_now - p) / p * 100
+                labels.append(lbl)
+                returns.append(ret)
+                colors_bar.append(cchart.get("plot2", "green") if ret >= 0 else cchart.get("plot1", "red"))
+            if not returns:
+                ax.set_title(f"Rentabilidad {symbol} — sin datos", color=cchart.get("titulo", "white"), fontsize=8)
+                cv.draw()
+                return
+            bars = ax.barh(labels, returns, color=colors_bar, alpha=0.75, height=0.5)
+            x_range = max(abs(v) for v in returns) or 1
+            small = x_range * 0.12
+            for bar, val in zip(bars, returns):
+                y_mid = bar.get_y() + bar.get_height() / 2
+                if val >= 0:
+                    xpos = bar.get_width() - x_range * 0.01 if val > small else bar.get_width() + x_range * 0.01
+                    ha = "right" if val > small else "left"
+                else:
+                    xpos = bar.get_width() + x_range * 0.01 if abs(val) > small else bar.get_width() - x_range * 0.01
+                    ha = "left" if abs(val) > small else "right"
+                ax.text(xpos, y_mid, f"{val:+.1f}%", va="center", ha=ha, color="white", fontsize=7)
+            ax.axvline(0, color="gray", linewidth=0.8, alpha=0.6)
+            ax.set_title(f"Rentabilidad {symbol}", color=cchart.get("titulo", "white"), fontsize=8, pad=3)
+            ax.tick_params(colors="white", labelsize=7)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.spines["bottom"].set_color("gray")
+            ax.spines["left"].set_color("gray")
+            cv.draw()
+
+        def _fetch():
+            try:
+                if tiene_div:
+                    activo, datos = get_yfinance(ticket=symbol, vehiculo="Stock")
+                    trailing = (activo.info.get("trailingAnnualDividendRate") or 0) if activo else 0
+                    if datos is not None and "Dividends" in datos and trailing > 0:
+                        m_datos = datos[datos["Dividends"] != 0].copy()
+                        if not m_datos.empty:
+                            m_datos["Rendimiento"] = m_datos["Dividends"] / m_datos["Close"]
+                            y_datos = pd.DataFrame(columns=["Close", "Dividends", "Rendimiento"])
+                            y_datos["Close"] = m_datos["Close"].resample("YE").mean()
+                            y_datos["Dividends"] = m_datos["Dividends"].resample("YE").sum()
+                            y_datos["Rendimiento"] = m_datos["Rendimiento"].resample("YE").sum()
+                            if len(y_datos) > 0:
+                                last_price = float(datos["Close"].iloc[-1])
+                                forward_yield = trailing / last_price
+                                y_datos.loc[y_datos.index[-1], "Rendimiento"] = forward_yield
+                                y_datos.loc[y_datos.index[-1], "Close"] = last_price
+                                dlabl = {"symbol": symbol, "buy": "Zona buy", "sell": "Zona sell", "legend": "outside upper left"}
+                                asset = {"ticket": symbol, "forward": forward_yield, "name": shortName or symbol, "aspect": 0.25}
+                                win.after(0, lambda: (chart_rendimiento_dividendos(fg=fg, datos=y_datos, dlabl=dlabl, asset=asset, cchart=cchart), cv.draw()))
+                                return
+                    # fallback: sin datos de dividendos → rentabilidad
+                    _, hist = get_yfinance(ticket=symbol, vehiculo="hist")
+                    win.after(0, lambda: _draw_rentabilidad(hist))
+                else:
+                    _, hist = get_yfinance(ticket=symbol, vehiculo="hist")
+                    win.after(0, lambda: _draw_rentabilidad(hist))
+            except Exception as e:
+                _logger.warning(f"_show_analisis_popup({symbol}): {e}")
 
         threading.Thread(target=_fetch, daemon=True).start()
 
@@ -1202,7 +1385,7 @@ class Screener(tk.Frame):
 
             _apply_filters()
 
-        bind_tv_web_menu(tree, win, colors=self.colors, get_url=lambda sym: _websites.get(sym))
+        bind_tv_web_menu(tree, win, colors=self.colors, get_url=lambda sym: _websites.get(sym), on_analisis=self._analisis_for_symbol)
 
         ttk.Button(btn_frame, text="Refresh", width=10, command=_refresh).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(btn_frame, text="Cancel", width=10, command=win.destroy).pack(side=tk.LEFT)
@@ -1928,7 +2111,7 @@ class Screener(tk.Frame):
                     webbrowser.open(str(url))
 
         ct.tree_scroll.bind("<Double-1>", _open_website_consenso)
-        bind_tv_web_menu(ct.tree_fixed, win, colors=self.colors)
+        bind_tv_web_menu(ct.tree_fixed, win, colors=self.colors, on_analisis=self._analisis_for_symbol)
 
         def _open_consenso_explicado(event):
             tree = event.widget
@@ -1943,8 +2126,9 @@ class Screener(tk.Frame):
                 return
             vals = ct.tree_fixed.item(sel[0], "values")
             sym = str(vals[0]).strip() if vals else ""
-            if sym:
-                self._show_consenso_explicado(sym)
+            if not sym:
+                return
+            self._show_consenso_explicado(sym)
 
         ct.tree_fixed.bind("<Double-1>", _open_consenso_explicado)
         ct.tree_scroll.bind("<Double-1>", _open_consenso_explicado, add="+")
