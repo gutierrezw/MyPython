@@ -1076,23 +1076,68 @@ class Screener(tk.Frame):
         win.protocol("WM_DELETE_WINDOW", lambda: (win.destroy(), setattr(self, "_analisis_win", None)))
 
         try:
-            px = self.winfo_rootx() + 850
+            px = self.winfo_rootx() + 950
             py = self.winfo_rooty() + 60
         except Exception:
-            px, py = 850, 60
+            px, py = 950, 60
 
         if tiene_div:
-            win.geometry(f"870x360+{px}+{py}")
-            fg = Figure(figsize=(8.5, 3.4), dpi=100, layout="tight")
+            win.geometry(f"1080x380+{px}+{py}")
+            fg = Figure(figsize=(6.8, 3.4), dpi=100, layout="tight")
         else:
-            win.geometry(f"560x230+{px}+{py}")
-            fg = Figure(figsize=(5.5, 2.1), dpi=100, layout="tight")
+            win.geometry(f"760x260+{px}+{py}")
+            fg = Figure(figsize=(4.3, 2.3), dpi=100, layout="tight")
 
         fg.set_facecolor(cgcolor)
-        frm = tk.Frame(win, bg=cgcolor)
-        frm.pack(fill=tk.BOTH, expand=True)
-        cv = FigureCanvasTkAgg(fg, master=frm)
+
+        # Layout: info izquierda + gráfico derecha
+        main_frm = tk.Frame(win, bg=cgcolor)
+        main_frm.pack(fill=tk.BOTH, expand=True)
+
+        info_frm = tk.Frame(main_frm, bg=cgcolor, width=210)
+        info_frm.pack(side=tk.LEFT, fill=tk.Y, padx=(6, 0), pady=4)
+        info_frm.pack_propagate(False)
+
+        chart_frm = tk.Frame(main_frm, bg=cgcolor)
+        chart_frm.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        cv = FigureCanvasTkAgg(fg, master=chart_frm)
         cv.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Panel de info: datos estáticos desde self.market
+        row_data = next((r for r in (self.market or []) if self.ix and r[self.ix.index("symbol")] == symbol), None)
+        mkt_row = dict(zip(self.ix, row_data)) if (row_data and self.ix) else {}
+
+        tag = mkt_row.get("consenso_tag") or ""
+        suma = mkt_row.get("consenso_suma")
+        consenso_lbl = f"{tag} ({int(suma):+d})" if (tag and suma is not None) else (tag or "—")
+        inst_score_lbl = f"{mkt_row.get('inst_score') or 0:.2f}"
+
+        _info_vals = {}
+
+        def _info_row(key, val="—", color="white"):
+            tk.Label(info_frm, text=key, bg=cgcolor, fg="#888888", font=("Arial", 7, "bold"), anchor="w").pack(anchor="w", padx=4, pady=(3, 0))
+            lv = tk.Label(info_frm, text=val, bg=cgcolor, fg=color, font=("Arial", 8), anchor="w")
+            lv.pack(anchor="w", padx=10, pady=0)
+            _info_vals[key] = lv
+
+        tk.Label(info_frm, text=symbol, bg=cgcolor, fg="white", font=("Arial", 10, "bold")).pack(anchor="w", padx=4, pady=(4, 2))
+        _info_row("Precio")
+        _info_row("Growth 5y")
+        _info_row("APR")
+        _info_row("Div Yield")
+        _info_row("Div Rate")
+        _info_row("P/E")
+        _info_row("Beta")
+        tk.Frame(info_frm, bg="#333333", height=1).pack(fill="x", padx=4, pady=3)
+        _info_row("Inst Score", inst_score_lbl)
+        _info_row("Consenso", consenso_lbl, color="#00cc88")
+
+        tk.Button(
+            info_frm, text="Cancel", bg="#444444", fg="white", font=("Arial", 8),
+            relief="flat", cursor="hand2",
+            command=lambda: (win.destroy(), setattr(self, "_analisis_win", None)),
+        ).pack(side=tk.BOTTOM, fill="x", padx=4, pady=5)
 
         def _draw_rentabilidad(datos):
             fg.clear()
@@ -1156,10 +1201,29 @@ class Screener(tk.Frame):
             if win.winfo_exists():
                 win.after(0, fn)
 
+        def _update_info_panel(activo_dict, datos):
+            def _do():
+                if not win.winfo_exists():
+                    return
+                inicial = float(datos["Close"].iloc[0]) if datos is not None and not datos.empty else 0
+                final = float(datos["Close"].iloc[-1]) if datos is not None and not datos.empty else 0
+                years = max(len(datos) / 252, 1) if datos is not None and not datos.empty else 1
+                growth = (final - inicial) / inicial if inicial else 0
+                apr = (1 + growth) ** (1 / years) - 1
+                _info_vals["Precio"].config(text=f"{inicial:.2f}  →  {final:.2f}")
+                _info_vals["Growth 5y"].config(text=f"{growth:+.1%}")
+                _info_vals["APR"].config(text=f"{apr:+.1%}")
+                _info_vals["Div Yield"].config(text=f"{(activo_dict or {}).get('dividendYield') or 0:.2f}%")
+                _info_vals["Div Rate"].config(text=f"{(activo_dict or {}).get('dividendRate') or 0:.2f}")
+                _info_vals["P/E"].config(text=f"{(activo_dict or {}).get('trailingPE') or 0:.1f}")
+                _info_vals["Beta"].config(text=f"{(activo_dict or {}).get('beta') or 0:.2f}")
+            _safe_render(_do)
+
         def _fetch():
             try:
                 if tiene_div:
                     activo, datos = get_yfinance(ticket=symbol, vehiculo="Stock")
+                    _update_info_panel(activo, datos)
                     trailing = (activo.get("trailingAnnualDividendRate") or 0) if activo else 0
                     if datos is not None and "Dividends" in datos and trailing > 0:
                         m_datos = datos[datos["Dividends"] != 0].copy()
@@ -1183,6 +1247,7 @@ class Screener(tk.Frame):
                     _safe_render(lambda h=hist: _draw_rentabilidad(h))
                 else:
                     _, hist = get_yfinance(ticket=symbol, vehiculo="hist")
+                    _update_info_panel({}, hist)
                     _safe_render(lambda h=hist: _draw_rentabilidad(h))
             except Exception as e:
                 _logger.warning(f"_show_analisis_popup({symbol}): {e}")
