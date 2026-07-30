@@ -1076,10 +1076,10 @@ class Screener(tk.Frame):
         win.protocol("WM_DELETE_WINDOW", lambda: (win.destroy(), setattr(self, "_analisis_win", None)))
 
         try:
-            px = self.winfo_rootx() + 550
+            px = self.winfo_rootx() + 850
             py = self.winfo_rooty() + 60
         except Exception:
-            px, py = 550, 60
+            px, py = 850, 60
 
         if tiene_div:
             win.geometry(f"870x360+{px}+{py}")
@@ -1160,7 +1160,7 @@ class Screener(tk.Frame):
             try:
                 if tiene_div:
                     activo, datos = get_yfinance(ticket=symbol, vehiculo="Stock")
-                    trailing = (activo.info.get("trailingAnnualDividendRate") or 0) if activo else 0
+                    trailing = (activo.get("trailingAnnualDividendRate") or 0) if activo else 0
                     if datos is not None and "Dividends" in datos and trailing > 0:
                         m_datos = datos[datos["Dividends"] != 0].copy()
                         if not m_datos.empty:
