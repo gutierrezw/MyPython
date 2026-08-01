@@ -1,3 +1,3 @@
 APP_NAME = "DashMain"
-VERSION = "10.6.0"
+VERSION = "10.5.1"
 RELEASE_DATE = "2026-08-01"
