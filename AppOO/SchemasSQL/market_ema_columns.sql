@@ -1,0 +1,3 @@
+-- EMA columns (ema20/50/100/200) eliminadas del Screener.
+-- "50D %" y "200D %" se calculan en display a partir de lastPrice, fiftyDayAverage y twoHundredDayAverage.
+-- No se requieren columnas adicionales en market.
