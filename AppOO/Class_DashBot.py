@@ -1304,6 +1304,25 @@ class ClassAgenteIA:
             # 2. Verificar ROI >= roi_minimo
             roi = unrealizedpnl / costobase
             if roi < roi_minimo:
+                # si había una orden activa en IB, cancelarla — el ROI ya no califica
+                _state_exit = self.preservation_state.get(symbol, {})
+                _order_exit = _state_exit.get("order_id")
+                if _order_exit:
+                    try:
+                        DataHub.preservation_cancel_order(vehiculo, account, _order_exit, symbol)
+                        self.preservation_state.pop(symbol, None)
+                        _snap_exit = {}
+                        for _s, _sd in self.preservation_state.items():
+                            _lc = _sd.get("last_check")
+                            _snap_exit[_s] = {**_sd, "last_check": _lc.isoformat() if isinstance(_lc, datetime) else _lc}
+                        for _veh, _lr in self.preservation_last_run.items():
+                            _snap_exit[f"_last_run_{_veh}"] = _lr.isoformat() if isinstance(_lr, datetime) else str(_lr)
+                        write_json_tmp("preservation_state.json", _snap_exit)
+                        self._preservation_logger.info(
+                            f"[EXIT] {symbol}: ROI={roi:.1%} < {roi_minimo:.0%} → orden {_order_exit} cancelada y removida del state"
+                        )
+                    except Exception as _e:
+                        self._preservation_logger.error(f"[EXIT-ERR] {symbol}: no se pudo cancelar {_order_exit} → {_e}")
                 continue
 
             base_limit = unrealizedpnl * proteccion_base
@@ -1795,6 +1814,13 @@ class Telegram:
         except Exception:
             pass
 
+    async def _safe_edit(self, query, text, **kwargs):
+        try:
+            await query.edit_message_text(text, **kwargs)
+        except BadRequest as e:
+            if "not modified" not in str(e).lower():
+                raise
+
     # Maneja los callbacks de los botones de aprobación/rechazo
     async def handle_callback(self, update, context):
         try:
@@ -1811,18 +1837,18 @@ class Telegram:
                 response, symbol, vehiculo = self.put_order_aprovate_telegram(hash_id=args[0])
 
                 if response.get("status") == "ya_ejecutada":
-                    await query.edit_message_text(f"⚠️ {symbol}: orden ya ejecutada anteriormente.")
+                    await self._safe_edit(query, f"⚠️ {symbol}: orden ya ejecutada anteriormente.")
                 elif response and response.get("status"):
                     status = response.get("status", "Pendiente")
                     price = response.get("price", 0)
                     message = f"✅ Oportunidad procesada: {status}\n"
                     message += f"Symbol {symbol}: @price {round(price, 4) if price else 0}"
-                    await query.edit_message_text(message)
+                    await self._safe_edit(query, message)
                 else:
                     broker = "IB Gateway" if vehiculo == "Stock" else "Binance API"
                     message = f"⚠️ Sin servicio de broker.\n"
                     message += f"Symbol: {symbol or 'N/A'}\nVerifique conexión {broker}."
-                    await query.edit_message_text(message)
+                    await self._safe_edit(query, message)
 
             elif accion == "rechazar":
                 self.RepositorioOportunidades.marcar_oportunidad(
@@ -1831,28 +1857,23 @@ class Telegram:
                     estado="rechazada",
                     razon="Rechazada desde Telegram.",
                 )
-                await query.edit_message_text("❌ Oportunidad rechazada.")
+                await self._safe_edit(query, "❌ Oportunidad rechazada.")
 
             # Aquí podrías activar solo mensajes de venta
             elif accion == "menu_sell":
-                await query.edit_message_text(
-                    "⬇️🔴 Has seleccionado *Oportunidades de Ventas*.",
-                    parse_mode="Markdown",
-                )
+                await self._safe_edit(query, "⬇️🔴 Has seleccionado *Oportunidades de Ventas*.", parse_mode="Markdown")
                 self.MostrarOpcionMenu_enTelegram = "Sell"
                 await self._flush_sell_actual()
 
             elif accion == "menu_buy":
-                await query.edit_message_text(
-                    "⬆️🟢 Has seleccionado *Oportunidades de Compra*.",
-                    parse_mode="Markdown",
-                )
+                await self._safe_edit(query, "⬆️🟢 Has seleccionado *Oportunidades de Compra*.", parse_mode="Markdown")
                 self.MostrarOpcionMenu_enTelegram = "Buy"
                 await self._flush_buy_actual()
 
             elif accion == "menu_top":
                 self.MostrarOpcionMenu_enTelegram = "Top10"
-                await query.edit_message_text(
+                await self._safe_edit(
+                    query,
                     "📊 Has seleccionado *TOP 10 Oportunidades* (5 Sell + 5 Buy).\nRecibirás las mejores para entrenar.",
                     parse_mode="Markdown",
                 )
@@ -1860,10 +1881,10 @@ class Telegram:
                 await self.send_top10_telegram(forzar=True)
 
             elif accion == "menu_reconnect":
-                await query.edit_message_text("⚙️ Ajustes: próximamente más opciones.", parse_mode="Markdown")
+                await self._safe_edit(query, "⚙️ Ajustes: próximamente más opciones.", parse_mode="Markdown")
 
             elif accion == "performan":
-                await query.edit_message_text("🎯 Cargando performance…", parse_mode="Markdown")
+                await self._safe_edit(query, "🎯 Cargando performance…", parse_mode="Markdown")
                 await self._send_performa()
 
             elif accion == "OrdersExec":
@@ -1879,19 +1900,17 @@ class Telegram:
                 alertas = DataHub.system_alerts[:]
                 DataHub.system_alerts.clear()
                 if not alertas:
-                    await query.edit_message_text("🔕 Sin alertas pendientes.")
+                    await self._safe_edit(query, "🔕 Sin alertas pendientes.")
                 else:
                     texto = "\n\n".join(alertas)
-                    await query.edit_message_text(
-                        f"🚨 *{len(alertas)} Alertas*\n\n{texto}",
-                        parse_mode="Markdown",
-                    )
+                    await self._safe_edit(query, f"🚨 *{len(alertas)} Alertas*\n\n{texto}", parse_mode="Markdown")
 
             elif accion == "ia_ejecutar":
                 trace_id = int(args[0])
                 self.IaTrace.update_trace_estado(trace_id, estado="APROBADO")
                 await self._safe_remove_buttons(query)
-                await query.edit_message_text(
+                await self._safe_edit(
+                    query,
                     f"✅ Propuesta IA aprobada (trace #{trace_id})\n_Ejecución manual por ahora — AUTONOMO pendiente._",
                     parse_mode="Markdown",
                 )
@@ -1900,22 +1919,19 @@ class Telegram:
                 trace_id = int(args[0])
                 self.IaTrace.update_trace_estado(trace_id, estado="DIFERIDO")
                 await self._safe_remove_buttons(query)
-                await query.edit_message_text(
-                    f"⏸ Propuesta diferida (trace #{trace_id})",
-                    parse_mode="Markdown",
-                )
+                await self._safe_edit(query, f"⏸ Propuesta diferida (trace #{trace_id})", parse_mode="Markdown")
 
             elif accion == "fci_reset_blocked":
                 from Class_BrowserFCI import BrowserFCI  # import diferido — evita ciclo
 
                 BrowserFCI().reset_blocked()
                 await self._safe_remove_buttons(query)
-                await query.edit_message_text("🔓 Bloqueo FCI liberado. El agente reintentará en el próximo ciclo.")
+                await self._safe_edit(query, "🔓 Bloqueo FCI liberado. El agente reintentará en el próximo ciclo.")
 
             elif accion == "reconcile_aprobar":
                 diffs = read_json_tmp("ib_reconcile_pending")
                 if not diffs:
-                    await query.edit_message_text("⚠️ No hay diffs pendientes (ya procesados o expirados).")
+                    await self._safe_edit(query, "⚠️ No hay diffs pendientes (ya procesados o expirados).")
                     return
                 write_json_tmp("ib_reconcile_pending", [])
                 db = RepositorioOportunidadesBuySell()
@@ -1936,12 +1952,12 @@ class Telegram:
                         self.logger.error(f"reconcile_aprobar {d['symbol']}: {ex}")
                 await self._safe_remove_buttons(query)
                 resumen = "\n".join(aplicados) if aplicados else "Sin cambios aplicados (bt_id nulo)."
-                await query.edit_message_text(f"✅ Reconcile aplicado:\n{resumen}")
+                await self._safe_edit(query, f"✅ Reconcile aplicado:\n{resumen}")
 
             elif accion == "reconcile_rechazar":
                 write_json_tmp("ib_reconcile_pending", [])
                 await self._safe_remove_buttons(query)
-                await query.edit_message_text("❌ Diffs IB ignorados.")
+                await self._safe_edit(query, "❌ Diffs IB ignorados.")
 
         except Exception as e:
             self.logger.error(f"handle_callback(): {e}\n{traceback.format_exc()}")

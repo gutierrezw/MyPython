@@ -16,7 +16,7 @@ from Modulos_Mysql import (
 from Class_Finance import scan_extractos
 from Class_IbFlex import Class_IbFlex
 from Class_IbReconcile import Class_IbReconcile
-from Class_Screener import sync_market, sync_prices, audit_portfolio, refresh_consenso_tags
+from Class_Screener import sync_market, sync_prices, audit_portfolio, refresh_consenso_tags, sync_dividend_status_screener
 from Class_InstitucionalScore import sync_institutional, sync_edgar_funds, sync_13f_scores
 from edgar_13f import sync_fund_filings, sync_13f_holdings
 from ConvergIA.Scanner_Sentimiento import scan_sentimiento
@@ -224,6 +224,18 @@ class AgentManager:
             )
         except Exception as e:
             self._log_stock.error(f"Agente_AuditPortfolio(): {e}")
+
+    @wait_rate(2592000, persist=True, desc="Actualiza categoriaActivo Screener ex-cartera (30d)", nivel=2)
+    def Agente_DividendStatusScreener(self):
+        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_DividendStatusScreener._overdue:
+            return
+        try:
+            result = sync_dividend_status_screener(account=self.account)
+            self._log_stock.warning(
+                f"DividendStatusScreener: procesados={result['processed']} errores={result['errors']} total={result['total']}"
+            )
+        except Exception as e:
+            self._log_stock.error(f"Agente_DividendStatusScreener(): {e}")
 
     @wait_rate(3600, persist=True)
     def Agente_StockBeta(self):
@@ -680,6 +692,7 @@ class AgentManager:
             ("Agente_13FHoldings", self.Agente_13FHoldings, 300),
             ("Agente_13FScores", self.Agente_13FScores, 300),
             ("Agente_AuditPortfolio", self.Agente_AuditPortfolio, 300),
+            ("Agente_DividendStatusScreener", self.Agente_DividendStatusScreener, 300),
             ("Agente_ClasificadorETF", self.Agente_ClasificadorETF, 300),
             ("Agente_ClasificadorCrypto", self.Agente_ClasificadorCrypto, 300),
             ("Agente_ApiCostTracker", self.Agente_ApiCostTracker, 300),

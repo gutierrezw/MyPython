@@ -806,11 +806,13 @@ class DataHub:
 
                         prec = recd[ix.index("preciotrans")]
                         cant = recd[ix.index("cantidad")]
-                        cost = prec * cant + recd[ix.index("tarifacomision")]
+                        sell_qty = recd[ix.index("sell")] if "sell" in ix else 0
+                        effective_cant = cant - sell_qty
+                        cost = prec * effective_cant + recd[ix.index("tarifacomision")]
                         fechahora = recd[ix.index("fechahora")]
 
                         x_costo += cost
-                        x_stock += cant
+                        x_stock += effective_cant
 
                         eof_pbook, recd = next(pbook, (None, None))
                         if eof_pbook is not None:

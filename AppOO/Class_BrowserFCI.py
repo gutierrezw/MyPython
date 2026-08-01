@@ -64,13 +64,53 @@ class BrowserFCI:
         await page.wait_for_load_state("domcontentloaded", timeout=_TIMEOUT)
         await page.wait_for_timeout(1_500)
 
-    async def _bbva_login(self, page, nro_doc: str, usuario: str, clave: str):
-        """Login BBVA usando perfil persistente Chrome — autofill llena las credenciales."""
-        await page.goto(self._BBVA_URL_LOGIN, wait_until="domcontentloaded", timeout=_TIMEOUT)
+    async def _fill_shadow(self, page, aria_label: str, value: str) -> bool:
+        """Llena un input dentro de shadow DOM anidado buscando por aria-label."""
+        return await page.evaluate(
+            """([label, val]) => {
+                function findInput(root) {
+                    for (const el of root.querySelectorAll('input')) {
+                        if (el.getAttribute('aria-label') === label) return el;
+                    }
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            const found = findInput(el.shadowRoot);
+                            if (found) return found;
+                        }
+                    }
+                    return null;
+                }
+                const input = findInput(document);
+                if (!input) return false;
+                const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+                setter.call(input, val);
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+                input.dispatchEvent(new Event('change', {bubbles: true}));
+                return true;
+            }""",
+            [aria_label, value],
+        )
 
-        campo_pass = page.locator("input[name='password']")
-        await campo_pass.wait_for(state="visible", timeout=_TIMEOUT)
-        await campo_pass.fill(clave)
+    async def _bbva_login(self, page, nro_doc: str, usuario: str, clave: str):
+        """Login BBVA. Con perfil limpio llena DNI+usuario+clave vía JS (shadow DOM anidado).
+        Con sesión activa solo aparece el campo clave."""
+        await page.goto(self._BBVA_URL_LOGIN, wait_until="domcontentloaded", timeout=_TIMEOUT)
+        await page.wait_for_timeout(3_000)  # esperar render de web components
+
+        # Detectar si es sesión nueva (aparece campo DNI) o sesión activa (solo clave)
+        tiene_doc = await self._fill_shadow(page, "Número de documento", nro_doc or "")
+        if tiene_doc:
+            await self._fill_shadow(page, "Usuario", usuario)
+            # Tildar "Recordar mi documento y usuario"
+            try:
+                chk = page.get_by_label("Recordar mi documento y usuario")
+                if not await chk.is_checked():
+                    await chk.check()
+            except Exception:
+                pass
+            await page.wait_for_timeout(500)
+
+        await self._fill_shadow(page, "Clave", clave)
         await page.wait_for_timeout(1_000)
 
         btn_login = page.get_by_role("button", name=self._BBVA_BTN_LOGIN)

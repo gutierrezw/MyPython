@@ -2143,6 +2143,33 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+    def select_screener_ex_cartera(self, account: str, limit: int = 150) -> list:
+        """Retorna símbolos del screener fuera de cartera activa, candidatos para actualizar categoriaActivo.
+        Prioriza símbolos sin categoría calculada (NULL o 'E'), luego por lastPrice DESC."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT symbol FROM market
+                WHERE account = %s
+                  AND (encartera IS NULL OR encartera != 'Y')
+                  AND (categoriaActivo IS NULL OR categoriaActivo NOT IN ('X'))
+                ORDER BY
+                  CASE WHEN categoriaActivo IS NULL OR categoriaActivo = 'E' THEN 0 ELSE 1 END,
+                  lastPrice DESC
+                LIMIT %s
+                """,
+                (account, limit),
+            )
+            return [row[0] for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"select_screener_ex_cartera({account}): {error}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
     def get_cusip_map(self, account: str) -> dict:
         """Retorna {cusip: symbol} combinando market + fund_holdings.
         fund_holdings ya tiene el mapeo completo de runs anteriores — evita

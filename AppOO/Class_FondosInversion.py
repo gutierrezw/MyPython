@@ -399,6 +399,7 @@ class ArsFondosInversion(tk.Frame):
             diaria_CNV = self.obtener_archivo_mas_reciente(p_path=self.path, sufijo=self.aliasExcel.get("CNV"))
             if diaria_CNV is not None:
                 # convierte Excel CNV en Dataframe standard / selection entidades de inversión
+                df = None
                 try:
                     names_list = list(columns.values())
                     self.CNVDiaria = []
@@ -469,7 +470,8 @@ class ArsFondosInversion(tk.Frame):
                     # Almacena archivo CNV que no estan en otros_activos
                     # file_CNV = define_FileCache("CNV_FCI_missing_activos.json")
 
-                sync_cnv_superfondos(df)
+                if df is not None:
+                    sync_cnv_superfondos(df)
                 delete_file(ruta=diaria_CNV, display=False)
         except Exception as e:
             print("load_EXCEL_TBdiaria_CNV_(): {}".format(e))
@@ -1070,7 +1072,6 @@ class ArsFondosInversion(tk.Frame):
                 self.ars.update_panelVehiculo(orden=self.ars.orden)
 
             self.root.after(0, _refresh_cnv)
-            existe = False
 
         return existe
 
@@ -1144,51 +1145,54 @@ class ArsFondosInversion(tk.Frame):
     def run_loads(self):
         def run_schedule(task=None):
             while True:
+                try:
+                    # descarga de la web planilla diaria CNV
+                    self.downdload_CNV_diaria()
 
-                # descarga de la web planilla diaria CNV
-                self.downdload_CNV_diaria()
+                    # valida si hay nueva interfaz
+                    if self.chequea_new_loadFile():
 
-                # valida si hay nueva interfaz
-                if self.chequea_new_loadFile():
+                        # snapshot max id antes del load para detectar ops recién insertadas
+                        max_ids = {
+                            acc: self.RepositorioOportunidades.get_max_booktrading_id(acc)
+                            for acc in self.account_fci
+                            if acc
+                        }
 
-                    # snapshot max id antes del load para detectar ops recién insertadas
-                    max_ids = {
-                        acc: self.RepositorioOportunidades.get_max_booktrading_id(acc)
-                        for acc in self.account_fci
-                        if acc
-                    }
+                        # encadena update_FCI_en_positions + panel en una sola callback (evita race con widgets_FCI)
+                        account = self.load_positions_FCI()
 
-                    # encadena update_FCI_en_positions + panel en una sola callback (evita race con widgets_FCI)
-                    account = self.load_positions_FCI()
+                        def _refresh_fci():
+                            self.update_FCI_en_positions()
+                            self.update_panel_fci()
+                            self.ars.update_panelVehiculo(orden=self.ars.orden)
 
-                    def _refresh_fci():
-                        self.update_FCI_en_positions()
-                        self.update_panel_fci()
-                        self.ars.update_panelVehiculo(orden=self.ars.orden)
+                        self.root.after(0, _refresh_fci)
 
-                    self.root.after(0, _refresh_fci)
+                        # si hay operaciones nuevas después de la última diaria → purga para regenerar limpio
+                        # se itera account_fci completo porque BBVA y SANT son cuentas independientes
+                        if account:
+                            for _acc in self.account_fci:
+                                if _acc:
+                                    self._purgar_diaria_si_nueva_operacion(_acc, max_id_before=max_ids.get(_acc, 0))
 
-                    # si hay operaciones nuevas después de la última diaria → purga para regenerar limpio
-                    # se itera account_fci completo porque BBVA y SANT son cuentas independientes
-                    if account:
-                        for _acc in self.account_fci:
-                            if _acc:
-                                self._purgar_diaria_si_nueva_operacion(_acc, max_id_before=max_ids.get(_acc, 0))
+                    # actualiza diaria y performance siempre — independiente de carga de archivo
+                    # (gprealizadas de ventas se capturan aunque no haya extracto nuevo ese día)
+                    ran = False
+                    for _acc in self.account_fci:
+                        ran = self.schedule_diaria_performace(_acc) or ran
+                    if ran:
+                        DataHub.last_process[self.vehiculo]["diaria_book_performance"] = (
+                            datetime.now() + timedelta(days=1)
+                        ).date()
+                        DataHub.last_process["graph_performace_portafolio"] = False
 
-                # actualiza diaria y performance siempre — independiente de carga de archivo
-                # (gprealizadas de ventas se capturan aunque no haya extracto nuevo ese día)
-                ran = False
-                for _acc in self.account_fci:
-                    ran = self.schedule_diaria_performace(_acc) or ran
-                if ran:
-                    DataHub.last_process[self.vehiculo]["diaria_book_performance"] = (
-                        datetime.now() + timedelta(days=1)
-                    ).date()
-                    DataHub.last_process["graph_performace_portafolio"] = False
-
-                self.counter += 1
-                DataHub.update_self_procesos(proces="thread", tarea=task, itera=self.counter)
-                threading.Event().wait(90)
+                    self.counter += 1
+                    DataHub.update_self_procesos(proces="thread", tarea=task, itera=self.counter)
+                except Exception as e:
+                    _logger.error(f"run_loads() iteración: {e}")
+                finally:
+                    threading.Event().wait(90)
 
         try:
             task_name = f"schedule_FondoInversion(ARS)"

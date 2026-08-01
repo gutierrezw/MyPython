@@ -3002,6 +3002,77 @@ def sync_prices(account):
     }
 
 
+def sync_dividend_status_screener(account: str, limit: int = 150) -> dict:
+    """Actualiza categoriaActivo en market para símbolos ex-cartera del Screener (sin plot)."""
+    _ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
+    market = MarketScreen()
+    symbols = market.select_screener_ex_cartera(account, limit=limit)
+    processed, errors = 0, 0
+
+    for symbol in symbols:
+        try:
+            result = get_yfinance(ticket=symbol, vehiculo="Stock")
+            if result is None:
+                continue
+            activo, datos = result
+            trailing_annual = activo.get("trailingAnnualDividendRate") or 0
+            qt = (activo.get("quoteType") or "").upper()
+
+            if qt in _ETF_TYPES:
+                categoria, traza, meses_str = "X", None, ""
+            elif trailing_annual == 0 or "Dividends" not in datos or datos.empty:
+                categoria, traza, meses_str = "N", None, ""
+            else:
+                try:
+                    datos.index = datos.index.tz_localize(None)
+                    m_datos = datos[datos["Dividends"] != 0].copy()
+                    if m_datos.empty:
+                        categoria, traza, meses_str = "N", None, ""
+                    else:
+                        m_datos["Rendimiento"] = m_datos["Dividends"] / m_datos["Close"]
+                        y_datos = pd.DataFrame(columns=["Close", "Dividends", "Rendimiento"])
+                        y_datos["Close"] = m_datos["Close"].resample("YE").mean()
+                        y_datos["Dividends"] = m_datos["Dividends"].resample("YE").sum()
+                        y_datos["Rendimiento"] = m_datos["Rendimiento"].resample("YE").sum()
+                        y_index = y_datos.index
+                        current_price = float(datos["Close"].iloc[-1])
+                        if len(y_index) > 0 and current_price > 0:
+                            forward_yield = trailing_annual / current_price
+                            y_datos.loc[y_index[-1], "Rendimiento"] = forward_yield
+                            y_datos.loc[y_index[-1], "Close"] = current_price
+                        m_mean = y_datos.describe()["Rendimiento"]["mean"]
+                        dforward = float(y_datos.loc[y_index[-1], "Rendimiento"]) if len(y_index) > 0 else 0.0
+                        categoria = "I" if dforward > m_mean else "S" if dforward < m_mean else "N"
+                        year = pd.Timestamp.now().year - 1
+                        meses = list(m_datos[m_datos.index.year == year].index.strftime("%B"))
+                        meses_str = ", ".join(meses)
+                        traza = y_datos.to_json(orient="split")
+                except Exception as inner_e:
+                    _logger.warning(f"sync_dividend_status_screener dividend calc ({symbol}): {inner_e}")
+                    categoria, traza, meses_str = "E", None, ""
+
+            columnas = ["categoriaActivo", "trailingAnnualDividendRate", "dividendYield", "previousClose"]
+            values = [
+                categoria,
+                trailing_annual,
+                activo.get("dividendYield") or 0,
+                activo.get("previousClose") or 0,
+            ]
+            if traza:
+                columnas.append("trazaDividends")
+                values.append(traza)
+            if meses_str:
+                columnas.append("monthDividendsPay")
+                values.append(meses_str)
+            market.update(upd=columnas, val=values, symbol=symbol, account=account)
+            processed += 1
+        except Exception as e:
+            _logger.error(f"sync_dividend_status_screener({symbol}): {e}")
+            errors += 1
+
+    return {"processed": processed, "errors": errors, "total": len(symbols)}
+
+
 if __name__ == "__main__":
     print("Iniciando cleanup_market ...")
     result = cleanup_market(account="U4214563")
