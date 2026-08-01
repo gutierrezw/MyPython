@@ -1075,17 +1075,19 @@ class Screener(tk.Frame):
         self._analisis_win = win
         win.protocol("WM_DELETE_WINDOW", lambda: (win.destroy(), setattr(self, "_analisis_win", None)))
 
+        win_width = 1080 if tiene_div else 760
+        win_height = 380 if tiene_div else 260
         try:
-            px = self.winfo_rootx() + 950
+            screen_w = win.winfo_screenwidth()
+            px = min(self.winfo_rootx() + 950, screen_w - win_width - 10)
             py = self.winfo_rooty() + 60
         except Exception:
             px, py = 950, 60
 
+        win.geometry(f"{win_width}x{win_height}+{px}+{py}")
         if tiene_div:
-            win.geometry(f"1080x380+{px}+{py}")
             fg = Figure(figsize=(6.8, 3.4), dpi=100, layout="tight")
         else:
-            win.geometry(f"760x260+{px}+{py}")
             fg = Figure(figsize=(4.3, 2.3), dpi=100, layout="tight")
 
         fg.set_facecolor(cgcolor)
@@ -1116,12 +1118,13 @@ class Screener(tk.Frame):
         _info_vals = {}
 
         def _info_row(key, val="—", color="white"):
-            tk.Label(info_frm, text=key, bg=cgcolor, fg="#888888", font=("Arial", 7, "bold"), anchor="w").pack(anchor="w", padx=4, pady=(3, 0))
-            lv = tk.Label(info_frm, text=val, bg=cgcolor, fg=color, font=("Arial", 8), anchor="w")
-            lv.pack(anchor="w", padx=10, pady=0)
+            row = tk.Frame(info_frm, bg=cgcolor)
+            row.pack(anchor="w", fill="x", padx=4, pady=1)
+            tk.Label(row, text=f"{key}:", bg=cgcolor, fg="#888888", font=("Arial", 7, "bold"), anchor="w", width=10).pack(side=tk.LEFT)
+            lv = tk.Label(row, text=val, bg=cgcolor, fg=color, font=("Arial", 8), anchor="w")
+            lv.pack(side=tk.LEFT)
             _info_vals[key] = lv
 
-        tk.Label(info_frm, text=symbol, bg=cgcolor, fg="white", font=("Arial", 10, "bold")).pack(anchor="w", padx=4, pady=(4, 2))
         _info_row("Precio")
         _info_row("Growth 5y")
         _info_row("APR")

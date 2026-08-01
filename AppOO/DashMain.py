@@ -3595,15 +3595,55 @@ class DashMain:
                 sin_div = result is None or (isinstance(result, tuple) and (result[0].empty or result[1] == "X"))
                 if sin_div and not datos.empty:
                     ax = rg.add_subplot(111)
-                    ax.set_facecolor("#0d1117")
-                    rg.patch.set_facecolor("#0d1117")
-                    ax.plot(datos.index, datos["Close"], color="#2196F3", linewidth=1.5)
-                    ax.set_title(f"{symbol} — Precio histórico", color="white", fontsize=9)
-                    ax.tick_params(colors="white", labelsize=7)
-                    ax.tick_params(axis="x", rotation=30)
-                    for spine in ax.spines.values():
-                        spine.set_color("#333333")
-                    ax.yaxis.label.set_color("white")
+                    cgc = self.colors.get("cgcolor", "#000000")
+                    ax.set_facecolor(cgc)
+                    rg.patch.set_facecolor(cgc)
+                    now = datos.index[-1]
+                    tz = datos.index.tz
+                    price_now = float(datos["Close"].iloc[-1])
+
+                    def _price_at(offset):
+                        sub = datos[datos.index <= offset]
+                        return float(sub["Close"].iloc[-1]) if not sub.empty else None
+
+                    periodos = [
+                        ("1S", now - pd.DateOffset(weeks=1)),
+                        ("1M", now - pd.DateOffset(months=1)),
+                        ("3M", now - pd.DateOffset(months=3)),
+                        ("6M", now - pd.DateOffset(months=6)),
+                        ("YTD", pd.Timestamp(now.year, 1, 1, tz=tz)),
+                        ("1A", now - pd.DateOffset(years=1)),
+                        ("3A", now - pd.DateOffset(years=3)),
+                    ]
+                    labels, returns, colors_bar = [], [], []
+                    for lbl, desde in periodos:
+                        p = _price_at(desde)
+                        if p is None or p == 0:
+                            continue
+                        ret = (price_now - p) / p * 100
+                        labels.append(lbl)
+                        returns.append(ret)
+                        colors_bar.append("#e65100" if ret >= 0 else "#b71c1c")
+                    if returns:
+                        bars = ax.barh(labels, returns, color=colors_bar, alpha=0.85, height=0.5)
+                        x_range = max(abs(v) for v in returns) or 1
+                        small = x_range * 0.12
+                        for bar, val in zip(bars, returns):
+                            y_mid = bar.get_y() + bar.get_height() / 2
+                            if val >= 0:
+                                xpos = bar.get_width() - x_range * 0.01 if val > small else bar.get_width() + x_range * 0.01
+                                ha = "right" if val > small else "left"
+                            else:
+                                xpos = bar.get_width() + x_range * 0.01 if abs(val) > small else bar.get_width() - x_range * 0.01
+                                ha = "left" if abs(val) > small else "right"
+                            ax.text(xpos, y_mid, f"{val:+.1f}%", va="center", ha=ha, color="white", fontsize=8)
+                        ax.axvline(0, color="gray", linewidth=0.8, alpha=0.6)
+                    ax.set_title(f"Rentabilidad {symbol}", color=self.colors.get("ctitulo", "white"), fontsize=9, pad=4)
+                    ax.tick_params(colors="white", labelsize=8)
+                    ax.spines["top"].set_visible(False)
+                    ax.spines["right"].set_visible(False)
+                    ax.spines["bottom"].set_color("gray")
+                    ax.spines["left"].set_color("gray")
                 rv.draw()
 
                 inicial = datos["Close"].iloc[0] if not datos.empty else 0
@@ -3646,24 +3686,24 @@ class DashMain:
                     "Consenso": consenso_lbl,
                 }
 
+                _bg = self.colors.get("cgcolor", "#000000")
                 for i, (key, value) in enumerate(analisis.items()):
-                    sep = key.startswith("─")
-                    lbl = tk.Label(
-                        windows,
-                        text=key if not sep else "",
-                        bg=self.bgcolor,
-                        font=("Arial", 9, "bold"),
-                        fg="white" if not sep else self.bgcolor,
-                    )
-                    lbv = tk.Label(
-                        windows,
-                        text=value,
-                        bg=self.bgcolor,
-                        font=("Arial", 9),
-                        fg="#00cc88" if key == "Consenso" else "white",
-                    )
-                    lbl.grid(row=i + 1, column=0, padx=5, pady=1 if not sep else 3, sticky=W)
-                    lbv.grid(row=i + 1, column=1, padx=5, pady=1 if not sep else 3, sticky=W)
+                    if key.startswith("─"):
+                        tk.Frame(windows, bg="#333333", height=1).grid(
+                            row=i + 1, column=0, columnspan=2, sticky="ew", padx=4, pady=3
+                        )
+                    else:
+                        row_frm = tk.Frame(windows, bg=_bg)
+                        row_frm.grid(row=i + 1, column=0, columnspan=2, sticky="w", padx=4, pady=1)
+                        tk.Label(
+                            row_frm, text=f"{key}:", bg=_bg, fg="#888888",
+                            font=("Arial", 7, "bold"), anchor="w", width=10,
+                        ).pack(side=tk.LEFT)
+                        tk.Label(
+                            row_frm, text=value, bg=_bg,
+                            fg="#00cc88" if key == "Consenso" else "white",
+                            font=("Arial", 8), anchor="w",
+                        ).pack(side=tk.LEFT)
 
             except Exception as e:
                 print("grafico_rendimiento_symbol(): {}".format(e))
@@ -3679,14 +3719,9 @@ class DashMain:
                 grafico_rendimiento_symbol(symbol=symbol, windows=windows)
 
             elif tipo == "Sector":
-                if str_float(values[4]) > 0.0:
-                    symbol = values[1]
+                symbol = str(values[1]).strip()
+                if symbol:
                     grafico_rendimiento_symbol(symbol=symbol, windows=windows)
-
-                else:
-                    symbol = values[1]
-                    message = "symbol :" + symbol + " No informa pago de dividendos"
-                    self.messagebox.showwarning("Advertencia", message)
 
             elif tipo == "Activo":
                 symbol = values[1]
@@ -3958,24 +3993,17 @@ class DashMain:
 
         def treeview_sector(option=None, windows=None):
             try:
-                # Configurar el Treeview para usar los scrollbars
                 columns, meses = [], meses_list(mask="%b")
-                fixed_columns = [
-                    "Sector",
-                    "symbol",
-                    "CostBase",
-                    "Exdiv.",
-                    "Year",
-                    "%Yield",
-                ]
+                fixed_columns = ["Sector", "symbol", "CostBase", "Exdiv.", "Year", "%Yield"]
                 alignments = {mes: {"width": 90, "anchor": "e"} for mes in meses}
-                alignments.update({"Sector": {"width": 150, "anchor": "w"}})
-                alignments.update({"symbol": {"width": 50, "anchor": "w"}})
-                alignments.update({"CostBase": {"width": 90, "anchor": "w"}})
-                alignments.update({"Exdiv.": {"width": 60, "anchor": "center"}})
-                alignments.update({"Year": {"width": 60, "anchor": "e"}})
-                alignments.update({"%Yield": {"width": 70, "anchor": "e"}})
-
+                alignments.update({
+                    "Sector": {"width": 150, "anchor": "w"},
+                    "symbol": {"width": 50, "anchor": "w"},
+                    "CostBase": {"width": 90, "anchor": "e"},
+                    "Exdiv.": {"width": 60, "anchor": "center"},
+                    "Year": {"width": 60, "anchor": "e"},
+                    "%Yield": {"width": 70, "anchor": "e"},
+                })
                 columns.extend(list(alignments.keys()))
                 tree = CustomTreeview(
                     master=frm1,
@@ -3988,83 +4016,81 @@ class DashMain:
                     column_alignments=alignments,
                     style="Treeview",
                 )
-
                 tree.tree_scroll.bind(
                     "<<TreeviewSelect>>",
                     lambda event: item_selected(event, tree.tree_fixed, windows),
                     "+",
                 )
+                tree.tag_configure("sector_hdr", background="#1A3A5C", foreground="white")
 
-                # construye e inserta symbol y proyecta los dividends
-                resumen_mes, producto, costobase = [0] * 12, 0.0, 0.0
                 book = resumen_cartera(option="Sector", meses=meses)
-                sector, div_sector, min_base, ticket = "", 0.0, pow(10, 9), ""
 
+                # agrupar por sector preservando orden
+                sector_groups = {}
                 for symbol, activo in book.items():
+                    s = activo["sector"]
+                    sector_groups.setdefault(s, []).append((symbol, activo))
 
-                    if activo["sector"] != sector:
-                        sector, values = activo["sector"], [""] * 17
-                        values[0] = sector
-                        tree.insert_row(texto=sector, padre=None, values=values)
+                resumen_mes, costobase_total, producto_total = [0.0] * 12, 0.0, 0.0
+                min_base, ticket = pow(10, 9), ""
 
-                    t_symbol, total = [""] * 12, 0.0
-                    for i in range(12):
-                        t_symbol[i] = "{:4.1f}".format(activo["dividends"][i]) if activo["dividends"][i] > 0 else ""
-                        resumen_mes[i] += activo["dividends"][i]
+                for sector, items in sector_groups.items():
+                    sec_cost = sum(a["costobase"] for _, a in items)
+                    sec_divs = [sum(a["dividends"][i] for _, a in items) for i in range(12)]
+                    sec_year = sum(sec_divs)
+                    sec_yield = sec_year / sec_cost if sec_cost > 0 else 0
 
-                    if min_base > activo["costobase"]:
-                        min_base = activo["costobase"]
-                        ticket = symbol
+                    sec_vals = [
+                        sector, "",
+                        "{:9.1f}".format(sec_cost), "",
+                        "{:4.1f}".format(sec_year),
+                        "{:.2%}".format(sec_yield),
+                    ] + ["{:4.1f}".format(d) if d > 0 else "" for d in sec_divs]
+                    tree.insert_row(texto=sector, padre=None, tag="sector_hdr", values=sec_vals)
 
-                    total_row = "{:4.1f}".format(sum(activo["dividends"]))
-                    costo = "{:9.1f}".format(activo["costobase"])
-                    producto += sum(activo["dividends"])
-                    costobase += activo["costobase"]
-                    rend = "{:4.2%}".format(activo["yield"])
+                    for symbol, activo in items:
+                        t_symbol = [
+                            "{:4.1f}".format(activo["dividends"][i]) if activo["dividends"][i] > 0 else ""
+                            for i in range(12)
+                        ]
+                        for i in range(12):
+                            resumen_mes[i] += activo["dividends"][i]
 
-                    values = [
-                        "",
-                        symbol,
-                        costo,
-                        activo["exdiv"],
-                        total_row,
-                        rend,
-                    ] + t_symbol
-                    tree.insert_row(texto=None, padre=sector, values=values)
+                        if activo["costobase"] < min_base:
+                            min_base, ticket = activo["costobase"], symbol
 
-                # totaliza e inserta en heard
+                        total_row = "{:4.1f}".format(sum(activo["dividends"]))
+                        costo = "{:9.1f}".format(activo["costobase"])
+                        producto_total += sum(activo["dividends"])
+                        costobase_total += activo["costobase"]
+                        rend = "{:4.2%}".format(activo["yield"])
+
+                        values = ["", symbol, costo, activo["exdiv"], total_row, rend] + t_symbol
+                        tree.insert_row(texto=None, padre=sector, values=values)
+
                 total = "{:4.1f}".format(sum(resumen_mes))
-                costo = "{:9.1f}".format(costobase)
-                rend = "{:4.2%}".format(sum(resumen_mes) / costobase)
+                costo = "{:9.1f}".format(costobase_total)
+                rend = "{:.2%}".format(producto_total / costobase_total) if costobase_total else "0.00%"
                 t_symbol = ["{:4.1f}".format(s) for s in resumen_mes]
-                summary = ["", "", costo, "", total, rend] + t_symbol
-                tree.insert_row(summary=summary)
+                tree.insert_row(summary=["", "", costo, "", total, rend] + t_symbol)
 
-                # gráfica symbol con menor base de inversión
                 grafico_rendimiento_symbol(symbol=ticket, windows=windows)
             except Exception as e:
                 print("treeview_sector(): {}".format(e))
 
         def treeview_TipoActivo(option=None, windows=None):
             try:
-                # Configurar el Treeview para usar los scrollbars
                 columns, meses = [], meses_list(mask="%b")
-                fixed_columns = [
-                    "Activo",
-                    "symbol",
-                    "CostBase",
-                    "Exdiv.",
-                    "Year",
-                    "%Yield",
-                ]
+                fixed_columns = ["Activo", "symbol", "CostBase", "Exdiv.", "Year", "%Yield"]
                 alignments = {mes: {"width": 90, "anchor": "e"} for mes in meses}
-                alignments.update({"Tipo Activo": {"width": 60, "anchor": "w"}})
-                alignments.update({"symbol": {"width": 150, "anchor": "w"}})
-                alignments.update({"CostBase": {"width": 90, "anchor": "w"}})
-                alignments.update({"Exdiv.": {"width": 60, "anchor": "center"}})
-                alignments.update({"Year": {"width": 60, "anchor": "e"}})
-                alignments.update({"%Yield": {"width": 70, "anchor": "e"}})
-
+                alignments.update({
+                    "Activo": {"width": 120, "anchor": "w"},
+                    "symbol": {"width": 80, "anchor": "w"},
+                    "CostBase": {"width": 90, "anchor": "e"},
+                    "Exdiv.": {"width": 60, "anchor": "center"},
+                    "Year": {"width": 60, "anchor": "e"},
+                    "%Yield": {"width": 70, "anchor": "e"},
+                })
                 columns.extend(list(alignments.keys()))
                 tree = CustomTreeview(
                     master=frm1,
@@ -4077,60 +4103,64 @@ class DashMain:
                     column_alignments=alignments,
                     style="Treeview",
                 )
-
                 tree.tree_scroll.bind(
                     "<<TreeviewSelect>>",
                     lambda event: item_selected(event, tree.tree_fixed, windows),
                     "+",
                 )
+                tree.tag_configure("activo_hdr", background="#1A3A5C", foreground="white")
 
-                # construye e inserta symbol y proyecta los dividends
-                resumen_mes, producto, costobase = [0] * 12, 0.0, 0.0
                 book = resumen_cartera(option="Activo", meses=meses)
-                TActivo, div_sector, ticket, first_exdiv = "", 0.0, "", ""
 
+                # agrupar por tipo activo preservando orden
+                activo_groups = {}
                 for symbol, activo in book.items():
+                    t = activo["activo"]
+                    activo_groups.setdefault(t, []).append((symbol, activo))
 
-                    if activo["activo"] != TActivo:
-                        TActivo, values = activo["activo"], [""] * 17
-                        values[0] = TActivo
-                        tree.insert_row(texto=TActivo, padre=None, values=values)
+                resumen_mes, costobase_total, producto_total = [0.0] * 12, 0.0, 0.0
+                min_base, ticket = pow(10, 9), ""
 
-                    t_symbol, total = [""] * 12, 0.0
-                    for i in range(12):
-                        t_symbol[i] = "{:4.1f}".format(activo["dividends"][i]) if activo["dividends"][i] > 0 else ""
-                        resumen_mes[i] += activo["dividends"][i]
+                for TActivo, items in activo_groups.items():
+                    sec_cost = sum(a["costobase"] for _, a in items)
+                    sec_divs = [sum(a["dividends"][i] for _, a in items) for i in range(12)]
+                    sec_year = sum(sec_divs)
+                    sec_yield = sec_year / sec_cost if sec_cost > 0 else 0
 
-                    # preferir primer símbolo con fecha ex-div
-                    if not first_exdiv and activo.get("exdiv"):
-                        first_exdiv = symbol
-                    ticket = first_exdiv or symbol
+                    sec_vals = [
+                        TActivo, "",
+                        "{:9.1f}".format(sec_cost), "",
+                        "{:4.1f}".format(sec_year),
+                        "{:.2%}".format(sec_yield),
+                    ] + ["{:4.1f}".format(d) if d > 0 else "" for d in sec_divs]
+                    tree.insert_row(texto=TActivo, padre=None, tag="activo_hdr", values=sec_vals)
 
-                    total_row = "{:4.1f}".format(sum(activo["dividends"]))
-                    costo = "{:9.1f}".format(activo["costobase"])
-                    producto += sum(activo["dividends"])
-                    costobase += activo["costobase"]
-                    rend = "{:4.2%}".format(activo["yield"])
+                    for symbol, activo in items:
+                        t_symbol = [
+                            "{:4.1f}".format(activo["dividends"][i]) if activo["dividends"][i] > 0 else ""
+                            for i in range(12)
+                        ]
+                        for i in range(12):
+                            resumen_mes[i] += activo["dividends"][i]
 
-                    values = [
-                        "",
-                        symbol,
-                        costo,
-                        activo["exdiv"],
-                        total_row,
-                        rend,
-                    ] + t_symbol
-                    tree.insert_row(texto=None, padre=TActivo, values=values)
+                        if activo["costobase"] < min_base:
+                            min_base, ticket = activo["costobase"], symbol
 
-                # totaliza e inserta en heard
+                        total_row = "{:4.1f}".format(sum(activo["dividends"]))
+                        costo = "{:9.1f}".format(activo["costobase"])
+                        producto_total += sum(activo["dividends"])
+                        costobase_total += activo["costobase"]
+                        rend = "{:4.2%}".format(activo["yield"])
+
+                        values = ["", symbol, costo, activo["exdiv"], total_row, rend] + t_symbol
+                        tree.insert_row(texto=None, padre=TActivo, values=values)
+
                 total = "{:4.1f}".format(sum(resumen_mes))
-                costo = "{:9.1f}".format(costobase)
-                rend = "{:4.2%}".format(sum(resumen_mes) / costobase)
+                costo = "{:9.1f}".format(costobase_total)
+                rend = "{:.2%}".format(producto_total / costobase_total) if costobase_total else "0.00%"
                 t_symbol = ["{:4.1f}".format(s) for s in resumen_mes]
-                summary = ["", "", costo, "", total, rend] + t_symbol
-                tree.insert_row(summary=summary)
+                tree.insert_row(summary=["", "", costo, "", total, rend] + t_symbol)
 
-                # gráfica symbol con menor base de inversión
                 grafico_rendimiento_symbol(symbol=ticket, windows=windows)
             except Exception as e:
                 print("treeview_TipoActivo(): {}".format(e))
@@ -4287,30 +4317,35 @@ class DashMain:
             elif tipo == "Region":
                 title = "Diversificación vs Región"
 
+            _cgcolor = self.colors.get("cgcolor", "#000000")
             rnb = tk.Toplevel()
             dimension = "%dx%d+%d+%d" % (847, 780, self.df - 240, 65)
             rnb.geometry(dimension)
             rnb.resizable(True, True)
             rnb.attributes("-toolwindow", 1)
-            rnb.config(bg=self.bgcolor)
+            rnb.config(bg=_cgcolor)
             rnb.title(title)
             rnb.focus()
             rnb.grab_set()
             rnb.protocol("WM_DELETE_WINDOW", eexit)
 
-            frm1 = ttk.Frame(rnb, padding=(2, 10, 2, 2), style="C.TFrame", width=600, height=300)
-            frm2 = ttk.Frame(rnb, padding=(2, 10, 2, 2), style="C.TFrame", width=600, height=200)
+            frm1 = tk.Frame(rnb, bg=_cgcolor, padx=2, pady=10)
+            frm2 = tk.Frame(rnb, bg=_cgcolor)
 
-            fr20 = ttk.Frame(frm2, padding=(0, 0, 0, 0), style="C.TFrame")
+            fr20 = tk.Frame(frm2, bg=_cgcolor, width=155)
             fr21 = ttk.Frame(frm2, padding=(0, 0, 0, 0))
 
-            frm1.pack(side=tk.TOP)
-            frm2.pack(side=tk.TOP)
-            fr20.pack(side=tk.LEFT)
+            frm1.pack(side=tk.TOP, fill=tk.X)
+            frm2.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(4, 0))
+            fr20.pack(side=tk.LEFT, fill=tk.Y)
+            fr20.pack_propagate(False)
             fr21.pack(side=tk.LEFT)
 
+            fr20.grid_rowconfigure(29, weight=1)
+            fr20.grid_columnconfigure(0, weight=1)
+
             # área y figura de graficos
-            rg = Figure(figsize=(5.0, 6.0), dpi=110, layout="tight")
+            rg = Figure(figsize=(6.2, 6.0), dpi=110, layout="tight")
             rv = FigureCanvasTkAgg(rg, master=fr21)
             rg.set_facecolor(self.colors["cgcolor"])
             rv.draw()
@@ -4336,12 +4371,14 @@ class DashMain:
             ft1 = tk.Button(
                 fr20,
                 text="Cancel",
-                width=8,
-                bg="gray",
+                bg="#444444",
                 fg="white",
+                font=("Arial", 8),
+                relief="flat",
+                cursor="hand2",
                 command=lambda: eexit(),
             )
-            ft1.grid(row=30, pady=12, sticky="w", padx=6)
+            ft1.grid(row=30, pady=10, sticky="ew", padx=6)
         except Exception as e:
             print("detalle_graph(): {}".format(e))
 
