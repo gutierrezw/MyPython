@@ -2401,8 +2401,8 @@ def sync_market(account):
         symbol = (row.get("symbol", "") or "").strip()
         if not symbol:
             continue
-        # Filtrar preferreds, warrants, rights, units (símbolo con guión: ABR-D, AHT-F, etc.)
-        if "-" in symbol:
+        # Filtrar preferreds, warrants, rights, units (símbolo con guión/acento: ABR-D, ABR^D, AHT-F, GPMT^A, etc.)
+        if "-" in symbol or "^" in symbol:
             continue
         if symbol not in existing:
             market.insert(upd=["account", "tipo"], val=[account, "Dividends"], symbol=symbol)
@@ -2624,13 +2624,23 @@ def cleanup_market(account):
 
     # ── Phase 0: Eliminar preferreds/warrants/rights ya existentes ────────────
     preferreds_eliminados = 0
+    preferreds_huerfanos = []  # preferreds sin lastPrice (huérfanos)
+
     for sym in list(all_symbols):
-        if ("-" in sym or "^" in sym) and existing[sym].get("encartera") != "Y":
-            market.delete(symbol=sym, account=account)
-            existing.pop(sym)
-            all_symbols.remove(sym)
-            preferreds_eliminados += 1
-            _logger.warning(f"cleanup_market: preferred eliminado {sym}")
+        if "-" in sym or "^" in sym:
+            if existing[sym].get("encartera") != "Y":
+                # Detectar huérfanos (sin lastPrice)
+                rows, ix = market.select(account=account, symbol=sym)
+                if rows:
+                    d = dict(zip(ix, rows[0]))
+                    if d.get("lastPrice") is None:
+                        preferreds_huerfanos.append(sym)
+
+                market.delete(symbol=sym, account=account)
+                existing.pop(sym)
+                all_symbols.remove(sym)
+                preferreds_eliminados += 1
+                _logger.warning(f"cleanup_market: preferred eliminado {sym}")
 
     # ── Phase 1: Quote — actualizar precios y detectar no encontrados ─────────
     not_found = []
@@ -2717,6 +2727,7 @@ def cleanup_market(account):
         "eliminados": eliminados,
         "renombrados": renombrados,
         "preferreds_eliminados": preferreds_eliminados,
+        "preferreds_huerfanos": preferreds_huerfanos,
         "fund_completados": fund_ok,
     }
 

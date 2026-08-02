@@ -1674,13 +1674,6 @@ class system_status(tk.Frame):
 
             cols = ["Nivel", "Intervalo", "Estado", "Run", "Próxima", "Descripción"]
             tree = ttk.Treeview(frame, columns=cols, height=8, show="tree headings")
-            tree.heading("#0", text="Agente")
-            tree.heading("Nivel", text="Nv")
-            tree.heading("Intervalo", text="Intervalo")
-            tree.heading("Estado", text="Estado")
-            tree.heading("Run", text="Run")
-            tree.heading("Próxima", text="Próxima")
-            tree.heading("Descripción", text="Descripción")
             tree.column("#0", width=210, minwidth=180)
             tree.column("Nivel", width=35, minwidth=30, anchor="center")
             tree.column("Intervalo", width=65, minwidth=55, anchor="center")
@@ -1729,6 +1722,69 @@ class system_status(tk.Frame):
 
             tree.bind("<Button-3>", _show_menu)
             tree.bind("<Double-1>", _on_double_click)
+
+            # Sorting por clic en encabezados
+            _sort_state = {"column": None, "reverse": False}
+
+            def _sort_by_column(col):
+                # Obtener todos los items con sus valores
+                items = []
+                for iid in tree.get_children():
+                    values = tree.item(iid, "values")
+                    items.append((iid, tree.item(iid, "text"), values))
+
+                # Definir índice de columna
+                col_idx = {"Nivel": 0, "Intervalo": 1, "Estado": 2, "Run": 3, "Próxima": 4, "Descripción": 5, "#0": -1}
+                idx = col_idx.get(col, -1)
+
+                # Determinar orden (ascendente/descendente toggle)
+                reverse = _sort_state["reverse"] if _sort_state["column"] == col else False
+                reverse = not reverse
+                _sort_state["column"] = col
+                _sort_state["reverse"] = reverse
+
+                # Ordenar
+                if idx == -1:  # Columna nombre (Agente)
+                    items.sort(key=lambda x: x[1], reverse=reverse)
+                else:
+                    # Intentar convertir a número para columnas numéricas
+                    try:
+                        items.sort(key=lambda x: (int(x[2][idx]) if col in ("Nivel", "Run") else x[2][idx]), reverse=reverse)
+                    except (ValueError, IndexError):
+                        items.sort(key=lambda x: str(x[2][idx] if idx < len(x[2]) else ""), reverse=reverse)
+
+                # Reordenar en el treeview
+                for i, (iid, name, values) in enumerate(items):
+                    tree.move(iid, "", i)
+
+                # Actualizar visual del heading
+                for col_name in ["#0", "Nivel", "Intervalo", "Estado", "Run", "Próxima", "Descripción"]:
+                    heading_text = tree.heading(col_name, "text")
+                    if col_name == col:
+                        suffix = " ▼" if reverse else " ▲"
+                        if " ▼" not in heading_text and " ▲" not in heading_text:
+                            tree.heading(col_name, text=heading_text + suffix)
+                        else:
+                            tree.heading(col_name, text=heading_text.replace(" ▼", "").replace(" ▲", "") + suffix)
+                    else:
+                        heading_text = tree.heading(col_name, "text")
+                        tree.heading(col_name, text=heading_text.replace(" ▼", "").replace(" ▲", ""))
+
+            # Vincular clic en encabezados
+            def _on_heading_click(event):
+                col = tree.identify_column(event.x)
+                col_map = {"#0": "#0", "#1": "Nivel", "#2": "Intervalo", "#3": "Estado", "#4": "Run", "#5": "Próxima", "#6": "Descripción"}
+                col_name = col_map.get(col, None)
+                if col_name:
+                    _sort_by_column(col_name)
+
+            tree.heading("#0", text="Agente", command=lambda: _sort_by_column("#0"))
+            tree.heading("Nivel", text="Nv", command=lambda: _sort_by_column("Nivel"))
+            tree.heading("Intervalo", text="Intervalo", command=lambda: _sort_by_column("Intervalo"))
+            tree.heading("Estado", text="Estado", command=lambda: _sort_by_column("Estado"))
+            tree.heading("Run", text="Run", command=lambda: _sort_by_column("Run"))
+            tree.heading("Próxima", text="Próxima", command=lambda: _sort_by_column("Próxima"))
+            tree.heading("Descripción", text="Descripción", command=lambda: _sort_by_column("Descripción"))
 
             schedule_data = read_json_tmp("agents_schedule.json")
             for name, cfg in AGENTES_SCHEDULE.items():

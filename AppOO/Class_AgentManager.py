@@ -680,6 +680,52 @@ class AgentManager:
         except Exception as e:
             self._log_infra.error(f"Agente_LotesReconcile(): {e}")
 
+    @wait_rate(86400, persist=True, desc="Limpia market sin enriquecimiento (24h)", nivel=1)
+    def Agente_CleanupMarketNoScore(self):
+        """Elimina símbolos sin datos enriquecidos: sin inst_score AND sin fh_count (13F).
+        Mantiene símbolos con fh_count > 0 aunque falte inst_score (solo falta calcular score)."""
+        try:
+            market = MarketScreen()
+            conn = BDsystem.connect_dbase("select.market")
+            cursor = conn.cursor()
+
+            # Diagnóstico
+            cursor.execute("""
+                SELECT
+                    SUM(CASE WHEN inst_score IS NULL AND fh_count IS NULL THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN inst_score IS NULL AND fh_count > 0 THEN 1 ELSE 0 END)
+                FROM market WHERE account=%s AND encartera != 'Y' AND tipo = 'Dividends'
+            """, (self.account,))
+            sin_datos, sin_score_13f = cursor.fetchone()
+
+            if not sin_datos:
+                self._log_stock.warning(
+                    f"Agente_CleanupMarketNoScore: OK — sin_score_13f={sin_score_13f or 0} (mantienen), sin_datos=0"
+                )
+                cursor.close()
+                conn.close()
+                return
+
+            # Obtener y eliminar símbolos sin datos (sin inst_score AND sin fh_count)
+            cursor.execute("""
+                SELECT symbol FROM market
+                WHERE account=%s AND encartera != 'Y' AND tipo = 'Dividends'
+                AND inst_score IS NULL AND fh_count IS NULL
+            """, (self.account,))
+            symbols = [row[0] for row in cursor.fetchall()]
+            cursor.close()
+            conn.close()
+
+            for sym in symbols:
+                market.delete(symbol=sym, account=self.account)
+
+            self._log_stock.warning(
+                f"Agente_CleanupMarketNoScore: eliminados={len(symbols)} sin_datos, "
+                f"mantenidos={sin_score_13f or 0} sin_score_pero_13f"
+            )
+        except Exception as e:
+            self._log_stock.error(f"Agente_CleanupMarketNoScore(): {e}")
+
     def register_threads(self):
         """Registra agentes de larga duración como threads independientes."""
         _threads = [

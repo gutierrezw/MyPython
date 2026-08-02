@@ -176,8 +176,30 @@ Luego el flujo completo:
 3. `git push && git push --tags`
 4. `gh release create vX.X.X --title "AppOO vX.X.X" --notes "..." --repo gutierrezw/MyPython`
 5. `buildExe.bat` → genera el binario
-6. `AppTest\export_hijo.bat` → empaqueta versión hijo
+6. `AppTest\export_hijo.bat` → empaqueta versión hijo (genera `deploy\setup_hijo\` y `deploy\AppOO_hijo\`)
 7. `gh release upload vX.X.X <archivos> --repo gutierrezw/MyPython --clobber`
+
+### Contenido obligatorio de cada release
+
+**GitHub release notes** deben incluir (con los ajustes de la versión actual):
+- Sección `### Novedades` — cambios de esta versión
+- Sección `## Instalacion — Version Hijo` — pasos completos: MySQL, BD, profiles, credenciales, Binance, TradingView
+
+**Assets a subir** (generados por `export_hijo.bat`):
+- `AppOO_hijo.zip`
+- `README.txt` (actualizar URL y sección Novedades antes de correr export_hijo.bat)
+- `hijo_estructura.sql`
+- `hijo_datos.sql`
+- `config_import.json.template`
+- `run_binance_import.py`
+- `tv_panel.js`
+
+**`AppTest\README.txt`** — actualizar antes de cada release:
+- URL del release (sección 0)
+- Sección `NOVEDADES vX.X.X` al pie
+
+**Tablas nuevas** — si se creó alguna tabla nueva en el release, verificar que esté incluida
+en el `mysqldump` de `export_hijo.bat` (paso `[3/4] Exportando estructura BD`).
 
 ---
 

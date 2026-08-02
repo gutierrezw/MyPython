@@ -1866,6 +1866,11 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         @param symbol: symbol o ticket que se inserta en market
         @return:  Agrega fila a partir de symbol y campos pasados como parameter
         """
+        # Guard: rechazar preferreds/warrants (no tienen data suficiente)
+        if symbol and ("-" in symbol or "^" in symbol):
+            _logger.warning(f"MarketScreen.insert(): preferencial/warrant rechazado: {symbol}")
+            return
+
         try:
             conn = self._conectar(tabla="insert.market")
             cursor = conn.cursor()
