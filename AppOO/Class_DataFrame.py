@@ -3012,4 +3012,77 @@ def show_strategy_chart(
 
     _draw_chart(win, fig, canvas)
     _timer_id[0] = win.after(5000, _auto_refresh, win, fig, canvas)
-    win.protocol("WM_DELETE_WINDOW", lambda: _on_close(win))
+
+
+# Gráfico de rentabilidad por períodos (YTD, 6M, 3M, 1M, 1S)
+def draw_rentabilidad(fg, cv, datos, symbol, cchart, cgcolor="#1a1a1a"):
+    """Dibuja gráfico de barras horizontales con rentabilidad por período."""
+    fg.clear()
+    ax = fg.add_subplot(111)
+    ax.set_facecolor(cgcolor)
+    fg.set_facecolor(cgcolor)
+
+    if datos is None or datos.empty or "Close" not in datos.columns:
+        ax.text(0.5, 0.5, "Sin datos históricos\ndisponibles", ha="center", va="center",
+               color=cchart.get("titulo", "white"), fontsize=10, transform=ax.transAxes)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis("off")
+        cv.draw()
+        return
+
+    now = datos.index[-1]
+    price_now = float(datos["Close"].iloc[-1])
+    tz = datos.index.tz
+
+    def _price_at(offset):
+        sub = datos[datos.index <= offset]
+        return float(sub["Close"].iloc[-1]) if not sub.empty else None
+
+    periodos = [
+        ("1S", now - pd.DateOffset(weeks=1)),
+        ("1M", now - pd.DateOffset(months=1)),
+        ("3M", now - pd.DateOffset(months=3)),
+        ("6M", now - pd.DateOffset(months=6)),
+        ("YTD", pd.Timestamp(now.year, 1, 1, tz=tz)),
+        ("1A", now - pd.DateOffset(years=1)),
+        ("3A", now - pd.DateOffset(years=3)),
+    ]
+
+    labels, returns, colors_bar = [], [], []
+    for lbl, desde in periodos:
+        p = _price_at(desde)
+        if p is None or p == 0:
+            continue
+        ret = (price_now - p) / p * 100
+        labels.append(lbl)
+        returns.append(ret)
+        colors_bar.append(cchart.get("plot2", "green") if ret >= 0 else cchart.get("plot1", "red"))
+
+    if not returns:
+        ax.set_title(f"Rentabilidad {symbol} — sin datos", color=cchart.get("titulo", "white"), fontsize=8)
+        cv.draw()
+        return
+
+    bars = ax.barh(labels, returns, color=colors_bar, alpha=0.75, height=0.5)
+    x_range = max(abs(v) for v in returns) or 1
+    small = x_range * 0.12
+
+    for bar, val in zip(bars, returns):
+        y_mid = bar.get_y() + bar.get_height() / 2
+        if val >= 0:
+            xpos = bar.get_width() - x_range * 0.01 if val > small else bar.get_width() + x_range * 0.01
+            ha = "right" if val > small else "left"
+        else:
+            xpos = bar.get_width() + x_range * 0.01 if abs(val) > small else bar.get_width() - x_range * 0.01
+            ha = "left" if abs(val) > small else "right"
+        ax.text(xpos, y_mid, f"{val:+.1f}%", va="center", ha=ha, color="white", fontsize=5)
+
+    ax.axvline(0, color="gray", linewidth=0.8, alpha=0.6)
+    ax.set_title(f"Rentabilidad {symbol}", color=cchart.get("titulo", "white"), fontsize=8, pad=3)
+    ax.tick_params(colors="white", labelsize=7)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["bottom"].set_color("gray")
+    ax.spines["left"].set_color("gray")
+    cv.draw()

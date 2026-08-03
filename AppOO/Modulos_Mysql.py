@@ -1580,9 +1580,9 @@ class EstrategiaInversion(BDsystem):  # ----------------------------------------
             conn = self._conectar(tabla="select.estrategia")
             cursor = conn.cursor()
             estrategia = {}
-            qry = """SELECT b.estrategia, b.descripcion, ticket, empresa, peso, costobase, 
-                            dividendo, unrealizedpnl, sector, deuda, country, region 
-                     FROM (SELECT * FROM inversion WHERE iactiva = 'Y') a 
+            qry = """SELECT b.estrategia, b.descripcion, b.vehiculo, ticket, empresa, peso, costobase,
+                            dividendo, unrealizedpnl, sector, deuda, country, region
+                     FROM (SELECT * FROM inversion WHERE iactiva = 'Y') a
                      LEFT JOIN  estrategia b ON a.estrategia = b.estrategia
                      ORDER BY a.estrategia;"""
 
@@ -1611,6 +1611,7 @@ class EstrategiaInversion(BDsystem):  # ----------------------------------------
                         "deuda": read[ix.index("deuda")],
                         "country": read[ix.index("country")],
                         "region": read[ix.index("region")],
+                        "vehiculo": read[ix.index("vehiculo")],
                     }
                     xlist.append(rows)
 

@@ -51,6 +51,7 @@ from Class_DataFrame import (
     Agente_income_Manager,
     grupo_region,
     CacheHut,
+    draw_rentabilidad,
 )
 from Class_ApiIBrks import IB
 from Class_ApiBinnace import BinanceClient
@@ -3579,7 +3580,7 @@ class DashMain:
             rnb.destroy()
 
         # Ubica información de yfinance. Ticker, para mostrar gráfico de dividends
-        def grafico_rendimiento_symbol(symbol=None, windows=None):
+        def grafico_rendimiento_symbol(symbol=None, windows=None, activo=None):
             try:
                 # limpiar widgets previos (excepto Cancel)
                 for w in windows.winfo_children():
@@ -3588,63 +3589,33 @@ class DashMain:
                     w.destroy()
 
                 rg.clf()  # reset figura antes de redibujar
-                activo, datos, update = self.crypto_ts.ts_yfinance_symbol(symbol=symbol, vehiculo="Stock")
-                result = self.crypto_ts.rendimiento_dividends(
-                    fg=rg, activo=activo, datos=datos, symbol=symbol, plot="yes"
-                )
-                sin_div = result is None or (isinstance(result, tuple) and (result[0].empty or result[1] == "X"))
-                if sin_div and not datos.empty:
-                    ax = rg.add_subplot(111)
+                vehiculo = activo.get("vehiculo") if activo else None
+                result = self.crypto_ts.ts_yfinance_symbol(symbol=symbol, vehiculo=vehiculo)
+                if result is None or not isinstance(result, tuple) or len(result) != 3:
+                    yf_activo, datos, update = {}, pd.DataFrame(), False
+                else:
+                    yf_activo, datos, update = result
+
+                # Determinar si es FCI o Crypto basado en vehiculo
+                es_fci_crypto = vehiculo in ("BBVA.ARS", "SANT.ARS", "Crypto", "Balance")
+
+                # Para FCI/Crypto, siempre mostrar rentabilidad (no dividendos)
+                if es_fci_crypto:
                     cgc = self.colors.get("cgcolor", "#000000")
-                    ax.set_facecolor(cgc)
-                    rg.patch.set_facecolor(cgc)
-                    now = datos.index[-1]
-                    tz = datos.index.tz
-                    price_now = float(datos["Close"].iloc[-1])
-
-                    def _price_at(offset):
-                        sub = datos[datos.index <= offset]
-                        return float(sub["Close"].iloc[-1]) if not sub.empty else None
-
-                    periodos = [
-                        ("1S", now - pd.DateOffset(weeks=1)),
-                        ("1M", now - pd.DateOffset(months=1)),
-                        ("3M", now - pd.DateOffset(months=3)),
-                        ("6M", now - pd.DateOffset(months=6)),
-                        ("YTD", pd.Timestamp(now.year, 1, 1, tz=tz)),
-                        ("1A", now - pd.DateOffset(years=1)),
-                        ("3A", now - pd.DateOffset(years=3)),
-                    ]
-                    labels, returns, colors_bar = [], [], []
-                    for lbl, desde in periodos:
-                        p = _price_at(desde)
-                        if p is None or p == 0:
-                            continue
-                        ret = (price_now - p) / p * 100
-                        labels.append(lbl)
-                        returns.append(ret)
-                        colors_bar.append("#e65100" if ret >= 0 else "#b71c1c")
-                    if returns:
-                        bars = ax.barh(labels, returns, color=colors_bar, alpha=0.85, height=0.5)
-                        x_range = max(abs(v) for v in returns) or 1
-                        small = x_range * 0.12
-                        for bar, val in zip(bars, returns):
-                            y_mid = bar.get_y() + bar.get_height() / 2
-                            if val >= 0:
-                                xpos = bar.get_width() - x_range * 0.01 if val > small else bar.get_width() + x_range * 0.01
-                                ha = "right" if val > small else "left"
-                            else:
-                                xpos = bar.get_width() + x_range * 0.01 if abs(val) > small else bar.get_width() - x_range * 0.01
-                                ha = "left" if abs(val) > small else "right"
-                            ax.text(xpos, y_mid, f"{val:+.1f}%", va="center", ha=ha, color="white", fontsize=8)
-                        ax.axvline(0, color="gray", linewidth=0.8, alpha=0.6)
-                    ax.set_title(f"Rentabilidad {symbol}", color=self.colors.get("ctitulo", "white"), fontsize=9, pad=4)
-                    ax.tick_params(colors="white", labelsize=8)
-                    ax.spines["top"].set_visible(False)
-                    ax.spines["right"].set_visible(False)
-                    ax.spines["bottom"].set_color("gray")
-                    ax.spines["left"].set_color("gray")
-                rv.draw()
+                    cchart = self.colors.get("cchart", {})
+                    draw_rentabilidad(fg=rg, cv=rv, datos=datos, symbol=symbol, cchart=cchart, cgcolor=cgc)
+                    rv.draw()
+                else:
+                    # Para Stock, mostrar dividendos si existen
+                    result = self.crypto_ts.rendimiento_dividends(
+                        fg=rg, activo=yf_activo, datos=datos, symbol=symbol, plot="yes"
+                    )
+                    sin_div = result is None or (isinstance(result, tuple) and (result[0].empty or result[1] == "X"))
+                    if sin_div and not datos.empty:
+                        cgc = self.colors.get("cgcolor", "#000000")
+                        cchart = self.colors.get("cchart", {})
+                        draw_rentabilidad(fg=rg, cv=rv, datos=datos, symbol=symbol, cchart=cchart, cgcolor=cgc)
+                    rv.draw()
 
                 inicial = datos["Close"].iloc[0] if not datos.empty else 0
                 final = datos["Close"].iloc[-1] if not datos.empty else 0
@@ -3677,14 +3648,38 @@ class DashMain:
                     "Precio": f"{inicial:.2f}  →  {final:.2f}",
                     "Growth 5y": f"{growth_total:+.1%}",
                     "APR": f"{apr:+.1%}",
-                    "Div Yield": f"{activo.get('dividendYield') or 0:.2f}%",
-                    "Div Rate": f"{activo.get('dividendRate') or 0:.2f}",
-                    "P/E": f"{activo.get('trailingPE') or 0:.1f}",
-                    "Beta": f"{activo.get('beta') or 0:.2f}",
+                }
+
+                # Para FCI/Crypto: campos calculados. Para Stock: dividendos
+                if es_fci_crypto and not datos.empty:
+                    # Calcular métricas para FCI/Crypto
+                    volatilidad = datos["Close"].pct_change().std() * (252 ** 0.5) if len(datos) > 1 else 0
+                    retornos = datos["Close"].pct_change().dropna()
+                    sharpe = (retornos.mean() / retornos.std() * (252 ** 0.5)) if retornos.std() > 0 else 0
+                    peak = datos["Close"].expanding().max()
+                    drawdown = (datos["Close"] / peak - 1).min()
+                    profit_factor = abs(retornos[retornos > 0].sum() / retornos[retornos < 0].sum()) if (retornos < 0).any() else 0
+
+                    analisis.update({
+                        "Volatilidad": f"{volatilidad:.2%}",
+                        "Sharpe Ratio": f"{sharpe:.2f}",
+                        "Max Drawdown": f"{drawdown:.2%}",
+                        "Profit Factor": f"{profit_factor:.2f}",
+                    })
+                else:
+                    # Para Stock: campos de dividendos
+                    analisis.update({
+                        "Div Yield": f"{(yf_activo or {}).get('dividendYield') or 0:.2f}%",
+                        "Div Rate": f"{(yf_activo or {}).get('dividendRate') or 0:.2f}",
+                        "P/E": f"{(yf_activo or {}).get('trailingPE') or 0:.1f}",
+                        "Beta": f"{(yf_activo or {}).get('beta') or 0:.2f}",
+                    })
+
+                analisis.update({
                     "─" * 12: "",
                     "Inst Score": inst_score,
                     "Consenso": consenso_lbl,
-                }
+                })
 
                 _bg = self.colors.get("cgcolor", "#000000")
                 for i, (key, value) in enumerate(analisis.items()):
@@ -3709,7 +3704,7 @@ class DashMain:
                 print("grafico_rendimiento_symbol(): {}".format(e))
 
         # selecciona desde treeview
-        def item_selected(event, tree, windows):
+        def item_selected(event, tree, windows, d_country=None):
             selected_item = tree.selection()
             item = tree.item(selected_item)
             values, symbol = item["values"], ""
@@ -3720,8 +3715,16 @@ class DashMain:
 
             elif tipo == "Sector":
                 symbol = str(values[1]).strip()
-                if symbol:
-                    grafico_rendimiento_symbol(symbol=symbol, windows=windows)
+                if symbol and d_country:
+                    activo = None
+                    for sector_activos in d_country.values():
+                        for a in sector_activos:
+                            if a["symbol"] == symbol:
+                                activo = a
+                                break
+                        if activo:
+                            break
+                    grafico_rendimiento_symbol(symbol=symbol, windows=windows, activo=activo)
 
             elif tipo == "Activo":
                 symbol = values[1]
@@ -3730,8 +3733,17 @@ class DashMain:
 
             elif tipo == "Region":
                 symbol = str(values[1]).strip()
-                if symbol:
-                    grafico_rendimiento_symbol(symbol=symbol, windows=windows)
+                if symbol and d_country:
+                    # Buscar activo completo en d_country
+                    activo = None
+                    for pais_activos in d_country.values():
+                        for a in pais_activos:
+                            if a["symbol"] == symbol:
+                                activo = a
+                                break
+                        if activo:
+                            break
+                    grafico_rendimiento_symbol(symbol=symbol, windows=windows, activo=activo)
 
         # selecciona y clasifica detalle por symbol y dividendos
         def detalle_dividendos(meses):
@@ -3937,9 +3949,15 @@ class DashMain:
                     style="Treeview",
                 )
 
+                strategy = self.Estrategia.read()
+                d_dividendos = {}
+                for activos in strategy.values():
+                    for activo in activos:
+                        d_dividendos.setdefault(activo["symbol"], []).append(activo)
+
                 tree.tree_scroll.bind(
                     "<<TreeviewSelect>>",
-                    lambda event: item_selected(event, tree.tree_fixed, windows),
+                    lambda event, dd=d_dividendos: item_selected(event, tree.tree_fixed, windows, dd),
                     "+",
                 )
 
@@ -4016,12 +4034,20 @@ class DashMain:
                     column_alignments=alignments,
                     style="Treeview",
                 )
+                tree.tag_configure("sector_hdr", background="#1A3A5C", foreground="white")
+
+                strategy = self.Estrategia.read()
+                d_sector = {}
+                for activos in strategy.values():
+                    for activo in activos:
+                        sector = activo.get("sector") or "Unknown"
+                        d_sector.setdefault(sector, []).append(activo)
+
                 tree.tree_scroll.bind(
                     "<<TreeviewSelect>>",
-                    lambda event: item_selected(event, tree.tree_fixed, windows),
+                    lambda event, ds=d_sector: item_selected(event, tree.tree_fixed, windows, ds),
                     "+",
                 )
-                tree.tag_configure("sector_hdr", background="#1A3A5C", foreground="white")
 
                 book = resumen_cartera(option="Sector", meses=meses)
 
@@ -4103,12 +4129,13 @@ class DashMain:
                     column_alignments=alignments,
                     style="Treeview",
                 )
+                tree.tag_configure("activo_hdr", background="#1A3A5C", foreground="white")
+
                 tree.tree_scroll.bind(
                     "<<TreeviewSelect>>",
                     lambda event: item_selected(event, tree.tree_fixed, windows),
                     "+",
                 )
-                tree.tag_configure("activo_hdr", background="#1A3A5C", foreground="white")
 
                 book = resumen_cartera(option="Activo", meses=meses)
 
@@ -4203,12 +4230,6 @@ class DashMain:
                     style="Treeview",
                 )
 
-                tree.tree_scroll.bind(
-                    "<<TreeviewSelect>>",
-                    lambda event: item_selected(event, tree.tree_fixed, windows),
-                    "+",
-                )
-
                 tree.tag_configure("country_hdr", background="#1A3A5C", foreground="white")
 
                 # Agrupar posiciones por país
@@ -4224,6 +4245,13 @@ class DashMain:
                         d_country.setdefault(country, []).append(activo)
 
                 total_capital_global = sum(a["costobase"] for activos in d_country.values() for a in activos) or 1
+
+                # Binding: pasar d_country para acceso a datos completos del activo
+                tree.tree_scroll.bind(
+                    "<<TreeviewSelect>>",
+                    lambda event, dc=d_country: item_selected(event, tree.tree_fixed, windows, dc),
+                    "+",
+                )
 
                 min_base, ticket = pow(10, 9), ""
                 total_cap_sum, total_mkt_sum, total_pnl_sum, total_div_sum = 0.0, 0.0, 0.0, 0.0

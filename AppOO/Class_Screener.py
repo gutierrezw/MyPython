@@ -1,5 +1,5 @@
 from Modulos_Mysql import MarketScreen, BDsystem
-from Class_DataFrame import set_yf_rate_limited, get_yf_status, get_yfinance, chart_rendimiento_dividendos
+from Class_DataFrame import set_yf_rate_limited, get_yf_status, get_yfinance, chart_rendimiento_dividendos, draw_rentabilidad
 from Modulos_Utilitarios import (
     style_app,
     is_null,
@@ -28,6 +28,8 @@ from Modulos_python import (
     W,
     S,
     N,
+    datetime,
+    timedelta,
     E,
     VERTICAL,
     HORIZONTAL,
@@ -1132,7 +1134,8 @@ class Screener(tk.Frame):
         _info_row("Div Rate")
         _info_row("P/E")
         _info_row("Beta")
-        tk.Frame(info_frm, bg="#333333", height=1).pack(fill="x", padx=4, pady=3)
+        # Divisor con guiones — ancho fijo
+        tk.Label(info_frm, text="-" * 28, bg=cgcolor, fg="#555555", font=("Courier", 7, "bold")).pack(anchor="w", fill="x", padx=4, pady=2)
         _info_row("Inst Score", inst_score_lbl)
         _info_row("Consenso", consenso_lbl, color="#00cc88")
 
@@ -1141,64 +1144,6 @@ class Screener(tk.Frame):
             relief="flat", cursor="hand2",
             command=lambda: (win.destroy(), setattr(self, "_analisis_win", None)),
         ).pack(side=tk.BOTTOM, fill="x", padx=4, pady=5)
-
-        def _draw_rentabilidad(datos):
-            fg.clear()
-            ax = fg.add_subplot(111)
-            ax.set_facecolor(cgcolor)
-            fg.set_facecolor(cgcolor)
-            if datos is None or datos.empty:
-                return
-            now = datos.index[-1]
-            price_now = float(datos["Close"].iloc[-1])
-            tz = datos.index.tz
-
-            def _price_at(offset):
-                sub = datos[datos.index <= offset]
-                return float(sub["Close"].iloc[-1]) if not sub.empty else None
-
-            periodos = [
-                ("1S", now - pd.DateOffset(weeks=1)),
-                ("1M", now - pd.DateOffset(months=1)),
-                ("3M", now - pd.DateOffset(months=3)),
-                ("6M", now - pd.DateOffset(months=6)),
-                ("YTD", pd.Timestamp(now.year, 1, 1, tz=tz)),
-                ("1A", now - pd.DateOffset(years=1)),
-                ("3A", now - pd.DateOffset(years=3)),
-            ]
-            labels, returns, colors_bar = [], [], []
-            for lbl, desde in periodos:
-                p = _price_at(desde)
-                if p is None or p == 0:
-                    continue
-                ret = (price_now - p) / p * 100
-                labels.append(lbl)
-                returns.append(ret)
-                colors_bar.append(cchart.get("plot2", "green") if ret >= 0 else cchart.get("plot1", "red"))
-            if not returns:
-                ax.set_title(f"Rentabilidad {symbol} — sin datos", color=cchart.get("titulo", "white"), fontsize=8)
-                cv.draw()
-                return
-            bars = ax.barh(labels, returns, color=colors_bar, alpha=0.75, height=0.5)
-            x_range = max(abs(v) for v in returns) or 1
-            small = x_range * 0.12
-            for bar, val in zip(bars, returns):
-                y_mid = bar.get_y() + bar.get_height() / 2
-                if val >= 0:
-                    xpos = bar.get_width() - x_range * 0.01 if val > small else bar.get_width() + x_range * 0.01
-                    ha = "right" if val > small else "left"
-                else:
-                    xpos = bar.get_width() + x_range * 0.01 if abs(val) > small else bar.get_width() - x_range * 0.01
-                    ha = "left" if abs(val) > small else "right"
-                ax.text(xpos, y_mid, f"{val:+.1f}%", va="center", ha=ha, color="white", fontsize=7)
-            ax.axvline(0, color="gray", linewidth=0.8, alpha=0.6)
-            ax.set_title(f"Rentabilidad {symbol}", color=cchart.get("titulo", "white"), fontsize=8, pad=3)
-            ax.tick_params(colors="white", labelsize=7)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
-            ax.spines["bottom"].set_color("gray")
-            ax.spines["left"].set_color("gray")
-            cv.draw()
 
         def _safe_render(fn):
             if win.winfo_exists():
@@ -1216,10 +1161,45 @@ class Screener(tk.Frame):
                 _info_vals["Precio"].config(text=f"{inicial:.2f}  →  {final:.2f}")
                 _info_vals["Growth 5y"].config(text=f"{growth:+.1%}")
                 _info_vals["APR"].config(text=f"{apr:+.1%}")
-                _info_vals["Div Yield"].config(text=f"{(activo_dict or {}).get('dividendYield') or 0:.2f}%")
-                _info_vals["Div Rate"].config(text=f"{(activo_dict or {}).get('dividendRate') or 0:.2f}")
-                _info_vals["P/E"].config(text=f"{(activo_dict or {}).get('trailingPE') or 0:.1f}")
-                _info_vals["Beta"].config(text=f"{(activo_dict or {}).get('beta') or 0:.2f}")
+
+                # Para Cripto/FCI: mostrar métricas de volatilidad/riesgo en lugar de dividendos/P/E
+                es_cripto_fci = categoriaActivo not in _DIV_CATS
+
+                if es_cripto_fci:
+                    if datos is None or datos.empty or "Close" not in datos.columns:
+                        # Sin datos disponibles para Cripto (ej: símbolos Binance no en Yahoo Finance)
+                        _info_vals["Div Yield"].config(text="—")
+                        _info_vals["Div Rate"].config(text="—")
+                        _info_vals["P/E"].config(text="—")
+                        _info_vals["Beta"].config(text="—")
+                    else:
+                        # Volatilidad anualizada
+                        pct_change = datos["Close"].pct_change().dropna()
+                        volatility = pct_change.std() * np.sqrt(252) if len(pct_change) > 1 else 0
+                        _info_vals["Div Yield"].config(text=f"{volatility:+.1%}")
+
+                        # Sharpe ratio (asumiendo risk-free rate = 0)
+                        sharpe = (pct_change.mean() * 252) / (pct_change.std() * np.sqrt(252)) if pct_change.std() > 0 else 0
+                        _info_vals["Div Rate"].config(text=f"{sharpe:+.2f}")
+
+                        # Max drawdown
+                        cumulative = (1 + pct_change).cumprod()
+                        running_max = cumulative.expanding().max()
+                        drawdown = (cumulative - running_max) / running_max
+                        max_dd = drawdown.min() if len(drawdown) > 0 else 0
+                        _info_vals["P/E"].config(text=f"{max_dd:+.1%}")
+
+                        # Profit factor (gains/losses ratio)
+                        gains = pct_change[pct_change > 0].sum()
+                        losses = abs(pct_change[pct_change < 0].sum())
+                        profit_factor = gains / losses if losses > 0 else 0
+                        _info_vals["Beta"].config(text=f"{profit_factor:+.2f}")
+                else:
+                    # Stock con dividendos: mostrar datos de mercado
+                    _info_vals["Div Yield"].config(text=f"{(activo_dict or {}).get('dividendYield') or 0:.2f}%")
+                    _info_vals["Div Rate"].config(text=f"{(activo_dict or {}).get('dividendRate') or 0:.2f}")
+                    _info_vals["P/E"].config(text=f"{(activo_dict or {}).get('trailingPE') or 0:.1f}")
+                    _info_vals["Beta"].config(text=f"{(activo_dict or {}).get('beta') or 0:.2f}")
             _safe_render(_do)
 
         def _fetch():
@@ -1246,12 +1226,30 @@ class Screener(tk.Frame):
                                 _safe_render(lambda: (chart_rendimiento_dividendos(fg=fg, datos=y_datos, dlabl=dlabl, asset=asset, cchart=cchart), cv.draw()))
                                 return
                     # fallback: sin datos de dividendos → rentabilidad
-                    _, hist = get_yfinance(ticket=symbol, vehiculo="hist")
-                    _safe_render(lambda h=hist: _draw_rentabilidad(h))
+                    veh = "Crypto" if "usdt" in symbol.lower() else "hist"
+                    _, hist = get_yfinance(ticket=symbol, vehiculo=veh)
+                    _safe_render(lambda h=hist: draw_rentabilidad(fg=fg, cv=cv, datos=h, symbol=symbol, cchart=cchart, cgcolor=cgcolor))
                 else:
-                    _, hist = get_yfinance(ticket=symbol, vehiculo="hist")
+                    # Calcular desde/hasta para Diaria_CNV
+                    now = datetime.now()
+                    desde = (now - timedelta(days=365*5)).date()
+                    hasta = now.date()
+
+                    # Detectar vehiculo según tipo: Crypto/Fondo/BBVA/Santander
+                    tipo = mkt_row.get("tipo", "").lower()
+                    if "usdt" in symbol.lower():
+                        veh = "Crypto"
+                    elif tipo == "fondo" or "bbva" in symbol.lower():
+                        veh = "BBVA.ARS"
+                    elif "sant" in symbol.lower():
+                        veh = "SANT.ARS"
+                    else:
+                        veh = "hist"
+
+                    _, hist = get_yfinance(ticket=symbol, vehiculo=veh, desde=desde, hasta=hasta)
                     _update_info_panel({}, hist)
-                    _safe_render(lambda h=hist: _draw_rentabilidad(h))
+                    # Mostrar gráfico rentabilidad para Cripto, BBVA, Fondos y otros sin dividendos
+                    _safe_render(lambda h=hist: draw_rentabilidad(fg=fg, cv=cv, datos=h, symbol=symbol, cchart=cchart, cgcolor=cgcolor))
             except Exception as e:
                 _logger.warning(f"_show_analisis_popup({symbol}): {e}")
 

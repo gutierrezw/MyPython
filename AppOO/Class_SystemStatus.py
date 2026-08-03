@@ -1529,6 +1529,7 @@ class system_status(tk.Frame):
             btn_frame = ttk.Frame(self.debugging, style="C.TFrame")
             btn_frame.pack(fill="x", padx=5, pady=(2, 5))
             ttk.Button(btn_frame, text="Reset All → WARNING", command=_reset_all).pack(side="left")
+            ttk.Button(btn_frame, text="Clear Cache", command=lambda: CacheHut.clear()).pack(side="left", padx=(5, 0))
 
             menu = tk.Menu(tree, tearoff=0)
             for lvl in LEVELS:
