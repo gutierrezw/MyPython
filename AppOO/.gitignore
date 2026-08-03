@@ -69,6 +69,7 @@ datos_personales/
 
 # Scripts de prueba/diagnóstico local
 AppTest/
+test_*.py
 backup_bdinv.bat
 
 # Docs — fuente de verdad en MyObsidian/AppOO/20-Proyecto (junction local)
