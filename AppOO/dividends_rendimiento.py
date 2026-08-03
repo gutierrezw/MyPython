@@ -27,7 +27,7 @@ def rendimiento_dividends(fg: object, cv: object, activo: object, symbol=None, p
             if not m_div.empty:
                 forward_div = activo.info["dividendRate"]
                 pd.options.mode.copy_on_write = True
-                x_none, pdatos = get_yfinance(ticket=symbol, vehiculo="hist")
+                x_none, pdatos = get_yfinance(ticket=symbol, vehiculo="Stock")
 
                 # datos.insert(datos.shape[1], 'Close', 0)
                 datos.index = datos.index.tz_localize(None)

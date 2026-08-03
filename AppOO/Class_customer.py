@@ -2424,17 +2424,25 @@ class TickerInfo(MyOrders):
             return indicadores, info_lotsize
 
         try:
-            result = get_yfinance(ticket=symbol, vehiculo=vehiculo)
+            # Mapear valores genéricos de estrategia a vehiculos reales para descargar
+            vehiculo_real = vehiculo if vehiculo else "Stock"
+
+            # Balance = FCI argentino (Fondo de Inversión Colectivo)
+            if vehiculo_real == "Balance":
+                vehiculo_real = "BBVA.ARS"
+
+            result = get_yfinance(ticket=symbol, vehiculo=vehiculo_real)
             if result is None:
                 return {}, pd.DataFrame(), False
 
             activos, datos = result
 
             # Crear clave de cache
-            key_cache = (symbol, vehiculo)
+            key_cache = (symbol, vehiculo_real)
 
-            # recupera ts para el symbol si existe y not None [activos, datos, update]
-            if symbol in self.info.keys():
+            # recupera ts para el symbol si existe, es del vehiculo correcto y not None [activos, datos, update]
+            cached_vehiculo = self.info.get(symbol, {}).get("_vehiculo")
+            if symbol in self.info.keys() and cached_vehiculo == vehiculo_real:
                 if "activos" in self.info[symbol]:
                     if self.info[symbol]["activos"] is not None:
                         activos = self.info[symbol].get("activos", {})
@@ -2444,13 +2452,14 @@ class TickerInfo(MyOrders):
                 else:
 
                     # si no tiene activos, datos o update, lo reconstruye
-                    indicadores, lotSize = get_datos(symbol=symbol, vehiculo=vehiculo, datos=datos)
+                    indicadores, lotSize = get_datos(symbol=symbol, vehiculo=vehiculo_real, datos=datos)
 
                     update = False
                     with DataHub.lockInfo:
                         self.info.update(
                             {
                                 symbol: {
+                                    "_vehiculo": vehiculo_real,  # guardar vehiculo para validar cache
                                     "activos": activos,  # almacena yf.Ticker.info()
                                     "datos": lambda: CacheHut.get(key_cache),
                                     "lotSize": lotSize,  # almacena minQty y stepSize
@@ -2466,13 +2475,14 @@ class TickerInfo(MyOrders):
             elif symbol not in self.info.keys():
 
                 # reconstruye datos del symbol
-                indicadores, lotSize = get_datos(symbol=symbol, vehiculo=vehiculo, datos=datos)
+                indicadores, lotSize = get_datos(symbol=symbol, vehiculo=vehiculo_real, datos=datos)
 
                 update = False
                 with DataHub.lockInfo:
                     self.info.update(
                         {
                             symbol: {
+                                "_vehiculo": vehiculo_real,  # guardar vehiculo para validar cache
                                 "activos": activos,  # almacena yf.Ticker.info()
                                 "datos": lambda: CacheHut.get(key_cache),
                                 "lotSize": lotSize,  # almacena minQty y stepSize
@@ -2720,7 +2730,7 @@ class TickerInfo(MyOrders):
 
                         # llamado necesario para obtener close['Close']
                         pd.options.mode.copy_on_write = True
-                        x_none, pdatos = get_yfinance(ticket=symbol, vehiculo="hist")
+                        x_none, pdatos = get_yfinance(ticket=symbol, vehiculo="Stock")
 
                         # datos.insert(datos.shape[1], 'Close', 0)
                         datos.index = datos.index.tz_localize(None)
@@ -4726,7 +4736,11 @@ class WidgetVehiculo(TickerInfo):
                 if market:
                     if market[0][iy.index("categoriaActivo")] in ("I", "N", "S", "X"):
                         # ubica información de yfinance.Ticker, para mostrar gráfico de dividends
-                        activo, datos, update = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=self.vehiculo)
+                        result = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=self.vehiculo)
+                        if result is None or not isinstance(result, tuple) or len(result) != 3:
+                            activo, datos, update = {}, pd.DataFrame(), False
+                        else:
+                            activo, datos, update = result
                         self.rendimiento_dividends(
                             fg=fg2,
                             activo=activo,
@@ -4737,8 +4751,12 @@ class WidgetVehiculo(TickerInfo):
                         cv2.draw()
 
                 # fg1 — Rentabilidad por períodos (siempre visible)
-                _veh_r = "hist" if self.vehiculo == "Stock" else ("download" if self.vehiculo == "Crypto" else self.vehiculo)
-                _, pdatos_r, _ = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=_veh_r)
+                _veh_r = "Stock" if self.vehiculo == "Stock" else ("Crypto" if self.vehiculo == "Crypto" else self.vehiculo)
+                result_r = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=_veh_r)
+                if result_r is None or not isinstance(result_r, tuple) or len(result_r) != 3:
+                    pdatos_r = pd.DataFrame()
+                else:
+                    _, pdatos_r, _ = result_r
                 self.graph_returns_periodos(fg=fg1, datos=pdatos_r, symbol=self.symbol)
                 cv1.draw()
 
@@ -4800,13 +4818,17 @@ class WidgetVehiculo(TickerInfo):
 
                 # busca datos yf.download si activo tiene dividendos (stock)
                 if self.vehiculo == "Stock":
-                    vehiculo = "hist"
+                    vehiculo = "Stock"
                 elif self.vehiculo == "Crypto":
-                    vehiculo = "download"
+                    vehiculo = "Crypto"
                 else:
                     vehiculo = self.vehiculo
 
-                activo, pdatos, update = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=vehiculo)
+                result = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=vehiculo)
+                if result is None or not isinstance(result, tuple) or len(result) != 3:
+                    activo, pdatos, update = {}, pd.DataFrame(), False
+                else:
+                    activo, pdatos, update = result
                 if periodo == "D":
                     desde = pd.Timestamp.now(tz=pdatos.index.tz) - pd.DateOffset(days=180)
                     pdatos = pdatos[pdatos.index >= desde]

@@ -570,7 +570,7 @@ def crea_dataframe_index(vehiculo=None, desde=None):
 
         indice = pd.DataFrame()
         # symbol = convierte_ticket_crypto(symbol)
-        activo, datos = get_yfinance(ticket=symbol, vehiculo="donwload", desde=desde, hasta=hoy)
+        activo, datos = get_yfinance(ticket=symbol, vehiculo="download", desde=desde, hasta=hoy)
 
         if datos is None or datos.empty or "Close" not in datos.columns:
             return None
