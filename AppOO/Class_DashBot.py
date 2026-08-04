@@ -1356,6 +1356,33 @@ class ClassAgenteIA:
                 self.logger.warning(f"Preservation({vehiculo}/{symbol}): sin precio → SKIP")
                 continue
 
+            # 4b. NUEVAS VALIDACIONES: RSI diario/semanal + piso mínimo de precio
+            PRECIO_MINIMO = 50.0  # Nunca vender por debajo de $50
+            RSI_VENTA_MIN = 70  # Solo vender si RSI semanal >= 70 (sobrecompra)
+
+            if last < PRECIO_MINIMO:
+                self._preservation_logger.info(
+                    f"[PRECIO-MIN] {symbol}: price={last:.2f} < ${PRECIO_MINIMO} → SKIP (esperar subida)"
+                )
+                continue
+
+            try:
+                ctx_temp = self._build_preservation_context(
+                    symbol, vehiculo, positio, unrealizedpnl, account, conid,
+                    self.account, api_key=_claude_key if _claude_key else None
+                )
+                rsi_d = ctx_temp.get("rsi_d", 50)
+                rsi_w = ctx_temp.get("rsi_w", 50)
+
+                if rsi_w < RSI_VENTA_MIN:
+                    self._preservation_logger.info(
+                        f"[RSI-VETA] {symbol}: RSI_semanal={rsi_w:.1f} < {RSI_VENTA_MIN} → "
+                        f"SKIP (no es sobrecompra semanal) [RSI_diario={rsi_d:.1f}]"
+                    )
+                    continue
+            except Exception as _rsi_e:
+                self._preservation_logger.warning(f"[RSI-ERR] {symbol}: {_rsi_e} → continuando sin validación RSI")
+
             # 5. Calcular ATR (DataHub)
             atr, atr_error = DataHub.preservation_get_atr(symbol, vehiculo)
             if atr is None:
