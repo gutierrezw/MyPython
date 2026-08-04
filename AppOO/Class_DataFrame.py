@@ -3031,12 +3031,23 @@ def draw_rentabilidad(fg, cv, datos, symbol, cchart, cgcolor="#1a1a1a"):
         cv.draw()
         return
 
-    now = datos.index[-1]
-    price_now = float(datos["Close"].iloc[-1])
-    tz = datos.index.tz
+    # Filtrar filas con Close válido (no NaN) — yfinance a veces trae últimas filas vacías
+    datos_valid = datos[datos["Close"].notna()]
+    if datos_valid.empty:
+        ax.text(0.5, 0.5, "Sin datos válidos", ha="center", va="center",
+               color=cchart.get("titulo", "white"), fontsize=10, transform=ax.transAxes)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis("off")
+        cv.draw()
+        return
+
+    now = datos_valid.index[-1]
+    price_now = float(datos_valid["Close"].iloc[-1])
+    tz = datos_valid.index.tz
 
     def _price_at(offset):
-        sub = datos[datos.index <= offset]
+        sub = datos_valid[datos_valid.index <= offset]
         return float(sub["Close"].iloc[-1]) if not sub.empty else None
 
     periodos = [
