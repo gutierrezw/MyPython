@@ -4751,7 +4751,7 @@ class WidgetVehiculo(TickerInfo):
                         cv2.draw()
 
                 # fg1 — Rentabilidad por períodos (siempre visible)
-                _veh_r = "Stock" if self.vehiculo == "Stock" else ("Crypto" if self.vehiculo == "Crypto" else ("BBVA.ARS" if self.vehiculo == "ARS" else self.vehiculo))
+                _veh_r = self.vehiculo
                 result_r = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=_veh_r)
                 if result_r is None or not isinstance(result_r, tuple) or len(result_r) != 3:
                     pdatos_r = pd.DataFrame()
