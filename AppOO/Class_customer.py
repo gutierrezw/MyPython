@@ -4751,7 +4751,7 @@ class WidgetVehiculo(TickerInfo):
                         cv2.draw()
 
                 # fg1 — Rentabilidad por períodos (siempre visible)
-                _veh_r = "Stock" if self.vehiculo == "Stock" else ("Crypto" if self.vehiculo == "Crypto" else self.vehiculo)
+                _veh_r = "Stock" if self.vehiculo == "Stock" else ("Crypto" if self.vehiculo == "Crypto" else ("BBVA.ARS" if self.vehiculo == "ARS" else self.vehiculo))
                 result_r = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=_veh_r)
                 if result_r is None or not isinstance(result_r, tuple) or len(result_r) != 3:
                     pdatos_r = pd.DataFrame()
@@ -6212,12 +6212,17 @@ class WidgetVehiculo(TickerInfo):
             if datos is None or datos.empty:
                 return
 
-            now = datos.index[-1]
-            price_now = float(datos["Close"].iloc[-1])
-            tz = datos.index.tz
+            # Filtrar solo filas con Close válido (no NaN) — yfinance a veces trae últimas filas vacías
+            datos_valid = datos[datos["Close"].notna()]
+            if datos_valid.empty:
+                return
+
+            now = datos_valid.index[-1]
+            price_now = float(datos_valid["Close"].iloc[-1])
+            tz = datos_valid.index.tz
 
             def price_at(offset_date):
-                subset = datos[datos.index <= offset_date]
+                subset = datos_valid[datos_valid.index <= offset_date]
                 return float(subset["Close"].iloc[-1]) if not subset.empty else None
 
             periodos = [
