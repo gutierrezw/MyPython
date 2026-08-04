@@ -6215,11 +6215,14 @@ class WidgetVehiculo(TickerInfo):
             # Filtrar solo filas con Close válido (no NaN) — yfinance a veces trae últimas filas vacías
             datos_valid = datos[datos["Close"].notna()]
             if datos_valid.empty:
+                print(f"[graph_returns_periodos({symbol})]: datos_valid vacío después de filtrar NaN")
+                ax.set_title(f"Rentabilidad {symbol} — sin datos", color=self.cchart.get("titulo", "white"), fontsize=8)
                 return
 
             now = datos_valid.index[-1]
             price_now = float(datos_valid["Close"].iloc[-1])
             tz = datos_valid.index.tz
+            print(f"[graph_returns_periodos({symbol})]: filas={len(datos_valid)}, últimaFecha={now}, price_now={price_now:.2f}")
 
             def price_at(offset_date):
                 subset = datos_valid[datos_valid.index <= offset_date]
