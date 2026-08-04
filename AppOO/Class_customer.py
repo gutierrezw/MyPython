@@ -4694,7 +4694,6 @@ class WidgetVehiculo(TickerInfo):
 
         # ventana inferior para el activo
         def window_analisis():
-            print(f"[window_analisis] INICIO: symbol={self.symbol}, vehiculo={self.vehiculo}")
             try:
                 # define windows de analysis
                 self.rns = tk.Toplevel()
@@ -4733,7 +4732,6 @@ class WidgetVehiculo(TickerInfo):
                 cv3.get_tk_widget().pack()
 
                 # Gráfica performance de dividendo
-                print(f"[window_analisis] Intentando rendimiento_dividends...")
                 market, iy = self.Market.select(account=self.account, symbol=self.symbol)
                 if market:
                     if market[0][iy.index("categoriaActivo")] in ("I", "N", "S", "X"):
@@ -4751,21 +4749,15 @@ class WidgetVehiculo(TickerInfo):
                             plot="yes",
                         )
                         cv2.draw()
-                        print(f"[window_analisis] rendimiento_dividends OK")
 
                 # fg1 — Rentabilidad por períodos (siempre visible)
-                print(f"[window_analisis] Intentando graph_returns_periodos... _veh_r={self.vehiculo}")
                 _veh_r = self.vehiculo
                 result_r = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=_veh_r)
-                print(f"[window_analisis] ts_yfinance_symbol retornó: {type(result_r)}, len={len(result_r) if result_r else 'None'}")
                 if result_r is None or not isinstance(result_r, tuple) or len(result_r) != 3:
                     pdatos_r = pd.DataFrame()
-                    print(f"[window_analisis] pdatos_r es DataFrame vacío")
                 else:
                     _, pdatos_r, _ = result_r
-                    print(f"[window_analisis] pdatos_r shape={pdatos_r.shape}")
                 self.graph_returns_periodos(fg=fg1, datos=pdatos_r, symbol=self.symbol)
-                print(f"[window_analisis] graph_returns_periodos OK")
                 cv1.draw()
 
                 # Gráfica performance acumulado para el symbol
