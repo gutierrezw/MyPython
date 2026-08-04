@@ -1071,6 +1071,24 @@ class ClassAgenteIA:
                 }
                 write_json_tmp("gains_capture_state.json", self.gains_capture_state)
                 try:
+                    if order_id and str(order_id) not in ("None", "null", ""):
+                        limit_price = float(round(lmt_price * 0.99, 2))
+                        values = {
+                            "account": account,
+                            "vehiculo": "Stock",
+                            "conid": int(conid),
+                            "orderType": "LMT",
+                            "price": lmt_price,
+                            "side": "SELL",
+                            "tif": "DAY",
+                            "quantity": float(vender_qty),
+                            "clientOrderId": str(order_id),
+                            "stampPlace": datetime.now(),
+                            "stampSubmit": datetime.now(),
+                            "hash_id_oportunidad": state.get("hash_id_Op"),
+                            "json_detalle": json.dumps(_det),
+                        }
+                        self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
                     self.RepositorioOportunidades.insert_preservation_order(
                         account,
                         "Stock",
@@ -1467,6 +1485,25 @@ class ClassAgenteIA:
                                 "ganancia_protegida_usd": round(float(base_limit), 4),
                             },
                         }
+                        if order_id and str(order_id) not in ("None", "null", ""):
+                            limit_price = float(round(stop_final * 0.99, 2))
+                            values = {
+                                "account": account,
+                                "vehiculo": vehiculo,
+                                "conid": int(conid),
+                                "orderType": "STP LMT",
+                                "price": limit_price,
+                                "side": "SELL",
+                                "intent": "PRESERV",
+                                "tif": "GTC",
+                                "quantity": float(qty),
+                                "clientOrderId": str(order_id),
+                                "stampPlace": datetime.now(),
+                                "stampSubmit": datetime.now(),
+                                "hash_id_oportunidad": hash_id,
+                                "json_detalle": json.dumps(_det),
+                            }
+                            self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
                         self.RepositorioOportunidades.insert_preservation_order(
                             account,
                             vehiculo,
@@ -1993,6 +2030,25 @@ class Telegram:
             }
             write_json_tmp("gains_capture_state.json", self.gains_capture_state)
             try:
+                if order_id and str(order_id) not in ("None", "null", ""):
+                    lmt_price = float(pendiente["lmt_price"])
+                    limit_price = float(round(lmt_price * 0.99, 2))
+                    values = {
+                        "account": pendiente["account"],
+                        "vehiculo": "Stock",
+                        "conid": int(pendiente["conid"]),
+                        "orderType": "LMT",
+                        "price": lmt_price,
+                        "side": "SELL",
+                        "tif": "DAY",
+                        "quantity": float(pendiente["qty"]),
+                        "clientOrderId": str(order_id),
+                        "stampPlace": datetime.now(),
+                        "stampSubmit": datetime.now(),
+                        "hash_id_oportunidad": state.get("hash_id"),
+                        "json_detalle": json.dumps(pendiente.get("det", {})),
+                    }
+                    self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
                 self.RepositorioOportunidades.insert_preservation_order(
                     pendiente["account"],
                     "Stock",
