@@ -1357,10 +1357,8 @@ class ClassAgenteIA:
                 continue
 
             # 4b. NUEVAS VALIDACIONES: RSI diario/semanal + piso mínimo de precio
-            # Leer de sesion.parameters["preservation"] si existen, sino usar defaults
-            pconfig = self.preservation_config.get(vehiculo)
-            PRECIO_MINIMO = pconfig.get("precio_minimo", 50.0 if vehiculo == "Stock" else 0.001) if pconfig else (50.0 if vehiculo == "Stock" else 0.001)
-            RSI_VENTA_MIN = pconfig.get("rsi_venta_min", 70 if vehiculo == "Stock" else 65) if pconfig else (70 if vehiculo == "Stock" else 65)
+            PRECIO_MINIMO = 50.0  # Nunca vender por debajo de $50
+            RSI_VENTA_MIN = 70  # Solo vender si RSI semanal >= 70 (sobrecompra)
 
             if last < PRECIO_MINIMO:
                 self._preservation_logger.info(
