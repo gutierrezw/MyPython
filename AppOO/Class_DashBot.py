@@ -1288,7 +1288,14 @@ class ClassAgenteIA:
         if not time_revision:
             return
 
-        roi_minimo = pconfig.get("roi_minimo", 0.10)
+        # Obtener gainInversion de sesion (ganancia mínima en dólares)
+        try:
+            sesion_data = BDsystem.get_sesion_by_vehiculo(vehiculo)
+            gain_inv_usd = sesion_data.get("gainInversion", 100 if vehiculo == "Stock" else 20) if sesion_data else (100 if vehiculo == "Stock" else 20)
+        except Exception as _e:
+            self.logger.warning(f"Preservation({vehiculo}): no se pudo obtener gainInversion → usando default | {_e}")
+            gain_inv_usd = 100 if vehiculo == "Stock" else 20
+
         proteccion_base = pconfig.get("proteccion_base", 0.50)
         correccion_pct = pconfig.get("correccion_pct", 0.08)
         atr_mult = pconfig.get("atr_mult", 2.0)
@@ -1328,6 +1335,13 @@ class ClassAgenteIA:
                 if _order_exit:
                     try:
                         DataHub.preservation_cancel_order(vehiculo, account, _order_exit, symbol)
+                        # Actualizar status en order_trader a CANCELED
+                        try:
+                            self.RepositorioOportunidades.update_order_trader_by_client_id(
+                                str(_order_exit), account, "CANCELED"
+                            )
+                        except Exception as _db_e:
+                            self._preservation_logger.warning(f"[EXIT-DB] {symbol}: no se pudo actualizar status en BD → {_db_e}")
                         self.preservation_state.pop(symbol, None)
                         _snap_exit = {}
                         for _s, _sd in self.preservation_state.items():
@@ -1420,17 +1434,14 @@ class ClassAgenteIA:
                 if claude_result:
                     stop_claude = claude_result.get("stop_sugerido", 0)
                     stop_final = max(stop_final, stop_claude)
-                    self._preservation_logger.info(
-                        f"[CLAUDE] {symbol}: stop_sugerido={stop_claude:.2f} "
-                        f"urgencia={claude_result.get('urgencia')} razon={claude_result.get('razon')}"
-                    )
+                    # Log CLAUDE solo si hay cambio de orden (comentado para reducir ruido)
+                    # self._preservation_logger.info(...)
 
             # Techo: el stop nunca puede quedar a menos de 1 ATR del precio actual
             stop_max = round(last - atr, 2)
             if stop_final > stop_max:
-                self._preservation_logger.info(
-                    f"[ATR-CAP] {symbol}: stop {stop_final:.2f} recortado a {stop_max:.2f} (last={last:.2f} − ATR={atr:.2f})"
-                )
+                # Log ATR-CAP solo si hay cambio de orden (comentado para reducir ruido)
+                # self._preservation_logger.info(...)
                 stop_final = stop_max
 
             # 9. Cantidad a proteger (DataHub — respeta lotSize en Crypto)

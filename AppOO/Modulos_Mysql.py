@@ -6154,7 +6154,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             print("[Mysql:: select_order_trader({})]: {}".format(vehiculo, error))
 
     def select_order_trader_today(self, account: str, vehiculo: str) -> tuple:
-        """Retorna órdenes de hoy + cualquier orden activa de días anteriores (ej: STOPs de preservation)."""
+        """Retorna órdenes de hoy (cualquier status) + órdenes activas de días anteriores (ej: STOPs de preservation)."""
         conn = self._conectar(tabla="select.order_trader")
         cursor = None
         try:
