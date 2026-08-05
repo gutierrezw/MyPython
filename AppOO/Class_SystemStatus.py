@@ -387,7 +387,20 @@ class system_status(tk.Frame):
                     detalle.insert("", "end", text=f"⚠️ {symbol}: No disponible", tags=("warning",))
                     return
 
-                data = DataHub.info[symbol]
+                # Buscar con normalización si es necesario
+                symbol_key = symbol
+                if symbol not in DataHub.info:
+                    symbol_norm = symbol.upper().strip()
+                    if symbol_norm == "BTC-USD":
+                        symbol_norm = "BITCOSDT"
+                    elif symbol_norm.endswith("-USD"):
+                        symbol_norm = symbol_norm[:-4] + "USDT"
+                    if symbol_norm in DataHub.info:
+                        symbol_key = symbol_norm
+
+                data = DataHub.info.get(symbol_key)
+                if not data:
+                    return
 
                 # Header con símbolo y timestamp
                 if "websocket" in data and "timestamp" in data["websocket"]:

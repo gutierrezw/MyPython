@@ -425,6 +425,11 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desd
 
             return activo, pdatos
 
+        # esta opción para obtener solo datos históricos (para índices, sin buscar info de dividendos)
+        elif vehiculo == "download":
+            pdatos = yf.download(ticket, period=period, progress=False)
+            return {}, pdatos
+
         # esta opción para obtener solo info()
         elif vehiculo == "info()":
             dat = yf.Ticker(ticket)

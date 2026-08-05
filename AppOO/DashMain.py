@@ -349,9 +349,13 @@ class DatosVehivulo(TickerInfo, MyOrders):
             # captura de evento de precio
             if "e" in data.keys():
                 if data["e"] == "24hrTicker":
-                    procesa_stream_crypto(data)
+                    # Solo procesar como Crypto si el vehiculo es Crypto
+                    if self.vehiculo == "Crypto":
+                        procesa_stream_crypto(data)
                 elif data["e"] == "executionReport":
-                    procesa_execution_report_crypto(data)
+                    # Solo procesar como Crypto si el vehiculo es Crypto
+                    if self.vehiculo == "Crypto":
+                        procesa_execution_report_crypto(data)
 
             # captura otros eventos id Client: trasladado a get_orders_binance()
             # elif 'id' in data.keys():
@@ -760,7 +764,17 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                                 if not found_hashId:
 
                                                     # Agrega indicadores técnicos al registro
-                                                    temp = DataHub.info[ticket].get("datos_tecnicos", {})
+                                                    # Buscar con normalización si es necesario
+                                                    ticket_key = ticket
+                                                    if ticket not in DataHub.info:
+                                                        ticket_norm = ticket.upper().strip()
+                                                        if ticket_norm == "BTC-USD":
+                                                            ticket_norm = "BITCOSDT"
+                                                        elif ticket_norm.endswith("-USD"):
+                                                            ticket_norm = ticket_norm[:-4] + "USDT"
+                                                        if ticket_norm in DataHub.info:
+                                                            ticket_key = ticket_norm
+                                                    temp = DataHub.info.get(ticket_key, {}).get("datos_tecnicos", {})
                                                     indicadores = (
                                                         json.dumps(temp, default=str)
                                                         if isinstance(temp, dict)
@@ -1087,7 +1101,17 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         if not found_hashId:
 
                             # Agrega indicadores técnicos al registro
-                            temp = DataHub.info[simbolo].get("datos_tecnicos", {})
+                            # Buscar con normalización si es necesario
+                            simbolo_key = simbolo
+                            if simbolo not in DataHub.info:
+                                simbolo_norm = simbolo.upper().strip()
+                                if simbolo_norm == "BTC-USD":
+                                    simbolo_norm = "BITCOSDT"
+                                elif simbolo_norm.endswith("-USD"):
+                                    simbolo_norm = simbolo_norm[:-4] + "USDT"
+                                if simbolo_norm in DataHub.info:
+                                    simbolo_key = simbolo_norm
+                            temp = DataHub.info.get(simbolo_key, {}).get("datos_tecnicos", {})
                             indicadores = json.dumps(temp, default=str) if isinstance(temp, dict) else temp
                             registro.update({"indicadores": indicadores})
 
@@ -2011,7 +2035,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # invoca API y actualiza inversiones
                     self.carga_inversion_en_positions()
                     self.conector_api_vehiclo()
-                    print(f"Start:(run_positions({self.vehiculo},{len(self.positions)}))")
 
                     # Start thread Websocket -----------------------------------------------------------------------------
                     TSocket, iteraStream = 7200, 1
@@ -3723,7 +3746,18 @@ class DashMain:
                 if symbol:
                     # Obtener vehiculo desde DataHub cache (ya cargado en memoria)
                     vehiculo = None
-                    if symbol in DataHub.info:
+                    # Normalizar símbolo para buscar en cache
+                    symbol_normalized = symbol.upper().strip()
+                    if symbol_normalized == "BTC-USD":
+                        symbol_normalized = "BITCOSDT"
+                    elif symbol_normalized.endswith("-USD"):
+                        symbol_normalized = symbol_normalized[:-4] + "USDT"
+
+                    if symbol_normalized in DataHub.info:
+                        cached_vehiculo = DataHub.info[symbol_normalized].get("_vehiculo")
+                        if cached_vehiculo:
+                            vehiculo = cached_vehiculo
+                    elif symbol in DataHub.info:  # fallback a símbolo original
                         cached_vehiculo = DataHub.info[symbol].get("_vehiculo")
                         if cached_vehiculo:
                             vehiculo = cached_vehiculo
@@ -3749,8 +3783,19 @@ class DashMain:
                 if symbol:
                     vehiculo = None
 
+                    # Normalizar símbolo para buscar en cache
+                    symbol_normalized = symbol.upper().strip()
+                    if symbol_normalized == "BTC-USD":
+                        symbol_normalized = "BITCOSDT"
+                    elif symbol_normalized.endswith("-USD"):
+                        symbol_normalized = symbol_normalized[:-4] + "USDT"
+
                     # Primero intentar desde DataHub cache
-                    if symbol in DataHub.info:
+                    if symbol_normalized in DataHub.info:
+                        cached_vehiculo = DataHub.info[symbol_normalized].get("_vehiculo")
+                        if cached_vehiculo:
+                            vehiculo = cached_vehiculo
+                    elif symbol in DataHub.info:  # fallback a símbolo original
                         cached_vehiculo = DataHub.info[symbol].get("_vehiculo")
                         if cached_vehiculo:
                             vehiculo = cached_vehiculo

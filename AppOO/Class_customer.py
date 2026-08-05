@@ -2424,6 +2424,14 @@ class TickerInfo(MyOrders):
             return indicadores, info_lotsize
 
         try:
+            # Normalizar símbolo a forma canónica antes de cachear
+            symbol_cache = symbol.upper().strip()
+            # Remover sufijos temporales de índices (BTC-USD → BITCOSDT)
+            if symbol_cache == "BTC-USD":
+                symbol_cache = "BITCOSDT"
+            elif symbol_cache.endswith("-USD") and vehiculo in ("Crypto", None):
+                symbol_cache = symbol_cache[:-4] + "USDT"
+
             # Mapear valores genéricos de estrategia a vehiculos reales para descargar
             vehiculo_real = vehiculo if vehiculo else "Stock"
 
@@ -2437,18 +2445,18 @@ class TickerInfo(MyOrders):
 
             activos, datos = result
 
-            # Crear clave de cache
-            key_cache = (symbol, vehiculo_real)
+            # Crear clave de cache con símbolo normalizado
+            key_cache = (symbol_cache, vehiculo_real)
 
             # recupera ts para el symbol si existe, es del vehiculo correcto y not None [activos, datos, update]
-            cached_vehiculo = self.info.get(symbol, {}).get("_vehiculo")
-            if symbol in self.info.keys() and cached_vehiculo == vehiculo_real:
-                if "activos" in self.info[symbol]:
-                    if self.info[symbol]["activos"] is not None:
-                        activos = self.info[symbol].get("activos", {})
-                        lotSize = self.info[symbol].get("lotSize", {})
-                        # datos = self.info[symbol].get("datos", pd.DataFrame())
-                        update = self.info[symbol]["update"]
+            cached_vehiculo = self.info.get(symbol_cache, {}).get("_vehiculo")
+            if symbol_cache in self.info.keys() and cached_vehiculo == vehiculo_real:
+                if "activos" in self.info[symbol_cache]:
+                    if self.info[symbol_cache]["activos"] is not None:
+                        activos = self.info[symbol_cache].get("activos", {})
+                        lotSize = self.info[symbol_cache].get("lotSize", {})
+                        # datos = self.info[symbol_cache].get("datos", pd.DataFrame())
+                        update = self.info[symbol_cache]["update"]
                         return activos, datos, update
 
                 # si no tiene activos, datos o update, lo reconstruye
@@ -2456,18 +2464,18 @@ class TickerInfo(MyOrders):
 
                 update = False
                 with DataHub.lockInfo:
-                    self.info.update(
-                        {
-                            symbol: {
-                                "_vehiculo": vehiculo_real,  # guardar vehiculo para validar cache
-                                "activos": activos,  # almacena yf.Ticker.info()
-                                "datos": lambda: CacheHut.get(key_cache),
-                                "lotSize": lotSize,  # almacena minQty y stepSize
-                                "datos_tecnicos": indicadores,  # almacena datos técnicos
-                                "update": update,
-                            }
-                        }
-                    )  # True: si contiene dividends
+                    cache_entry = {
+                        "_vehiculo": vehiculo_real,  # guardar vehiculo para validar cache
+                        "activos": activos,  # almacena yf.Ticker.info()
+                        "datos": lambda: CacheHut.get(key_cache),
+                        "lotSize": lotSize,  # almacena minQty y stepSize
+                        "datos_tecnicos": indicadores,  # almacena datos técnicos
+                        "update": update,
+                    }
+                    self.info[symbol_cache] = cache_entry
+                    # Si símbolo es distinto, guardar ambas claves para compatibilidad
+                    if symbol_cache != symbol:
+                        self.info[symbol] = cache_entry
 
                 return activos, datos, update
 
@@ -2478,18 +2486,18 @@ class TickerInfo(MyOrders):
 
                 update = False
                 with DataHub.lockInfo:
-                    self.info.update(
-                        {
-                            symbol: {
-                                "_vehiculo": vehiculo_real,  # guardar vehiculo para validar cache
-                                "activos": activos,  # almacena yf.Ticker.info()
-                                "datos": lambda: CacheHut.get(key_cache),
-                                "lotSize": lotSize,  # almacena minQty y stepSize
-                                "datos_tecnicos": indicadores,  # almacena datos técnicos
-                                "update": update,
-                            }
-                        }
-                    )  # True: si contiene dividends update = False
+                    cache_entry = {
+                        "_vehiculo": vehiculo_real,  # guardar vehiculo para validar cache
+                        "activos": activos,  # almacena yf.Ticker.info()
+                        "datos": lambda: CacheHut.get(key_cache),
+                        "lotSize": lotSize,  # almacena minQty y stepSize
+                        "datos_tecnicos": indicadores,  # almacena datos técnicos
+                        "update": update,
+                    }
+                    self.info[symbol_cache] = cache_entry
+                    # Si símbolo es distinto, guardar ambas claves para compatibilidad
+                    if symbol_cache != symbol:
+                        self.info[symbol] = cache_entry
 
                 return activos, datos, update
         except Exception as e:
@@ -3035,6 +3043,7 @@ class TickerInfo(MyOrders):
                 data[_KEY] = ultimo_cierre.strftime("%Y-%m-%d")
                 write_json_tmp(_FILE, data)
                 DataHub.last_process["graph_performace_portafolio"] = False
+                DataHub.last_process[self.vehiculo]["diaria_book_performance"] = ultimo_cierre
                 proceso_update_performance(account=self.account, vehiculo=self.vehiculo)
                 self.logger.warning(f"schedule_diario({self.vehiculo}): diaria {ultimo_cierre} procesada OK")
             else:
@@ -6221,7 +6230,6 @@ class WidgetVehiculo(TickerInfo):
             now = datos_valid.index[-1]
             price_now = float(datos_valid["Close"].iloc[-1])
             tz = datos_valid.index.tz
-            print(f"[graph_returns_periodos({symbol})]: filas={len(datos_valid)}, últimaFecha={now}, price_now={price_now:.2f}")
 
             def price_at(offset_date):
                 subset = datos_valid[datos_valid.index <= offset_date]
