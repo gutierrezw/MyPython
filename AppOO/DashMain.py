@@ -3715,34 +3715,61 @@ class DashMain:
 
             elif tipo == "Sector":
                 symbol = str(values[1]).strip()
-                if symbol and d_country:
-                    activo = None
-                    for sector_activos in d_country.values():
-                        for a in sector_activos:
-                            if a["symbol"] == symbol:
-                                activo = a
-                                break
-                        if activo:
-                            break
-                    grafico_rendimiento_symbol(symbol=symbol, windows=windows, activo=activo)
+                if symbol:
+                    grafico_rendimiento_symbol(symbol=symbol, windows=windows)
 
             elif tipo == "Activo":
                 symbol = values[1]
                 if symbol:
-                    grafico_rendimiento_symbol(symbol=symbol, windows=windows)
+                    # Obtener vehiculo desde DataHub cache (ya cargado en memoria)
+                    vehiculo = None
+                    if symbol in DataHub.info:
+                        cached_vehiculo = DataHub.info[symbol].get("_vehiculo")
+                        if cached_vehiculo:
+                            vehiculo = cached_vehiculo
+
+                    # Si no está en cache, buscar en position
+                    if not vehiculo:
+                        positions = self.PlanInversion.select_inversion(tipoin="activo", ticket="all")
+                        for pos in positions:
+                            if convierte_ticket_crypto(pos["ticket"]) == symbol:
+                                tipoinv = pos.get("tipoinv", "Stock")
+                                if tipoinv in ("FCI", "Balance"):
+                                    vehiculo = "Balance"
+                                else:
+                                    vehiculo = tipoinv
+                                break
+
+                    # Pasar vehiculo igual que Análisis
+                    activo = {"vehiculo": vehiculo} if vehiculo else None
+                    grafico_rendimiento_symbol(symbol=symbol, windows=windows, activo=activo)
 
             elif tipo == "Region":
                 symbol = str(values[1]).strip()
-                if symbol and d_country:
-                    # Buscar activo completo en d_country
-                    activo = None
-                    for pais_activos in d_country.values():
-                        for a in pais_activos:
-                            if a["symbol"] == symbol:
-                                activo = a
+                if symbol:
+                    vehiculo = None
+
+                    # Primero intentar desde DataHub cache
+                    if symbol in DataHub.info:
+                        cached_vehiculo = DataHub.info[symbol].get("_vehiculo")
+                        if cached_vehiculo:
+                            vehiculo = cached_vehiculo
+
+                    # Si no está en cache, detectar desde d_country (Crypto o FCI)
+                    if not vehiculo and d_country:
+                        for country_activos in d_country.values():
+                            for a in country_activos:
+                                if a.get("symbol") == symbol:
+                                    country = a.get("country", "")
+                                    if country == "Digital" or d_country.get("Crypto"):  # Es Crypto
+                                        vehiculo = "Crypto"
+                                    elif a.get("idcrypto"):  # Es FCI
+                                        vehiculo = "Balance"
+                                    break
+                            if vehiculo:
                                 break
-                        if activo:
-                            break
+
+                    activo = {"vehiculo": vehiculo} if vehiculo else None
                     grafico_rendimiento_symbol(symbol=symbol, windows=windows, activo=activo)
 
         # selecciona y clasifica detalle por symbol y dividendos
@@ -4188,7 +4215,7 @@ class DashMain:
                 t_symbol = ["{:4.1f}".format(s) for s in resumen_mes]
                 tree.insert_row(summary=["", "", costo, "", total, rend] + t_symbol)
 
-                grafico_rendimiento_symbol(symbol=ticket, windows=windows)
+                grafico_rendimiento_symbol(symbol=ticket, windows=windows, activo=activo_data)
             except Exception as e:
                 print("treeview_TipoActivo(): {}".format(e))
 

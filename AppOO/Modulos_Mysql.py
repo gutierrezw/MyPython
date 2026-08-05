@@ -4382,6 +4382,8 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
 
         # obtiene idcrypto desde tabla otros_activos
         OtrActivos, found = self.select_otros_activos(symbol=symbol)
+        if not found or not OtrActivos:
+            return pd.DataFrame()
 
         # 1. Construir la consulta SQL con los cálculos y el filtro principal
         sql_query = f"""

@@ -2449,31 +2449,30 @@ class TickerInfo(MyOrders):
                         lotSize = self.info[symbol].get("lotSize", {})
                         # datos = self.info[symbol].get("datos", pd.DataFrame())
                         update = self.info[symbol]["update"]
-                else:
+                        return activos, datos, update
 
-                    # si no tiene activos, datos o update, lo reconstruye
-                    indicadores, lotSize = get_datos(symbol=symbol, vehiculo=vehiculo_real, datos=datos)
+                # si no tiene activos, datos o update, lo reconstruye
+                indicadores, lotSize = get_datos(symbol=symbol, vehiculo=vehiculo_real, datos=datos)
 
-                    update = False
-                    with DataHub.lockInfo:
-                        self.info.update(
-                            {
-                                symbol: {
-                                    "_vehiculo": vehiculo_real,  # guardar vehiculo para validar cache
-                                    "activos": activos,  # almacena yf.Ticker.info()
-                                    "datos": lambda: CacheHut.get(key_cache),
-                                    "lotSize": lotSize,  # almacena minQty y stepSize
-                                    "datos_tecnicos": indicadores,  # almacena datos técnicos
-                                    "update": update,
-                                }
+                update = False
+                with DataHub.lockInfo:
+                    self.info.update(
+                        {
+                            symbol: {
+                                "_vehiculo": vehiculo_real,  # guardar vehiculo para validar cache
+                                "activos": activos,  # almacena yf.Ticker.info()
+                                "datos": lambda: CacheHut.get(key_cache),
+                                "lotSize": lotSize,  # almacena minQty y stepSize
+                                "datos_tecnicos": indicadores,  # almacena datos técnicos
+                                "update": update,
                             }
-                        )  # True: si contiene dividends
+                        }
+                    )  # True: si contiene dividends
 
                 return activos, datos, update
 
-            # crea ts para el symbol si no existe o es None [activos, datos, update]
-            elif symbol not in self.info.keys():
-
+            # crea ts para el symbol si no existe o si el vehiculo es diferente
+            else:
                 # reconstruye datos del symbol
                 indicadores, lotSize = get_datos(symbol=symbol, vehiculo=vehiculo_real, datos=datos)
 
