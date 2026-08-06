@@ -235,7 +235,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     conid = crypto[0]["idcrypto"]
 
                     # procesa_crypto(symbol, d_precio)
-                    if d_precio and ("position" in self.assets[symbol].keys()):
+                    if d_precio and symbol in self.assets and ("position" in self.assets[symbol].keys()):
                         wallet = self.assets[symbol]["position"]
 
                         stock = wallet["netAsset"] + wallet["borrowed"]
@@ -362,7 +362,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
             #         if data["id"] == "allOrders_5494febb":
             #            procesa_orders_crypto(data)
         except json.JSONDecodeError or Exception as error:
-            print("[on_message_binance_websocket()]: {}".format(error))
+            symbol = data.get("s", "?") if isinstance(data, dict) else "?"
+            print(f"[procesa_stream_crypto() vehiculo={self.vehiculo} symbol={symbol}]: {type(error).__name__}: {error}")
             time.sleep(1)
 
     def on_message_IBrks_websocket(self, message):

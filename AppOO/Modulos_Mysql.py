@@ -4149,7 +4149,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 result = cursor.fetchone()
 
             elif vehiculo is not None:
-                qury += " AND tipoinv = %s;"
+                qry += " AND tipoinv = %s;"
                 cursor.execute(qry, vehiculo)
                 result = cursor.fetchone()
 
@@ -4405,7 +4405,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             sql_query += f" AND fecha >= '{start}'"
 
         elif start is None:
-            inicio = datetime.now() - timedelta(days=365)
+            inicio = datetime.now() - timedelta(days=1800)
             desde = inicio.strftime("%Y-%m-%d")
             sql_query += f" AND fecha >= '{desde}'"
 

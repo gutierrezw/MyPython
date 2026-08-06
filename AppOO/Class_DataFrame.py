@@ -336,7 +336,7 @@ def get_yf_status() -> dict:
 # 📊 Función principal get_yfinance: encapsula llamados a yfinance
 # =================================================================
 @use_dataframe_cache(CacheHut)
-def get_yfinance(ticket=None, vehiculo="Stock", period="5y", interval="1d", desde=None, hasta=None):
+def get_yfinance(ticket=None, vehiculo="Stock", period="7y", interval="1d", desde=None, hasta=None):
     """
     @param ticket: id de activo
     @param vehiculo: tipo de activo Crypto, stock
