@@ -4264,8 +4264,7 @@ class system_status(tk.Frame):
 
             # Cargar símbolos disponibles
             def load_symbols():
-                db = BDsystem()
-                conn = db._conectar(tabla="select.symbol_decision_history")
+                conn = BDsystem.connect_dbase("select.symbol_decision_history")
                 cursor = conn.cursor()
                 try:
                     cursor.execute("SELECT DISTINCT symbol FROM symbol_decision_history ORDER BY symbol")
@@ -4288,8 +4287,7 @@ class system_status(tk.Frame):
                 if not symbol:
                     return
 
-                db = BDsystem()
-                conn = db._conectar(tabla="select.symbol_decision_history")
+                conn = BDsystem.connect_dbase("select.symbol_decision_history")
                 cursor = conn.cursor()
                 try:
                     cursor.execute("""
