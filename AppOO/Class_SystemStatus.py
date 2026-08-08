@@ -4240,7 +4240,7 @@ class system_status(tk.Frame):
                 tree_frame,
                 columns=("timestamp", "agente", "tag", "mensaje"),
                 height=10,
-                ysrollcommand=vsb.set,
+                yscrollcommand=vsb.set,
                 xscrollcommand=hsb.set
             )
 
