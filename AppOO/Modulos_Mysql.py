@@ -6155,6 +6155,64 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.close()
             conn.close()
 
+    def append_order_audit_log(self, order_id: int, tag: str, mensaje: str = None, data: dict = None) -> bool:
+        """
+        Registra un evento en order_trader.json_audit_log (Fase 1 - GainsCapture + Preservation).
+
+        @param order_id: clientOrderId de order_trader
+        @param tag: 'CLAUDE', 'ENVIADA', 'MODIFIED', 'FILLED', 'EXIT', etc
+        @param mensaje: descripción legible del evento
+        @param data: dict con contexto técnico (roi, rsi_d, stop_final, etc)
+        @return: True si se registró exitosamente
+        """
+        conn = self._conectar(tabla="insert.order_trader")
+        cursor = None
+        try:
+            import json
+            from datetime import datetime
+
+            event = {
+                "ts": datetime.now().isoformat(),
+                "tag": tag,
+                "msg": mensaje,
+                "data": data or {}
+            }
+            event_json = json.dumps(event)
+
+            cursor = conn.cursor()
+            # Verificar si ya existe json_audit_log
+            cursor.execute(
+                "SELECT json_audit_log FROM order_trader WHERE clientOrderId=%s",
+                (order_id,)
+            )
+            result = cursor.fetchone()
+
+            if result and result[0]:  # Si ya tiene eventos
+                cursor.execute(
+                    """UPDATE order_trader
+                       SET json_audit_log=JSON_ARRAY_APPEND(json_audit_log, '$.events', %s)
+                       WHERE clientOrderId=%s""",
+                    (event_json, order_id)
+                )
+            else:  # Primer evento
+                audit_log = json.dumps({"events": [event]})
+                cursor.execute(
+                    """UPDATE order_trader
+                       SET json_audit_log=%s
+                       WHERE clientOrderId=%s""",
+                    (audit_log, order_id)
+                )
+
+            conn.commit()
+            return cursor.rowcount > 0
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::append_order_audit_log]: {error}")
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
     def select_order_trader(self, account=None, vehiculo=None, symbol=None, conid=None):
         """
         @param account: id de cuenta inversionista

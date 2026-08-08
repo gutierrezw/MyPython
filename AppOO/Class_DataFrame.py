@@ -433,6 +433,10 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="7y", interval="1d", desd
                 pdatos = yf.download(ticket, start=start_str, end=end_str, progress=False)
             else:
                 pdatos = yf.download(ticket, period=period, progress=False)
+            # extraer el primer nivel de las columnas (en caso de múltiples niveles)
+            if hasattr(pdatos.columns, 'levels'):
+                pdatos.columns = pdatos.columns.get_level_values(0)
+                pdatos = pdatos.loc[:, ~pdatos.columns.duplicated()]
             return {}, pdatos
 
         # esta opción para obtener solo info()

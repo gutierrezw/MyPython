@@ -1001,7 +1001,8 @@ class ClassAgenteIA:
                 claude_result = self._gains_capture_claude_eval(
                     symbol, roi_ref, ganancia_ref, last, datos_tecnicos, _claude_key
                 )
-                # Registrar evaluación de Claude
+                # Nota: logging en json_audit_log se hace DESPUÉS de insertar en order_trader
+                # (cuando ya existe clientOrderId). Aquí registramos en symbol_decision_history.
                 try:
                     self.RepositorioOportunidades.insert_symbol_decision_history(
                         symbol=symbol,
@@ -1108,6 +1109,22 @@ class ClassAgenteIA:
                             "json_detalle": json.dumps(_det),
                         }
                         self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
+                        # Registrar en json_audit_log (ENVIADA)
+                        try:
+                            self.RepositorioOportunidades.append_order_audit_log(
+                                order_id=str(order_id),
+                                tag="ENVIADA",
+                                mensaje=f"GainsCapture: LMT SELL {vender_qty} acc @ ${lmt_price:.2f}",
+                                data={
+                                    "order_id": str(order_id),
+                                    "qty": vender_qty,
+                                    "lmt_price": lmt_price,
+                                    "escenario": escenario_key.strip(),
+                                    "modo": DataHub.gains_capture_modo
+                                }
+                            )
+                        except Exception as _e:
+                            _gc_logger.debug(f"[ORDER_AUDIT] {symbol}: error registrando ENVIADA → {_e}")
                         # Registrar en symbol_decision_history (ENVIADA)
                         try:
                             self.RepositorioOportunidades.insert_symbol_decision_history(
@@ -1610,7 +1627,26 @@ class ClassAgenteIA:
                                 "json_detalle": json.dumps(_det),
                             }
                             self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
-                            # Registrar en symbol_decision_history (ENVIADA)
+                            # Registrar en json_audit_log (ENVIADA o MODIFICADA)
+                            try:
+                                tag_accion = "MODIFICADA" if order_id_prev else "ENVIADA"
+                                self.RepositorioOportunidades.append_order_audit_log(
+                                    order_id=str(order_id),
+                                    tag=tag_accion,
+                                    mensaje=f"Preservation({vehiculo}/{symbol}): STP LMT {qty} acc @ {stop_final:.2f}",
+                                    data={
+                                        "order_id": str(order_id),
+                                        "stop_final": round(float(stop_final), 4),
+                                        "qty": int(qty),
+                                        "stop_anterior": round(float(stop_anterior), 4) if order_id_prev else None,
+                                        "stop_calculado": round(float(stop_calculado), 4),
+                                        "atr": round(float(atr), 4),
+                                        "roi": round(float(roi), 4)
+                                    }
+                                )
+                            except Exception as _e:
+                                self._preservation_logger.debug(f"[ORDER_AUDIT] {symbol}: error registrando {tag_accion} → {_e}")
+                            # Registrar en symbol_decision_history (ENVIADA o MODIFICADA)
                             try:
                                 tag_accion = "MODIFICADA" if order_id_prev else "ENVIADA"
                                 self.RepositorioOportunidades.insert_symbol_decision_history(
