@@ -1,5 +1,16 @@
 # AppOO — Convenciones específicas del proyecto
 
+## ⚙️ Protocolo Obligatorio
+
+**Al inicio de CADA SESIÓN y cuando hay CONFLICTO de decisión:**
+- Leer `FEEDBACK.md` (18 patrones validados)
+- Consultar si ya existe solución para el problema
+- Evitar duplicar enfoques ya resueltos
+
+**Motivo:** Asegurar consistencia sesión a sesión. FEEDBACK.md es fuente de verdad para patrones de trabajo.
+
+---
+
 ## Visión de plataforma — principios arquitectónicos
 
 AppOO es una plataforma de automatización de inversiones con visión de evolucionar de herramienta personal a servicio para terceros. La arquitectura debe soportar ese camino sin reescrituras.
