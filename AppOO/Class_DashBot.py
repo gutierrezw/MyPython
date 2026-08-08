@@ -933,12 +933,11 @@ class ClassAgenteIA:
         symbols_gain = DataHub.get_info_symbols_gain()
 
         symbols_in_gain = [s.get("symbol") for s in symbols_gain if s.get("symbol")]
-        _gc_logger.warning(f"GainsCapture: evaluando {len(symbols_in_gain)} símbolos en ganancia: {symbols_in_gain}")
         for sym_data in symbols_gain:
             symbol = sym_data.get("symbol")
             categ = categories.get(symbol)
             if categ != "N":
-                _gc_logger.warning(f"GainsCapture({symbol}): categoriaActivo={categ!r} != 'N' → SKIP")
+                _gc_logger.debug(f"GainsCapture({symbol}): categoriaActivo={categ!r} != 'N' → SKIP")
                 continue
 
             list_gain = sym_data.get("list_gain", [])
@@ -965,6 +964,8 @@ class ClassAgenteIA:
             ganancia_ref = mejor_lote["ganancia"]
             last = sym_data.get("last", 0)
             conid, account = conid_map.get(symbol, (None, None))
+
+            _gc_logger.warning(f"GainsCapture: {symbol} → ROI={roi_ref:.1%} (${ganancia_ref:.2f}) | {len(lotes_validos)} lotes")
 
             state = self.gains_capture_state.get(symbol, {})
             estado = state.get("estado", "normal")
@@ -1000,6 +1001,24 @@ class ClassAgenteIA:
                 claude_result = self._gains_capture_claude_eval(
                     symbol, roi_ref, ganancia_ref, last, datos_tecnicos, _claude_key
                 )
+                # Registrar evaluación de Claude
+                try:
+                    self.RepositorioOportunidades.insert_symbol_decision_history(
+                        symbol=symbol,
+                        agente="GainsCapture",
+                        tag="CLAUDE",
+                        mensaje=f"accion={claude_result.get('accion')} urgencia={claude_result.get('urgencia')}",
+                        json_contexto={
+                            "accion": claude_result.get("accion"),
+                            "urgencia": claude_result.get("urgencia"),
+                            "roi": round(float(roi_ref), 4),
+                            "rsi_d": float(datos_tecnicos.get("diaria", {}).get("rsi")) if datos_tecnicos.get("diaria", {}).get("rsi") else None,
+                            "razon": claude_result.get("razon")[:100] if claude_result.get("razon") else None
+                        },
+                        order_trader_id=None
+                    )
+                except Exception as _e:
+                    _gc_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CLAUDE → {_e}")
 
             if not claude_result or claude_result.get("accion") != "vender":
                 razon = claude_result.get("razon", "") if claude_result else "sin evaluación"
@@ -1089,6 +1108,23 @@ class ClassAgenteIA:
                             "json_detalle": json.dumps(_det),
                         }
                         self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
+                        # Registrar en symbol_decision_history (ENVIADA)
+                        try:
+                            self.RepositorioOportunidades.insert_symbol_decision_history(
+                                symbol=symbol,
+                                agente="GainsCapture",
+                                tag="ENVIADA",
+                                mensaje=f"LMT SELL {vender_qty} acc @ ${lmt_price:.2f}",
+                                json_contexto={
+                                    "order_id": int(order_id) if order_id else None,
+                                    "qty": int(vender_qty),
+                                    "lmt_price": round(float(lmt_price), 4),
+                                    "nivel_roi": round(float(roi_ref), 4)
+                                },
+                                order_trader_id=None
+                            )
+                        except Exception as _e2:
+                            _gc_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando ENVIADA → {_e2}")
                     self.RepositorioOportunidades.insert_preservation_order(
                         account,
                         "Stock",
@@ -1353,6 +1389,22 @@ class ClassAgenteIA:
                         self._preservation_logger.info(
                             f"[EXIT] {symbol}: ROI={roi:.1%} < {roi_minimo:.0%} → orden {_order_exit} cancelada y removida del state"
                         )
+                        # Registrar en symbol_decision_history (EXIT)
+                        try:
+                            self.RepositorioOportunidades.insert_symbol_decision_history(
+                                symbol=symbol,
+                                agente="Preservation",
+                                tag="EXIT",
+                                mensaje=f"ROI={roi:.1%} < {roi_minimo:.0%} → cancelada",
+                                json_contexto={
+                                    "roi": round(float(roi), 4),
+                                    "roi_minimo": round(float(roi_minimo), 4),
+                                    "order_id_cancelada": int(_order_exit) if _order_exit else None
+                                },
+                                order_trader_id=None
+                            )
+                        except Exception as _e2:
+                            self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando EXIT → {_e2}")
                     except Exception as _e:
                         self._preservation_logger.error(f"[EXIT-ERR] {symbol}: no se pudo cancelar {_order_exit} → {_e}")
                 continue
@@ -1434,8 +1486,24 @@ class ClassAgenteIA:
                 if claude_result:
                     stop_claude = claude_result.get("stop_sugerido", 0)
                     stop_final = max(stop_final, stop_claude)
-                    # Log CLAUDE solo si hay cambio de orden (comentado para reducir ruido)
-                    # self._preservation_logger.info(...)
+                    # Registrar en symbol_decision_history (CLAUDE)
+                    try:
+                        self.RepositorioOportunidades.insert_symbol_decision_history(
+                            symbol=symbol,
+                            agente="Preservation",
+                            tag="CLAUDE",
+                            mensaje=f"stop_sugerido={stop_claude:.2f} urgencia={claude_result.get('urgencia')}",
+                            json_contexto={
+                                "stop_sugerido": round(float(stop_claude), 4),
+                                "urgencia": claude_result.get("urgencia"),
+                                "roi": round(float(roi), 4),
+                                "rsi_d": float(ctx.get("rsi_d")) if ctx.get("rsi_d") else None,
+                                "razon": claude_result.get("razon")[:100] if claude_result.get("razon") else None
+                            },
+                            order_trader_id=None
+                        )
+                    except Exception as _e:
+                        self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CLAUDE → {_e}")
 
             # Techo: el stop nunca puede quedar a menos de 1 ATR del precio actual
             stop_max = round(last - atr, 2)
@@ -1542,6 +1610,24 @@ class ClassAgenteIA:
                                 "json_detalle": json.dumps(_det),
                             }
                             self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
+                            # Registrar en symbol_decision_history (ENVIADA)
+                            try:
+                                tag_accion = "MODIFICADA" if order_id_prev else "ENVIADA"
+                                self.RepositorioOportunidades.insert_symbol_decision_history(
+                                    symbol=symbol,
+                                    agente="Preservation",
+                                    tag=tag_accion,
+                                    mensaje=f"STP LMT {qty} acc @ {stop_final:.2f}",
+                                    json_contexto={
+                                        "order_id": int(order_id) if order_id else None,
+                                        "stop_final": round(float(stop_final), 4),
+                                        "qty": int(qty),
+                                        "stop_anterior": round(float(stop_anterior), 4) if order_id_prev else None
+                                    },
+                                    order_trader_id=None  # Se actualizará cuando order_trader.id se conozca
+                                )
+                            except Exception as _e:
+                                self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando ENVIADA → {_e}")
                         self.RepositorioOportunidades.insert_preservation_order(
                             account,
                             vehiculo,

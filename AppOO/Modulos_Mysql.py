@@ -6121,6 +6121,40 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.close()
             conn.close()
 
+    def insert_symbol_decision_history(self, symbol: str, agente: str, tag: str, mensaje: str = None, json_contexto: dict = None, order_trader_id: int = None):
+        """
+        Registra un evento de decisión en symbol_decision_history.
+
+        @param symbol: símbolo del activo (ej: 'SKLZ', 'BP')
+        @param agente: 'GainsCapture' o 'Preservation'
+        @param tag: 'CLAUDE', 'ENVIADA', 'FILLED', 'MODIFICADA', 'EXIT', etc
+        @param mensaje: descripción legible del evento
+        @param json_contexto: dict con contexto técnico (roi, rsi_d, etc)
+        @param order_trader_id: referencia a order_trader.id (nullable)
+        """
+        conn = self._conectar(tabla="insert.symbol_decision_history")
+        cursor = None
+        try:
+            import json
+            from datetime import datetime
+
+            json_str = json.dumps(json_contexto) if json_contexto else None
+
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO symbol_decision_history
+                   (symbol, agente, tag, mensaje, json_contexto, order_trader_id, timestamp)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (symbol, agente, tag, mensaje, json_str, order_trader_id, datetime.now())
+            )
+            conn.commit()
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::insert_symbol_decision_history]: {error}")
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
     def select_order_trader(self, account=None, vehiculo=None, symbol=None, conid=None):
         """
         @param account: id de cuenta inversionista
@@ -6227,6 +6261,32 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 continue
             if self.update_order_trader_by_client_id(coid, account, _STATUS_MAP.get(ib_status, ib_status)):
                 updated += 1
+                # Registrar en symbol_decision_history si es FILLED
+                if ib_status == "Filled":
+                    try:
+                        # Obtener símbolo y otros detalles de order_trader
+                        conn = self._conectar(tabla="select.order_trader")
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "SELECT symbol, intent FROM order_trader WHERE clientOrderId = %s AND account = %s",
+                            (coid, account)
+                        )
+                        row = cursor.fetchone()
+                        cursor.close()
+                        conn.close()
+                        if row:
+                            symbol, intent = row[0], row[1]
+                            agente = "Preservation" if intent == "PRESERV" else "GainsCapture"
+                            self.insert_symbol_decision_history(
+                                symbol=symbol,
+                                agente=agente,
+                                tag="FILLED",
+                                mensaje=f"Orden {coid} completada",
+                                json_contexto={"order_id": int(coid) if coid.isdigit() else coid},
+                                order_trader_id=None
+                            )
+                    except Exception as _e:
+                        _logger.debug(f"[sync_orders_from_ib] error registrando FILLED {coid}: {_e}")
         if updated:
             _logger.warning(f"sync_orders_from_ib: {updated} actualizadas account={account}")
         return updated
@@ -6263,6 +6323,22 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 bn_status = _STATUS_MAP.get(detail.get("status", ""), detail.get("status", ""))
                 if self.update_order_trader_by_client_id(coid, account, bn_status):
                     updated += 1
+                    # Registrar en symbol_decision_history si es FILLED
+                    if detail.get("status") == "FILLED":
+                        try:
+                            symbol = r.get("symbol")
+                            intent = r.get("intent", "")
+                            agente = "Preservation" if intent == "PRESERV" else "GainsCapture"
+                            self.insert_symbol_decision_history(
+                                symbol=symbol,
+                                agente=agente,
+                                tag="FILLED",
+                                mensaje=f"Orden {coid} completada en Binance",
+                                json_contexto={"order_id": int(coid) if coid.isdigit() else coid},
+                                order_trader_id=None
+                            )
+                        except Exception as _e2:
+                            _logger.debug(f"[sync_orders_from_binance] error registrando FILLED {coid}: {_e2}")
             except Exception as e:
                 _logger.warning(f"[sync_orders_from_binance] {r.get('symbol')}: {e}")
         if updated:

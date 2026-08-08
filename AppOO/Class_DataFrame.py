@@ -427,7 +427,12 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="7y", interval="1d", desd
 
         # esta opción para obtener solo datos históricos (para índices, sin buscar info de dividendos)
         elif vehiculo == "download":
-            pdatos = yf.download(ticket, period=period, progress=False)
+            if desde and hasta:
+                start_str = str(desde) if not isinstance(desde, str) else desde
+                end_str = str(hasta) if not isinstance(hasta, str) else hasta
+                pdatos = yf.download(ticket, start=start_str, end=end_str, progress=False)
+            else:
+                pdatos = yf.download(ticket, period=period, progress=False)
             return {}, pdatos
 
         # esta opción para obtener solo info()
@@ -477,7 +482,9 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="7y", interval="1d", desd
                 # download con fecha desde y hasta
                 if not is_none(desde) and not is_none(hasta):
 
-                    pdatos = yf.download(ticket, start=str(desde), auto_adjust=True, progress=False)
+                    start_str = str(desde) if not isinstance(desde, str) else desde
+                    end_str = str(hasta) if not isinstance(hasta, str) else hasta
+                    pdatos = yf.download(ticket, start=start_str, end=end_str, auto_adjust=True, progress=False)
 
                     # extraer el primer nivel de las columnas sacando infor Ticker
                     pdatos.columns = pdatos.columns.get_level_values(0)

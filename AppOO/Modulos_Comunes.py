@@ -153,7 +153,7 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
         return datos
 
     except Exception as error:
-        print("[performa_asset({})]: {}".format(vehiculo, error))
+        pass
 
 
 # carga de datos diarios desde CSV e inserta en la tabla diaria_performance
@@ -565,11 +565,14 @@ def actualiza_performa_inversion(account=None, vehiculo=None):
 # Modulo para crear performance del indice asociado al vehiculo
 def crea_dataframe_index(vehiculo=None, desde=None):
     try:
+        from Modulos_Utilitarios import convierte_ticket_crypto
         hoy = (datetime.now() - timedelta(days=1)).date()
         symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=vehiculo)
 
         indice = pd.DataFrame()
-        # symbol = convierte_ticket_crypto(symbol)
+        # Convertir símbolo crypto a formato Yahoo (BTCUSDT → BTC-USD)
+        if vehiculo in ("Crypto", "token", "BotCrypto"):
+            symbol = convierte_ticket_crypto(symbol)
         activo, datos = get_yfinance(ticket=symbol, vehiculo="download", desde=desde, hasta=hoy)
 
         if datos is None or datos.empty or "Close" not in datos.columns:
