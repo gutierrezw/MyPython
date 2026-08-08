@@ -4217,8 +4217,6 @@ class system_status(tk.Frame):
         Selector de símbolo + Tabla timeline (timestamp, agente, tag, mensaje, contexto).
         """
         try:
-            from Modulos_Mysql import Modulos_MySQL
-
             # Frame superior — Selector de símbolo
             top_frame = ttk.Frame(self.symbol_events, style="C.TFrame")
             top_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
@@ -4266,7 +4264,7 @@ class system_status(tk.Frame):
 
             # Cargar símbolos disponibles
             def load_symbols():
-                db = Modulos_MySQL()
+                db = BDsystem()
                 conn = db._conectar(tabla="select.symbol_decision_history")
                 cursor = conn.cursor()
                 try:
@@ -4290,7 +4288,7 @@ class system_status(tk.Frame):
                 if not symbol:
                     return
 
-                db = Modulos_MySQL()
+                db = BDsystem()
                 conn = db._conectar(tabla="select.symbol_decision_history")
                 cursor = conn.cursor()
                 try:
