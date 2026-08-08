@@ -153,18 +153,6 @@ class ClassAgenteIA:
         DataHub.gains_capture_modo = _gc_params.get("gains_capture", {}).get("modo", "automatico")
         DataHub.modo_operacion = _gc_params.get("agente_ia", {}).get("modo", "OBSERVACION")
 
-        # Logger dedicado a preservation — escribe a logs/preservation_diag.log
-        self._preservation_logger = logging.getLogger("Preservation")
-        if not self._preservation_logger.handlers:
-            _tmp = os.environ.get("APPOO_TMP") or os.path.join(os.getcwd(), "tmp")
-            _logs = os.path.normpath(os.path.join(_tmp, "..", "logs"))
-            os.makedirs(_logs, exist_ok=True)
-            _fh = logging.FileHandler(os.path.join(_logs, "preservation_diag.log"), encoding="utf-8")
-            _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-            self._preservation_logger.addHandler(_fh)
-            self._preservation_logger.setLevel(logging.DEBUG)
-            self._preservation_logger.propagate = False
-
     _BUY_TAGS = {"UNANIME", "CONSENSO", "TENDENCIA"}
     _SELL_TAGS = {"ALERTA", "SALIDA"}
 
@@ -1394,7 +1382,7 @@ class ClassAgenteIA:
                                 str(_order_exit), account, "CANCELED"
                             )
                         except Exception as _db_e:
-                            self._preservation_logger.warning(f"[EXIT-DB] {symbol}: no se pudo actualizar status en BD → {_db_e}")
+                            self.logger.warning(f"[EXIT-DB] {symbol}: no se pudo actualizar status en BD → {_db_e}")
                         self.preservation_state.pop(symbol, None)
                         _snap_exit = {}
                         for _s, _sd in self.preservation_state.items():
@@ -1403,9 +1391,6 @@ class ClassAgenteIA:
                         for _veh, _lr in self.preservation_last_run.items():
                             _snap_exit[f"_last_run_{_veh}"] = _lr.isoformat() if isinstance(_lr, datetime) else str(_lr)
                         write_json_tmp("preservation_state.json", _snap_exit)
-                        self._preservation_logger.info(
-                            f"[EXIT] {symbol}: ROI={roi:.1%} < {roi_minimo:.0%} → orden {_order_exit} cancelada y removida del state"
-                        )
                         # Registrar en symbol_decision_history (EXIT)
                         try:
                             self.RepositorioOportunidades.insert_symbol_decision_history(
@@ -1421,9 +1406,9 @@ class ClassAgenteIA:
                                 order_trader_id=None
                             )
                         except Exception as _e2:
-                            self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando EXIT → {_e2}")
+                            self.logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando EXIT → {_e2}")
                     except Exception as _e:
-                        self._preservation_logger.error(f"[EXIT-ERR] {symbol}: no se pudo cancelar {_order_exit} → {_e}")
+                        self.logger.error(f"[EXIT-ERR] {symbol}: no se pudo cancelar {_order_exit} → {_e}")
                 continue
 
             base_limit = unrealizedpnl * proteccion_base
@@ -1444,9 +1429,6 @@ class ClassAgenteIA:
             RSI_VENTA_MIN = 70  # Solo vender si RSI semanal >= 70 (sobrecompra)
 
             if last < PRECIO_MINIMO:
-                self._preservation_logger.info(
-                    f"[PRECIO-MIN] {symbol}: price={last:.2f} < ${PRECIO_MINIMO} → SKIP (esperar subida)"
-                )
                 continue
 
             try:
@@ -1458,13 +1440,9 @@ class ClassAgenteIA:
                 rsi_w = ctx_temp.get("rsi_w", 50)
 
                 if rsi_w < RSI_VENTA_MIN:
-                    self._preservation_logger.info(
-                        f"[RSI-VETA] {symbol}: RSI_semanal={rsi_w:.1f} < {RSI_VENTA_MIN} → "
-                        f"SKIP (no es sobrecompra semanal) [RSI_diario={rsi_d:.1f}]"
-                    )
                     continue
             except Exception as _rsi_e:
-                self._preservation_logger.warning(f"[RSI-ERR] {symbol}: {_rsi_e} → continuando sin validación RSI")
+                self.logger.warning(f"[RSI-ERR] {symbol}: {_rsi_e} → continuando sin validación RSI")
 
             # 5. Calcular ATR (DataHub)
             atr, atr_error = DataHub.preservation_get_atr(symbol, vehiculo)
@@ -1520,7 +1498,7 @@ class ClassAgenteIA:
                             order_trader_id=None
                         )
                     except Exception as _e:
-                        self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CLAUDE → {_e}")
+                        self.logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CLAUDE → {_e}")
 
             # Techo: el stop nunca puede quedar a menos de 1 ATR del precio actual
             stop_max = round(last - atr, 2)
@@ -1552,7 +1530,6 @@ class ClassAgenteIA:
                 )
                 if not is_live:
                     order_id = order_id_prev
-                    self._preservation_logger.info(f"[DRY-RUN] {msg}")
                     self.logger.warning(f"[DRY-RUN] {msg}")
                 else:
                     if order_id_prev:
@@ -1572,17 +1549,16 @@ class ClassAgenteIA:
                                 )
                                 if matched:
                                     order_id = matched.get("order_id")
-                                    self._preservation_logger.warning(
+                                    self.logger.warning(
                                         f"[RETRY-OK] {symbol}: order_id recuperado de live orders → {order_id}"
                                     )
                                 else:
-                                    self._preservation_logger.error(
+                                    self.logger.error(
                                         f"[RETRY-FAIL] {symbol}: order_id sigue None tras reintento — "
                                         "se preserva estado anterior sin actualizar order_trader"
                                     )
                         except Exception as _retry_e:
-                            self._preservation_logger.error(f"[RETRY-ERR] {symbol}: {_retry_e}")
-                    self._preservation_logger.info(f"[ENVIADA] {msg} | order_id={order_id}")
+                            self.logger.error(f"[RETRY-ERR] {symbol}: {_retry_e}")
                     self.logger.warning(f"[ENVIADA] {msg} | order_id={order_id}")
                     try:
                         _det = {
@@ -1645,7 +1621,7 @@ class ClassAgenteIA:
                                     }
                                 )
                             except Exception as _e:
-                                self._preservation_logger.debug(f"[ORDER_AUDIT] {symbol}: error registrando {tag_accion} → {_e}")
+                                self.logger.debug(f"[ORDER_AUDIT] {symbol}: error registrando {tag_accion} → {_e}")
                             # Registrar en symbol_decision_history (ENVIADA o MODIFICADA)
                             try:
                                 tag_accion = "MODIFICADA" if order_id_prev else "ENVIADA"
@@ -1663,7 +1639,7 @@ class ClassAgenteIA:
                                     order_trader_id=None  # Se actualizará cuando order_trader.id se conozca
                                 )
                             except Exception as _e:
-                                self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando ENVIADA → {_e}")
+                                self.logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando ENVIADA → {_e}")
                         self.RepositorioOportunidades.insert_preservation_order(
                             account,
                             vehiculo,
@@ -1683,7 +1659,6 @@ class ClassAgenteIA:
                     f"ROI={roi:.1%} | last={last:.2f} | sma20={sma_base:.2f} | "
                     f"stop={stop_final:.2f} (sin cambio)"
                 )
-                self._preservation_logger.info(msg)
                 self.logger.warning(msg)
 
             # 11. Persistir estado en memoria y en JSON (sobrevive reinicios)
