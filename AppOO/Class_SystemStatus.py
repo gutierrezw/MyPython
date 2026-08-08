@@ -68,6 +68,7 @@ class system_status(tk.Frame):
         self.agentes = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.apicost = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.iatrace = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
+        self.symbol_events = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
         self.alertas = ttk.Frame(self.bottom, padding=(1, 1, 1, 1), style="C.TFrame")
 
         # Frames para la derecha
@@ -93,6 +94,7 @@ class system_status(tk.Frame):
         self.bottom.add(self.agentes, text="Agentes")
         self.bottom.add(self.apicost, text="IA Cost")
         self.bottom.add(self.iatrace, text="IA Trace")
+        self.bottom.add(self.symbol_events, text="Symbol Events")
         self.bottom.add(self.alertas, text="Alertas")
 
         self.bottom.pack(side=tk.BOTTOM, fill=tk.BOTH, ipady=0)
@@ -347,6 +349,7 @@ class system_status(tk.Frame):
             self.debugging_system()
             self.agentes_system()
             self.api_cost_system()
+            self.symbol_events_system()
             self.alertas_system()
 
             # bloqueado hasta que mejore consumo CPU
@@ -4203,6 +4206,124 @@ class system_status(tk.Frame):
             auto_actualizar()
         except Exception as e:
             print(f"buy_ia_monitor(): {e}")
+            traceback.print_exc()
+
+    # ============================================================================
+    # Symbol Events — Timeline de decisiones por símbolo
+    # ============================================================================
+    def symbol_events_system(self):
+        """
+        MVP Tab: Timeline de eventos por símbolo desde symbol_decision_history.
+        Selector de símbolo + Tabla timeline (timestamp, agente, tag, mensaje, contexto).
+        """
+        try:
+            from Modulos_Mysql import Modulos_MySQL
+
+            # Frame superior — Selector de símbolo
+            top_frame = ttk.Frame(self.symbol_events, style="C.TFrame")
+            top_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+
+            lbl = ttk.Label(top_frame, text="Símbolo:", style="C.TLabel")
+            lbl.pack(side=tk.LEFT, padx=5)
+
+            combo_symbols = ttk.Combobox(top_frame, width=15, state="readonly")
+            combo_symbols.pack(side=tk.LEFT, padx=5)
+
+            # Frame inferior — Tabla timeline
+            tree_frame = ttk.Frame(self.symbol_events, style="C.TFrame")
+            tree_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+            # Scrollbars
+            vsb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL)
+            hsb = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL)
+
+            # Treeview con columnas
+            tree = ttk.Treeview(
+                tree_frame,
+                columns=("timestamp", "agente", "tag", "mensaje"),
+                height=10,
+                ysrollcommand=vsb.set,
+                xscrollcommand=hsb.set
+            )
+
+            vsb.configure(command=tree.yview)
+            hsb.configure(command=tree.xview)
+
+            tree.column("#0", width=0, stretch=tk.NO)
+            tree.column("timestamp", anchor=tk.W, width=150)
+            tree.column("agente", anchor=tk.W, width=100)
+            tree.column("tag", anchor=tk.W, width=100)
+            tree.column("mensaje", anchor=tk.W, width=300)
+
+            tree.heading("timestamp", text="Timestamp", anchor=tk.W)
+            tree.heading("agente", text="Agente", anchor=tk.W)
+            tree.heading("tag", text="Tag", anchor=tk.W)
+            tree.heading("mensaje", text="Mensaje", anchor=tk.W)
+
+            tree.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+            vsb.pack(side=tk.RIGHT, fill=tk.Y)
+            hsb.pack(side=tk.BOTTOM, fill=tk.X)
+
+            # Cargar símbolos disponibles
+            def load_symbols():
+                db = Modulos_MySQL()
+                conn = db._conectar(tabla="select.symbol_decision_history")
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("SELECT DISTINCT symbol FROM symbol_decision_history ORDER BY symbol")
+                    symbols = [row[0] for row in cursor.fetchall()]
+                    combo_symbols["values"] = symbols
+                    if symbols:
+                        combo_symbols.set(symbols[0])
+                        load_events(symbols[0])
+                except Exception as e:
+                    self.messagebox.showinfo("Error", f"Error cargando símbolos: {e}")
+                finally:
+                    cursor.close()
+                    conn.close()
+
+            # Cargar eventos para símbolo seleccionado
+            def load_events(symbol):
+                for item in tree.get_children():
+                    tree.delete(item)
+
+                if not symbol:
+                    return
+
+                db = Modulos_MySQL()
+                conn = db._conectar(tabla="select.symbol_decision_history")
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("""
+                        SELECT timestamp, agente, tag, mensaje
+                        FROM symbol_decision_history
+                        WHERE symbol = %s
+                        ORDER BY timestamp DESC
+                        LIMIT 100
+                    """, (symbol,))
+
+                    for row in cursor.fetchall():
+                        timestamp, agente, tag, mensaje = row
+                        tree.insert("", tk.END, values=(timestamp, agente, tag, mensaje))
+                except Exception as e:
+                    self.messagebox.showinfo("Error", f"Error cargando eventos: {e}")
+                finally:
+                    cursor.close()
+                    conn.close()
+
+            # Event handler para selector de símbolo
+            def on_symbol_change(event):
+                symbol = combo_symbols.get()
+                if symbol:
+                    load_events(symbol)
+
+            combo_symbols.bind("<<ComboboxSelected>>", on_symbol_change)
+
+            # Cargar símbolos al inicio
+            load_symbols()
+
+        except Exception as e:
+            print(f"symbol_events_system(): {e}")
             traceback.print_exc()
 
     # ============================================================================
