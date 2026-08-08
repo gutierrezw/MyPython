@@ -283,19 +283,20 @@ class AgentManager:
                 f"PerformaValidator: cache size={st['size']}/{st['maxsize']} "
                 f"hits={st['hits']} misses={st['misses']} bypass={st['bypass']}"
             )
-            result = self.Performa.validate_performa(account=self.account, vehiculo=self.vehiculo)
-            if result["purgados"]:
-                for a in result["anomalias"]:
-                    sym, fecha, ratio = a["symbol"], a["fecha"], a["ratio"]
-                    if a.get("quarantined"):
-                        self._log_stock.critical(
-                            f"PerformaValidator: {sym} CUARENTENA — purgado 3+ veces en 6h, ratio={ratio:.2f}x"
-                        )
-                    else:
-                        self._log_stock.warning(
-                            f"PerformaValidator: {sym} {fecha} ratio={ratio:.2f}x purgado — bypass cache"
-                        )
-                        CacheHut.add_bypass(sym)
+            for veh in ["Stock", "Crypto"]:
+                result = self.Performa.validate_performa(account=self.account, vehiculo=veh)
+                if result["purgados"]:
+                    for a in result["anomalias"]:
+                        sym, fecha, ratio = a["symbol"], a["fecha"], a["ratio"]
+                        if a.get("quarantined"):
+                            self._log_stock.critical(
+                                f"PerformaValidator {veh}: {sym} CUARENTENA — purgado 3+ veces en 6h, ratio={ratio:.2f}x"
+                            )
+                        else:
+                            self._log_stock.warning(
+                                f"PerformaValidator {veh}: {sym} {fecha} ratio={ratio:.2f}x purgado — bypass cache"
+                            )
+                            CacheHut.add_bypass(sym)
         except Exception as e:
             self._log_stock.error(f"Agente_PerformaValidator(): {e}")
 
