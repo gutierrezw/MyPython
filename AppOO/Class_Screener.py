@@ -48,6 +48,7 @@ from Modulos_python import (
     logging,
     yf,
     math,
+    np,
     pd,
     EmptyDataError,
     webbrowser,
