@@ -1084,19 +1084,22 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
-    def validate_performa(self, account, vehiculo="Stock", threshold=2.0, low_threshold=0.1):
+    def validate_performa(self, account, vehiculo="Stock", threshold=2.0, low_threshold=0.1, extreme_threshold=100.0):
         """Detecta registros en diaria_performance con value_ratio fuera de rango vs día anterior.
 
         Usa LAG sobre toda la historia del símbolo para calcular value_ratio en los últimos 7 días.
         ratio > threshold  → precio corrupto al alza (ej: ABEV $7230)
         ratio < low_threshold → precio corrupto a la baja (ej: BIL $1.32 en vez de $91)
+        ratio > extreme_threshold → anomalía extrema (ej: Crypto con 100x+ salto) — CRÍTICO
+
+        Para Crypto: extreme_threshold=100 por defecto (detecta 100x+). Para Stock: usa threshold normal.
 
         Purga quirúrgica: solo elimina los registros del símbolo afectado (no todos los símbolos
         de esa fecha). Performa_inversion se purga desde la fecha mínima afectada para forzar
         reagregación. agents_schedule.json se resetea para que schedule_diario regenere.
 
         Returns:
-            dict con 'anomalias' (list of dicts) y 'purgados' (bool).
+            dict con 'anomalias' (list of dicts), 'purgados' (bool) y 'extremas' (count).
         """
         conn = self._conectar(tabla="validate_performa")
         try:
@@ -1121,6 +1124,28 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                 (account, threshold, low_threshold),
             )
             anomalias_value = cursor.fetchall()
+
+            # ── 1b. Para Crypto: detectar anomalías EXTREMAS (> 100x) ──────────
+            anomalias_extremas = []
+            if vehiculo == "Crypto" and extreme_threshold > threshold:
+                cursor.execute(
+                    """
+                    SELECT t.Date, t.symbol, t.value, t.value_ayer,
+                           t.value / t.value_ayer AS value_ratio
+                    FROM (
+                        SELECT Date, symbol, value,
+                               LAG(value) OVER (PARTITION BY account, symbol ORDER BY Date) AS value_ayer
+                        FROM diaria_performance
+                        WHERE account = %s AND value > 0
+                    ) t
+                    WHERE t.value_ayer > 0
+                      AND t.Date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                      AND (t.value / t.value_ayer > %s OR t.value / t.value_ayer < %s)
+                    ORDER BY t.Date ASC
+                    """,
+                    (account, extreme_threshold, 1.0 / extreme_threshold),
+                )
+                anomalias_extremas = cursor.fetchall()
 
             # ── 2. Validar diaria_performance.costo_base ──────────────────────
             cursor.execute(
@@ -1148,13 +1173,19 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                 return {"anomalias": [], "purgados": False}
 
             anomalias = [
-                {"fecha": r[0], "symbol": r[1], "value": float(r[2]), "value_ayer": float(r[3]), "ratio": float(r[4])}
+                {"fecha": r[0], "symbol": r[1], "value": float(r[2]), "value_ayer": float(r[3]), "ratio": float(r[4]), "extrema": False}
                 for r in anomalias_value
             ]
             anomalias += [
-                {"fecha": r[0], "symbol": r[1], "costo_base": float(r[2]), "costo_base_ayer": float(r[3]), "ratio": float(r[4])}
+                {"fecha": r[0], "symbol": r[1], "costo_base": float(r[2]), "costo_base_ayer": float(r[3]), "ratio": float(r[4]), "extrema": False}
                 for r in anomalias_cb
             ]
+
+            # Agregar anomalías extremas (Crypto > 100x)
+            for r in anomalias_extremas:
+                anomalia_extrema = {"fecha": r[0], "symbol": r[1], "value": float(r[2]), "value_ayer": float(r[3]), "ratio": float(r[4]), "extrema": True}
+                if anomalia_extrema not in anomalias:
+                    anomalias.append(anomalia_extrema)
 
             # purga quirúrgica: solo los registros del símbolo afectado
             simbolos_purgados = set()
@@ -1268,11 +1299,12 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                 data[key] = desde_reset
                 write_json_tmp("agents_schedule.json", data)
 
-            return {"anomalias": anomalias, "purgados": True}
+            extremas_count = sum(1 for a in anomalias if a.get("extrema", False))
+            return {"anomalias": anomalias, "purgados": True, "extremas": extremas_count}
 
         except (Exception, connect.Error) as error:
             print(f"[Mysql:: IPerformance.validate_performa()]: {error}")
-            return {"anomalias": [], "purgados": False}
+            return {"anomalias": [], "purgados": False, "extremas": 0}
 
 
 class DiariaCNV(BDsystem):  # --------------------------------------------------------------------------------------

@@ -47,6 +47,9 @@ class AgentManager:
         self._log_crypto = logging.getLogger("Agente.Crypto")
         self._log_ia = logging.getLogger("Agente.IA")
         self._log_infra = logging.getLogger("Agente.Infra")
+        self._log_performa = logging.getLogger("Agente.Performa")
+        self._log_edgar = logging.getLogger("Agente.EDGAR")
+        self._log_institucion = logging.getLogger("Agente.Institucion")
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
@@ -142,19 +145,19 @@ class AgentManager:
     def Agente_InstitucionalScore(self):
         try:
             result = sync_institutional(account=self.account)
-            self._log_stock.warning(
+            self._log_institucion.warning(
                 f"InstitucionalScore: procesados={result['symbols_processed']} actualizados={result['updated']}"
             )
         except Exception as e:
-            self._log_stock.error(f"Agente_InstitucionalScore(): {e}")
+            self._log_institucion.error(f"Agente_InstitucionalScore(): {e}")
 
     @wait_rate(300, persist=True)
     def Agente_ConsensoCache(self):
         try:
             result = refresh_consenso_tags(account=self.account)
-            self._log_stock.warning(f"ConsensoCache: actualizados={result['actualizados']}/{result['total']}")
+            self._log_institucion.warning(f"ConsensoCache: actualizados={result['actualizados']}/{result['total']}")
         except Exception as e:
-            self._log_stock.error(f"Agente_ConsensoCache(): {e}")
+            self._log_institucion.error(f"Agente_ConsensoCache(): {e}")
 
     @wait_rate(2592000, persist=True)
     def Agente_EdgarFunds(self):
@@ -162,9 +165,9 @@ class AgentManager:
             return
         try:
             result = sync_edgar_funds()
-            self._log_stock.warning(f"EdgarFunds: total={result['total']} insertados={result['inserted']}")
+            self._log_edgar.warning(f"EdgarFunds: total={result['total']} insertados={result['inserted']}")
         except Exception as e:
-            self._log_stock.error(f"Agente_EdgarFunds(): {e}")
+            self._log_edgar.error(f"Agente_EdgarFunds(): {e}")
 
     @wait_rate(604800, persist=True)
     def Agente_FundFilings(self):
@@ -177,12 +180,12 @@ class AgentManager:
                 DataHub.update_self_procesos(proces="thread", tarea=task_name, itera=i)
 
             result = sync_fund_filings(account=self.account, progress_cb=_progress)
-            self._log_stock.warning(
+            self._log_edgar.warning(
                 f"FundFilings: fondos={result['funds']} descargados={result['downloaded']} "
                 f"skipped={result['skipped']} fallidos={result['failed']}"
             )
         except Exception as e:
-            self._log_stock.error(f"Agente_FundFilings(): {e}")
+            self._log_edgar.error(f"Agente_FundFilings(): {e}")
 
     @wait_rate(86400, persist=True)
     def Agente_13FScores(self):
@@ -190,11 +193,11 @@ class AgentManager:
             return
         try:
             result = sync_13f_scores(account=self.account)
-            self._log_stock.warning(
+            self._log_edgar.warning(
                 f"13FScores: símbolos={result['symbols']} actualizados={result['updated']} skipped={result['skipped']}"
             )
         except Exception as e:
-            self._log_stock.error(f"Agente_13FScores(): {e}")
+            self._log_edgar.error(f"Agente_13FScores(): {e}")
 
     @wait_rate(86400, persist=True)
     def Agente_13FHoldings(self):
@@ -202,14 +205,14 @@ class AgentManager:
             return
         try:
             result = sync_13f_holdings(account=self.account)
-            self._log_stock.warning(
+            self._log_edgar.warning(
                 f"13FHoldings: archivos={result['xml_files']} "
                 f"holdings={result['inserted_holdings']} opciones={result['inserted_options']}"
             )
             deleted = MarketScreen().cleanup_fund_holdings_nulls()
-            self._log_stock.warning(f"13FHoldings cleanup: eliminadas={deleted} filas NULL")
+            self._log_edgar.warning(f"13FHoldings cleanup: eliminadas={deleted} filas NULL")
         except Exception as e:
-            self._log_stock.error(f"Agente_13FHoldings(): {e}")
+            self._log_edgar.error(f"Agente_13FHoldings(): {e}")
 
     @wait_rate(2592000, persist=True)
     def Agente_AuditPortfolio(self):
@@ -217,13 +220,13 @@ class AgentManager:
             return
         try:
             result = audit_portfolio(account=self.account)
-            self._log_stock.warning(
+            self._log_institucion.warning(
                 f"AuditPortfolio: total={result['total']} delistados={result['delistados']} "
                 f"nombres_upd={result['nombres_upd']} cusips_upd={result['cusips_upd']} "
                 f"etfs_upd={result['etfs_upd']} sin_precio={result['sin_precio']} errores={result['errores']}"
             )
         except Exception as e:
-            self._log_stock.error(f"Agente_AuditPortfolio(): {e}")
+            self._log_institucion.error(f"Agente_AuditPortfolio(): {e}")
 
     @wait_rate(2592000, persist=True, desc="Actualiza categoriaActivo Screener ex-cartera (30d)", nivel=2)
     def Agente_DividendStatusScreener(self):
@@ -261,9 +264,9 @@ class AgentManager:
                 total_val += val
             beta_port = round(max(beta_sum / total_val, 0.1), 3) if total_val > 0 else 1.0
             DataHub.manager_GyP["Stock"]["BetaPortfolio"] = beta_port
-            self._log_stock.warning(f"StockBeta: β={beta_port:.3f}  ({len(positions)} posiciones)")
+            self._log_institucion.warning(f"StockBeta: β={beta_port:.3f}  ({len(positions)} posiciones)")
         except Exception as e:
-            self._log_stock.error(f"Agente_StockBeta(): {e}")
+            self._log_institucion.error(f"Agente_StockBeta(): {e}")
 
     @wait_rate(86400, persist=True)
     def Agente_SplitsControl(self):
@@ -279,26 +282,40 @@ class AgentManager:
     def Agente_PerformaValidator(self):
         try:
             st = CacheHut.stats()
-            self._log_stock.warning(
+            self._log_performa.warning(
                 f"PerformaValidator: cache size={st['size']}/{st['maxsize']} "
                 f"hits={st['hits']} misses={st['misses']} bypass={st['bypass']}"
             )
             for veh in ["Stock", "Crypto"]:
-                result = self.Performa.validate_performa(account=self.account, vehiculo=veh)
+                extreme_threshold = 100.0 if veh == "Crypto" else 2.0
+                result = self.Performa.validate_performa(
+                    account=self.account,
+                    vehiculo=veh,
+                    extreme_threshold=extreme_threshold
+                )
                 if result["purgados"]:
+                    extremas = result.get("extremas", 0)
+                    if extremas > 0:
+                        self._log_performa.critical(
+                            f"PerformaValidator {veh}: ⚠️ {extremas} ANOMALÍAS EXTREMAS (>100x) detectadas y purgadas"
+                        )
                     for a in result["anomalias"]:
                         sym, fecha, ratio = a["symbol"], a["fecha"], a["ratio"]
-                        if a.get("quarantined"):
-                            self._log_stock.critical(
+                        if a.get("extrema", False):
+                            self._log_performa.critical(
+                                f"PerformaValidator {veh}: {sym} {fecha} EXTREMA ratio={ratio:.1f}x — purgado"
+                            )
+                        elif a.get("quarantined"):
+                            self._log_performa.critical(
                                 f"PerformaValidator {veh}: {sym} CUARENTENA — purgado 3+ veces en 6h, ratio={ratio:.2f}x"
                             )
                         else:
-                            self._log_stock.warning(
+                            self._log_performa.warning(
                                 f"PerformaValidator {veh}: {sym} {fecha} ratio={ratio:.2f}x purgado — bypass cache"
                             )
                             CacheHut.add_bypass(sym)
         except Exception as e:
-            self._log_stock.error(f"Agente_PerformaValidator(): {e}")
+            self._log_performa.error(f"Agente_PerformaValidator(): {e}")
 
     # ── Agente.Crypto ─────────────────────────────────────────────────────────
 

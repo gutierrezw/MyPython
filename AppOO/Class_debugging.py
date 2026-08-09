@@ -408,6 +408,12 @@ class Debugging:
         self.logger["Agente.IA"].setLevel(logging.WARNING)
         self.logger.update({"Agente.Infra": logging.getLogger("Agente.Infra")})
         self.logger["Agente.Infra"].setLevel(logging.WARNING)
+        self.logger.update({"Agente.Performa": logging.getLogger("Agente.Performa")})
+        self.logger["Agente.Performa"].setLevel(logging.WARNING)
+        self.logger.update({"Agente.EDGAR": logging.getLogger("Agente.EDGAR")})
+        self.logger["Agente.EDGAR"].setLevel(logging.WARNING)
+        self.logger.update({"Agente.Institucion": logging.getLogger("Agente.Institucion")})
+        self.logger["Agente.Institucion"].setLevel(logging.WARNING)
 
         # manager logging
         self.logger.update({"GainsCapture": logging.getLogger("GainsCapture")})

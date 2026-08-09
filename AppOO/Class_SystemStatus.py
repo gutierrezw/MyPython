@@ -1474,8 +1474,8 @@ class system_status(tk.Frame):
                 "DEBUG": "#4A90D9",
                 "INFO": "#7ED321",
                 "WARNING": "#F5A623",
-                "ERROR": "#D0021B",
-                "CRITICAL": "#9B0000",
+                "ERROR": "#FFD700",
+                "CRITICAL": "#FF4500",
             }
 
             def _save_levels():
@@ -1525,15 +1525,93 @@ class system_status(tk.Frame):
                         tree.item(iid, tags=("WARNING",))
                 _save_levels()
 
+            def _sort_by_column(col, reverse):
+                if col == "#0":
+                    items = [(tree.item(k, "text"), k) for k in tree.get_children("")]
+                else:
+                    items = [(tree.set(k, col), k) for k in tree.get_children("")]
+                items.sort(reverse=reverse)
+                for index, (val, k) in enumerate(items):
+                    tree.move(k, "", index)
+                tree.heading(col, command=lambda: _sort_by_column(col, not reverse))
+
+            # Mapeo de loggers a agentes/procesos
+            LOGGER_MODULES = {
+                # Agentes principales
+                "Agente.Stock": ["MarketScreener", "DividendStatusScreener", "PriceSync"],
+                "Agente.Crypto": ["LtvControl", "BotCrypto", "Preservation"],
+                "Agente.EDGAR": ["EdgarFunds", "FundFilings", "13FScores", "13FHoldings"],
+                "Agente.Institucion": ["InstitucionalScore", "ConsensoCache", "AuditPortfolio", "StockBeta"],
+                "Agente.Performa": ["PerformaValidator"],
+                "Agente.IA": ["ClaudeIA"],
+                "Agente.Infra": ["BrowserFCI"],
+
+                # Módulos principales
+                "Screener": ["sync_market", "cleanup_market", "Screener queries"],
+                "TradingView": ["BrowserBridge", "TV panel updates"],
+                "InstitucionalScore": ["Class_InstitucionalScore", "EDGAR 13F pipeline"],
+                "Mysql": ["Modulos_Mysql", "Database operations"],
+                "ClassAgenteIA": ["IA Claude responses"],
+                "BinanceClient": ["Class_ApiBinnace", "Binance REST API"],
+                "BinanceSpot": ["SpotClient Binance"],
+                "BotCryptoUI": ["BotCryptoUI interface", "State management"],
+                "Sentimiento": ["Sentiment analysis"],
+                "ApiTracker": ["Class_ApiCosts", "Cost tracking"],
+                "YouTubeScanner": ["YouTube data extraction"],
+                "GainsCapture": ["GainsCapture Agent"],
+                "BrowserFCI": ["Agente_BrowserFCI"],
+                "ClaudeIA": ["ClaudeIA Reasoning"],
+                "Analisis": ["Class_Analisis"],
+                "FondosInversion": ["Class_FondosInversion"],
+                "Finance": ["Class_Finance"],
+                "IbFlex": ["Class_IbFlex"],
+                "IBroks_Client": ["Class_Ibrks", "Class_ApiIBrks"],
+
+                # Clases internas
+                "ClassChatbot": ["Chatbot processing"],
+                "ClassMoodeloIA": ["IA Model operations"],
+                "ClassMyOrders": ["Orders management"],
+                "DataFrameCache": ["DataFrame caching"],
+                "DataFrame": ["DataFrame operations"],
+
+                # Librerías externas
+                "root": ["Root logger (system)"],
+                "yfinance": ["Yahoo Finance API"],
+                "requests_cache": ["HTTP cache"],
+                "matplotlib.font_manager": ["Matplotlib fonts"],
+                "PIL.PngImagePlugin": ["PIL PNG handling"],
+                "peewee": ["ORM operations"],
+                "urllib3.connectionpool": ["HTTP connections"],
+                "schedule": ["Task scheduling"],
+                "binance.websocket.websocket_client": ["Binance WebSocket"],
+                "binance.api": ["Binance API client"],
+                "py.warnings": ["Python warnings"],
+            }
+
+            def _format_modules(logger_name):
+                modules = LOGGER_MODULES.get(logger_name, [])
+                if not modules:
+                    return "-"
+                if len(modules) <= 3:
+                    return ", ".join(modules)
+                else:
+                    return f"{', '.join(modules[:3])}, +{len(modules)-3} más"
+
             frame = ttk.Frame(self.debugging, style="C.TFrame")
             frame.pack(expand=True, fill="both", padx=5, pady=(5, 0))
 
-            cols = ["Level"]
+            cols = ["Level", "UsadoPor"]
             tree = ttk.Treeview(frame, columns=cols, height=15, show="tree headings")
             tree.heading("#0", text="Logger")
             tree.heading("Level", text="Level")
-            tree.column("#0", width=220, minwidth=150)
-            tree.column("Level", width=100, minwidth=80)
+            tree.heading("UsadoPor", text="Usado por")
+            tree.column("#0", width=180, minwidth=150)
+            tree.column("Level", width=80, minwidth=70)
+            tree.column("UsadoPor", width=350, minwidth=200)
+
+            tree.heading("#0", command=lambda: _sort_by_column("#0", False))
+            tree.heading("Level", command=lambda: _sort_by_column("Level", False))
+            tree.heading("UsadoPor", command=lambda: _sort_by_column("UsadoPor", False))
 
             scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
             scroll.pack(side="right", fill="y")
@@ -1556,7 +1634,8 @@ class system_status(tk.Frame):
 
             for key, handler in DataHub.logger.items():
                 lvl_name = logging.getLevelName(handler.level)
-                tree.insert("", "end", text=key, values=(lvl_name,), tags=(lvl_name,))
+                usado_por = _format_modules(key)
+                tree.insert("", "end", text=key, values=(lvl_name, usado_por), tags=(lvl_name,))
 
         except Exception as e:
             print("debugging_system(): {}".format(e))
