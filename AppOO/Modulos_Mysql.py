@@ -3605,6 +3605,24 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         except (Exception, EncodingWarning) as error:
             print("[Mysql:: select_trazaplan()]: {}".format(error))
 
+    def insert_trazaplan(self, idcuenta, meta, vision, extracto=None, status="proyectado"):
+        """Inserta nuevo registro en trazaplan con valores por defecto."""
+        try:
+            conn = self._conectar(tabla="insert.trazaplan")
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO trazaplan (idcuenta, meta, vision, extracto, costobase, dividendo, ccapital, trendimiento, tinversion, efectividad, status) VALUES (%s, %s, %s, %s, 0, 0, 0, 0, 0, 0, %s)",
+                (idcuenta, meta, vision, extracto, status)
+            )
+            conn.commit()
+        except (Exception, EncodingWarning, connect.Error) as error:
+            print(f"[Mysql:: insert_trazaplan()]: {error}")
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
     def update_plan_inversion(self, idcuenta=None, vision="deseada", values=None):
         """
         @param idcuenta: cuenta ID de inversor
@@ -6418,7 +6436,16 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                         try:
                             symbol = r.get("symbol")
                             intent = r.get("intent", "")
-                            agente = "Preservation" if intent == "PRESERV" else "GainsCapture"
+                            # Solo registrar órdenes de agentes (PRESERV o GAINS_CAPTURE)
+                            # Órdenes manuales sin intent se ignoran
+                            if intent == "PRESERV":
+                                agente = "Preservation"
+                            elif intent == "GAINS_CAPTURE":
+                                agente = "GainsCapture"
+                            else:
+                                # Sin intent específico = orden manual, no se registra en audit de agentes
+                                continue
+
                             self.insert_symbol_decision_history(
                                 symbol=symbol,
                                 agente=agente,
