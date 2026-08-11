@@ -2891,7 +2891,7 @@ class DashMain:
                     self.after_ids = self.after_ids[-500:]
 
     def _toggle_modo_operacion(self):
-        ciclo = ["OBSERVACION", "SUPERVISADO", "AUTONOMO"]
+        ciclo = ["OBSERVACION", "SUPERVISADO"]  # AUTONOMO deshabilitado en UI — no listo aún
         actual = DataHub.modo_operacion if DataHub.modo_operacion in ciclo else "OBSERVACION"
         nuevo = ciclo[(ciclo.index(actual) + 1) % len(ciclo)]
         DataHub.modo_operacion = nuevo
