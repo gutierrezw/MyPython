@@ -1435,19 +1435,6 @@ class ClassAgenteIA:
             if last < PRECIO_MINIMO:
                 continue
 
-            try:
-                ctx_temp = self._build_preservation_context(
-                    symbol, vehiculo, positio, unrealizedpnl, account, conid,
-                    self.account, api_key=_claude_key if _claude_key else None
-                )
-                rsi_d = ctx_temp.get("rsi_d", 50)
-                rsi_w = ctx_temp.get("rsi_w", 50)
-
-                if rsi_w < RSI_VENTA_MIN:
-                    continue
-            except Exception as _rsi_e:
-                self.logger.warning(f"[RSI-ERR] {symbol}: {_rsi_e} → continuando sin validación RSI")
-
             # 5. Calcular ATR (DataHub)
             atr, atr_error = DataHub.preservation_get_atr(symbol, vehiculo)
             if atr is None:
@@ -1564,6 +1551,11 @@ class ClassAgenteIA:
                         except Exception as _retry_e:
                             self.logger.error(f"[RETRY-ERR] {symbol}: {_retry_e}")
                     self.logger.warning(f"[ENVIADA] {msg} | order_id={order_id}")
+                    hash_id = self.RepositorioOportunidades.generar_hash_id(
+                        account,
+                        symbol,
+                        vehiculo,
+                    )
                     try:
                         _det = {
                             "tipo": "preservation_stop",
