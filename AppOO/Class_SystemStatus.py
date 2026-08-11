@@ -1791,25 +1791,8 @@ class system_status(tk.Frame):
             btn_frame = ttk.Frame(self.agentes, style="C.TFrame")
             btn_frame.pack(fill="x", padx=5, pady=(2, 5))
             ttk.Button(btn_frame, text="Activar todos", command=_activar_todos).pack(side="left")
-
-            _gc_modo_var = tk.StringVar(
-                value="⚡ Auto" if DataHub.gains_capture_modo == "automatico" else "🔐 Autorizar"
-            )
-
-            def _toggle_gains_modo():
-                nuevo = "autorizado" if DataHub.gains_capture_modo == "automatico" else "automatico"
-                DataHub.gains_capture_modo = nuevo
-                try:
-                    ses = BDsystem.get_sesion_by_vehiculo("Stock")
-                    params_raw = ses.get("parameters") or "{}"
-                    params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
-                    params.setdefault("gains_capture", {})["modo"] = nuevo
-                    BDsystem.update_sesion_parameters("Stock", params)
-                except Exception as e:
-                    print(f"_toggle_gains_modo: {e}")
-                _gc_modo_var.set("⚡ Auto" if nuevo == "automatico" else "🔐 Autorizar")
-
-            ttk.Button(btn_frame, textvariable=_gc_modo_var, command=_toggle_gains_modo).pack(side="left", padx=(8, 0))
+            # NOTA: toggle de modo operativo (OBSERVACION/SUPERVISADO/AUTONOMO) está en DashMain
+            # GainsCapture respeta ese modo único — no hay toggle separado aquí
 
             menu = tk.Menu(tree, tearoff=0)
             menu.add_command(label="Activar", command=lambda: _set_agent_active(True))
