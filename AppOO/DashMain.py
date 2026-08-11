@@ -2891,18 +2891,16 @@ class DashMain:
                     self.after_ids = self.after_ids[-500:]
 
     def _toggle_modo_operacion(self):
-        _GC_MAP = {"OBSERVACION": "autorizado", "SUPERVISADO": "autorizado", "AUTONOMO": "automatico"}
         ciclo = ["OBSERVACION", "SUPERVISADO", "AUTONOMO"]
         actual = DataHub.modo_operacion if DataHub.modo_operacion in ciclo else "OBSERVACION"
         nuevo = ciclo[(ciclo.index(actual) + 1) % len(ciclo)]
         DataHub.modo_operacion = nuevo
-        DataHub.gains_capture_modo = _GC_MAP[nuevo]
         try:
             ses = BDsystem.get_sesion_by_vehiculo("Stock")
             params_raw = ses.get("parameters") or "{}"
             params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
             params.setdefault("agente_ia", {})["modo"] = nuevo
-            params.setdefault("gains_capture", {})["modo"] = _GC_MAP[nuevo]
+            # NOTA: gains_capture.modo ya NO se usa — GainsCapture respeta agente_ia.modo
             BDsystem.update_sesion_parameters("Stock", params)
         except Exception as e:
             print(f"_toggle_modo_operacion: {e}")
