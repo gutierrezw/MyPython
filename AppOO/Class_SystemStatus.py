@@ -1539,7 +1539,7 @@ class system_status(tk.Frame):
             LOGGER_MODULES = {
                 # Agentes principales
                 "Agente.Stock": ["MarketScreener", "DividendStatusScreener", "PriceSync"],
-                "Agente.Crypto": ["LtvControl", "BotCrypto", "Preservation"],
+                "Agente.Crypto": ["LtvControl", "BotCrypto"],
                 "Agente.EDGAR": ["EdgarFunds", "FundFilings", "13FScores", "13FHoldings"],
                 "Agente.Institucion": ["InstitucionalScore", "ConsensoCache", "AuditPortfolio", "StockBeta"],
                 "Agente.Performa": ["PerformaValidator"],
@@ -1559,6 +1559,7 @@ class system_status(tk.Frame):
                 "ApiTracker": ["Class_ApiCosts", "Cost tracking"],
                 "YouTubeScanner": ["YouTube data extraction"],
                 "GainsCapture": ["GainsCapture Agent"],
+                "Preservation": ["Agente_ManagerPreservation", "Stock + Crypto gains protection"],
                 "BrowserFCI": ["Agente_BrowserFCI"],
                 "ClaudeIA": ["ClaudeIA Reasoning"],
                 "Analisis": ["Class_Analisis"],
