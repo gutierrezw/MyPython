@@ -151,8 +151,8 @@ class ClassAgenteIA:
         _gc_saved = read_json_tmp("gains_capture_state.json")
         self.gains_capture_state = {k: v for k, v in _gc_saved.items() if not k.startswith("_")}
         _gc_params = self._load_params("Stock") or {}
-        DataHub.gains_capture_modo = _gc_params.get("gains_capture", {}).get("modo", "automatico")
         DataHub.modo_operacion = _gc_params.get("agente_ia", {}).get("modo", "OBSERVACION")
+        # GainsCapture ahora respeta DataHub.modo_operacion (agente_ia.modo) — no usa gains_capture.modo
 
     _BUY_TAGS = {"UNANIME", "CONSENSO", "TENDENCIA"}
     _SELL_TAGS = {"ALERTA", "SALIDA"}
@@ -1036,12 +1036,13 @@ class ClassAgenteIA:
                 "roi_lote": roi_ref,
                 "ganancia_lote": ganancia_ref,
                 "escenario": escenario_key.strip(),
-                "modo": DataHub.gains_capture_modo,
+                "modo": DataHub.modo_operacion,
                 "claude": claude_result,
                 "orden": {"qty": vender_qty, "lmt_price": lmt_price},
             }
 
-            if DataHub.gains_capture_modo == "autorizado":
+            # Evalúa modo operativo: OBSERVACION/SUPERVISADO = pedir confirmación | AUTONOMO = ejecutar
+            if DataHub.modo_operacion in ("OBSERVACION", "SUPERVISADO"):
                 razon = claude_result.get("razon", "")
                 msg = (
                     f"📈 *GainsCapture — {symbol}*\n"
@@ -1065,7 +1066,7 @@ class ClassAgenteIA:
                     "pendiente_ts": datetime.now().isoformat(),
                 }
                 write_json_tmp("gains_capture_state.json", self.gains_capture_state)
-                _gc_logger.warning(f"GainsCapture({symbol}): propuesta enviada a Telegram (autorizado)")
+                _gc_logger.warning(f"GainsCapture({symbol}): propuesta enviada [{DataHub.modo_operacion}] (confirmación pendiente)")
                 continue
 
             trama = DataHub.gains_capture_build_trama_sell("Stock", account, symbol, conid, lmt_price, vender_qty)
@@ -1109,7 +1110,7 @@ class ClassAgenteIA:
                                     "qty": vender_qty,
                                     "lmt_price": lmt_price,
                                     "escenario": escenario_key.strip(),
-                                    "modo": DataHub.gains_capture_modo
+                                    "modo": DataHub.modo_operacion
                                 }
                             )
                         except Exception as _e:
