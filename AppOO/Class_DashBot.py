@@ -3113,7 +3113,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     self.exec_modulo_async(self.Agente_GainsCapture())
                     self.Agente_Sentimiento()
                     self.Agente_InterpreteSentimiento()
-                    self.Agente_ExtractoBBVA()
+                    # self.Agente_ExtractoBBVA()  # DESACTIVADO — incompatible con Santander (UI diferente)
                     self.Agente_ClaudeIA()
                     self.Agente_SyncOrders()
                     self.Agente_OrderEodCleanup()
