@@ -1339,6 +1339,8 @@ class ClassAgenteIA:
             self._preservation_logger.warning(f"Preservation({vehiculo}): no se pudo obtener gainInversion → usando default | {_e}")
             gain_inv_usd = 100 if vehiculo == "Stock" else 20
 
+        # Extraer parámetros de config
+        roi_minimo = pconfig.get("roi_minimo", 0.10)
         proteccion_base = pconfig.get("proteccion_base", 0.50)
         correccion_pct = pconfig.get("correccion_pct", 0.08)
         atr_mult = pconfig.get("atr_mult", 2.0)
