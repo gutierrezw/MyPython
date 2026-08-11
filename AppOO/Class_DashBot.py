@@ -117,6 +117,7 @@ class ClassAgenteIA:
 
         # Asigna Nombre Logging
         self.logger = logging.getLogger("ClassAgenteIA")
+        self._preservation_logger = logging.getLogger("Preservation")
 
         # Estado del agente de preservación
         self.preservation_config = {}  # {vehiculo: sub-dict "preservation"} — extraído de _params_cache
@@ -480,9 +481,9 @@ class ClassAgenteIA:
                 if DataHub.manager_sesion.get(vehiculo):
                     self._preservation_run_vehiculo(vehiculo)
                 else:
-                    self.logger.debug(f"Agente_ManagerPreservation({vehiculo}): sesion no activa → SKIP")
+                    self._preservation_logger.debug(f"Agente_ManagerPreservation({vehiculo}): sesion no activa → SKIP")
             except Exception as e:
-                self.logger.error(f"Agente_ManagerPreservation({vehiculo}): {e}")
+                self._preservation_logger.error(f"Agente_ManagerPreservation({vehiculo}): {e}")
 
     # agente especulativo: captura ganancias en activos volátiles con ventas parciales por niveles ROI
     @wait_rate(1800, persist=True)
@@ -1278,12 +1279,12 @@ class ClassAgenteIA:
         if vehiculo not in self.preservation_config:
             params = self._load_params(vehiculo)
             if not params:
-                self.logger.warning(f"Preservation({vehiculo}): sin parameters en sesion → SKIP")
+                self._preservation_logger.warning(f"Preservation({vehiculo}): sin parameters en sesion → SKIP")
                 self.preservation_config[vehiculo] = None
                 return None, 0, False
             pconfig = params.get("preservation")
             if not pconfig:
-                self.logger.warning(f"Preservation({vehiculo}): sin bloque 'preservation' en parameters → SKIP")
+                self._preservation_logger.warning(f"Preservation({vehiculo}): sin bloque 'preservation' en parameters → SKIP")
                 self.preservation_config[vehiculo] = None
                 return None, 0, False
             self.preservation_config[vehiculo] = pconfig
@@ -1334,7 +1335,7 @@ class ClassAgenteIA:
             sesion_data = BDsystem.get_sesion_by_vehiculo(vehiculo)
             gain_inv_usd = sesion_data.get("gainInversion", 100 if vehiculo == "Stock" else 20) if sesion_data else (100 if vehiculo == "Stock" else 20)
         except Exception as _e:
-            self.logger.warning(f"Preservation({vehiculo}): no se pudo obtener gainInversion → usando default | {_e}")
+            self._preservation_logger.warning(f"Preservation({vehiculo}): no se pudo obtener gainInversion → usando default | {_e}")
             gain_inv_usd = 100 if vehiculo == "Stock" else 20
 
         proteccion_base = pconfig.get("proteccion_base", 0.50)
@@ -1347,11 +1348,11 @@ class ClassAgenteIA:
             _ses = BDsystem.get_sesion_by_vehiculo("ClaudeAPIP")
             _claude_key = _ses["userapi"].decode("utf-8") if _ses else None
         except Exception as e:
-            self.logger.error(f"Preservation({vehiculo}): ClaudeAPIP no disponible → {e}")
+            self._preservation_logger.error(f"Preservation({vehiculo}): ClaudeAPIP no disponible → {e}")
 
         # 1. Cargar posiciones activas
         positions = self.PlanInversion.select_inversion(tipoin=vehiculo, ticket="all")
-        self.logger.warning(f"Preservation({vehiculo}): {len(positions)} posiciones cargadas")
+        self._preservation_logger.warning(f"Preservation({vehiculo}): {len(positions)} posiciones cargadas")
 
         for positio in positions:
             symbol = positio.get("ticket")
@@ -1413,7 +1414,7 @@ class ClassAgenteIA:
 
             base_limit = unrealizedpnl * proteccion_base
 
-            self.logger.warning(f"Preservation({vehiculo}/{symbol}): ROI={roi:.1%} ≥ {roi_minimo:.0%} → evaluando")
+            self._preservation_logger.warning(f"Preservation({vehiculo}/{symbol}): ROI={roi:.1%} ≥ {roi_minimo:.0%} → evaluando")
 
             # estado previo del símbolo
             state = self.preservation_state.get(symbol, {})
@@ -1421,7 +1422,7 @@ class ClassAgenteIA:
             # 4. Obtener precio actual (DataHub)
             last = DataHub.preservation_get_price(symbol, positio)
             if not last or last <= 0:
-                self.logger.warning(f"Preservation({vehiculo}/{symbol}): sin precio → SKIP")
+                self._preservation_logger.warning(f"Preservation({vehiculo}/{symbol}): sin precio → SKIP")
                 continue
 
             # 4b. NUEVAS VALIDACIONES: RSI diario/semanal + piso mínimo de precio
@@ -1447,7 +1448,7 @@ class ClassAgenteIA:
             # 5. Calcular ATR (DataHub)
             atr, atr_error = DataHub.preservation_get_atr(symbol, vehiculo)
             if atr is None:
-                self.logger.warning(f"Preservation({vehiculo}/{symbol}): {atr_error} → SKIP")
+                self._preservation_logger.warning(f"Preservation({vehiculo}/{symbol}): {atr_error} → SKIP")
                 continue
 
             # 5b. SMA20 — base suavizada para stop (activos long-term encima de EMAs)
@@ -1651,7 +1652,7 @@ class ClassAgenteIA:
                             json.dumps(_det),
                         )
                     except Exception as _e:
-                        self.logger.error(f"insert_preservation_order({symbol}): {_e}")
+                        self._preservation_logger.error(f"insert_preservation_order({symbol}): {_e}")
             else:
                 order_id = order_id_prev
                 msg = (
