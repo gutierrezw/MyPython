@@ -470,7 +470,8 @@ class ClassAgenteIA:
             self.logger.error(f"_flush_reconcile_pending: {e}")
 
     # agente defensivo: protege ganancias con órdenes STOP dinámicas
-    async def Agente_ManagerPreservation(self):
+    @wait_rate(43200, persist=True, desc="Preservación de ganancias (12h)", nivel=1)
+    def Agente_ManagerPreservation(self):
         """
         Agente de Preservación de Ganancias (Stock + Crypto).
         Protege ganancias acumuladas mediante órdenes STOP dinámicas.
@@ -3112,7 +3113,6 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     self.exec_modulo_async(self.Agente_ManagerBuy())
                     self.exec_modulo_async(self.Agente_ManagerTop10())
                     agent_mgr.run_loop()
-                    self.exec_modulo_async(self.Agente_ManagerPreservation())
                     self.exec_modulo_async(self.Agente_GainsCapture())
                     self.Agente_Sentimiento()
                     self.Agente_InterpreteSentimiento()
