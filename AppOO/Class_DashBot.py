@@ -154,6 +154,9 @@ class ClassAgenteIA:
         DataHub.modo_operacion = _gc_params.get("agente_ia", {}).get("modo", "OBSERVACION")
         # GainsCapture ahora respeta DataHub.modo_operacion (agente_ia.modo) — no usa gains_capture.modo
 
+        # Inicializar AgentManager — registra todos sus agentes @wait_rate en AGENTES_SCHEDULE
+        self.agent_manager = AgentManager(account=self.account, vehiculo=self.vehiculo)
+
     _BUY_TAGS = {"UNANIME", "CONSENSO", "TENDENCIA"}
     _SELL_TAGS = {"ALERTA", "SALIDA"}
 
