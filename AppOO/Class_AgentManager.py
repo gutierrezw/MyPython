@@ -41,6 +41,7 @@ class AgentManager:
         self.PlanInversion = PlanInversion()
         self.RepositorioOportunidades = RepositorioOportunidadesBuySell()
         self.Performa = IPerformance()
+        self.Market = MarketScreen()
         self._params_cache: dict = {}
 
         self._log_stock = logging.getLogger("Agente.Stock")
