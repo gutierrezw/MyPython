@@ -1538,7 +1538,7 @@ class ClassAgenteIA:
                     order_id = DataHub.preservation_extract_order_id(response)
                     if not order_id and vehiculo == "Stock":
                         # IB a veces tarda en confirmar — reintento leyendo live orders
-                        time.sleep(3)
+                        await asyncio.sleep(3)
                         try:
                             ib_client = DataHub.clients.get("Stock")
                             if ib_client:
