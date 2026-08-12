@@ -1302,8 +1302,10 @@ class ClassAgenteIA:
         revisiones_dia = pconfig.get("revisiones_dia", 2)
         intervalo_min = 86400 / revisiones_dia
 
-        # 2. Verificar intervalo por vehículo — único acceso a BD solo cuando toca
-        last_run = self.preservation_last_run.get(vehiculo)
+        # 2. Verificar intervalo por vehículo — recargar JSON en cada ciclo para control dinámico
+        _preservation_state_fresh = read_json_tmp("preservation_state.json")
+        last_run_str = _preservation_state_fresh.get(f"_last_run_{vehiculo}")
+        last_run = datetime.fromisoformat(last_run_str) if isinstance(last_run_str, str) else None
         if last_run is not None:
             elapsed = (datetime.now() - last_run).total_seconds()
             if elapsed < intervalo_min:
