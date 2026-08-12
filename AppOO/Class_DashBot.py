@@ -1412,7 +1412,14 @@ class ClassAgenteIA:
                         except Exception as _e2:
                             self.logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando EXIT → {_e2}")
                     except Exception as _e:
-                        self.logger.error(f"[EXIT-ERR] {symbol}: no se pudo cancelar {_order_exit} → {_e}")
+                        # Guard: ignorar órdenes huérfanas que no existen en IB
+                        if "doesn't exist" in str(_e):
+                            self._preservation_logger.info(
+                                f"[EXIT-ORPHAN] {symbol}: orden {_order_exit} ya no existe en IB (se limpió)"
+                            )
+                            self.preservation_state.pop(symbol, None)
+                        else:
+                            self.logger.error(f"[EXIT-ERR] {symbol}: no se pudo cancelar {_order_exit} → {_e}")
                 continue
 
             base_limit = unrealizedpnl * proteccion_base
