@@ -94,6 +94,29 @@ class AgentManager:
         codigo = resp.json()["content"][0]["text"].strip()
         return codigo if codigo in {o["estrategia"] for o in opciones} else None
 
+    def _call_claude(self, prompt: str, api_key: str, session_key: str, max_tokens: int = 500, timeout: int = 20):
+        """POST a Claude API, retorna primer bloque JSON parseado o None."""
+        try:
+            resp = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={"model": "claude-haiku-4-5-20251001", "max_tokens": max_tokens,
+                      "messages": [{"role": "user", "content": prompt}]},
+                timeout=timeout,
+            )
+            if not resp.ok:
+                self._log_stock.error(f"_call_claude({session_key}): HTTP {resp.status_code} — {resp.text[:200]}")
+                return None
+            usage = resp.json().get("usage", {})
+            track_claude_usage(session_key, usage.get("input_tokens", 0), usage.get("output_tokens", 0))
+            text = resp.json()["content"][0]["text"].strip()
+            start, end = text.find("{"), text.rfind("}") + 1
+            if start >= 0 and end > start:
+                return json.loads(text[start:end])
+        except Exception as e:
+            self._log_stock.error(f"_call_claude({session_key}): {e}")
+        return None
+
     # ── Agente.Stock ──────────────────────────────────────────────────────────
 
     @wait_rate(3600)
@@ -842,8 +865,7 @@ class AgentManager:
             f"NUNCA sugerir un stop inferior al base calculado por reglas (${ctx['stop_calculado']:.2f}).\n"
             f'Respondé SOLO con JSON válido: {{"stop_sugerido": float, "razon": "str max 120 chars", "urgencia": "alta"|"media"|"baja"}}'
         )
-        from Class_ServiciosCrypto import _call_claude
-        result = _call_claude(prompt, api_key, "ClaudeAPIP", max_tokens=256, timeout=15)
+        result = self._call_claude(prompt, api_key, "ClaudeAPIP", max_tokens=256, timeout=15)
         return result if result and "stop_sugerido" in result else None
 
     def _preservation_get_config(self, vehiculo):
