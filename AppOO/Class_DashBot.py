@@ -479,7 +479,7 @@ class ClassAgenteIA:
         for vehiculo in ("Stock", "Crypto"):
             try:
                 if DataHub.manager_sesion.get(vehiculo):
-                    await self._preservation_run_vehiculo(vehiculo)
+                    self._preservation_run_vehiculo(vehiculo)
                 else:
                     self._preservation_logger.debug(f"Agente_ManagerPreservation({vehiculo}): sesion no activa → SKIP")
             except Exception as e:
@@ -1326,7 +1326,7 @@ class ClassAgenteIA:
         )
         return pconfig, intervalo_min, True
 
-    async def _preservation_run_vehiculo(self, vehiculo):
+    def _preservation_run_vehiculo(self, vehiculo):
         """Orquesta la preservación para un vehículo. Lógica de vehículo en DataHub."""
 
         pconfig, intervalo_min, time_revision = self._preservation_get_config(vehiculo)
@@ -1538,7 +1538,7 @@ class ClassAgenteIA:
                     order_id = DataHub.preservation_extract_order_id(response)
                     if not order_id and vehiculo == "Stock":
                         # IB a veces tarda en confirmar — reintento leyendo live orders
-                        await asyncio.sleep(3)
+                        time.sleep(3)
                         try:
                             ib_client = DataHub.clients.get("Stock")
                             if ib_client:
