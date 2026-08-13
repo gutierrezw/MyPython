@@ -3137,10 +3137,11 @@ class DashMain:
             try:
                 for i, orden in enumerate(_load_stock_orders_today()):
                     st = orden["status"]
+                    side = orden["side"]
                     if "cancel" in st.lower():
                         tag = "red"
                     elif "fill" in st.lower():
-                        tag = "green"
+                        tag = "blue" if side == "BUY" else "green"
                     else:
                         tag = ""
                     price = orden["price"]
@@ -3178,10 +3179,11 @@ class DashMain:
                 for i, row in enumerate(rows):
                     r = dict(zip(ix, row))
                     st = r.get("status", "")
+                    side = r.get("side", "")
                     if "cancel" in st.lower():
                         tag = "red"
                     elif "fill" in st.lower():
-                        tag = "green"
+                        tag = "blue" if side == "BUY" else "green"
                     else:
                         tag = ""
                     price = r.get("price", "")
