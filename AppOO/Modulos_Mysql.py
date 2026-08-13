@@ -6384,7 +6384,12 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                         conn.close()
                         if row:
                             symbol, intent = row[0], row[1]
-                            agente = "Preservation" if intent == "PRESERV" else "GainsCapture"
+                            if intent == "PRESERV":
+                                agente = "Preservation"
+                            elif intent == "GAINS_CAPTURE":
+                                agente = "GainsCapture"
+                            else:
+                                agente = "Manual"
                             self.insert_symbol_decision_history(
                                 symbol=symbol,
                                 agente=agente,
