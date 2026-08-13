@@ -398,8 +398,8 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                     activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="BBVA.ARS", desde=f_desde, hasta=sym_hasta)
 
                 elif categoria == "Crypto":
-                    yf_ticket = convierte_ticket_crypto(bkey)
-                    activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="Crypto", desde=f_desde, hasta=sym_hasta)
+                    # para Binance klines se pasa ticker sin convertir (ya está en formato USDT)
+                    activo, datos = get_yfinance(ticket=bkey, vehiculo="Crypto", desde=f_desde, hasta=sym_hasta)
 
                 else:
                     yf_ticket = convierte_ticket_stock(bkey, divisa)
