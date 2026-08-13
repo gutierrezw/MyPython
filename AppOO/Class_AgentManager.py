@@ -967,7 +967,7 @@ class AgentManager:
             unrealizedpnl = (mktvalue - costobase) if mktvalue else positio.get("unrealizedpnl", 0)
 
             roi = unrealizedpnl / costobase
-            if roi < roi_minimo:
+            if roi < roi_minimo or unrealizedpnl < gain_inv_usd:
                 _state_exit = self.preservation_state.get(symbol, {})
                 _order_exit = _state_exit.get("order_id")
                 if _order_exit:
