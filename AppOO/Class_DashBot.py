@@ -151,7 +151,7 @@ class ClassAgenteIA:
         _gc_saved = read_json_tmp("gains_capture_state.json")
         self.gains_capture_state = {k: v for k, v in _gc_saved.items() if not k.startswith("_")}
         _gc_params = self._load_params("Stock") or {}
-        DataHub.modo_operacion = _gc_params.get("agente_ia", {}).get("modo", "OBSERVACION")
+        DataHub.modo_operacion = (_gc_params or {}).get("agente_ia", {}).get("modo", "OBSERVACION")
         # GainsCapture ahora respeta DataHub.modo_operacion (agente_ia.modo) — no usa gains_capture.modo
 
         # Inicializar AgentManager — registra todos sus agentes @wait_rate en AGENTES_SCHEDULE
