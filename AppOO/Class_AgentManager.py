@@ -950,8 +950,12 @@ class AgentManager:
         except Exception as e:
             self._preservation_logger.error(f"Preservation({vehiculo}): ClaudeAPIP no disponible → {e}")
 
-        positions = self.PlanInversion.select_inversion(tipoin=vehiculo, ticket="all")
-        self._preservation_logger.warning(f"Preservation({vehiculo}): {len(positions)} posiciones cargadas")
+        try:
+            positions = self.PlanInversion.select_inversion(tipoin=vehiculo, ticket="all")
+            self._preservation_logger.warning(f"Preservation({vehiculo}): {len(positions)} posiciones cargadas")
+        except Exception as e:
+            self._preservation_logger.error(f"Preservation({vehiculo}): error al cargar posiciones → {e}")
+            return
 
         for positio in positions:
             symbol = positio.get("ticket")
