@@ -732,10 +732,11 @@ class system_status(tk.Frame):
 
             st = CacheHut.stats()
             uso_pct = int(st["size"] / st["maxsize"] * 100) if st["maxsize"] else 0
+            hit_ratio = (st['hits'] / (st['hits'] + st['misses']) * 100) if (st['hits'] + st['misses']) > 0 else 0
             lbl_stats.config(
                 text=(
                     f"  Entradas: {st['size']}/{st['maxsize']} ({uso_pct}%)  │"
-                    f"  Hits: {st['hits']}  │  Misses: {st['misses']}  │"
+                    f"  Hits: {st['hits']}  │  Misses: {st['misses']}  │  Eficiencia: {hit_ratio:.1f}%  │"
                     f"  TTL: {st['ttl_seg']//60} min  │  Bypass: {len(st['bypass'])}"
                 )
             )
