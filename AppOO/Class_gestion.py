@@ -302,6 +302,10 @@ class GestionInversion(tk.Frame):
 
     # mantiene actualizada información de extractos
     def widgets_extractos(self):
+        # Guard: verificar que self.year esté definido
+        if not hasattr(self, 'year') or self.year is None:
+            print("widgets_extractos(): self.year no está definido. Abortando.")
+            return
 
         def meses_extract(x_datos=None, extracto=None, parent=None):
             try:
@@ -315,36 +319,40 @@ class GestionInversion(tk.Frame):
                 costo_base, nav_cierre, margen_neto = 0.0, 0.0, 0.0
 
                 for idd, fila in x_datos.iterrows():
-                    if (idd.month in (8, 9, 10, 11, 12) and idd.year == anterior) or (
-                        idd.month in (1, 2, 3, 4, 5, 6, 7) and idd.year == extracto
-                    ):
-
-                        if ilog:
-                            nav_cierre = fila["navcierre"]
-                            costo_base = fila["costobase"]
-                            ilog = False
-                        marge_neto = (fila["beneficios"] / fila["ingresos"]) if fila["ingresos"] > 0 else 0.0
-                        self.extract.insert(
-                            parent,
-                            tk.END,
-                            text=idd.strftime("%b"),
-                            values=(
-                                "{:10.2f}".format(fila["depositos"]),
-                                "{:10.2f}".format(fila["retiros"]),
-                                "{:10.2f}".format(fila["crecimiento"]),
-                                "{:10.2f}".format(fila["dividendos"]),
-                                "{:10.2f}".format(fila["perdidas"]),
-                                "{:10.2f}".format(fila["fee"]),
-                                "{:10.2f}".format(fila["comisiones"]),
-                                "{:10.2f}".format(fila["tax"]),
-                                "{:10.2f}".format(fila["navcierre"]),
-                                "{:10.2f}".format(fila["costobase"]),
-                                "{:10.2f}".format(fila["idevengo"]),
-                                "{:10.2f}".format(fila["imargen"]),
-                                "{:10.2f}".format(fila["beneficios"]),
-                                "{:10.1%}".format(marge_neto),
-                            ),
+                    if idd is None or pd.isna(idd):
+                        continue
+                    try:
+                        if (idd.month in (8, 9, 10, 11, 12) and idd.year == anterior) or (
+                            idd.month in (1, 2, 3, 4, 5, 6, 7) and idd.year == extracto
+                        ):
+                            if ilog:
+                                nav_cierre = fila["navcierre"]
+                                costo_base = fila["costobase"]
+                                ilog = False
+                            marge_neto = (fila["beneficios"] / fila["ingresos"]) if fila["ingresos"] is not None and fila["ingresos"] > 0 else 0.0
+                            self.extract.insert(
+                                parent,
+                                tk.END,
+                                text=idd.strftime("%b"),
+                                values=(
+                                    "{:10.2f}".format(fila["depositos"] or 0),
+                                    "{:10.2f}".format(fila["retiros"] or 0),
+                                    "{:10.2f}".format(fila["crecimiento"] or 0),
+                                    "{:10.2f}".format(fila["dividendos"] or 0),
+                                    "{:10.2f}".format(fila["perdidas"] or 0),
+                                    "{:10.2f}".format(fila["fee"] or 0),
+                                    "{:10.2f}".format(fila["comisiones"] or 0),
+                                    "{:10.2f}".format(fila["tax"] or 0),
+                                    "{:10.2f}".format(fila["navcierre"] or 0),
+                                    "{:10.2f}".format(fila["costobase"] or 0),
+                                    "{:10.2f}".format(fila["idevengo"] or 0),
+                                    "{:10.2f}".format(fila["imargen"] or 0),
+                                    "{:10.2f}".format(fila["beneficios"] or 0),
+                                    "{:10.1%}".format(marge_neto),
+                                ),
                         )
+                    except (AttributeError, TypeError):
+                        continue
                 return costo_base, nav_cierre
             except Exception as e:
                 print("meses_extract(): {}".format(e))
@@ -354,11 +362,21 @@ class GestionInversion(tk.Frame):
         def extract_update_treeview(tipo=None):
 
             # detalle de extracts por year fiscal
+            if tipo is None:
+                return
             self.extract.item(tipo, open=True)
-            for index, row in f_datos[::-1].iterrows():
-                extracto = index.year
+            if f_datos is None or f_datos.empty:
+                return
 
-                margen = row["margen"] if row["margen"] > 0 else 0.0
+            for index, row in f_datos[::-1].iterrows():
+                if index is None or pd.isna(index):
+                    continue
+                try:
+                    extracto = index.year
+                except (AttributeError, TypeError):
+                    continue
+
+                margen = row["margen"] if row["margen"] is not None and row["margen"] > 0 else 0.0
                 parent = self.extract.insert(
                     tipo,
                     tk.END,
@@ -387,20 +405,20 @@ class GestionInversion(tk.Frame):
                 self.extract.item(
                     parent,
                     values=(
-                        "{:10.2f}".format(row["depositos"]),
-                        "{:10.2f}".format(row["retiros"]),
-                        "{:10.2f}".format(row["crecimiento"]),
-                        "{:10.2f}".format(row["dividendos"]),
-                        "{:10.2f}".format(row["perdidas"]),
-                        "{:10.2f}".format(row["fee"]),
-                        "{:10.2f}".format(row["comisiones"]),
-                        "{:10.2f}".format(row["tax"]),
-                        "{:10.2f}".format(navcierre),
-                        "{:10.2f}".format(costobase),
-                        "{:10.2f}".format(row["idevengo"]),
-                        "{:10.2f}".format(row["imargen"]),
-                        "{:10.2f}".format(row["beneficios"]),
-                        "{:10.1%}".format(margen),
+                        "{:10.2f}".format(row["depositos"] or 0),
+                        "{:10.2f}".format(row["retiros"] or 0),
+                        "{:10.2f}".format(row["crecimiento"] or 0),
+                        "{:10.2f}".format(row["dividendos"] or 0),
+                        "{:10.2f}".format(row["perdidas"] or 0),
+                        "{:10.2f}".format(row["fee"] or 0),
+                        "{:10.2f}".format(row["comisiones"] or 0),
+                        "{:10.2f}".format(row["tax"] or 0),
+                        "{:10.2f}".format(navcierre or 0),
+                        "{:10.2f}".format(costobase or 0),
+                        "{:10.2f}".format(row["idevengo"] or 0),
+                        "{:10.2f}".format(row["imargen"] or 0),
+                        "{:10.2f}".format(row["beneficios"] or 0),
+                        "{:10.1%}".format(margen or 0),
                     ),
                 )
 
@@ -649,26 +667,29 @@ class GestionInversion(tk.Frame):
 
                 # Recorrer los hijos del padre
                 for child in self.extract.get_children(items):
-                    depositos += float(self.extract.item(child, "values")[0])
-                    retiros += float(self.extract.item(child, "values")[1])
-                    crecimiento += float(self.extract.item(child, "values")[2])
-                    dividendos += float(self.extract.item(child, "values")[3])
-                    perdidas += float(self.extract.item(child, "values")[4])
-                    fee += float(self.extract.item(child, "values")[5])
-                    comisiones += float(self.extract.item(child, "values")[6])
-                    tax += float(self.extract.item(child, "values")[7])
-                    idevengo += float(self.extract.item(child, "values")[10])
-                    imargen += float(self.extract.item(child, "values")[11])
-                    beneficios += float(self.extract.item(child, "values")[12])
+                    try:
+                        depositos += float(self.extract.item(child, "values")[0] or 0)
+                        retiros += float(self.extract.item(child, "values")[1] or 0)
+                        crecimiento += float(self.extract.item(child, "values")[2] or 0)
+                        dividendos += float(self.extract.item(child, "values")[3] or 0)
+                        perdidas += float(self.extract.item(child, "values")[4] or 0)
+                        fee += float(self.extract.item(child, "values")[5] or 0)
+                        comisiones += float(self.extract.item(child, "values")[6] or 0)
+                        tax += float(self.extract.item(child, "values")[7] or 0)
+                        idevengo += float(self.extract.item(child, "values")[10] or 0)
+                        imargen += float(self.extract.item(child, "values")[11] or 0)
+                        beneficios += float(self.extract.item(child, "values")[12] or 0)
 
-                    # toma costo y value más recientes
-                    if itrue:
-                        value = float(self.extract.item(child, "values")[8])
-                        costo_base = float(self.extract.item(child, "values")[9])
-                        itrue = False
+                        # toma costo y value más recientes
+                        if itrue:
+                            value = float(self.extract.item(child, "values")[8] or 0)
+                            costo_base = float(self.extract.item(child, "values")[9] or 0)
+                            itrue = False
+                    except (ValueError, TypeError, IndexError):
+                        pass
 
             # Actualizar el valor del padre
-            margen_neto = beneficios / costo_base if costo_base > 0 else 0
+            margen_neto = beneficios / costo_base if costo_base is not None and costo_base > 0 else 0
             self.extract.item(
                 padre,
                 values=(
@@ -748,22 +769,22 @@ class GestionInversion(tk.Frame):
                 0,
             )
             for i, key in enumerate(plan):
-                s_deseada = "{:>,.0f}".format(key["deseada"])
-                s_actual = "{:>,.0f}".format(key["actual"])
-                self.plan[key["vision"]] = key["deseada"]
+                s_deseada = "{:>,.0f}".format(key["deseada"] or 0)
+                s_actual = "{:>,.0f}".format(key["actual"] or 0)
+                self.plan[key["vision"]] = key["deseada"] or 0
 
-                self.mpl[i + 1][0].config(text="{:>10}".format(key["vision"]))
+                self.mpl[i + 1][0].config(text="{:>10}".format(key["vision"] or ""))
                 self.mpl[i + 1][1].config(text=s_deseada.rjust(14))
                 self.mpl[i + 1][2].config(text=s_actual.rjust(14))
-                deseada += key["deseada"]
-                actual += key["actual"]
+                deseada += (key["deseada"] or 0)
+                actual += (key["actual"] or 0)
                 if i == 0:
-                    self.mpl[i + 1][3].config(text="{:>12.1%}".format(key["objetivo"]))
+                    self.mpl[i + 1][3].config(text="{:>12.1%}".format(key["objetivo"] or 0))
                     self.mpl[5][6].config(
-                        text="{:>6.0f} de Ingresos ({:>5.2%} visión actual)".format(key["indicador"], key["objetivo"])
+                        text="{:>6.0f} de Ingresos ({:>5.2%} visión actual)".format(key["indicador"] or 0, key["objetivo"] or 0)
                     )
                 else:
-                    self.mpl[i + 1][3].config(text="{:>12.1%}".format(key["indicador"]))
+                    self.mpl[i + 1][3].config(text="{:>12.1%}".format(key["indicador"] or 0))
 
                 if key["proyecto"] != " ":
                     self.mpl[0][5].insert(tk.END, str(i) + ") " + key["proyecto"] + "\n")
@@ -777,20 +798,20 @@ class GestionInversion(tk.Frame):
             if traz:
                 self.tree_plan.delete(*self.tree_plan.get_children())
                 for tkey in traz:
-                    vision = "{:>,.0f}".format(tkey["vision"])
+                    vision = "{:>,.0f}".format(tkey["vision"] or 0)
                     cap = div = efe = sta = rec = ""
-                    if tkey["costobase"] > 0:
-                        cap = "{:>,.1f}".format(tkey["tinversion"])
-                        div = "{:>,.1f}".format(tkey["dividendo"])
-                        efe = "{:>+.1%}".format(tkey["efectividad"])
+                    if tkey["costobase"] is not None and tkey["costobase"] > 0:
+                        cap = "{:>,.1f}".format(tkey["tinversion"] or 0)
+                        div = "{:>,.1f}".format(tkey["dividendo"] or 0)
+                        efe = "{:>+.1%}".format(tkey["efectividad"] or 0)
                         sta = tkey["status"] or ""
                         rec = tkey["recompensa"] or ""
                     self.tree_plan.insert(
                         "",
                         tk.END,
                         values=(
-                            "{:>n} Año".format(tkey["meta"]),
-                            "{:%Y-%b}".format(tkey["extracto"]),
+                            "{:>n} Año".format(tkey["meta"] or 0),
+                            "{:%Y-%b}".format(tkey["extracto"] or datetime.now().date()),
                             vision,
                             cap,
                             div,
@@ -888,7 +909,7 @@ class GestionInversion(tk.Frame):
         tree.bind("<Double-1>", _edit_cell)
         vsb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
-        tree.pack(side=tk.LEFT, fill="both", expand=True)
+        tree.pack(side=tk.LEFT, fill="both", expand=False)
         vsb.pack(side=tk.RIGHT, fill="y")
 
         btn_frame = tk.Frame(parent, bg=self.bgcolor)
@@ -1334,10 +1355,10 @@ class GestionInversion(tk.Frame):
         datos["depositos"] = datos.apply(lambda rows: rows["producto"] if rows["codigo"] == "O" else 0, axis=1)
         datos["retiros"] = datos.apply(lambda rows: rows["producto"] if rows["codigo"] == "C" else 0, axis=1)
         datos["perdidas"] = datos.apply(
-            lambda rows: -rows["gprealizadas"] if rows["gprealizadas"] < 0 else 0,
+            lambda rows: -rows["gprealizadas"] if rows["gprealizadas"] is not None and rows["gprealizadas"] < 0 else 0,
             axis=1,
         )
-        datos["crecimiento"] = datos.apply(lambda rows: rows["gprealizadas"] if rows["gprealizadas"] > 0 else 0, axis=1)
+        datos["crecimiento"] = datos.apply(lambda rows: rows["gprealizadas"] if rows["gprealizadas"] is not None and rows["gprealizadas"] > 0 else 0, axis=1)
         datos["costos"] = datos["perdidas"] + datos["tarifacomision"]
         datos["beneficios"] = datos["crecimiento"] - datos["costos"]
         datos["comisiones"] = datos["tarifacomision"]
@@ -1470,10 +1491,10 @@ class GestionInversion(tk.Frame):
         datos["depositos"] = 0.0
         datos["retiros"] = 0.0
         datos["perdidas"] = datos.apply(
-            lambda rows: -rows["gprealizadas"] if rows["gprealizadas"] < 0 else 0,
+            lambda rows: -rows["gprealizadas"] if rows["gprealizadas"] is not None and rows["gprealizadas"] < 0 else 0,
             axis=1,
         )
-        datos["crecimiento"] = datos.apply(lambda rows: rows["gprealizadas"] if rows["gprealizadas"] > 0 else 0, axis=1)
+        datos["crecimiento"] = datos.apply(lambda rows: rows["gprealizadas"] if rows["gprealizadas"] is not None and rows["gprealizadas"] > 0 else 0, axis=1)
         datos["costos"] = datos["perdidas"] + datos["tarifacomision"]
         datos["beneficios"] = datos["crecimiento"] - datos["costos"]
         datos["comisiones"] = datos["tarifacomision"]
@@ -1583,24 +1604,24 @@ class GestionInversion(tk.Frame):
 
         # identificar en columnas compras y ventas ---------------------------------------------------------------------
         datos["depositos"] = datos.apply(
-            lambda rows: (rows["producto"] / rows["factor_cambio"] if rows["codigo"] == "O" else 0),
+            lambda rows: (rows["producto"] / rows["factor_cambio"] if rows["codigo"] == "O" and rows["factor_cambio"] is not None and rows["factor_cambio"] != 0 else 0),
             axis=1,
         )
         datos["retiros"] = datos.apply(
-            lambda rows: (abs(rows["basico"] * rows["cantidad"]) / rows["factor_cambio"] if rows["codigo"] == "C" else 0),
+            lambda rows: (abs(rows["basico"] * rows["cantidad"]) / rows["factor_cambio"] if rows["codigo"] == "C" and rows["factor_cambio"] is not None and rows["factor_cambio"] != 0 else 0),
             axis=1,
         )
         datos["perdidas"] = datos.apply(
-            lambda rows: (-rows["gprealizadas"] / rows["factor_cambio"] if rows["gprealizadas"] < 0 else 0),
+            lambda rows: (-rows["gprealizadas"] / rows["factor_cambio"] if rows["gprealizadas"] is not None and rows["factor_cambio"] is not None and rows["factor_cambio"] != 0 and rows["gprealizadas"] < 0 else 0),
             axis=1,
         )
         datos["crecimiento"] = datos.apply(
-            lambda rows: (rows["gprealizadas"] / rows["factor_cambio"] if rows["gprealizadas"] >= 0 else 0),
+            lambda rows: (rows["gprealizadas"] / rows["factor_cambio"] if rows["gprealizadas"] is not None and rows["factor_cambio"] is not None and rows["gprealizadas"] >= 0 else 0),
             axis=1,
         )
 
         datos["gprealizadas"] = datos.apply(
-            lambda rows: (rows["gprealizadas"] / rows["factor_cambio"] if rows["gprealizadas"] >= 0 else 0),
+            lambda rows: (rows["gprealizadas"] / rows["factor_cambio"] if rows["gprealizadas"] is not None and rows["factor_cambio"] is not None and rows["gprealizadas"] >= 0 else 0),
             axis=1,
         )
 
@@ -1660,7 +1681,7 @@ class GestionInversion(tk.Frame):
             # evalua si trabaja ne opción insert para agregar el mes en curso
             if insert and (hasta == row.Index.date().strftime("%Y-%m-%d")):
                 # solo inserta si performa tiene dato real para ese mes (navcierre > 0)
-                if values["navcierre"] > 0:
+                if values["navcierre"] is not None and values["navcierre"] > 0:
                     self.PlaInversion.insert_extracto(account=account, values=values)
 
         return resultado
@@ -1792,6 +1813,37 @@ class GestionInversion(tk.Frame):
         except Exception as e:
             print(f"update_plan(): {e} {traceback.print_exc()}")
 
+    def _regenerar_trazaplan_horizonte(self, idcuenta, meta_capital, año_objetivo):
+        """Regenera trazaplan si cambió el horizonte (año objetivo). Solo inserta años nuevos."""
+        try:
+            trazaplan_actual = self.PlaInversion.select_trazaplan(idcuenta, orden="DESC")
+            if not trazaplan_actual:
+                return  # No hay trazaplan anterior, nada que regenerar
+
+            años_existentes = {t["meta"] for t in trazaplan_actual}
+            año_objetivo_actual = max(años_existentes) if años_existentes else 2026
+
+            if año_objetivo > año_objetivo_actual:
+                # Solo insertar años nuevos que no existen
+                for año in range(año_objetivo_actual + 1, año_objetivo + 1):
+                    if año not in años_existentes:
+                        meta_año = meta_capital / (2 ** (año_objetivo - año))
+                        self.PlaInversion.insert_trazaplan(
+                            idcuenta=idcuenta,
+                            meta=año,
+                            vision=meta_año,
+                            extracto=None,
+                            status="proyectado"
+                        )
+
+                self.PlaInversion.update_plan_inversion(
+                    idcuenta=idcuenta,
+                    vision="deseada",
+                    values={"Financiera": meta_capital}
+                )
+        except Exception as e:
+            print(f"_regenerar_trazaplan_horizonte(): {e}")
+
     def edit_plan(self):
         def eexit():
             if not (rnb is None):
@@ -1852,6 +1904,18 @@ class GestionInversion(tk.Frame):
                 except ValueError:
                     pass
                 BDsystem.update_sesion_parameters("Stock", params)
+
+                # Regenerar trazaplan si cambió horizonte
+                try:
+                    meta_cap_num = int(meta_cap.replace("M USD", "").replace("M", "").replace(",", ""))
+                    meta_year_num = int(meta_year)
+                    self._regenerar_trazaplan_horizonte(
+                        idcuenta=self.datsess["idcuenta"],
+                        meta_capital=meta_cap_num,
+                        año_objetivo=meta_year_num
+                    )
+                except ValueError:
+                    pass
 
                 idcuenta = self.datsess["idcuenta"]
                 for row in _fn_criterios[0]():
@@ -1985,7 +2049,7 @@ class GestionInversion(tk.Frame):
 
             # ── sección Restricciones de cartera ─────────────────────────────
             rst = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")
-            rst.pack(fill=tk.X, pady=(0, 1))
+            rst.pack(fill=tk.X, pady=(0, 1), expand=False)
 
             tk.Button(
                 rst,
@@ -2047,7 +2111,7 @@ class GestionInversion(tk.Frame):
 
             # botones al fondo
             bot = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="B.TFrame")
-            bot.pack(fill=tk.X, pady=(1, 0))
+            bot.pack(fill=tk.X, pady=(1, 0), expand=False)
 
             tk.Button(bot, text="Guardar", width=10, bg="gray", fg="white", command=submit_values).pack(
                 side=tk.LEFT, padx=(20, 5), pady=8

@@ -378,7 +378,7 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                         continue
 
                 divisa = read[ix.index("divisa")] if "divisa" in ix else "USD"
-                yf_ticket = convierte_ticket_stock(bkey, divisa)
+                categoria = read[ix.index("categoria")] if "categoria" in ix else "Stock"
 
                 # cuarentena: símbolo con datos corruptos recurrentes — saltear hasta que expire (24h)
                 _quarantine = read_json_tmp("cache_health").get("quarantine", {})
@@ -389,13 +389,20 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                     continue
 
                 # cuando Stock hace Ticker para bajar los dividends
-                if read[ix.index("categoria")] == "Stock":
+                if categoria == "Stock":
+                    yf_ticket = convierte_ticket_stock(bkey, divisa)
                     activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="Dividends", desde=f_desde, hasta=sym_hasta)
 
-                elif read[ix.index("categoria")] == "BBVA.ARS":
+                elif categoria == "BBVA.ARS":
+                    yf_ticket = convierte_ticket_stock(bkey, divisa)
                     activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="BBVA.ARS", desde=f_desde, hasta=sym_hasta)
 
+                elif categoria == "Crypto":
+                    yf_ticket = convierte_ticket_crypto(bkey)
+                    activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="Crypto", desde=f_desde, hasta=sym_hasta)
+
                 else:
+                    yf_ticket = convierte_ticket_stock(bkey, divisa)
                     activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="download", desde=f_desde, hasta=sym_hasta)
 
                 if datos is None or datos.empty:

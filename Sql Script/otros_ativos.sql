@@ -1,5 +1,2 @@
-SELECT * FROM bdinv.otros_activos
-where base_asset = 'ARS'
-and cuenta = 'BBVA0001'
-;
-
+DELETE FROM diaria_performance
+WHERE account IN ('BBVA0001', 'SANT0001');
