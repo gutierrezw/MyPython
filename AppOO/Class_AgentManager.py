@@ -1271,6 +1271,7 @@ class AgentManager:
             ("Agente_NtpCheck", self.Agente_NtpCheck, 300),
             ("Agente_IbFlex", self.Agente_IbFlex, 3600),
             ("Agente_LotesReconcile", self.Agente_LotesReconcile, 3600),
+            ("Agente_ManagerPreservation", self.Agente_ManagerPreservation, 1),
         ]
         for name, target, sleep in _threads:
             DataHub.procesos.append({"thread": {name: 1}})
