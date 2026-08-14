@@ -819,7 +819,9 @@ def proceso_update_performance(account=None, vehiculo=None):
             for date, rows in df_performa.iterrows():
                 date_val = date.date() if hasattr(date, "date") else date
                 if hasta is None or date_val > hasta:
-                    p_ref = float(rows[rtn_index]) if rtn_index and rtn_index in rows.index else 0.0
+                    if not (rtn_index and rtn_index in rows.index):
+                        continue
+                    p_ref = float(rows[rtn_index])
                     values = {
                         "idcuenta": account,
                         "vehiculo": vehiculo,
