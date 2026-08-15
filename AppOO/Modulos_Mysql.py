@@ -3982,11 +3982,15 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                     xlis.append(dict(zip(ix, curs)))
                     return xlis
 
-            cursor.close()
-            conn.close()
             return []
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql:: select_inversion()]: {}".format(error))
+        finally:
+            try:
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
 
     # actualiza tabla de cartera
     def update_inversion(self, vehiculo=None, account=None, positions=None):

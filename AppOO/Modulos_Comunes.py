@@ -10,6 +10,7 @@ from Modulos_Utilitarios import (
 from Modulos_python import datetime, date, pd, timedelta, os, csv, traceback, logging, time, brentq
 
 _logger = logging.getLogger("ClassMyOrders")
+_log_diaria_performa = logging.getLogger("DiariaPerforma")
 
 
 # construye e inserta diaria para los assets del vehiculo
@@ -675,12 +676,12 @@ def crea_dataframe_performa_Index(account=None, vehiculo=None, display=True, dia
                 pdatos.index = pd.to_datetime(pdatos.index)
                 indice.index = pd.to_datetime(indice.index)
                 c_pdatos = pdatos.join(indice, how="left")
-                c_pdatos.fillna(0, inplace=True)
+                _, _, cum_index, _ = vehiculo_parm(vehiculo=vehiculo)
+                cols_sin_index = [col for col in c_pdatos.columns if col not in (rtn_index, cum_index)]
+                c_pdatos[cols_sin_index] = c_pdatos[cols_sin_index].fillna(0)
             else:
-                # sin índice externo disponible — igual se construye performa_inversion
+                # sin índice externo disponible — no crear columna de índice (evita p_referencia=0 ficticio)
                 c_pdatos = pdatos.copy()
-                if rtn_index:
-                    c_pdatos[rtn_index] = 0.0
 
         if display:
             hoy = datetime.now().date()
@@ -816,10 +817,12 @@ def proceso_update_performance(account=None, vehiculo=None):
 
             symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=vehiculo)
 
+            saltadas = []
             for date, rows in df_performa.iterrows():
                 date_val = date.date() if hasattr(date, "date") else date
                 if hasta is None or date_val > hasta:
-                    if not (rtn_index and rtn_index in rows.index):
+                    if not (rtn_index and rtn_index in rows.index) or pd.isna(rows.get(rtn_index)):
+                        saltadas.append(date_val)
                         continue
                     p_ref = float(rows[rtn_index])
                     values = {
@@ -836,5 +839,11 @@ def proceso_update_performance(account=None, vehiculo=None):
                         "dividends": float(rows["dividends"]),
                     }
                     Performa.insert_performa_inversion(values)
+
+            if saltadas:
+                _log_diaria_performa.warning(
+                    f"proceso_update_performance({account}, {vehiculo}): {len(saltadas)} fila(s) "
+                    f"saltadas por falta de índice '{rtn_index}' — fechas: {min(saltadas)} a {max(saltadas)}"
+                )
     except Exception as e:
-        print(f"proceso_update_performance({vehiculo}): error: {e}")
+        _log_diaria_performa.error(f"proceso_update_performance({vehiculo}): error: {e}")

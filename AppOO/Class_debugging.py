@@ -410,6 +410,8 @@ class Debugging:
         self.logger["Agente.Infra"].setLevel(logging.WARNING)
         self.logger.update({"Agente.Performa": logging.getLogger("Agente.Performa")})
         self.logger["Agente.Performa"].setLevel(logging.WARNING)
+        self.logger.update({"DiariaPerforma": logging.getLogger("DiariaPerforma")})
+        self.logger["DiariaPerforma"].setLevel(logging.WARNING)
         self.logger.update({"Agente.EDGAR": logging.getLogger("Agente.EDGAR")})
         self.logger["Agente.EDGAR"].setLevel(logging.WARNING)
         self.logger.update({"Agente.Institucion": logging.getLogger("Agente.Institucion")})

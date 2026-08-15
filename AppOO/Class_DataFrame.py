@@ -624,11 +624,13 @@ def get_klines_info(symbol=None, period="5y", interval="1d", desde=None, hasta=N
 
 
 def get_ultimo_dia_mercado(market="Stock"):
+    # Crypto opera 24/7 — no hay "cierre de mercado" que confirmar via ticker externo
+    if market == "Crypto":
+        return datetime.now().date() - timedelta(days=1)
+
     # Descarga los datos históricos del índice
     if market == "Stock":
         activo, datos = get_yfinance(ticket="^GSPC", period="7d", vehiculo="download")
-    elif market == "Crypto":
-        activo, datos = get_yfinance(ticket="BTC-USD", period="7d", vehiculo="download")
     elif market == "BBVA.ARS":
         activo, datos = get_yfinance(ticket="^MERV", period="7d", vehiculo="download")
 
