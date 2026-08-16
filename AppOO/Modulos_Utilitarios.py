@@ -912,6 +912,17 @@ def style_app(main=None) -> object:
     style.configure("B.TButton", foreground="black")
     style.configure("C.TButton", background="DarkCyan", foreground="black")
 
+    # Flat.TButton — botón unificado para popups/formularios (spec-style-guide.md)
+    style.configure(
+        "Flat.TButton",
+        background="#444444",
+        foreground="white",
+        font=("Segoe UI", 8),
+        relief="flat",
+        padding=4,
+    )
+    style.map("Flat.TButton", background=[("active", "#606060"), ("disabled", "#2a2a2a")])
+
     # TNoteBook
     style.configure("TNotebook", background="DarkCyan", borderwidth=1)
     style.configure("TNotebook.Tab", background="DarkCyan", foreground="black")
@@ -1013,6 +1024,25 @@ def style_app(main=None) -> object:
     )
 
     return style
+
+
+def ui_section_bar(parent, text, bg="#37474f", row=0, column=0, columnspan=2, font=("Segoe UI", 9, "bold"),
+                    pady=(8, 4)):
+    """
+    Barra de sección de ancho completo — encabezado unificado de "sesión" dentro de un formulario/popup
+    (spec-style-guide.md). Reutiliza el patrón ya validado en Editar Plan (Class_gestion.py::edit_plan).
+    """
+    tk.Button(
+        parent,
+        text=text,
+        height=1,
+        state="disabled",
+        font=font,
+        fg="white",
+        disabledforeground="white",
+        bg=bg,
+        relief=tk.FLAT,
+    ).grid(row=row, column=column, columnspan=columnspan, padx=2, pady=pady, sticky="ew")
 
 
 def mask_numero(numero):

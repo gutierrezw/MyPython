@@ -169,6 +169,13 @@ class DataHub:
     cgcolor = envs_config["cgcolor"]
     cchart = envs_config["cchart"]
     cchart["tab20"] = colormaps.get_cmap("tab20")
+    session_colors = {
+        "neutral": "#37474f",
+        "ia": "#1565c0",
+        "danger": "#c0392b",
+        "nested": "#546e7a",
+    }
+    session_colors.update(envs_config.get("session_colors", {}))
     colors = {
         "bgcolor": bgcolor,
         "cgcolor": cgcolor,
@@ -179,6 +186,7 @@ class DataHub:
         "max_dw": None,
         "max_dh": None,
         "cchart": cchart,
+        "session": session_colors,
     }
 
     # ========================================================================================================
@@ -437,6 +445,9 @@ class DataHub:
             if "cgcolor" in envs_config:
                 DataHub.cgcolor = envs_config["cgcolor"]
                 DataHub.colors["cgcolor"] = envs_config["cgcolor"]
+
+            if "session_colors" in envs_config:
+                DataHub.colors["session"].update(envs_config["session_colors"])
 
             if "cchart" in envs_config:
                 DataHub.cchart.update(envs_config["cchart"])

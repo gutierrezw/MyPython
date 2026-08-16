@@ -3623,6 +3623,28 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             if conn:
                 conn.close()
 
+    def delete_trazaplan_proyectados(self, idcuenta, meta_min):
+        """Elimina pasos futuros aún no alcanzados (status='proyectado') con meta >= meta_min.
+
+        Nunca borra pasos Cumplido/Ejecucion — el filtro por status protege el historial real aunque
+        meta_min caiga dentro del rango ya alcanzado. Se usa al acortar el horizonte del plan (año
+        objetivo más próximo que el guardado antes)."""
+        try:
+            conn = self._conectar(tabla="delete.trazaplan")
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM trazaplan WHERE idcuenta = %s AND meta >= %s AND status = 'proyectado'",
+                (idcuenta, meta_min)
+            )
+            conn.commit()
+        except (Exception, EncodingWarning, connect.Error) as error:
+            print(f"[Mysql:: delete_trazaplan_proyectados()]: {error}")
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
     def update_plan_inversion(self, idcuenta=None, vision="deseada", values=None):
         """
         @param idcuenta: cuenta ID de inversor
@@ -3635,16 +3657,27 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             if traza:
                 inversion, campos = values["Financiera"], {}
 
+                # tasa de crecimiento anual implícita: la que lleva del capital base (meta más antiguo,
+                # el punto de partida real del plan) al objetivo actual, distribuida en la cantidad de
+                # pasos/años que separan ambos extremos. Reemplaza el ÷2 fijo (100% anual) por una tasa
+                # que se adapta al plazo y monto objetivo.
+                meta_max, meta_min = traza[0]["meta"], traza[-1]["meta"]
+                vision_base, pasos_totales = traza[-1]["vision"], meta_max - meta_min
+                tasa = (inversion / vision_base) ** (1 / pasos_totales) - 1 if vision_base > 0 and pasos_totales > 0 else 1.0
+
                 for i, key in enumerate(traza):
                     campos["vision"] = inversion
                     campos["efectividad"] = 0.0
                     campos["trendimiento"] = 0.0
 
                     if key["tinversion"] > 0:
-                        campos["efectividad"] = (key["tinversion"] - key["vision"]) / key["vision"]
-                        campos["trendimiento"] = (key["dividendo"] + key["ccapital"]) / key["tinversion"]
+                        campos["efectividad"] = (key["tinversion"] - campos["vision"]) / campos["vision"]
+                        # "ccapital" ya es el neto (ingresos - costos) y ya incluye "dividendo" —
+                        # ver Class_gestion.py::update_plan(): ingresos = crecimiento + dividendos +
+                        # idevengo. Sumar "dividendo" de nuevo aquí duplicaba el aporte de dividendos.
+                        campos["trendimiento"] = key["ccapital"] / key["tinversion"]
 
-                    inversion = int(inversion / 2)
+                    inversion = inversion / (1 + tasa)
                     self.update_trazaplan_inversion(idcuenta=idcuenta, meta=key["meta"], values=campos)
 
         try:
@@ -3657,6 +3690,12 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
 
             if vision == "actual":
                 qry = """UPDATE plan SET actual = '%s', timestamp = '%s' WHERE idcuenta = '%s' AND vision = '%s';"""
+
+            if vision == "indicador":
+                qry = """UPDATE plan SET indicador = '%s', timestamp = '%s' WHERE idcuenta = '%s' AND vision = '%s';"""
+
+            if vision == "objetivo":
+                qry = """UPDATE plan SET objetivo = '%s', timestamp = '%s' WHERE idcuenta = '%s' AND vision = '%s';"""
 
             found = self.select_plan(idcuenta=idcuenta)
             if found:

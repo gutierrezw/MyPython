@@ -1,4 +1,5 @@
 from Class_DataFrame import chart_margen_neto, chart_trazaplan, cagar_archivo
+from Modulos_Utilitarios import ui_section_bar
 from Modulos_Mysql import (
     PlanInversion,
     RepositorioOportunidadesBuySell,
@@ -760,6 +761,35 @@ class GestionInversion(tk.Frame):
         traz = self.PlaInversion.select_trazaplan(self.datsess["idcuenta"])
         vari = self.PlaInversion.select_variablesplan(self.datsess["idcuenta"])
 
+        # capital invertido y dividendos/año del paso vigente de trazaplan (Ejecucion, o el último
+        # Cumplido si ningún paso está en Ejecucion) — misma fuente que alimenta "Ingresos pasivos".
+        # Se persiste en plan.indicador/objetivo para que la fila Financiera no quede desfasada.
+        _meta_activa = None
+        if traz:
+            _meta_activa = next(
+                (t for t in traz if t.get("status") == "Ejecucion" and t.get("dividendo", 0) > 0),
+                None,
+            )
+            if not _meta_activa:
+                _cumplidos = [t for t in traz if t.get("status") == "Cumplido" and (t.get("tinversion") or 0) > 0]
+                if _cumplidos:
+                    _meta_activa = max(_cumplidos, key=lambda t: t["meta"])
+
+        _div_actual, _objetivo_actual, _inv_actual = 0.0, 0.0, 0.0
+        if _meta_activa:
+            _div_actual = _meta_activa["dividendo"]
+            _inv_actual = _meta_activa["tinversion"] or 0
+            _objetivo_actual = _div_actual / (_meta_activa["tinversion"] or 1)
+            self.PlaInversion.update_plan_inversion(
+                idcuenta=self.datsess["idcuenta"], vision="actual", values={"Financiera": _inv_actual}
+            )
+            self.PlaInversion.update_plan_inversion(
+                idcuenta=self.datsess["idcuenta"], vision="indicador", values={"Financiera": _div_actual}
+            )
+            self.PlaInversion.update_plan_inversion(
+                idcuenta=self.datsess["idcuenta"], vision="objetivo", values={"Financiera": _objetivo_actual}
+            )
+
         if plan:
             (
                 deseada,
@@ -768,26 +798,32 @@ class GestionInversion(tk.Frame):
                 0,
                 0,
             )
+            ia_plan, _ = self._load_ia_plan()
+            self.mpl[0][5].delete("1.0", tk.END)
             for i, key in enumerate(plan):
                 s_deseada = "{:>,.0f}".format(key["deseada"] or 0)
-                s_actual = "{:>,.0f}".format(key["actual"] or 0)
+                _val_actual = _inv_actual if (i == 0 and _meta_activa) else (key["actual"] or 0)
+                s_actual = "{:>,.0f}".format(_val_actual)
                 self.plan[key["vision"]] = key["deseada"] or 0
 
                 self.mpl[i + 1][0].config(text="{:>10}".format(key["vision"] or ""))
                 self.mpl[i + 1][1].config(text=s_deseada.rjust(14))
                 self.mpl[i + 1][2].config(text=s_actual.rjust(14))
                 deseada += (key["deseada"] or 0)
-                actual += (key["actual"] or 0)
+                actual += _val_actual
                 if i == 0:
-                    self.mpl[i + 1][3].config(text="{:>12.1%}".format(key["objetivo"] or 0))
+                    _objetivo = _objetivo_actual if _meta_activa else (key["objetivo"] or 0)
+                    _indicador = _div_actual if _meta_activa else (key["indicador"] or 0)
+                    self.mpl[i + 1][3].config(text="{:>12.1%}".format(_objetivo))
                     self.mpl[5][6].config(
-                        text="{:>6.0f} de Ingresos ({:>5.2%} visión actual)".format(key["indicador"] or 0, key["objetivo"] or 0)
+                        text="{:>6.0f} de Ingresos ({:>5.2%} visión actual)".format(_indicador, _objetivo)
                     )
                 else:
                     self.mpl[i + 1][3].config(text="{:>12.1%}".format(key["indicador"] or 0))
 
                 if key["proyecto"] != " ":
-                    self.mpl[0][5].insert(tk.END, str(i) + ") " + key["proyecto"] + "\n")
+                    texto_proyecto = self._resolver_objetivo_texto(key["proyecto"], ia_plan)
+                    self.mpl[0][5].insert(tk.END, str(i) + ") " + texto_proyecto + "\n")
 
             # totaliza y justifica a la derecha
             s_deseada = "{:>,.0f}".format(deseada)
@@ -819,18 +855,6 @@ class GestionInversion(tk.Frame):
                             sta,
                             rec,
                         ),
-                    )
-
-                # actualiza Ingresos con dividendo real del año en Ejecucion (trazaplan)
-                _meta_activa = next(
-                    (t for t in traz if t.get("status") == "Ejecucion" and t.get("dividendo", 0) > 0),
-                    None,
-                )
-                if _meta_activa:
-                    _div = _meta_activa["dividendo"]
-                    _inv = _meta_activa["tinversion"] or 1
-                    self.mpl[5][6].config(
-                        text="{:>6.0f} de Ingresos ({:>5.2%} visión actual)".format(_div, _div / _inv)
                     )
 
                 # redibuja gráfico de plan trazado Neto
@@ -909,7 +933,7 @@ class GestionInversion(tk.Frame):
         tree.bind("<Double-1>", _edit_cell)
         vsb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
-        tree.pack(side=tk.LEFT, fill="both", expand=False)
+        tree.pack(side=tk.LEFT, fill="both", expand=True)
         vsb.pack(side=tk.RIGHT, fill="y")
 
         btn_frame = tk.Frame(parent, bg=self.bgcolor)
@@ -1813,34 +1837,89 @@ class GestionInversion(tk.Frame):
         except Exception as e:
             print(f"update_plan(): {e} {traceback.print_exc()}")
 
-    def _regenerar_trazaplan_horizonte(self, idcuenta, meta_capital, año_objetivo):
-        """Regenera trazaplan si cambió el horizonte (año objetivo). Solo inserta años nuevos."""
+    def _parse_meta_capital(self, texto):
+        """Convierte 'meta capital' de UI (ej: '1.2M USD', '1200000', '1,200,000') a float USD."""
+        limpio = texto.strip().upper().replace("USD", "").replace(",", "").strip()
+        multiplicador = 1
+        if limpio.endswith("M"):
+            multiplicador = 1_000_000
+            limpio = limpio[:-1].strip()
+        elif limpio.endswith("K"):
+            multiplicador = 1_000
+            limpio = limpio[:-1].strip()
+        return float(limpio) * multiplicador
+
+    def _load_ia_plan(self):
+        """Carga 'Misión IA' (agente_ia.plan) desde parameters de la sesión Stock."""
+        try:
+            ses = BDsystem.get_sesion_by_vehiculo("Stock")
+            raw = ses.get("parameters") or "{}"
+            params = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+            return params.get("agente_ia", {}).get("plan", {}), params.get("agente_ia", {})
+        except Exception:
+            return {}, {}
+
+    def _resolver_objetivo_texto(self, proyecto, ia_plan=None):
+        """Sustituye placeholders (ej. {ingreso_pasivo}) en el texto de Objetivo por su valor actual
+        en Misión IA, para que el texto narrativo no quede desincronizado del valor configurado."""
+        ia_plan = ia_plan if ia_plan is not None else self._load_ia_plan()[0]
+        return (proyecto or "").replace("{ingreso_pasivo}", str(ia_plan.get("ingreso_pasivo_pct", "")))
+
+    def _regenerar_trazaplan_horizonte(self, idcuenta, meta_capital, año_objetivo, año_actual):
+        """Regenera trazaplan si cambió el horizonte (año objetivo), sea ampliado o acortado.
+
+        `meta` en trazaplan es un contador secuencial de pasos del plan de duplicación de capital
+        (0, 1, 2, ...), no un año calendario. `año_actual`/`año_objetivo` sí son años calendario —
+        la diferencia entre ambos determina cuántos pasos hay que agregar o quitar a partir del
+        último `meta` existente. Los pasos nuevos se distribuyen hacia atrás desde el objetivo
+        (duplicando), igual que el resto del plan ya construido. Al acortar, se eliminan los pasos
+        futuros sobrantes que todavía estén `status='proyectado'` — nunca se toca un paso ya
+        Cumplido/Ejecucion, aunque su `meta` caiga dentro del rango a recortar.
+
+        `año_actual` se recibe como fallback, pero se prioriza el año calendario real ya presente en
+        `trazaplan.extracto` de la fila con `meta` más alto — `agente_ia.plan.meta_año` no es
+        confiable como año_actual porque puede no haberse guardado nunca antes (primera vez que se
+        usa esta sección del popup).
+
+        Solo inserta/elimina los pasos — el recálculo del cascade (`update_plan_inversion()`) lo hace
+        `submit_values()` una única vez para todo el guardado, con `meta_capital` como única fuente
+        de "Financiera"."""
         try:
             trazaplan_actual = self.PlaInversion.select_trazaplan(idcuenta, orden="DESC")
             if not trazaplan_actual:
                 return  # No hay trazaplan anterior, nada que regenerar
 
-            años_existentes = {t["meta"] for t in trazaplan_actual}
-            año_objetivo_actual = max(años_existentes) if años_existentes else 2026
+            fila_max = max(trazaplan_actual, key=lambda t: t["meta"])
+            meta_max_actual = fila_max["meta"]
+            if fila_max.get("extracto"):
+                año_actual = fila_max["extracto"].year
 
-            if año_objetivo > año_objetivo_actual:
-                # Solo insertar años nuevos que no existen
-                for año in range(año_objetivo_actual + 1, año_objetivo + 1):
-                    if año not in años_existentes:
-                        meta_año = meta_capital / (2 ** (año_objetivo - año))
-                        self.PlaInversion.insert_trazaplan(
-                            idcuenta=idcuenta,
-                            meta=año,
-                            vision=meta_año,
-                            extracto=None,
-                            status="proyectado"
-                        )
+            fiscal = self.datsess.get("fiscalYear") if self.datsess else None
+            if fiscal:
+                mes, dia = fiscal.month, fiscal.day
+            elif fila_max.get("extracto"):
+                mes, dia = fila_max["extracto"].month, fila_max["extracto"].day
+            else:
+                mes, dia = 7, 31
 
-                self.PlaInversion.update_plan_inversion(
-                    idcuenta=idcuenta,
-                    vision="deseada",
-                    values={"Financiera": meta_capital}
-                )
+            pasos_nuevos = año_objetivo - año_actual
+
+            if pasos_nuevos > 0:
+                for i in range(1, pasos_nuevos + 1):
+                    nuevo_meta = meta_max_actual + i
+                    distancia_target = pasos_nuevos - i
+                    vision = meta_capital / (2 ** distancia_target)
+                    extracto = datetime(año_actual + i, mes, dia).date()
+                    self.PlaInversion.insert_trazaplan(
+                        idcuenta=idcuenta,
+                        meta=nuevo_meta,
+                        vision=vision,
+                        extracto=extracto,
+                        status="proyectado"
+                    )
+            elif pasos_nuevos < 0:
+                nuevo_meta_max = meta_max_actual + pasos_nuevos
+                self.PlaInversion.delete_trazaplan_proyectados(idcuenta, meta_min=nuevo_meta_max + 1)
         except Exception as e:
             print(f"_regenerar_trazaplan_horizonte(): {e}")
 
@@ -1849,37 +1928,20 @@ class GestionInversion(tk.Frame):
             if not (rnb is None):
                 rnb.destroy()
 
-        def _load_ia_plan():
-            try:
-                ses = BDsystem.get_sesion_by_vehiculo("Stock")
-                raw = ses.get("parameters") or "{}"
-                params = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
-                return params.get("agente_ia", {}).get("plan", {}), params.get("agente_ia", {})
-            except Exception:
-                return {}, {}
-
         def submit_values():
             try:
-                vision_financiera = int(entry_vision.get())
                 estilo_vida = int(entry_estilo.get())
                 contribucion = int(entry_contribucion.get())
 
-                if vision_financiera < 1000 or estilo_vida < 1000 or contribucion < 1000:
+                meta_cap = entry_meta_capital.get().strip() or "1.2M USD"
+                meta_year = entry_meta_año.get().strip() or "2030"
+                meta_cap_num = self._parse_meta_capital(meta_cap)
+                meta_year_num = int(meta_year)
+
+                if meta_cap_num < 1000 or estilo_vida < 1000 or contribucion < 1000:
                     MyMessageBox(self.root).showerror("Error", "Todos los valores deben ser enteros de al menos 1000.")
                     return
 
-                self.PlaInversion.update_plan_inversion(
-                    idcuenta=self.sesion["Stock"]["idcuenta"],
-                    vision="deseada",
-                    values={
-                        "Financiera": vision_financiera,
-                        "Estilo de vida": estilo_vida,
-                        "Contribucion": contribucion,
-                    },
-                )
-
-                meta_cap = entry_meta_capital.get().strip() or "1.2M USD"
-                meta_year = entry_meta_año.get().strip() or "2030"
                 ingreso_pct = entry_ingreso_pct.get().strip() or "≥3%"
                 perdida_pct = entry_perdida_pct.get().strip() or "20%"
                 mision_txt = txt_mision.get("1.0", tk.END).strip()
@@ -1905,17 +1967,27 @@ class GestionInversion(tk.Frame):
                     pass
                 BDsystem.update_sesion_parameters("Stock", params)
 
-                # Regenerar trazaplan si cambió horizonte
-                try:
-                    meta_cap_num = int(meta_cap.replace("M USD", "").replace("M", "").replace(",", ""))
-                    meta_year_num = int(meta_year)
-                    self._regenerar_trazaplan_horizonte(
-                        idcuenta=self.datsess["idcuenta"],
-                        meta_capital=meta_cap_num,
-                        año_objetivo=meta_year_num
-                    )
-                except ValueError:
-                    pass
+                # Regenerar trazaplan si cambió horizonte (inserta pasos nuevos, si corresponde)
+                año_actual = int(str(ia_plan.get("meta_año", meta_year_num)).strip() or meta_year_num)
+                self._regenerar_trazaplan_horizonte(
+                    idcuenta=self.datsess["idcuenta"],
+                    meta_capital=meta_cap_num,
+                    año_objetivo=meta_year_num,
+                    año_actual=año_actual,
+                )
+
+                # Único punto que fija "deseada" — "Meta capital" (Misión IA) es la fuente para
+                # "Financiera", reemplaza al viejo campo "Visión financiera (USD)". Se llama una sola
+                # vez para todo el guardado, después de insertar los pasos nuevos si los hubo.
+                self.PlaInversion.update_plan_inversion(
+                    idcuenta=self.sesion["Stock"]["idcuenta"],
+                    vision="deseada",
+                    values={
+                        "Financiera": meta_cap_num,
+                        "Estilo de vida": estilo_vida,
+                        "Contribucion": contribucion,
+                    },
+                )
 
                 idcuenta = self.datsess["idcuenta"]
                 for row in _fn_criterios[0]():
@@ -1930,6 +2002,9 @@ class GestionInversion(tk.Frame):
                         elif ditem:
                             self.PlaInversion.insert_variablesplan_item(idcuenta, "salida_emergencia", ditem)
 
+                for item, e in zip(plan_rows or [], objetivo_entries):
+                    self.PlaInversion.update_plan_proyecto(item["id"], e.get().strip())
+
                 eexit()
                 self.widgets_plan()
 
@@ -1937,101 +2012,105 @@ class GestionInversion(tk.Frame):
                 MyMessageBox(self.root).showerror("Error", "Todos los valores deben ser números enteros válidos.")
 
         try:
-            ia_plan, ia_config = _load_ia_plan()
+            ia_plan, ia_config = self._load_ia_plan()
+            plan_rows = self.PlaInversion.select_plan(self.datsess["idcuenta"]) or []
             vari_all = self.PlaInversion.select_variablesplan(self.datsess["idcuenta"]) or []
             criterios_items = [v for v in vari_all if v["tipo"] == "salida_emergencia"]
             _fn_criterios = [None]
 
             rnb = tk.Toplevel()
-            marco = "%dx%d+%d+%d" % (680, 680, 650, 80)
+            marco = "%dx%d+%d+%d" % (760, 900, 650, 80)
             rnb.geometry(marco)
             rnb.resizable(False, True)
             rnb.attributes("-toolwindow", 1)
-            rnb.config(bg=self.cgcolor)
+            rnb.config(bg=self.bgcolor)
             rnb.title("Editar Plan")
             rnb.focus()
             rnb.grab_set()
             rnb.protocol("WM_DELETE_WINDOW", eexit)
 
+            # sección Objetivo del Plan — texto narrativo por visión (se muestra en el panel Gestión)
+            obj = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")
+            obj.pack(fill=tk.X, pady=(0, 1))
+            obj.columnconfigure(1, weight=1)
+
+            ui_section_bar(obj, "Objetivo del Plan", bg=self.colors["session"]["neutral"], row=0, columnspan=2,
+                            pady=(4, 2))
+
+            objetivo_entries = []
+            _obj_row = 1
+            for pr in plan_rows:
+                tk.Label(obj, text=pr.get("vision", ""), width=14, anchor="w", **{
+                    "bg": self.bgcolor, "fg": "white", "font": ("Segoe UI", 9),
+                }).grid(row=_obj_row, column=0, padx=(20, 5), pady=3, sticky="w")
+                e = tk.Entry(obj, bg=self.bgcolor, fg="white", insertbackground="white", font=("Segoe UI", 9))
+                e.insert(0, pr.get("proyecto", "") or "")
+                e.grid(row=_obj_row, column=1, padx=(5, 20), pady=3, sticky="ew")
+                objetivo_entries.append(e)
+                _obj_row += 1
+
+            tk.Label(
+                obj,
+                text="Tip: usa {ingreso_pasivo} para que tome el valor de \"Ingreso pasivo mín.\" (Misión IA).",
+                bg=self.bgcolor,
+                fg="#b0bec5",
+                font=("Segoe UI", 8, "italic"),
+                anchor="w",
+            ).grid(row=_obj_row, column=0, columnspan=2, padx=20, pady=(0, 4), sticky="w")
+
             # marco superior cyan — igual al estilo de la ventana Gestión
             top = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")
             top.pack(fill=tk.X, pady=(0, 1))
+            top.columnconfigure(1, weight=1)
 
             # sección Visión Deseada
-            tk.Button(
-                top,
-                text="Visión Deseada",
-                width=30,
-                height=1,
-                state="disabled",
-                font=("Segoe UI", 9, "bold"),
-                fg="white",
-                disabledforeground="white",
-                bg="#37474f",
-                relief=tk.FLAT,
-            ).grid(row=0, column=0, columnspan=2, padx=2, pady=(4, 2), sticky="ew")
+            ui_section_bar(top, "Visión Deseada", bg=self.colors["session"]["neutral"], row=0, columnspan=2,
+                            pady=(4, 2))
 
-            _lbl = {"bg": self.cgcolor, "fg": "white", "font": ("Segoe UI", 9)}
+            _lbl = {"bg": self.bgcolor, "fg": "white", "font": ("Segoe UI", 9)}
 
-            tk.Label(top, text="Visión financiera (USD):", **_lbl).grid(row=1, column=0, padx=20, pady=3, sticky=E)
-            vision_str = tk.StringVar(value=str(self.plan.get("Financiera", 0)))
-            entry_vision = tk.Entry(
-                top, textvariable=vision_str, width=22, bg=self.bgcolor, fg="white", insertbackground="white"
-            )
-            entry_vision.grid(row=1, column=1, padx=10, pady=3, sticky=W)
-
-            tk.Label(top, text="Estilo de vida (USD):", **_lbl).grid(row=2, column=0, padx=20, pady=3, sticky=E)
+            tk.Label(top, text="Estilo de vida (USD):", **_lbl).grid(row=1, column=0, padx=20, pady=3, sticky="w")
             estilo_str = tk.StringVar(value=str(self.plan.get("Estilo de vida", 0)))
             entry_estilo = tk.Entry(
                 top, textvariable=estilo_str, width=22, bg=self.bgcolor, fg="white", insertbackground="white"
             )
-            entry_estilo.grid(row=2, column=1, padx=10, pady=3, sticky=W)
+            entry_estilo.grid(row=1, column=1, padx=10, pady=3, sticky=W)
 
-            tk.Label(top, text="Contribución (USD):", **_lbl).grid(row=3, column=0, padx=20, pady=3, sticky=E)
+            tk.Label(top, text="Contribución (USD):", **_lbl).grid(row=2, column=0, padx=20, pady=3, sticky="w")
             contrib_str = tk.StringVar(value=str(self.plan.get("Contribucion", 0)))
             entry_contribucion = tk.Entry(
                 top, textvariable=contrib_str, width=22, bg=self.bgcolor, fg="white", insertbackground="white"
             )
-            entry_contribucion.grid(row=3, column=1, padx=10, pady=3, sticky=W)
+            entry_contribucion.grid(row=2, column=1, padx=10, pady=3, sticky=W)
 
             # sección Misión IA
             mid = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")
             mid.pack(fill=tk.X, pady=(0, 1))
+            mid.columnconfigure(3, weight=1)
 
-            tk.Button(
-                mid,
-                text="Misión IA",
-                width=30,
-                height=1,
-                state="disabled",
-                font=("Segoe UI", 9, "bold"),
-                fg="white",
-                disabledforeground="white",
-                bg="#1565c0",
-                relief=tk.FLAT,
-            ).grid(row=0, column=0, columnspan=4, padx=2, pady=(4, 2), sticky="ew")
+            ui_section_bar(mid, "Misión IA", bg=self.colors["session"]["ia"], row=0, columnspan=4, pady=(4, 2))
 
             _ent = {"width": 14, "bg": self.bgcolor, "fg": "white", "insertbackground": "white"}
 
-            tk.Label(mid, text="Meta capital:", **_lbl).grid(row=1, column=0, padx=(20, 5), pady=3, sticky=E)
+            tk.Label(mid, text="Meta capital:", **_lbl).grid(row=1, column=0, padx=(20, 5), pady=3, sticky="w")
             entry_meta_capital = tk.Entry(mid, **_ent)
             entry_meta_capital.insert(0, ia_plan.get("meta_capital", "1.2M USD"))
             entry_meta_capital.grid(row=1, column=1, padx=5, pady=3, sticky=W)
-            tk.Label(mid, text="Año objetivo:", **_lbl).grid(row=1, column=2, padx=(15, 5), pady=3, sticky=E)
+            tk.Label(mid, text="Año objetivo:", **_lbl).grid(row=1, column=2, padx=(15, 5), pady=3, sticky="w")
             entry_meta_año = tk.Entry(mid, **_ent)
             entry_meta_año.insert(0, ia_plan.get("meta_año", "2030"))
             entry_meta_año.grid(row=1, column=3, padx=(5, 20), pady=3, sticky=W)
 
-            tk.Label(mid, text="Ingreso pasivo mín.:", **_lbl).grid(row=2, column=0, padx=(20, 5), pady=3, sticky=E)
+            tk.Label(mid, text="Ingreso pasivo mín.:", **_lbl).grid(row=2, column=0, padx=(20, 5), pady=3, sticky="w")
             entry_ingreso_pct = tk.Entry(mid, **_ent)
             entry_ingreso_pct.insert(0, ia_plan.get("ingreso_pasivo_pct", "≥3%"))
             entry_ingreso_pct.grid(row=2, column=1, padx=5, pady=3, sticky=W)
-            tk.Label(mid, text="Pérdida máx.:", **_lbl).grid(row=2, column=2, padx=(15, 5), pady=3, sticky=E)
+            tk.Label(mid, text="Pérdida máx.:", **_lbl).grid(row=2, column=2, padx=(15, 5), pady=3, sticky="w")
             entry_perdida_pct = tk.Entry(mid, **_ent)
             entry_perdida_pct.insert(0, ia_plan.get("perdida_max_pct", "20%"))
             entry_perdida_pct.grid(row=2, column=3, padx=(5, 20), pady=3, sticky=W)
 
-            tk.Label(mid, text="Misión:", **_lbl).grid(row=3, column=0, padx=(20, 5), pady=(3, 2), sticky=N + E)
+            tk.Label(mid, text="Misión:", **_lbl).grid(row=3, column=0, padx=(20, 5), pady=(3, 2), sticky=N + "w")
             txt_mision = tk.Text(
                 mid,
                 height=4,
@@ -2045,80 +2124,76 @@ class GestionInversion(tk.Frame):
             txt_mision.insert(
                 "1.0", ia_plan.get("mision", "En crisis → Hold o sumar posiciones, nunca vender por pánico.")
             )
-            txt_mision.grid(row=3, column=1, columnspan=3, padx=(5, 20), pady=3, sticky=W)
+            txt_mision.grid(row=3, column=1, columnspan=3, padx=(5, 20), pady=3, sticky="we")
 
             # ── sección Restricciones de cartera ─────────────────────────────
             rst = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="C.TFrame")
             rst.pack(fill=tk.X, pady=(0, 1), expand=False)
+            rst.columnconfigure(3, weight=1)
 
-            tk.Button(
-                rst,
-                text="Restricciones de cartera",
-                height=1,
-                state="disabled",
-                font=("Segoe UI", 9, "bold"),
-                fg="white",
-                disabledforeground="white",
-                bg="#37474f",
-                relief=tk.FLAT,
-            ).grid(row=0, column=0, columnspan=4, padx=2, pady=(4, 2), sticky="ew")
+            ui_section_bar(rst, "Restricciones de cartera", bg=self.colors["session"]["neutral"], row=0,
+                            columnspan=4, pady=(4, 2))
 
-            _rst_lbl = {"bg": self.cgcolor, "fg": "white", "font": ("Segoe UI", 9)}
+            _rst_lbl = {"bg": self.bgcolor, "fg": "white", "font": ("Segoe UI", 9)}
             _rst_ent = {"width": 8, "bg": self.bgcolor, "fg": "white", "insertbackground": "white"}
 
-            tk.Label(rst, text="Leverage máximo:", **_rst_lbl).grid(row=1, column=0, padx=(20, 5), pady=3, sticky=E)
+            tk.Label(rst, text="Leverage máximo:", **_rst_lbl).grid(row=1, column=0, padx=(20, 5), pady=3, sticky="w")
             entry_leverage = tk.Entry(rst, **_rst_ent)
             entry_leverage.insert(0, str(ia_config.get("leverage_max", 1.8)))
             entry_leverage.grid(row=1, column=1, padx=5, pady=3, sticky=W)
-            tk.Label(rst, text="Deuda máxima %:", **_rst_lbl).grid(row=1, column=2, padx=(15, 5), pady=3, sticky=E)
+            tk.Label(rst, text="Deuda máxima %:", **_rst_lbl).grid(row=1, column=2, padx=(15, 5), pady=3, sticky="w")
             entry_deuda = tk.Entry(rst, **_rst_ent)
             entry_deuda.insert(0, str(ia_config.get("deuda_max_pct", 35)))
             entry_deuda.grid(row=1, column=3, padx=(5, 20), pady=3, sticky=W)
 
-            tk.Label(rst, text="Risk real máximo:", **_rst_lbl).grid(row=2, column=0, padx=(20, 5), pady=3, sticky=E)
+            tk.Label(rst, text="Risk real máximo:", **_rst_lbl).grid(row=2, column=0, padx=(20, 5), pady=3, sticky="w")
             entry_risk = tk.Entry(rst, **_rst_ent)
             entry_risk.insert(0, str(ia_config.get("risk_real_max", 2.0)))
             entry_risk.grid(row=2, column=1, padx=5, pady=3, sticky=W)
 
             tk.Label(rst, text="Concentración sector %:", **_rst_lbl).grid(
-                row=3, column=0, padx=(20, 5), pady=3, sticky=E
+                row=3, column=0, padx=(20, 5), pady=3, sticky="w"
             )
             entry_conc_sector = tk.Entry(rst, **_rst_ent)
             entry_conc_sector.insert(0, str(ia_config.get("concentracion_sector_max", 30)))
             entry_conc_sector.grid(row=3, column=1, padx=5, pady=3, sticky=W)
             tk.Label(rst, text="Concentración región %:", **_rst_lbl).grid(
-                row=3, column=2, padx=(15, 5), pady=3, sticky=E
+                row=3, column=2, padx=(15, 5), pady=3, sticky="w"
             )
             entry_conc_region = tk.Entry(rst, **_rst_ent)
             entry_conc_region.insert(0, str(ia_config.get("concentracion_region_max", 40)))
             entry_conc_region.grid(row=3, column=3, padx=(5, 20), pady=3, sticky=W)
 
-            tk.Button(
+            ui_section_bar(
                 rst,
-                text="Criterios de salida de emergencia  (doble-click para editar)",
-                height=1,
-                state="disabled",
+                "Criterios de salida de emergencia  (doble-click para editar)",
+                bg=self.colors["session"]["danger"],
+                row=4,
+                columnspan=4,
                 font=("Segoe UI", 8, "bold"),
-                fg="white",
-                disabledforeground="white",
-                bg="#c0392b",
-                relief=tk.FLAT,
-            ).grid(row=4, column=0, columnspan=4, padx=2, pady=(8, 2), sticky="ew")
+                pady=(8, 2),
+            )
 
             _fn_criterios[0] = self._make_editable_list(
                 rst, 5, criterios_items, [("ditem", "Criterio", 645)], col_span=4
             )
 
-            # botones al fondo
-            bot = ttk.Frame(rnb, padding=(1, 1, 1, 1), style="B.TFrame")
+            # botones al fondo — centrados, fondo igual al resto de la ventana
+            bot = tk.Frame(rnb, bg=self.bgcolor)
             bot.pack(fill=tk.X, pady=(1, 0), expand=False)
+            bot.columnconfigure(0, weight=1)
+            bot.columnconfigure(1, weight=1)
 
-            tk.Button(bot, text="Guardar", width=10, bg="gray", fg="white", command=submit_values).pack(
-                side=tk.LEFT, padx=(20, 5), pady=8
+            ttk.Button(bot, text="Guardar", width=10, style="Flat.TButton", command=submit_values).grid(
+                row=0, column=0, sticky="e", padx=(0, 15), pady=8
             )
-            tk.Button(bot, text="Cancel", width=10, bg="gray", fg="white", command=eexit).pack(
-                side=tk.LEFT, padx=5, pady=8
+            ttk.Button(bot, text="Cancel", width=10, style="Flat.TButton", command=eexit).grid(
+                row=0, column=1, sticky="w", padx=(15, 0), pady=8
             )
+
+            # altura ajustada al contenido real — evita espacio vacío al fondo de la ventana
+            rnb.update_idletasks()
+            rnb.geometry(f"760x{rnb.winfo_reqheight()}")
 
         except Exception as e:
             print(f"edit_plan(): {e}")

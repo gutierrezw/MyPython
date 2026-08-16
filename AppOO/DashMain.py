@@ -65,6 +65,7 @@ from Modulos_Mysql import (
 )
 from Modulos_Utilitarios import (
     style_app,
+    ui_section_bar,
     convierte_ticket_crypto,
     sort_positions,
     buscar_ticker,
@@ -4469,13 +4470,10 @@ class DashMain:
                 treeview_Region(option=tipo, windows=fr20)
 
             # boton de salida ---------------------------------------------------------------------------------------------------
-            ft1 = tk.Button(
+            ft1 = ttk.Button(
                 fr20,
                 text="Cancel",
-                bg="#444444",
-                fg="white",
-                font=("Arial", 8),
-                relief="flat",
+                style="Flat.TButton",
                 cursor="hand2",
                 command=lambda: eexit(),
             )
@@ -4922,21 +4920,16 @@ class DashMain:
                 lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
             )
 
-            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
             canvas.configure(yscrollcommand=scrollbar.set)
 
             # Campos del formulario - REORGANIZADO: 1) Trading, 2) Monitor, 3) Colores
             row = 0
 
             # ========== GRUPO 1: PARÁMETROS DE TRADING ==========
-            tk.Label(
-                scrollable_frame,
-                text="💰 Parámetros de Trading",
-                bg=self.colors["bgcolor"],
-                fg="yellow",
-                font=("Segoe UI", 10, "bold"),
-                anchor="w",
-            ).grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 5))
+            ui_section_bar(scrollable_frame, "Parámetros de Trading", bg=self.colors["session"]["neutral"],
+                            row=row, columnspan=2, pady=(10, 5))
             row += 1
 
             # MinProfit
@@ -4945,9 +4938,10 @@ class DashMain:
                 text="Min Profit:",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_minprofit = tk.Entry(scrollable_frame, width=50)
+            entry_minprofit = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_minprofit.insert(0, str(envs_config.get("MinProfit", 80.0)))
             entry_minprofit.grid(row=row, column=1, padx=10, pady=5)
             row += 1
@@ -4958,9 +4952,10 @@ class DashMain:
                 text="Tolerancia Sell:",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_toleranciasell = tk.Entry(scrollable_frame, width=50)
+            entry_toleranciasell = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_toleranciasell.insert(0, str(envs_config.get("Toleranciasell", 0.10)))
             entry_toleranciasell.grid(row=row, column=1, padx=10, pady=5)
             row += 1
@@ -4971,9 +4966,10 @@ class DashMain:
                 text="Max ROI:",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_maxroi = tk.Entry(scrollable_frame, width=50)
+            entry_maxroi = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_maxroi.insert(0, str(envs_config.get("MaxRoi", 0.09)))
             entry_maxroi.grid(row=row, column=1, padx=10, pady=5)
             row += 1
@@ -4984,9 +4980,10 @@ class DashMain:
                 text="Inicio Inversión (YYYY-MM-DD):",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_inicioinversior = tk.Entry(scrollable_frame, width=50)
+            entry_inicioinversior = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_inicioinversior.insert(0, envs_config.get("InicioInversior", "2020-07-31"))
             entry_inicioinversior.grid(row=row, column=1, padx=10, pady=5)
             row += 1
@@ -4997,9 +4994,10 @@ class DashMain:
                 text="IB Gateway Host:",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_ib_gateway_host = tk.Entry(scrollable_frame, width=50)
+            entry_ib_gateway_host = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_ib_gateway_host.insert(0, envs_config.get("ib_gateway_host", "https://localhost"))
             entry_ib_gateway_host.grid(row=row, column=1, padx=10, pady=5)
             row += 1
@@ -5010,22 +5008,17 @@ class DashMain:
                 text="IB Gateway Port:",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_ib_gateway_port = tk.Entry(scrollable_frame, width=50)
+            entry_ib_gateway_port = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_ib_gateway_port.insert(0, envs_config.get("ib_gateway_port", "5501"))
             entry_ib_gateway_port.grid(row=row, column=1, padx=10, pady=5)
             row += 1
 
             # ========== GRUPO 1.5: MODELO IA SELL ==========
-            tk.Label(
-                scrollable_frame,
-                text="🤖 Modelo IA Sell",
-                bg=self.colors["bgcolor"],
-                fg="yellow",
-                font=("Segoe UI", 10, "bold"),
-                anchor="w",
-            ).grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(15, 5))
+            ui_section_bar(scrollable_frame, "Modelo IA Sell", bg=self.colors["session"]["ia"], row=row,
+                            columnspan=2, pady=(15, 5))
             row += 1
 
             # umbral_venta (confianza >= 0.65 = enviar a telegram)
@@ -5034,9 +5027,10 @@ class DashMain:
                 text="Umbral Venta (conf >=):",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_umbral_venta = tk.Entry(scrollable_frame, width=50)
+            entry_umbral_venta = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_umbral_venta.insert(0, str(envs_config.get("ia_umbral_venta", 0.65)))
             entry_umbral_venta.grid(row=row, column=1, padx=10, pady=5)
             row += 1
@@ -5047,9 +5041,10 @@ class DashMain:
                 text="Umbral Observación (conf >=):",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_umbral_observacion = tk.Entry(scrollable_frame, width=50)
+            entry_umbral_observacion = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_umbral_observacion.insert(0, str(envs_config.get("ia_umbral_observacion", 0.35)))
             entry_umbral_observacion.grid(row=row, column=1, padx=10, pady=5)
             row += 1
@@ -5060,22 +5055,17 @@ class DashMain:
                 text="Nombre Modelo:",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_modelo_name = tk.Entry(scrollable_frame, width=50)
+            entry_modelo_name = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_modelo_name.insert(0, envs_config.get("ia_modelo_name", "modelo_sellv01"))
             entry_modelo_name.grid(row=row, column=1, padx=10, pady=5)
             row += 1
 
             # ========== GRUPO 2: MONITOREO CPU/MEMORIA ==========
-            tk.Label(
-                scrollable_frame,
-                text="💻 Monitoreo CPU/Memoria",
-                bg=self.colors["bgcolor"],
-                fg="yellow",
-                font=("Segoe UI", 10, "bold"),
-                anchor="w",
-            ).grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(15, 5))
+            ui_section_bar(scrollable_frame, "Monitoreo CPU/Memoria", bg=self.colors["session"]["neutral"],
+                            row=row, columnspan=2, pady=(15, 5))
             row += 1
 
             # display
@@ -5084,9 +5074,10 @@ class DashMain:
                 text="Display:",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_display = tk.Entry(scrollable_frame, width=50)
+            entry_display = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_display.insert(0, envs_config.get("display", "") or "")
             entry_display.grid(row=row, column=1, padx=10, pady=5)
             row += 1
@@ -5097,9 +5088,10 @@ class DashMain:
                 text="Max Points:",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_max_points = tk.Entry(scrollable_frame, width=50)
+            entry_max_points = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_max_points.insert(0, str(envs_config.get("max_points", 40)))
             entry_max_points.grid(row=row, column=1, padx=10, pady=5)
             row += 1
@@ -5110,9 +5102,10 @@ class DashMain:
                 text="Interval:",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_interval = tk.Entry(scrollable_frame, width=50)
+            entry_interval = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_interval.insert(0, str(envs_config.get("interval", 1)))
             entry_interval.grid(row=row, column=1, padx=10, pady=5)
             row += 1
@@ -5123,22 +5116,17 @@ class DashMain:
                 text="CPU Lock:",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_cpulock = tk.Entry(scrollable_frame, width=50)
+            entry_cpulock = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_cpulock.insert(0, envs_config.get("CpuLock", "") or "")
             entry_cpulock.grid(row=row, column=1, padx=10, pady=5)
             row += 1
 
             # ========== GRUPO 3: COLORES ==========
-            tk.Label(
-                scrollable_frame,
-                text="🎨 Colores",
-                bg=self.colors["bgcolor"],
-                fg="yellow",
-                font=("Segoe UI", 10, "bold"),
-                anchor="w",
-            ).grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(15, 5))
+            ui_section_bar(scrollable_frame, "Colores", bg=self.colors["session"]["neutral"], row=row,
+                            columnspan=2, pady=(15, 5))
             row += 1
 
             # bgcolor
@@ -5147,9 +5135,10 @@ class DashMain:
                 text="Color de Fondo (bgcolor):",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_bgcolor = tk.Entry(scrollable_frame, width=50)
+            entry_bgcolor = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_bgcolor.insert(0, envs_config.get("bgcolor", "DarkCyan"))
             entry_bgcolor.grid(row=row, column=1, padx=10, pady=5)
             row += 1
@@ -5160,22 +5149,17 @@ class DashMain:
                 text="Color de Gráficos (cgcolor):",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
-            entry_cgcolor = tk.Entry(scrollable_frame, width=50)
+            entry_cgcolor = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
             entry_cgcolor.insert(0, envs_config.get("cgcolor", "black"))
             entry_cgcolor.grid(row=row, column=1, padx=10, pady=5)
             row += 1
 
-            # Subsección: Colores de Gráficos (cchart)
-            tk.Label(
-                scrollable_frame,
-                text="  📊 Paleta de Gráficos (cchart):",
-                bg=self.colors["bgcolor"],
-                fg="cyan",
-                font=("Segoe UI", 9, "bold"),
-                anchor="w",
-            ).grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 5))
+            # Subsección: Colores de Gráficos (cchart) — tono más claro, indica nivel anidado bajo "Colores"
+            ui_section_bar(scrollable_frame, "Paleta de Gráficos (cchart)", bg=self.colors["session"]["nested"],
+                            row=row, columnspan=2, pady=(10, 5))
             row += 1
 
             cchart = envs_config.get("cchart", {})
@@ -5214,7 +5198,7 @@ class DashMain:
                     anchor="w",
                 ).grid(row=row, column=0, sticky="w", padx=20, pady=2)
 
-                entry = tk.Entry(scrollable_frame, width=50)
+                entry = tk.Entry(scrollable_frame, width=50, bg=self.colors["bgcolor"], fg="white", insertbackground="white")
                 entry.insert(0, cchart.get(field_key, "white"))
                 entry.grid(row=row, column=1, padx=10, pady=2)
 
@@ -5435,7 +5419,8 @@ class DashMain:
                 lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
             )
 
-            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
             canvas.configure(yscrollcommand=scrollbar.set)
 
             # Campos del formulario
@@ -5494,12 +5479,19 @@ class DashMain:
                     text=label_text,
                     bg=self.colors["bgcolor"],
                     fg="white",
+                    font=("Segoe UI", 9),
                     anchor="w",
                 )
                 label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
 
                 # Crear Entry siempre en estado normal para permitir inserción de valores
-                entry = tk.Entry(scrollable_frame, width=50)
+                entry = tk.Entry(
+                    scrollable_frame,
+                    width=50,
+                    bg=self.colors["bgcolor"],
+                    fg="white",
+                    insertbackground="white",
+                )
                 entry.grid(row=row, column=1, padx=10, pady=5)
 
                 # Poblar con datos existentes si está en modo edición
@@ -5540,6 +5532,7 @@ class DashMain:
                         text="⭐ Cuenta Principal:",
                         bg=self.colors["bgcolor"],
                         fg="white",
+                        font=("Segoe UI", 9),
                         anchor="w",
                     )
                     label_principal.grid(row=row, column=0, sticky="w", padx=10, pady=5)
@@ -5565,6 +5558,7 @@ class DashMain:
                         text="🔄 Transacción Online:",
                         bg=self.colors["bgcolor"],
                         fg="white",
+                        font=("Segoe UI", 9),
                         anchor="w",
                     )
                     label_transaccion.grid(row=row, column=0, sticky="w", padx=10, pady=5)
@@ -5590,6 +5584,7 @@ class DashMain:
                         text="Load CSV:",
                         bg=self.colors["bgcolor"],
                         fg="white",
+                        font=("Segoe UI", 9),
                         anchor="w",
                     )
                     label_load_csv.grid(row=row, column=0, sticky="w", padx=10, pady=5)
@@ -5646,6 +5641,7 @@ class DashMain:
                     text=label_text,
                     bg=self.colors["bgcolor"],
                     fg="white",
+                    font=("Segoe UI", 9),
                     anchor="w",
                 )
                 label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
@@ -5655,13 +5651,15 @@ class DashMain:
                 blob_frame.grid(row=row, column=1, padx=20, pady=5, sticky="ew")
 
                 # Text widget
-                text_widget = tk.Text(blob_frame, width=30, height=3)
+                text_widget = tk.Text(blob_frame, width=30, height=3, bg=self.colors["bgcolor"], fg="white",
+                                       insertbackground="white")
                 text_widget.pack(side=tk.LEFT)
 
                 # Botón de importar
-                import_btn = tk.Button(
+                import_btn = ttk.Button(
                     blob_frame,
                     text="Importar",
+                    style="Flat.TButton",
                     command=lambda tw=text_widget: import_blob_file(tw),
                 )
                 import_btn.pack(side=tk.LEFT, padx=5)
@@ -5697,6 +5695,7 @@ class DashMain:
                 text="Parameters (JSON):",
                 bg=self.colors["bgcolor"],
                 fg="white",
+                font=("Segoe UI", 9),
                 anchor="w",
             )
             label_params.grid(row=row, column=0, sticky="nw", padx=10, pady=5)
@@ -5704,12 +5703,14 @@ class DashMain:
             blob_frame_params = tk.Frame(scrollable_frame, bg=self.colors["bgcolor"])
             blob_frame_params.grid(row=row, column=1, padx=20, pady=5, sticky="ew")
 
-            blob_parameters = tk.Text(blob_frame_params, width=30, height=5)
+            blob_parameters = tk.Text(blob_frame_params, width=30, height=5, bg=self.colors["bgcolor"], fg="white",
+                                       insertbackground="white")
             blob_parameters.pack(side=tk.LEFT)
 
-            import_btn_params = tk.Button(
+            import_btn_params = ttk.Button(
                 blob_frame_params,
                 text="Importar",
+                style="Flat.TButton",
                 command=lambda: import_blob_file(blob_parameters),
             )
             import_btn_params.pack(side=tk.LEFT, padx=5)
@@ -5727,15 +5728,25 @@ class DashMain:
 
             row += 1
 
-            # Frame de botones
+            # Frame de botones — se adapta al ancho resultante de la ventana, separación centrada
             btn_frame = tk.Frame(scrollable_frame, bg=self.colors["bgcolor"])
-            btn_frame.grid(row=row, column=0, columnspan=2, pady=20)
+            btn_frame.grid(row=row, column=0, columnspan=2, pady=20, sticky="ew")
+            btn_frame.columnconfigure(0, weight=1)
+            btn_frame.columnconfigure(1, weight=1)
 
-            save_btn = tk.Button(btn_frame, text="Guardar", width=10, command=save_session)
-            save_btn.pack(side=tk.LEFT, padx=10)
+            save_btn = ttk.Button(btn_frame, text="Guardar", width=10, style="Flat.TButton", command=save_session)
+            save_btn.grid(row=0, column=0, sticky="e", padx=(0, 15))
 
-            cancel_btn = tk.Button(btn_frame, text="Cancel", width=10, command=cancel_edit)
-            cancel_btn.pack(side=tk.LEFT, padx=10)
+            cancel_btn = ttk.Button(btn_frame, text="Cancel", width=10, style="Flat.TButton", command=cancel_edit)
+            cancel_btn.grid(row=0, column=1, sticky="w", padx=(15, 0))
+
+            # Ancho de ventana proporcional al campo más ancho (evita espacio muerto a la derecha)
+            scrollable_frame.columnconfigure(1, weight=1)
+            scrollable_frame.update_idletasks()
+            content_width = scrollable_frame.winfo_reqwidth()
+            scrollbar_width = scrollbar.winfo_reqwidth()
+            win_width = content_width + scrollbar_width + 4
+            editor_window.geometry(f"{win_width}x700")
 
             # Empaquetar canvas y scrollbar
             canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -5761,38 +5772,6 @@ class DashMain:
             # Cargar datos desde BD
             sessions = BDsystem.select_all_sesion()
             height = max(2, len(sessions) + 1)
-
-            # Posicionamiento (izquierda de la pantalla para dejar espacio al editor)
-            window_width = 850
-            window_height = min(550, 30 + height * 25)
-            x_position = 300
-            y_position = 110
-            session_window.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
-            session_window.config(bg=self.colors["bgcolor"])
-            session_window.resizable(True, True)
-
-            # Panel de control con botones
-            control_frame = ttk.Frame(session_window, style="C.TFrame", padding=(10, 10))
-            control_frame.pack(side=tk.BOTTOM, fill=tk.X)
-
-            add_btn = tk.Button(control_frame, text="Agregar", width=10, command=on_add_click)
-            add_btn.pack(side=tk.LEFT, padx=5)
-
-            delete_btn = tk.Button(control_frame, text="Eliminar", width=10, command=on_delete_click)
-            delete_btn.pack(side=tk.LEFT, padx=5)
-
-            refresh_btn = tk.Button(control_frame, text="Refrescar", width=10, command=refresh_sessions)
-            refresh_btn.pack(side=tk.LEFT, padx=5)
-
-            envs_btn = tk.Button(control_frame, text="Envs", width=10, command=on_envs_click)
-            envs_btn.pack(side=tk.LEFT, padx=5)
-
-            cancel_btn = tk.Button(control_frame, text="Cancel", width=10, command=eexit)
-            cancel_btn.pack(side=tk.LEFT, padx=5)
-
-            # Frame para TreeView
-            tree_frame = ttk.Frame(session_window, style="B.TFrame")
-            tree_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=10)
 
             # Definición de columnas (sin id, orcartera, xstrategy, userapi, userpass, private_key, public_key)
             columns = [
@@ -5820,6 +5799,43 @@ class DashMain:
                 "gypPrecio": {"width": 90, "anchor": "e"},
                 "gainInversion": {"width": 100, "anchor": "e"},
             }
+
+            # Posicionamiento (izquierda de la pantalla para dejar espacio al editor)
+            # Ancho ajustado al total de columnas del treeview — sin espacio muerto a la derecha
+            window_width = sum(c["width"] for c in column_alignments.values()) + 40
+            window_height = min(550, 30 + height * 25)
+            x_position = 300
+            y_position = 110
+            session_window.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+            session_window.config(bg=self.colors["bgcolor"])
+            session_window.resizable(True, True)
+
+            # Panel de control con botones
+            control_frame = ttk.Frame(session_window, style="C.TFrame", padding=(10, 10))
+            control_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+            add_btn = ttk.Button(control_frame, text="Agregar", width=10, style="Flat.TButton", command=on_add_click)
+            add_btn.pack(side=tk.LEFT, padx=5)
+
+            delete_btn = ttk.Button(
+                control_frame, text="Eliminar", width=10, style="Flat.TButton", command=on_delete_click
+            )
+            delete_btn.pack(side=tk.LEFT, padx=5)
+
+            refresh_btn = ttk.Button(
+                control_frame, text="Refrescar", width=10, style="Flat.TButton", command=refresh_sessions
+            )
+            refresh_btn.pack(side=tk.LEFT, padx=5)
+
+            envs_btn = ttk.Button(control_frame, text="Envs", width=10, style="Flat.TButton", command=on_envs_click)
+            envs_btn.pack(side=tk.LEFT, padx=5)
+
+            cancel_btn = ttk.Button(control_frame, text="Cancel", width=10, style="Flat.TButton", command=eexit)
+            cancel_btn.pack(side=tk.LEFT, padx=5)
+
+            # Frame para TreeView
+            tree_frame = ttk.Frame(session_window, style="B.TFrame")
+            tree_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=10)
 
             # Crear CustomTreeview
             tree = CustomTreeview(

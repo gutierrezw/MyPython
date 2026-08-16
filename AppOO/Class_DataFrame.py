@@ -2438,13 +2438,13 @@ def chart_margen_neto(fg=None, df=None, parm=None):
     width = 0.30
 
     p_legend = []
-    # Alinear ambos gráficos en x=0
-    offset_ingresos = 0
-    offset_costos = width
+    # Alinear con el eje x del gráfico de Plan (offset = width, igual que Alcanzado/Rendimiento)
+    offset = width
 
-    # Barras de ingresos y costos
+    # Barra de costos dentro de la barra de ingresos (mismo x, ancho menor), igual que
+    # Rendimiento dentro de Alcanzado en el gráfico de Plan
     ax.bar(
-        x + offset_ingresos,
+        x + offset,
         resum["ingresos"],
         width,
         color=cchart["plot1"],
@@ -2452,9 +2452,9 @@ def chart_margen_neto(fg=None, df=None, parm=None):
         label="ingresos",
     )
     ax.bar(
-        x + offset_costos,
+        x + offset,
         resum["costos"],
-        width,
+        width / 2,
         color=cchart["plot2"],
         alpha=0.9,
         label="costos",
@@ -2477,15 +2477,14 @@ def chart_margen_neto(fg=None, df=None, parm=None):
     ax.set_ylabel("Ingresos / Costos ($)", fontsize=6, color=cchart["asy"])
     ax.set_xlabel("", fontsize=6, color=cchart["asx"])
 
-    # Centrar las etiquetas entre las barras
-    ax.set_xticks(x + width / 2, lyear)
+    ax.set_xticks(x + width, lyear)
     ax.yaxis.set_major_formatter(currency)
     ax.tick_params(axis="x", colors=cchart["asx"])
     ax.tick_params(axis="y", colors=cchart["asx"])
 
     # 2do eje: margen neto (puede ser negativo)
     av.plot(
-        x + width / 2,
+        x + width,
         resum["margenNT"],
         color=cchart["plot0"],
         linewidth=0.6,
@@ -2493,39 +2492,42 @@ def chart_margen_neto(fg=None, df=None, parm=None):
         alpha=0.9,
         marker="o",
     )
-    offset = 0.02 * (resum["margenNT"].max() - resum["margenNT"].min() or 1)
+    offset_txt = 0.02 * (resum["margenNT"].max() - resum["margenNT"].min() or 1)
     for i in x:
         av.text(
-            x[i] + width / 2,
+            x[i] + width,
             (
-                resum["margenNT"].iloc[i] + offset
+                resum["margenNT"].iloc[i] + offset_txt
                 if resum["margenNT"].iloc[i] >= 0
-                else resum["margenNT"].iloc[i] - offset
+                else resum["margenNT"].iloc[i] - offset_txt
             ),
             "{:>+4.1%}".format(resum["margenNT"].iloc[i]),
             fontsize=5,
             va="center",
             color="cyan",
         )
-
-    tlabels = av.get_yticklabels()
-    plt.setp(tlabels, ha="left", fontsize=6, color=cchart["plot0"])
+    av.spines[["top", "bottom", "left"]].set_visible(False)
+    av.set_ylabel("Margen Neto", fontsize=6, color=cchart["plot0"])
+    av.tick_params(axis="y", labelcolor=cchart["plot0"])
     av.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:2.0%}"))
-    av.set_ylabel("Margen Neto", color=cchart["plot0"], fontsize=6)
 
-    # Limites simétricos para mostrar negativos y positivos
-    # Sanitize values to avoid NaN or Inf in yabs
+    # Limites con paso fijo (25%), igual estilo que el eje Rendimiento Total del gráfico de Plan
+    # Sanitize values to avoid NaN or Inf
     max_val = resum["margenNT"].max()
     min_val = resum["margenNT"].min()
     max_val = np.nan_to_num(max_val, nan=0.0, posinf=0.0, neginf=0.0)
     min_val = np.nan_to_num(min_val, nan=0.0, posinf=0.0, neginf=0.0)
-    # yabs = max(abs(max_val), abs(min_val), 0.1)
+    step = 0.25
+    ymax = max(step, np.ceil(max_val / step) * step)
+    ymin = 0 if min_val >= 0 else np.floor(min_val / step) * step
+    av.set_ylim(ymin, ymax)
+    av.yaxis.set_major_locator(ticker.MultipleLocator(step))
 
-    # av.set(ylim=(-yabs * 1.20, yabs * 1.20))
+    tlabels = av.get_yticklabels()
+    plt.setp(tlabels, ha="left", fontsize=6, color=cchart["plot0"])
     av.tick_params(axis="y", colors=cchart["plot0"])
-
-    av.spines[["top", "bottom", "left"]].set_visible(False)
     av.spines["right"].set_color(cchart["plot0"])
+    av.spines.right.set_visible(True)
 
 
 # grafica performan traza plan
@@ -2547,7 +2549,8 @@ def chart_trazaplan(fg=None, traza=None, cchart=None):
 
         meta, tinv, tvis, efec, tdiv = [], [], [], [], []
         for key in traza:
-            if key["costobase"] != 0:
+            # Omitir meta 0 (año de inicio) para alinear años con el gráfico de Ingresos/Costos
+            if key["costobase"] != 0 and key["meta"] != 0:
                 meta.append(key["extracto"].year)
                 efec.append(key["efectividad"])
                 tinv.append(float(key["tinversion"]))
@@ -2571,7 +2574,7 @@ def chart_trazaplan(fg=None, traza=None, cchart=None):
         )
         p_legend.append(mpatches.Patch(color=cchart["plot8"], label="Plan Trazado"))
 
-        for i in x[1:]:
+        for i in x:
             xcol = "cyan" if efec[i] > 0 else "red"
             ax.text(
                 x[i] - offset,
@@ -2603,6 +2606,7 @@ def chart_trazaplan(fg=None, traza=None, cchart=None):
         ax.yaxis.set_major_formatter(currency)
 
         #  construcción de 2.º eje, para mostrar % rendimiento de capital + dividendos
+        col_rendimiento = "white"
         for keys, measurement in ddato.items():
             offset = width * multiplier
             if keys == "Alcanzado":
@@ -2610,22 +2614,22 @@ def chart_trazaplan(fg=None, traza=None, cchart=None):
                 p_legend.append(mpatches.Patch(color=cchart["plot5"], label=keys))
 
             if keys == "Rendimiento":
-                av.bar(x + offset, measurement, width / 2, color=cchart["2eje"], alpha=0.9)
-                p_legend.append(mpatches.Patch(color=cchart["2eje"], label=keys))
+                av.bar(x + offset, measurement, width / 2, color=col_rendimiento, alpha=0.9)
+                p_legend.append(mpatches.Patch(color=col_rendimiento, label=keys))
 
         fg.legend(loc="outside upper right", handles=p_legend, fontsize=5)
         fg.suptitle(titulo, fontsize="smaller", color=cchart["titulo"])
 
         av.spines[["top", "bottom", "left"]].set_visible(False)
-        av.set_ylabel("Total (Cap + Div)", fontsize=6, color=cchart["2eje"])
-        av.tick_params(axis="y", labelcolor=cchart["2eje"])
+        av.set_ylabel("Total (Cap + Div)", fontsize=6, color=col_rendimiento)
+        av.tick_params(axis="y", labelcolor=col_rendimiento)
         av.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:2.0%}"))
 
         tlabels = av.get_yticklabels()
         av.set_ylim([0, 0.2])
-        plt.setp(tlabels, ha="left", fontsize=6, color=cchart["2eje"])
-        av.tick_params(axis="y", colors=cchart["2eje"])
-        av.spines["right"].set_color(cchart["2eje"])
+        plt.setp(tlabels, ha="left", fontsize=6, color=col_rendimiento)
+        av.tick_params(axis="y", colors=col_rendimiento)
+        av.spines["right"].set_color(col_rendimiento)
         av.spines.right.set_visible(True)
 
 
