@@ -6810,8 +6810,10 @@ class MyWebsocket:
             # self.ws.close()
             pass
 
-        def on_close(ws, *args):
-            _ws_logger.warning("WebSocket connection closed(): {}".format(self.vehiculo))
+        def on_close(ws, close_status_code, close_msg):
+            _ws_logger.warning(
+                "WebSocket connection closed({}): code={} msg={}".format(self.vehiculo, close_status_code, close_msg)
+            )
 
         def subscribe_get_order():
             time.sleep(3)
@@ -6889,7 +6891,7 @@ class MyWebsocket:
         try:
             sslopt = {"cert_reqs": ssl.CERT_NONE}
             self.limit = limit
-            self.ws.run_forever(sslopt=sslopt, ping_interval=30)
+            self.ws.run_forever(sslopt=sslopt, ping_interval=30, ping_timeout=10)
             _log.error(f"MyWebsocket.websocket_loop({self.vehiculo}): run_forever() retornó — conexión caída")
         except Exception as e:
             _log.error(f"MyWebsocket.websocket_loop({self.vehiculo}): {e}")

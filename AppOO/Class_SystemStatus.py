@@ -1111,12 +1111,9 @@ class system_status(tk.Frame):
                 if ws_iter == 0:
                     ib_status = "🟡 Configurado"
                     ib_ok = True
-                elif ws_conn and ws_iter <= 2:
+                elif ws_conn:
                     ib_status = "🟢 Activo"
                     ib_ok = True
-                elif ws_conn:
-                    ib_status = f"🟡 Reconectando (iter={ws_iter})"
-                    ib_ok = False
                 else:
                     ib_status = f"🔴 WS caído (iter={ws_iter})"
                     ib_ok = False
