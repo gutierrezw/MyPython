@@ -113,8 +113,23 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
             if diaria_all and ix:
                 pdatos = crea_dataframe_diaria(diaria=diaria_all, ix=ix)
                 if pdatos is not None and not pdatos.empty:
-                    raiz = pdatos["performa"].iloc[0]
-                    pdatos["CumPort"] = (pdatos["performa"] / raiz) - 1
+                    # TWR real: aísla flujos de capital (aportes/retiros) del rendimiento de mercado,
+                    # evita que value/costo_base se distorsione con cada compra/venta nueva (mismo
+                    # esquema que BBVA.ARS, reutiliza select_bbva_ars_cashflows)
+                    cf_rows = Performa.select_bbva_ars_cashflows(categoria=tipo, cuentas=account)
+                    if cf_rows:
+                        cf_df = pd.DataFrame(cf_rows, columns=["fecha", "usd_invested"])
+                        cf_df["fecha"] = pd.to_datetime(cf_df["fecha"]).dt.date
+                        cf_series = cf_df.set_index("fecha")["usd_invested"].astype(float)
+                        new_capital = cf_series.reindex(pdatos.index, fill_value=0.0)
+                    else:
+                        new_capital = pd.Series(0.0, index=pdatos.index)
+                    denom = (pdatos["value Portafolio"].shift(1) + new_capital).replace(0, float("nan"))
+                    pdatos["daily_twr"] = (pdatos["value Portafolio"] / denom - 1).fillna(0)
+                    # Anula saltos imposibles (dato faltante/gap de fuente). Umbral mayor al 30% de
+                    # BBVA.ARS porque Stock/Crypto son activos más volátiles que un FCI
+                    pdatos.loc[pdatos["daily_twr"].abs() > 0.50, "daily_twr"] = 0.0
+                    pdatos["CumPort"] = (1 + pdatos["daily_twr"]).cumprod() - 1
 
                     first_date = pdatos.index[0]
                     result = crea_dataframe_index(vehiculo=vehiculo, desde=first_date)

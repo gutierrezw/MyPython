@@ -865,22 +865,26 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
-    def select_bbva_ars_cashflows(self):
+    def select_bbva_ars_cashflows(self, categoria="BBVA.ARS", cuentas=("BBVA0001", "SANT0001")):
         """
-        Retorna flujos netos diarios de capital (USD) inyectado en FCI BBVA.ARS.
+        Retorna flujos netos diarios de capital (USD) inyectado en el vehículo/categoría indicado
+        (BBVA.ARS por defecto, o Stock/Crypto pasando categoria+cuentas).
         Calcula delta_stock × basico / factor_cambio por transacción para reconstruir
         el costo real sin que basico reseteado distorsione el costo_base acumulado.
         """
+        if isinstance(cuentas, str):
+            cuentas = (cuentas,)
         conn = self._conectar(tabla="select.bbva_ars_cashflows")
         try:
             cursor = conn.cursor()
-            qry = """
+            placeholders = ", ".join(["%s"] * len(cuentas))
+            qry = f"""
                 WITH bt_lag AS (
                     SELECT cuenta, simbolo, DATE(fechahora) AS fecha,
                            basico, stock, factor_cambio,
                            LAG(stock, 1, 0) OVER (PARTITION BY cuenta, simbolo ORDER BY fechahora) AS prev_stock
                     FROM booktrading
-                    WHERE cuenta IN ('BBVA0001','SANT0001') AND categoria = 'BBVA.ARS'
+                    WHERE cuenta IN ({placeholders}) AND categoria = %s
                 )
                 SELECT fecha,
                        SUM((stock - prev_stock) * basico / NULLIF(factor_cambio, 0)) AS usd_invested
@@ -888,7 +892,7 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                 GROUP BY fecha
                 ORDER BY fecha ASC
             """
-            cursor.execute(qry)
+            cursor.execute(qry, (*cuentas, categoria))
             rows = cursor.fetchall()
             return rows if rows else []
         except Exception as e:
