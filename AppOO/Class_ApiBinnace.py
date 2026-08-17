@@ -128,7 +128,7 @@ class BinanceSpot(Spot):
     Recibe api_key, private_key y base_url como parámetros (no lee BD internamente).
     """
 
-    def __init__(self, api_key, private_key, base_url, timeout=10):
+    def __init__(self, api_key, private_key, base_url, timeout=30):
         # Pasar private_key al SDK para que firme automáticamente con Ed25519
         super().__init__(api_key, base_url=base_url, timeout=timeout, private_key=private_key)
         self._base_url = base_url
