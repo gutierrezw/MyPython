@@ -51,7 +51,7 @@ class AgentManager:
         self._log_performa = logging.getLogger("Agente.Performa")
         self._log_edgar = logging.getLogger("Agente.EDGAR")
         self._log_institucion = logging.getLogger("Agente.Institucion")
-        self._preservation_logger = logging.getLogger("Agente.Preservation")
+        self._preservation_logger = self._log_stock  # "Agente.Preservation" nunca se registró en Class_debugging.py (sin FileHandler)
 
         # Preservation state management
         self.preservation_config = {}
