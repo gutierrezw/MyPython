@@ -6449,6 +6449,12 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                                 json_contexto={"order_id": int(coid) if coid.isdigit() else coid},
                                 order_trader_id=None
                             )
+                            self.append_order_audit_log(
+                                order_id=coid,
+                                tag="FILLED",
+                                mensaje=f"{agente}: orden {coid} completada en IB",
+                                data={"symbol": symbol},
+                            )
                     except Exception as _e:
                         _logger.debug(f"[sync_orders_from_ib] error registrando FILLED {coid}: {_e}")
         if updated:
@@ -6509,6 +6515,12 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                                 mensaje=f"Orden {coid} completada en Binance",
                                 json_contexto={"order_id": int(coid) if coid.isdigit() else coid},
                                 order_trader_id=None
+                            )
+                            self.append_order_audit_log(
+                                order_id=coid,
+                                tag="FILLED",
+                                mensaje=f"{agente}: orden {coid} completada en Binance",
+                                data={"symbol": symbol},
                             )
                         except Exception as _e2:
                             _logger.debug(f"[sync_orders_from_binance] error registrando FILLED {coid}: {_e2}")
