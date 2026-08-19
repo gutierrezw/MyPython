@@ -971,17 +971,8 @@ class GestionInversion(tk.Frame):
             dlg.destroy()
 
         def _seccion(parent, titulo, color, row):
-            tk.Button(
-                parent,
-                text=titulo,
-                height=1,
-                state="disabled",
-                font=("Segoe UI", 9, "bold"),
-                fg="white",
-                disabledforeground="white",
-                bg=color,
-                relief=tk.FLAT,
-            ).grid(row=row, column=0, columnspan=2, sticky="ew", pady=(8, 2))
+            ui_section_bar(parent, titulo, bg=color, row=row, columnspan=2, font=("Segoe UI", 9, "bold"),
+                            pady=(8, 2))
 
         def _make_list(parent, grid_row, items, cols):
             return self._make_editable_list(parent, grid_row, items, cols, max_filas=MAX_FILAS)
@@ -1079,10 +1070,10 @@ class GestionInversion(tk.Frame):
             # ── Botones ───────────────────────────────────────────────────────
             bot = tk.Frame(body, bg=self.bgcolor)
             bot.grid(row=r, column=0, columnspan=2, pady=12)
-            tk.Button(bot, text="Guardar", width=8, bg="gray", fg="white", command=guardar).pack(
+            ttk.Button(bot, text="Guardar", width=8, style="Flat.TButton", command=guardar).pack(
                 side=tk.LEFT, padx=(20, 8)
             )
-            tk.Button(bot, text="Cancel", width=8, bg="gray", fg="white", command=eexit).pack(side=tk.LEFT, padx=8)
+            ttk.Button(bot, text="Cancel", width=8, style="Flat.TButton", command=eexit).pack(side=tk.LEFT, padx=8)
 
         except Exception as e:
             print(f"_edit_riesgos(): {e}")
@@ -1123,30 +1114,10 @@ class GestionInversion(tk.Frame):
             rsg = ["Riesgos", "Solución Potencial"]
             win1.grid_columnconfigure(0, minsize=250, weight=0)
             win1.grid_columnconfigure(1, minsize=350, weight=1)
-            self.mpl[14][8] = tk.Button(
-                win1,
-                text=rsg[0],
-                height=2,
-                state="disabled",
-                font=("Segoe UI", 10, "bold"),
-                fg="white",
-                disabledforeground="white",
-                bg="#c0392b",
-                relief=tk.FLAT,
-            )
-            self.mpl[14][9] = tk.Button(
-                win1,
-                text=rsg[1],
-                height=2,
-                state="disabled",
-                font=("Segoe UI", 10, "bold"),
-                fg="white",
-                disabledforeground="white",
-                bg="#1565c0",
-                relief=tk.FLAT,
-            )
-            self.mpl[14][8].grid(row=0, column=0, sticky="ew")
-            self.mpl[14][9].grid(row=0, column=1, sticky="ew")
+            ui_section_bar(win1, rsg[0], bg="#c0392b", row=0, column=0, columnspan=1, font=("Segoe UI", 10, "bold"),
+                            pady=0)
+            ui_section_bar(win1, rsg[1], bg="#1565c0", row=0, column=1, columnspan=1, font=("Segoe UI", 10, "bold"),
+                            pady=0)
 
             # Configurar el Treeview para usar los scrollbars
             columns = []
@@ -1169,7 +1140,7 @@ class GestionInversion(tk.Frame):
             )
 
             prc = ["Precio \na \nPagar", "Tiempo/Energía", "Económicos", "Personales"]
-            self.mpl[23][0] = tk.Button(
+            precio_lbl = tk.Button(
                 wi30,
                 text=prc[0],
                 width=10,
@@ -1192,31 +1163,23 @@ class GestionInversion(tk.Frame):
             personal.heading(prc[3], text=prc[3])
             personal.column(prc[3], width=480)
 
-            self.mpl[23][0].pack(fill=tk.Y, pady=5)
+            precio_lbl.pack(fill=tk.Y, pady=5)
             tiempo.pack(fill=tk.X, padx=5, pady=3)
             economico.pack(fill=tk.X, padx=5, pady=3)
             personal.pack(fill=tk.X, padx=5, pady=3)
 
-            cancel = tk.Button(
-                win4,
-                text="Cancel",
-                width=8,
-                bg="gray",
-                fg="white",
-                command=lambda: eexit(),
-            )
+            cancel = ttk.Button(win4, text="Cancel", width=8, style="Flat.TButton", command=lambda: eexit())
             cancel.grid(row=1, column=1, pady=2, padx=13)
 
             # volcado de información de variables del plan
             vari = self.PlaInversion.select_variablesplan(self.datsess["idcuenta"])
             plan_rows = self.PlaInversion.select_plan(self.datsess["idcuenta"])
 
-            edit_btn = tk.Button(
+            edit_btn = ttk.Button(
                 win4,
                 text="Editar",
                 width=8,
-                bg="gray",
-                fg="white",
+                style="Flat.TButton",
                 command=lambda: self._edit_riesgos(vari, plan_rows, anchor_x=rnb.winfo_rootx()),
             )
             edit_btn.grid(row=1, column=0, pady=2, padx=13)
@@ -1850,7 +1813,8 @@ class GestionInversion(tk.Frame):
         return float(limpio) * multiplicador
 
     def _load_ia_plan(self):
-        """Carga 'Misión IA' (agente_ia.plan) desde parameters de la sesión Stock."""
+        """Carga 'Misión IA' (agente_ia.plan) desde parameters de la sesión Stock — fuente canónica,
+        replicada a Crypto/BotCrypto por _sync_plan_restricciones() al guardar."""
         try:
             ses = BDsystem.get_sesion_by_vehiculo("Stock")
             raw = ses.get("parameters") or "{}"
@@ -1858,6 +1822,23 @@ class GestionInversion(tk.Frame):
             return params.get("agente_ia", {}).get("plan", {}), params.get("agente_ia", {})
         except Exception:
             return {}, {}
+
+    def _sync_plan_restricciones(self, plan_data, restricciones_data, exclude_vehiculo=None):
+        """Misión IA (plan) y Restricciones de cartera son un único plan compartido por cuenta,
+        no por vehículo — replica agente_ia.plan y las restricciones a Stock/Crypto/BotCrypto."""
+        for vehiculo in ("Stock", "Crypto", "BotCrypto"):
+            if vehiculo == exclude_vehiculo:
+                continue
+            try:
+                ses = BDsystem.get_sesion_by_vehiculo(vehiculo)
+                raw = ses.get("parameters") or "{}"
+                params = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+                agente_ia = params.setdefault("agente_ia", {})
+                agente_ia["plan"] = plan_data
+                agente_ia.update(restricciones_data)
+                BDsystem.update_sesion_parameters(vehiculo, params)
+            except Exception as e:
+                print(f"_sync_plan_restricciones({vehiculo}): {e}")
 
     def _resolver_objetivo_texto(self, proyecto, ia_plan=None):
         """Sustituye placeholders (ej. {ingreso_pasivo}) en el texto de Objetivo por su valor actual
@@ -1966,6 +1947,18 @@ class GestionInversion(tk.Frame):
                 except ValueError:
                     pass
                 BDsystem.update_sesion_parameters("Stock", params)
+
+                # Misión IA y Restricciones de cartera son un único plan para toda la cuenta —
+                # se replican a Crypto/BotCrypto, no quedan hardcodeadas a Stock
+                _restricciones_keys = (
+                    "leverage_max", "deuda_max_pct", "risk_real_max",
+                    "concentracion_sector_max", "concentracion_region_max",
+                )
+                self._sync_plan_restricciones(
+                    plan_data=agente_ia["plan"],
+                    restricciones_data={k: agente_ia[k] for k in _restricciones_keys if k in agente_ia},
+                    exclude_vehiculo="Stock",
+                )
 
                 # Regenerar trazaplan si cambió horizonte (inserta pasos nuevos, si corresponde)
                 año_actual = int(str(ia_plan.get("meta_año", meta_year_num)).strip() or meta_year_num)
