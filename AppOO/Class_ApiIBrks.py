@@ -564,6 +564,7 @@ class IB(IBClient):
         params: dict = None,
         data: dict = None,
         json: dict = None,
+        _retry_accounts: bool = True,
     ) -> Dict:
         """
         Handles a request to the client API (GET, POST, DELETE, PUT).
@@ -617,11 +618,26 @@ class IB(IBClient):
                     )
                     return {"raw_text": response.text}
             else:
+                # sesión perdió el contexto de cuenta (típico tras reset nocturno del Gateway):
+                # re-primea con iserver/accounts y reintenta una única vez
+                if status_code == 500 and _retry_accounts and "query /accounts first" in response.text:
+                    self.logger.warning("_make_request(): sesión sin contexto de cuenta, re-primeando iserver/accounts")
+                    self._make_request(endpoint="iserver/accounts", req_type="GET", _retry_accounts=False)
+                    return self._make_request(
+                        endpoint=endpoint,
+                        req_type=req_type,
+                        headers="json",
+                        params=params,
+                        data=data,
+                        json=json,
+                        _retry_accounts=False,
+                    )
+
                 # Error HTTP
                 self.logger.error(textwrap.dedent(f"""
                         ================
                         _make_request(): HTTP ERROR
-                        ================  
+                        ================
                         URL    : {response.url}
                         Code   : {status_code}
                         params : {params}
