@@ -909,9 +909,9 @@ class AnalisisFCI(AnalisisBase):
                 return {}
             rf_w = rv_w = 0.0
             for _, row in self.df_lotes.iterrows():
-                simbolo = str(row.get("symbol", ""))
+                simbolo = str(row.get("symbol", "")).upper()
                 valor = float(row.get("valor_actual", 0) or 0)
-                if any(k in simbolo for k in ("Acciones", "Renta Variable")):
+                if any(k in simbolo for k in ("ACCIONES", "RENTA VARIABLE")):
                     rv_w += valor
                 else:
                     rf_w += valor
