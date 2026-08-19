@@ -1029,6 +1029,9 @@ class AgentManager:
 
             PRECIO_MINIMO = 50.0
             if last < PRECIO_MINIMO:
+                self._preservation_logger.warning(
+                    f"Preservation({vehiculo}/{symbol}): last={last:.2f} < PRECIO_MINIMO={PRECIO_MINIMO} → SKIP"
+                )
                 continue
 
             atr, atr_error = DataHub.preservation_get_atr(symbol, vehiculo)
@@ -1086,6 +1089,10 @@ class AgentManager:
 
             qty = DataHub.preservation_calc_qty(self.account, vehiculo, symbol, last, base_limit, proteccion_qty_pct)
             if qty <= 0:
+                self._preservation_logger.warning(
+                    f"Preservation({vehiculo}/{symbol}): qty calculada={qty} | base_limit={base_limit:.2f} "
+                    f"| last={last:.2f} → SKIP"
+                )
                 continue
 
             trama = DataHub.preservation_build_trama(vehiculo, account, symbol, conid, stop_final, max_price, qty)
