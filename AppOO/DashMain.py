@@ -5977,6 +5977,17 @@ class DashMain:
                     gypDiaria = int(inversion / 100)
                     return inversion, gypDiaria
 
+    def _get_deuda_max_pct(self):
+        """Lee deuda_max_pct de Restricciones de cartera (agente_ia) — tope real para las barras
+        Leverage (D/K %) y Deuda Total, en vez del 30% fijo anterior."""
+        try:
+            ses = BDsystem.get_sesion_by_vehiculo("Stock")
+            params_raw = ses.get("parameters") or "{}"
+            params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
+            return float(params.get("agente_ia", {}).get("deuda_max_pct", 35))
+        except Exception:
+            return 35.0
+
     def actualizar_totales_inversiones(self):
         """
         Actualiza los labels de ganancia diaria y costo base con datos de la tabla inversiones.
@@ -5991,11 +6002,12 @@ class DashMain:
                 limit_costoB, limit_gyp = self.get_limite_inversion()
                 extracto = self.RepositorioOportunidades.select_extracto(account=self.account, extract="sum")
                 div_ytd = float(extracto[0].get("dividendos") or 0) if extracto else 0.0
-                self.root.after(0, lambda: _update_ui(totales, limit_costoB, limit_gyp, div_ytd))
+                deuda_max_pct = self._get_deuda_max_pct()
+                self.root.after(0, lambda: _update_ui(totales, limit_costoB, limit_gyp, div_ytd, deuda_max_pct))
             except Exception as e:
                 print(f"[actualizar_totales_inversiones._fetch()]: {e}")
 
-        def _update_ui(totales, limit_costoB, limit_gyp, div_ytd):
+        def _update_ui(totales, limit_costoB, limit_gyp, div_ytd, deuda_max_pct):
             try:
                 capital_botCrypto = DataHub.manager_GyP["BotCrypto"].get("Inversion", 0)
                 Value_botCrypto = DataHub.manager_GyP["BotCrypto"].get("Value", 0)
@@ -6030,7 +6042,6 @@ class DashMain:
                 stock_debit = DataHub.manager_GyP.get("Stock", {}).get("Debit", 0)
                 stock_debitmax = DataHub.manager_GyP.get("Stock", {}).get("DebitMax", 0)
                 crypto_debit = DataHub.manager_GyP.get("Crypto", {}).get("Debit", 0)
-                crypto_debitmax = DataHub.manager_GyP.get("Crypto", {}).get("DebitMax", 0)
                 if stock_debit == 0 and not DataHub.ws_stock_connected:
                     stock_debit = _kpi_cache.get("stock_debit", 0)
                     stock_debitmax = _kpi_cache.get("stock_debitmax", 1)
@@ -6039,9 +6050,8 @@ class DashMain:
                     _kpi_cache["stock_debitmax"] = stock_debitmax
                     _kpi_dirty = True
                 total_debit = stock_debit + crypto_debit
-                total_debitmax = stock_debitmax + crypto_debitmax
 
-                # Leverage: deuda total como % del capital (máx referencia 30%)
+                # Leverage: deuda total como % del capital (máx = deuda_max_pct de Restricciones de cartera)
                 leverage_pct = (total_debit / max(costo_base, 1)) * 100
 
                 # UnP&L vs Capital: ganancia no realizada como % (rango ±20% del capital)
@@ -6073,9 +6083,10 @@ class DashMain:
 
                 self.GypProgress.update_values(low_limit_gyp, ganancias_dia, high_limit_gyp)
                 self.InvProgress.update_values(0, costo_base, limit_costoB)
-                self.LeverageProgress.update_values(0, leverage_pct, 30.0)
+                self.LeverageProgress.update_values(0, leverage_pct, deuda_max_pct)
                 self.UnpnlProgress.update_values(-unpnl_limit, unpnl, unpnl_limit)
-                self.DebtProgress.update_values(0, total_debit, total_debitmax if total_debitmax > 0 else 1)
+                deuda_max_usd = (deuda_max_pct / 100) * max(costo_base, 1)
+                self.DebtProgress.update_values(0, total_debit, deuda_max_usd)
                 self.BetaProgress.update_values(0, beta_consolidado, 2.0)
                 self.DivProgress.update_values(0, div_ytd, max(div_proyeccion, 1))
             except Exception as e:
