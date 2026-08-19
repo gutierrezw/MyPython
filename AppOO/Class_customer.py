@@ -4092,6 +4092,10 @@ class WidgetVehiculo(TickerInfo):
             tmp.append(como)
             self.orden = tmp.copy()
 
+            self.PlanInversion.update_sesion_fecha_orden(
+                self.vehiculo, self.sesion["fesesion"], json.dumps(self.orden)
+            )
+
         except Exception as e:
             print("[on_heading_click()]: {}".format(e))
 
