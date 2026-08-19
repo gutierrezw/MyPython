@@ -2648,6 +2648,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             if modo == "system":
                 mensaje = f"🔴 *System Sell: ${symbol} ({option};  @price: {price})*\n"
+                if self.modo_etiquetado_sell:
+                    mensaje += "⚠️ Modo etiquetado (IA no evalúa)\n"
                 mensaje += "```\n"
 
             elif modo == "top10":
@@ -2675,8 +2677,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             mensaje += f"{'CostoB posVenta'  :<18} {row['PosCostobase']:>12.2f}\n"
             mensaje += f"{'Valoracion'       :<18} {""}\n"
 
-            confianza = row.get("confianza") if modo != "ia" else confianza
-            if confianza is not None:
+            if modo == "ia" and confianza is not None:
                 mensaje += f"{'-' * 37}\n"
                 mensaje += f"{'Confianza IA'     :<18} {confianza:>12.1%}\n"
 
@@ -2961,6 +2962,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
             if modo == "system":
                 mensaje = f"🟢 *System Buy: ${symbol} ({vehiculo};  @price: {last:.4f})*\n"
+                if self.modo_etiquetado_buy:
+                    mensaje += "⚠️ Modo etiquetado (IA no evalúa)\n"
                 mensaje += "```\n"
             elif modo == "top10":
                 score = row.get("score", 0) or 0
@@ -2998,8 +3001,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     mensaje += f"{'-' * 37}\n"
                     mensaje += f"{'RSI d/w':<18} {_emoji} {_rsi_d:.1f} / {_rsi_w_str}\n"
 
-            confianza = row.get("confianza") if modo != "ia" else confianza
-            if confianza is not None:
+            if modo == "ia" and confianza is not None:
                 mensaje += f"{'-' * 37}\n"
                 mensaje += f"{'Confianza IA'     :<18} {confianza:>12.1%}\n"
 
