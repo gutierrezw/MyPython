@@ -6820,13 +6820,16 @@ class MyWebsocket:
             )
 
         def subscribe_get_order():
-            time.sleep(3)
-            payload = {
-                "type": "request",
-                "topic": "sor",  # Suscribirse a Smart Order Routing (órdenes)
-            }
-            self.ws.send("sor+{}")
-            # self.ws.send(json.dumps(payload))
+            try:
+                time.sleep(3)
+                payload = {
+                    "type": "request",
+                    "topic": "sor",  # Suscribirse a Smart Order Routing (órdenes)
+                }
+                self.ws.send("sor+{}")
+                # self.ws.send(json.dumps(payload))
+            except Exception as e:
+                logging.getLogger("IBroks_Client").error("[subscribe_get_order()]: {}".format(e))
 
         # inicia symbol en websocket
         def subscribe_to_idsymbol():
