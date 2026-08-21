@@ -2988,7 +2988,13 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 tendencia = 0.0
             return (confianza * 0.50) + (rsi_score * 0.30) + (tendencia * 0.20)
 
+        def _min_ganancia(vehiculo):
+            params = self._load_params(vehiculo) or {}
+            return float(params.get("gains_capture", {}).get("min_ganancia", 100.0))
+
         def _es_candidato(o):
+            if (o.get("Profit") or 0) < _min_ganancia(o.get("vehiculo", "Stock")):
+                return False
             if o.get("confianza") is not None:
                 return _score_hibrido(o) >= 0.25
             return (o.get("%Roi") or 0) > DataHub.Toleranciasell
