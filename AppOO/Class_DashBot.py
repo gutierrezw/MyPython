@@ -152,7 +152,11 @@ class ClassAgenteIA:
         self.gains_capture_state = {k: v for k, v in _gc_saved.items() if not k.startswith("_")}
         _gc_params = self._load_params("Stock") or {}
         DataHub.modo_operacion = (_gc_params or {}).get("agente_ia", {}).get("modo", "OBSERVACION")
-        # GainsCapture ahora respeta DataHub.modo_operacion (agente_ia.modo) — no usa gains_capture.modo
+        # DataHub.gains_capture_modo es el switch propio de GainsCapture, independiente de
+        # DataHub.modo_operacion (exclusivo de Agente_ClaudeIA/Capa 4) — H9. Se lee de un atributo
+        # global (no de self._params_cache, que se cachea una sola vez por proceso) para que el
+        # toggle de la UI (DashMain._toggle_gc_modo) tenga efecto inmediato sin reiniciar
+        DataHub.gains_capture_modo = (_gc_params or {}).get("gains_capture", {}).get("modo", "SUPERVISADO")
 
         # Inicializar AgentManager — registra todos sus agentes @wait_rate en AGENTES_SCHEDULE
         self.agent_manager = AgentManager(account=self.account, vehiculo=self.vehiculo)
@@ -895,6 +899,7 @@ class ClassAgenteIA:
 
         min_roi = gc_config.get("min_roi", 0.20)
         min_ganancia = float(gc_config.get("min_ganancia", 100.0))
+        gc_modo = DataHub.gains_capture_modo  # switch propio, independiente de DataHub.modo_operacion (Agente_ClaudeIA)
 
         _claude_key = None
         try:
@@ -956,10 +961,10 @@ class ClassAgenteIA:
                 ts_raw = state.get("pendiente_ts")
                 if ts_raw:
                     elapsed = (datetime.now() - datetime.fromisoformat(ts_raw)).total_seconds()
-                    if elapsed > 7200:
+                    if elapsed > 1800:
                         self.gains_capture_state[symbol] = {**state, "estado": "normal", "pendiente": None}
                         write_json_tmp("gains_capture_state.json", self.gains_capture_state)
-                        _gc_logger.warning(f"GainsCapture({symbol}): propuesta expirada (2h) → cancelada")
+                        _gc_logger.warning(f"GainsCapture({symbol}): propuesta expirada (30min) → cancelada")
                         estado = "normal"
                     else:
                         _gc_logger.debug(
@@ -1015,6 +1020,25 @@ class ClassAgenteIA:
             sell_data = ventas.get(escenario_key, ventas.get(" 25%", {}))
             vender_qty = int(sell_data.get("cantidad sell", 0))
             if vender_qty <= 0:
+                _gc_logger.warning(
+                    f"GainsCapture({symbol}): Claude decidió vender (escenario={escenario_key.strip()}) pero "
+                    f"vender_qty=0 (lotes_en_ganancia={len(list_gain)}) → anulado por regla fija, sin orden"
+                )
+                try:
+                    self.RepositorioOportunidades.insert_symbol_decision_history(
+                        symbol=symbol,
+                        agente="GainsCapture",
+                        tag="CANCELLED",
+                        mensaje=f"vender_qty=0 escenario={escenario_key.strip()} lotes={len(list_gain)}",
+                        json_contexto={
+                            "escenario": escenario_key.strip(),
+                            "lotes_en_ganancia": len(list_gain),
+                            "roi_lote": round(float(roi_ref), 4),
+                        },
+                        order_trader_id=None
+                    )
+                except Exception as _e:
+                    _gc_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CANCELLED (vender_qty=0) → {_e}")
                 continue
 
             lmt_price = round(last * 0.995, 2)
@@ -1023,13 +1047,13 @@ class ClassAgenteIA:
                 "roi_lote": roi_ref,
                 "ganancia_lote": ganancia_ref,
                 "escenario": escenario_key.strip(),
-                "modo": DataHub.modo_operacion,
+                "modo": gc_modo,
                 "claude": claude_result,
                 "orden": {"qty": vender_qty, "lmt_price": lmt_price},
             }
 
-            # Evalúa modo operativo: OBSERVACION/SUPERVISADO = pedir confirmación | AUTONOMO = ejecutar
-            if DataHub.modo_operacion in ("OBSERVACION", "SUPERVISADO"):
+            # Evalúa modo operativo propio de GainsCapture: OBSERVACION/SUPERVISADO = pedir confirmación | AUTONOMO = ejecutar
+            if gc_modo in ("OBSERVACION", "SUPERVISADO"):
                 razon = claude_result.get("razon", "")
                 msg = (
                     f"📈 *GainsCapture — {symbol}*\n"
@@ -1053,7 +1077,7 @@ class ClassAgenteIA:
                     "pendiente_ts": datetime.now().isoformat(),
                 }
                 write_json_tmp("gains_capture_state.json", self.gains_capture_state)
-                _gc_logger.warning(f"GainsCapture({symbol}): propuesta enviada [{DataHub.modo_operacion}] (confirmación pendiente)")
+                _gc_logger.warning(f"GainsCapture({symbol}): propuesta enviada [{gc_modo}] (confirmación pendiente)")
                 continue
 
             trama = DataHub.gains_capture_build_trama_sell("Stock", account, symbol, conid, lmt_price, vender_qty)
@@ -1098,7 +1122,7 @@ class ClassAgenteIA:
                                     "qty": vender_qty,
                                     "lmt_price": lmt_price,
                                     "escenario": escenario_key.strip(),
-                                    "modo": DataHub.modo_operacion
+                                    "modo": gc_modo
                                 }
                             )
                         except Exception as _e:

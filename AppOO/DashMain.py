@@ -2248,8 +2248,7 @@ class DashMain:
         self.line.pack(side=tk.LEFT, fill=tk.X)
         self.user.pack(side=tk.LEFT, fill=tk.X)
 
-        # botón semáforo — modo operación (OBSERVACION / SUPERVISADO / AUTONOMO)
-        # absorbe GainsCapture: OBSERVACION/SUPERVISADO→autorizado, AUTONOMO→automatico
+        # botón semáforo — modo operación de Agente_ClaudeIA (Capa 4): OBSERVACION / SUPERVISADO / AUTONOMO
         _AGENTE_MODOS = {
             "OBSERVACION": {"bg": "#CC3333", "fg": "white"},
             "SUPERVISADO": {"bg": "#CC9900", "fg": "white"},
@@ -2261,6 +2260,7 @@ class DashMain:
             _params = json.loads(_params_raw.decode("utf-8") if isinstance(_params_raw, bytes) else _params_raw)
             DataHub.modo_operacion = _params.get("agente_ia", {}).get("modo", "OBSERVACION")
         except Exception:
+            _params = {}
             DataHub.modo_operacion = "OBSERVACION"
         _modo_init = DataHub.modo_operacion if DataHub.modo_operacion in _AGENTE_MODOS else "OBSERVACION"
         self.btn_agente_modo = tk.Button(
@@ -2278,6 +2278,25 @@ class DashMain:
         )
         self.btn_agente_modo._modos = _AGENTE_MODOS
         self.btn_agente_modo.pack(side=tk.LEFT, padx=(8, 0))
+
+        # botón semáforo — modo operación propio de GainsCapture (independiente de Agente_ClaudeIA, ver H9)
+        DataHub.gains_capture_modo = _params.get("gains_capture", {}).get("modo", "SUPERVISADO")
+        _gc_modo_init = DataHub.gains_capture_modo if DataHub.gains_capture_modo in _AGENTE_MODOS else "SUPERVISADO"
+        self.btn_gc_modo = tk.Button(
+            lineLeft,
+            text=f"📈 GC:{_gc_modo_init}",
+            bg=_AGENTE_MODOS[_gc_modo_init]["bg"],
+            fg=_AGENTE_MODOS[_gc_modo_init]["fg"],
+            font=("Segoe UI", 8, "bold"),
+            relief=tk.FLAT,
+            cursor="hand2",
+            width=14,
+            padx=4,
+            pady=2,
+            command=self._toggle_gc_modo,
+        )
+        self.btn_gc_modo._modos = _AGENTE_MODOS
+        self.btn_gc_modo.pack(side=tk.LEFT, padx=(8, 0))
 
         # órdenes y salida del sistema — anclados al extremo derecho de la ventana raíz
         _btn_right = tk.Frame(self.root, bg=self.colors["bgcolor"])
@@ -2901,12 +2920,28 @@ class DashMain:
             params_raw = ses.get("parameters") or "{}"
             params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
             params.setdefault("agente_ia", {})["modo"] = nuevo
-            # NOTA: gains_capture.modo ya NO se usa — GainsCapture respeta agente_ia.modo
+            # gains_capture.modo es un switch independiente — no se toca acá, ver _toggle_gc_modo (H9)
             BDsystem.update_sesion_parameters("Stock", params)
         except Exception as e:
             print(f"_toggle_modo_operacion: {e}")
         estilos = self.btn_agente_modo._modos[nuevo]
         self.btn_agente_modo.configure(text=f"⚙ {nuevo}", bg=estilos["bg"], fg=estilos["fg"])
+
+    def _toggle_gc_modo(self):
+        ciclo = ["OBSERVACION", "SUPERVISADO"]  # AUTONOMO deshabilitado en UI — no listo aún (bloqueado por H1/H5)
+        actual = DataHub.gains_capture_modo if DataHub.gains_capture_modo in ciclo else "SUPERVISADO"
+        nuevo = ciclo[(ciclo.index(actual) + 1) % len(ciclo)]
+        DataHub.gains_capture_modo = nuevo
+        try:
+            ses = BDsystem.get_sesion_by_vehiculo("Stock")
+            params_raw = ses.get("parameters") or "{}"
+            params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
+            params.setdefault("gains_capture", {})["modo"] = nuevo
+            BDsystem.update_sesion_parameters("Stock", params)
+        except Exception as e:
+            print(f"_toggle_gc_modo: {e}")
+        estilos = self.btn_gc_modo._modos[nuevo]
+        self.btn_gc_modo.configure(text=f"📈 GC:{nuevo}", bg=estilos["bg"], fg=estilos["fg"])
 
     def car_ordenes_activas(self):
         _refresh_id = [None]
