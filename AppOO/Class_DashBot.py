@@ -946,6 +946,17 @@ class ClassAgenteIA:
             last = sym_data.get("last", 0)
             conid, account = conid_map.get(symbol, (None, None))
 
+            # Escenarios alcanzables según cantidad de lotes en ganancia — maximiza_sell_lotes()
+            # reparte por conteo de lotes completos, no por cantidad de acciones: "25%" solo es
+            # posible con >=4 lotes (1/4<=0.25) y "33%" con >=3 (1/3<=0.336). Con menos lotes esos
+            # escalones son matemáticamente inalcanzables, así que no se le ofrecen a Claude.
+            c_sell = len(list_gain)
+            escenarios_disponibles = ["100%"]
+            if c_sell >= 3:
+                escenarios_disponibles.insert(0, "33%")
+            if c_sell >= 4:
+                escenarios_disponibles.insert(0, "25%")
+
             _gc_logger.warning(f"GainsCapture: {symbol} → ROI={roi_ref:.1%} (${ganancia_ref:.2f}) | {len(lotes_validos)} lotes")
 
             state = self.gains_capture_state.get(symbol, {})
@@ -980,7 +991,7 @@ class ClassAgenteIA:
             claude_result = None
             if _claude_key:
                 claude_result = self._gains_capture_claude_eval(
-                    symbol, roi_ref, ganancia_ref, last, datos_tecnicos, _claude_key
+                    symbol, roi_ref, ganancia_ref, last, datos_tecnicos, _claude_key, escenarios_disponibles
                 )
                 # Nota: logging en json_audit_log se hace DESPUÉS de insertar en order_trader
                 # (cuando ya existe clientOrderId). Aquí registramos en symbol_decision_history.
@@ -1009,8 +1020,11 @@ class ClassAgenteIA:
                 )
                 continue
 
+            escenario_default = " 25%" if escenarios_disponibles[0] == "25%" else (
+                " 33%" if escenarios_disponibles[0] == "33%" else "100%"
+            )
             escenario_key = {" 25%": " 25%", "25%": " 25%", " 33%": " 33%", "33%": " 33%", "100%": "100%"}.get(
-                claude_result.get("escenario", "25%"), " 25%"
+                claude_result.get("escenario"), escenario_default
             )
             ventas = DataHub.maximiza_sell_lotes(
                 list_gain=list_gain,
@@ -1052,8 +1066,9 @@ class ClassAgenteIA:
                 "orden": {"qty": vender_qty, "lmt_price": lmt_price},
             }
 
-            # Evalúa modo operativo propio de GainsCapture: OBSERVACION/SUPERVISADO = pedir confirmación | AUTONOMO = ejecutar
-            if gc_modo in ("OBSERVACION", "SUPERVISADO"):
+            # Evalúa modo operativo propio de GainsCapture: fail-closed — solo AUTONOMO ejecuta en vivo,
+            # cualquier otro valor (incluido uno no reconocido) pide confirmación por Telegram
+            if gc_modo != "AUTONOMO":
                 razon = claude_result.get("razon", "")
                 msg = (
                     f"📈 *GainsCapture — {symbol}*\n"
@@ -1169,7 +1184,14 @@ class ClassAgenteIA:
                 _gc_logger.error(f"GainsCapture({symbol}): error enviando orden → {e}")
 
     def _gains_capture_claude_eval(
-        self, symbol: str, roi_lote: float, ganancia_lote: float, last: float, datos_tecnicos: dict, api_key: str
+        self,
+        symbol: str,
+        roi_lote: float,
+        ganancia_lote: float,
+        last: float,
+        datos_tecnicos: dict,
+        api_key: str,
+        escenarios_disponibles: list,
     ) -> dict | None:
         d = datos_tecnicos.get("diaria", {})
         s = datos_tecnicos.get("semanal", {})
@@ -1185,6 +1207,14 @@ class ClassAgenteIA:
         def _f(v, fmt="{:.1f}", default="N/D"):
             return fmt.format(v) if v is not None else default
 
+        descripciones = {
+            "25%": "- '25%': momentum presente, asegurar algo conservador\n",
+            "33%": "- '33%': señales mixtas, venta moderada\n",
+            "100%": "- '100%': spike claro o sobrecompra extrema, salida total del lote\n",
+        }
+        opciones_texto = "".join(descripciones[e] for e in escenarios_disponibles)
+        enum_escenarios = "|".join(f'"{e}"' for e in escenarios_disponibles)
+
         prompt = (
             f"Eres un agente de captura de ganancias para un portfolio especulativo de acciones volátiles.\n"
             f"El activo {symbol} tiene un lote con ROI={roi_lote:.1%} y ganancia=${ganancia_lote:.0f}. Precio actual: ${last:.2f}.\n\n"
@@ -1192,11 +1222,10 @@ class ClassAgenteIA:
             f"- RSI diario: {_f(rsi_d)} | RSI semanal: {_f(rsi_w)} | MACD: {macd_estado}\n"
             f"- Precio vs EMA50: {ema50_rel} | vs EMA200: {ema200_rel}\n\n"
             f"Determiná si el precio está en un SPIKE/TECHO (vender) o en TENDENCIA ALCISTA sostenida (esperar).\n"
-            f"Si vendés, elegí el escenario según convicción:\n"
-            f"- '25%': momentum presente, asegurar algo conservador\n"
-            f"- '33%': señales mixtas, venta moderada\n"
-            f"- '100%': spike claro o sobrecompra extrema, salida total del lote\n\n"
-            f'Respondé SOLO con JSON: {{"accion": "vender"|"esperar", "escenario": "25%"|"33%"|"100%", "razon": "max 120 chars"}}'
+            f"Si vendés, elegí el escenario según convicción (solo estas opciones son válidas para este símbolo,\n"
+            f"por la cantidad de lotes en ganancia disponibles):\n"
+            f"{opciones_texto}\n"
+            f'Respondé SOLO con JSON: {{"accion": "vender"|"esperar", "escenario": {enum_escenarios}, "razon": "max 120 chars"}}'
         )
         result = self._call_claude(prompt, api_key, "ClaudeAPIP", max_tokens=200, timeout=15)
         return result if result and "accion" in result else None

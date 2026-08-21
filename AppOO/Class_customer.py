@@ -1150,7 +1150,7 @@ class DataHub:
             pass
         return None
 
-    gains_capture_modo: str = "automatico"
+    gains_capture_modo: str = "SUPERVISADO"
 
     @staticmethod
     def gains_capture_build_trama_sell(vehiculo, account, symbol, conid, lmt_price, qty):
