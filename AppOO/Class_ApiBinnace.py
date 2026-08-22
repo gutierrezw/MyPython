@@ -119,6 +119,43 @@ def handle_binance_exceptions(func):
     return wrapper
 
 
+# activos quote que ya cotizan en USD — la comisión cobrada en ellos no se convierte
+COMISION_QUOTES_USD = ("USDT", "USDC", "BUSD", "FDUSD", "TUSD", "DAI")
+
+
+def comision_a_usd(symbol, commission, commission_asset, price, price_bnb=0.0):
+    """Convierte a USD la comisión que Binance devuelve en myTrades/fills.
+
+    Binance cobra la comisión en el activo base (compras), en el activo quote (ventas)
+    o en BNB (descuento de fees). Multiplicar siempre por `price` infla la comisión de
+    las ventas exactamente `price` veces — con BNBUSDT eso convirtió 0.0728 USDT en 50.52.
+    """
+    try:
+        commission = float(commission or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+    if commission <= 0:
+        return 0.0
+
+    symbol = (symbol or "").upper()
+    asset = (commission_asset or "").upper()
+    price = float(price or 0.0)
+    price_bnb = float(price_bnb or 0.0)
+
+    quote = next((q for q in COMISION_QUOTES_USD if symbol.endswith(q)), "")
+    base = symbol[: -len(quote)] if quote else ""
+
+    if asset and asset == quote:
+        return commission
+    if asset and asset == base:
+        return commission * price
+    if asset == "BNB" and price_bnb > 0:
+        return commission * price_bnb
+
+    return commission * price
+
+
 # =============================================================================
 # CLIENTE REST SPOT: BinanceSpot
 # =============================================================================
@@ -518,6 +555,13 @@ class BinanceClient:
         insertados = 0
         simbolos_con_trades = []
 
+        # precio BNB para convertir comisiones cobradas con descuento de fees
+        price_bnb = 0.0
+        try:
+            price_bnb = float(self.spot.ticker_price("BNBUSDT").get("price", 0))
+        except Exception as e:
+            self.logger.warning(f"sync_trades: ticker_price BNBUSDT — {e}")
+
         for symbol in symbols:
             cursor_fecha = desde
             while cursor_fecha <= hoy:
@@ -546,7 +590,9 @@ class BinanceClient:
                             "idtrans": str(t.get("id")),
                             "preciotrans": price,
                             "preciocierre": price,
-                            "tarifacomision": float(t.get("commission", 0)) * price,
+                            "tarifacomision": comision_a_usd(
+                                symbol, t.get("commission", 0), t.get("commissionAsset"), price, price_bnb
+                            ),
                             "mtmgp": 0.0,
                             "fechahora": datetime.fromtimestamp(t.get("time", 0) / 1000),
                             "indicadores": "{}",

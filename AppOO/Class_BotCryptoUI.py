@@ -34,7 +34,7 @@ from Modulos_python import (
 import os
 from Modulos_Mysql import BDsystem, RepositorioOportunidadesBuySell, PlanInversion
 from Modulos_Utilitarios import calcular_indicadores_df, define_FileCache, read_json_tmp, write_json_tmp
-from Class_ApiBinnace import BinanceClient, BinanceStreamClient
+from Class_ApiBinnace import BinanceClient, BinanceStreamClient, comision_a_usd
 from Class_DataFrame import get_ultimo_dia_mercado
 from Class_customer import DataHub, MyMessageBox
 from Modulos_Comunes import diaria_book_performance, proceso_update_performance
@@ -1762,12 +1762,8 @@ class BotCryptoUI:
                         qty = qty if trade["isBuyer"] else -1 * qty
                         quoteqty = float(trade.get("quoteQty", 0.0))
                         price = float(trade.get("price", 0.0))
-                        commission_raw = float(trade.get("commission", 0.0))
-                        commission_asset = trade.get("commissionAsset", "")
-                        commission = (
-                            commission_raw * PRICE_BNB
-                            if commission_asset == "BNB" and PRICE_BNB > 0
-                            else commission_raw * price
+                        commission = comision_a_usd(
+                            symbol, trade.get("commission", 0.0), trade.get("commissionAsset"), price, PRICE_BNB
                         )
                         fechahora = datetime.fromtimestamp(trade.get("time", 0) / 1000)
 
@@ -2782,8 +2778,6 @@ class BotCryptoUI:
                 try:
                     qty = float(fill.get("qty", 0))
                     price = float(fill.get("price", 0))
-                    commission = float(fill.get("commission", 0))
-                    commission_asset = fill.get("commissionAsset", "")
                     quoteqty = qty * price
                     # Usar tradeId del fill (igual que Test_InsertBotTraderBook.py)
                     trade_id = str(fill.get("tradeId", order_id))
@@ -2791,11 +2785,10 @@ class BotCryptoUI:
                     # BUY = positivo, SELL = negativo (igual que trader_binance)
                     cantidad = qty if side == "BUY" else -qty
 
-                    # Comisión en USD: si viene en BNB usar precio BNB, si no usar precio del activo
-                    if commission_asset == "BNB" and price_bnb > 0:
-                        comision_usd = commission * price_bnb
-                    else:
-                        comision_usd = commission * price
+                    # Comisión en USD según el activo en que Binance la cobró (base / quote / BNB)
+                    comision_usd = comision_a_usd(
+                        symbol, fill.get("commission", 0), fill.get("commissionAsset"), price, price_bnb
+                    )
 
                     # obtiene situación actual del estado de los indicadores + contexto operación
                     bot = self.bots.get(symbol)
