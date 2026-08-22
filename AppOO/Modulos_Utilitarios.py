@@ -29,6 +29,9 @@ from Modulos_python import (
 
 _SCHEDULE_LOCK = threading.Lock()
 
+# TTL del caché de sesion.parameters — un UPDATE en BD se refleja sin reiniciar la app
+PARAMS_TTL = 60
+
 AGENTES_SCHEDULE = {
     "Agente_MarketScreener": {"intervalo": 86400, "desc": "Discovery + Yahoo (diario)", "active": True, "nivel": 1},
     "Agente_PriceSync": {
@@ -1153,18 +1156,19 @@ def write_json_tmp(name: str, data: dict) -> None:
 
 
 def load_vehiculo_params(vehiculo: str, cache: dict, plan_inversion) -> dict:
-    """Carga y cachea el JSON de parameters de la sesión de un vehículo. Retorna dict o None."""
-    if vehiculo not in cache:
-        import json as _json
-        sesion = plan_inversion.get_sesion_by_vehiculo(vehiculo)
-        params_raw = sesion.get("parameters") if sesion else None
-        if not params_raw:
-            cache[vehiculo] = None
-        else:
-            cache[vehiculo] = _json.loads(
-                params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw
-            )
-    return cache.get(vehiculo)
+    """Carga el JSON de parameters de la sesión de un vehículo, con caché de PARAMS_TTL segundos."""
+    ts, params = cache.get(vehiculo, (0.0, None))
+    if time.time() - ts < PARAMS_TTL:
+        return params
+
+    sesion = plan_inversion.get_sesion_by_vehiculo(vehiculo)
+    params_raw = sesion.get("parameters") if sesion else None
+    if not params_raw:
+        params = None
+    else:
+        params = json.loads(params_raw.decode("utf-8") if isinstance(params_raw, bytes) else params_raw)
+    cache[vehiculo] = (time.time(), params)
+    return params
 
 
 _OBSIDIAN_DOCS_MAP = {

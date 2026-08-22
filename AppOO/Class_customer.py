@@ -742,7 +742,7 @@ class DataHub:
 
                 while eof_pbook is not None:
 
-                    x_stock, x_costo, lotes = 0.0, 0.0, 0
+                    x_stock, x_costo = 0.0, 0.0
                     factor, divisa = 0.0, "USD"
                     pkey = str(recd[ix.index("preciotrans")])
                     fkey = recd[ix.index("fechahora")].strftime("%Y-%m-%d")
@@ -755,11 +755,14 @@ class DataHub:
 
                         prec = recd[ix.index("preciotrans")]
                         cant = recd[ix.index("cantidad")]
-                        cost = prec * cant + recd[ix.index("tarifacomision")]
+                        # descuenta lo ya vendido del lote — igual que lotesGainLost()
+                        sell_qty = recd[ix.index("sell")] if "sell" in ix else 0
+                        effective_cant = cant - sell_qty
+                        cost = prec * effective_cant + recd[ix.index("tarifacomision")]
                         fechahora = recd[ix.index("fechahora")]
 
                         x_costo += cost
-                        x_stock += cant
+                        x_stock += effective_cant
 
                         eof_pbook, recd = next(pbook, (None, None))
                         if eof_pbook is not None:
@@ -767,8 +770,7 @@ class DataHub:
                             fkey = recd[ix.index("fechahora")].strftime("%Y-%m-%d")
 
                     gyp = last * x_stock - x_costo
-                    if gyp > 0:
-                        lotes += 1
+                    if x_stock > 0 and gyp > 0:
                         roi = (gyp / x_costo) if x_costo > 0 else 0
                         gain.append(
                             {
@@ -780,14 +782,17 @@ class DataHub:
                                 "roi": roi,
                                 "gyp": gyp,
                                 "costo lote": x_costo,
-                                "Nro.Lote": lotes,
+                                "Nro.Lote": 0,
                                 "divisa": divisa,
                                 "factar_cambio": factor,
                             }
                         )
 
-                # ordena DESC lista de lotes ganadores y asigna acum=0
-                l_gain = sorted(gain, key=lambda x: x["Nro.Lote"], reverse=False)
+                # ordena por ROI DESC — las clases 25%/33% deben tomar los lotes de mejor
+                # rendimiento, no los más antiguos. Nro.Lote queda como ranking 1..n
+                l_gain = sorted(gain, key=lambda x: x["roi"], reverse=True)
+                for nro, lote in enumerate(l_gain, 1):
+                    lote["Nro.Lote"] = nro
                 return l_gain
             except Exception as e:
                 print(f"lotesGain: {e}")
@@ -876,6 +881,15 @@ class DataHub:
                                 "factar_cambio": factor,
                             }
                         )
+
+                # ordena por ROI DESC igual que lotesGain() — así el acumulado de la ventana
+                # fiscal sigue la misma secuencia con que maximiza_sell_lotes() arma las clases
+                a_gain = sorted(a_gain, key=lambda x: x["roi"], reverse=True)
+                a_lost = sorted(a_lost, key=lambda x: x["roi"], reverse=True)
+                for nro, lote in enumerate(a_gain, 1):
+                    lote["Nro.Lote"] = nro
+                for nro, lote in enumerate(a_lost, 1):
+                    lote["Nro.Lote"] = nro
 
                 # eof_pbbok()
                 ResumLotes = {
@@ -1149,8 +1163,6 @@ class DataHub:
         except Exception:
             pass
         return None
-
-    gains_capture_modo: str = "SUPERVISADO"
 
     @staticmethod
     def gains_capture_build_trama_sell(vehiculo, account, symbol, conid, lmt_price, qty):
@@ -4956,6 +4968,7 @@ class WidgetVehiculo(TickerInfo):
                         "Cum Total",
                         "%ROI",
                         "UnP&L",
+                        "Clase",
                     ]
 
                     fields = [
@@ -4968,6 +4981,7 @@ class WidgetVehiculo(TickerInfo):
                         "total",
                         "bene",
                         "GPa",
+                        "clase",
                     ]
                     x_heard = ttk.Treeview(rns, columns=fields, height=1, style="TFrame")
                     x_heard.tag_configure("blue", background="blue", foreground="white")
@@ -5054,8 +5068,26 @@ class WidgetVehiculo(TickerInfo):
                     ),
                 )
 
-                # ordena lista de lotes ganadores y asigna acum=0
-                s_gain = sorted(a_gain, key=lambda x: x["precio"], reverse=False)
+                # respeta el orden ROI DESC que entrega lotesGainLost() — el acumulado debe
+                # leerse en la misma secuencia con que se arman las clases 25%/33%/100%
+                s_gain = a_gain
+
+                # marca hasta qué lote llega cada clase — mismo método que arma las clases
+                # en oportunidades, así el Cum UnP&L de la fila marcada es el profit de esa clase
+                ventas = DataHub.maximiza_sell_lotes(
+                    list_gain=[
+                        {"last": self.gchar["mkPrice"], "cantidad": g["cantidad"], "costo lote": g["costo"]}
+                        for g in s_gain
+                    ],
+                    position=self.gchar["stock"],
+                    costobase=self.gchar["costobase"],
+                )
+                cortes = {}
+                for _clase, _datos in ventas.items():
+                    _nro = int(_datos["lotes"])
+                    if _nro > 0:
+                        cortes.setdefault(_nro, []).append(_clase.strip())
+
                 p_acum, c_acum, costo = 0.0, 0.0, 0.0
 
                 for i, value in enumerate(s_gain):
@@ -5079,12 +5111,13 @@ class WidgetVehiculo(TickerInfo):
                             "{:>10.2f}".format(total),
                             "{:>+10.2%}".format(roi),
                             "{:>10.2f}".format(value["gyp"]),
+                            "◀ {}".format(" / ".join(cortes[i + 1])) if (i + 1) in cortes else "",
                         ),
                         tags=("green",),
                     )
 
-                # ordena lista de lotes perdedores y asigna acum=0
-                s_lost = sorted(a_lost, key=lambda x: x["precio"], reverse=False)
+                # respeta el orden ROI DESC — pérdida menos severa primero
+                s_lost = a_lost
                 p_acum, c_acum, costo = 0.0, 0.0, 0.0
 
                 for i, value in enumerate(s_lost):

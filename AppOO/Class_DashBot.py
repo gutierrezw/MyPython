@@ -152,11 +152,6 @@ class ClassAgenteIA:
         self.gains_capture_state = {k: v for k, v in _gc_saved.items() if not k.startswith("_")}
         _gc_params = self._load_params("Stock") or {}
         DataHub.modo_operacion = (_gc_params or {}).get("agente_ia", {}).get("modo", "OBSERVACION")
-        # DataHub.gains_capture_modo es el switch propio de GainsCapture, independiente de
-        # DataHub.modo_operacion (exclusivo de Agente_ClaudeIA/Capa 4) — H9. Se lee de un atributo
-        # global (no de self._params_cache, que se cachea una sola vez por proceso) para que el
-        # toggle de la UI (DashMain._toggle_gc_modo) tenga efecto inmediato sin reiniciar
-        DataHub.gains_capture_modo = (_gc_params or {}).get("gains_capture", {}).get("modo", "SUPERVISADO")
 
         # Inicializar AgentManager — registra todos sus agentes @wait_rate en AGENTES_SCHEDULE
         self.agent_manager = AgentManager(account=self.account, vehiculo=self.vehiculo)
@@ -899,7 +894,7 @@ class ClassAgenteIA:
 
         min_roi = gc_config.get("min_roi", 0.20)
         min_ganancia = float(gc_config.get("min_ganancia", 100.0))
-        gc_modo = DataHub.gains_capture_modo  # switch propio, independiente de DataHub.modo_operacion (Agente_ClaudeIA)
+        gc_modo = DataHub.modo_operacion  # semáforo único del sistema — GainsCapture no tiene switch propio
 
         _claude_key = None
         try:
@@ -925,6 +920,8 @@ class ClassAgenteIA:
             if not list_gain:
                 continue
 
+            # min_roi filtra LOTES (calidad: solo entran lotes maduros); min_ganancia filtra
+            # ESCENARIOS (fricción: la orden completa debe justificar comisión e impuesto)
             lotes_validos = []
             for lote in list_gain:
                 last_l = lote.get("last", 0)
@@ -932,32 +929,38 @@ class ClassAgenteIA:
                 costo_lote = lote.get("costo lote", 0)
                 if costo_lote <= 0:
                     continue
-                ganancia_lote = last_l * cantidad - costo_lote
-                roi_lote = ganancia_lote / costo_lote
-                if roi_lote >= min_roi and ganancia_lote >= min_ganancia:
-                    lotes_validos.append({**lote, "ganancia": ganancia_lote, "roi": roi_lote})
+                roi_lote = (last_l * cantidad - costo_lote) / costo_lote
+                if roi_lote >= min_roi:
+                    lotes_validos.append(lote)
 
             if not lotes_validos:
                 continue
 
-            mejor_lote = max(lotes_validos, key=lambda x: x["roi"])
-            roi_ref = mejor_lote["roi"]
-            ganancia_ref = mejor_lote["ganancia"]
+            # Escenarios sobre los lotes que califican — maximiza_sell_lotes() reparte por conteo
+            # de lotes completos, así que los escalones inalcanzables quedan en cero y se filtran
+            ventas = DataHub.maximiza_sell_lotes(
+                list_gain=lotes_validos,
+                position=sym_data.get("position"),
+                costobase=sym_data.get("costobase"),
+            )
+            escenarios = {
+                k: v for k, v in ventas.items() if v["cantidad sell"] > 0 and v["profit"] >= min_ganancia
+            }
+            if not escenarios:
+                continue
+
+            claves = list(escenarios)
+            escenarios_disponibles = [k.strip() for k in claves]
+            _ref = escenarios[claves[-1]]
+            roi_ref = _ref["roi"]
+            ganancia_ref = _ref["profit"]
             last = sym_data.get("last", 0)
             conid, account = conid_map.get(symbol, (None, None))
 
-            # Escenarios alcanzables según cantidad de lotes en ganancia — maximiza_sell_lotes()
-            # reparte por conteo de lotes completos, no por cantidad de acciones: "25%" solo es
-            # posible con >=4 lotes (1/4<=0.25) y "33%" con >=3 (1/3<=0.336). Con menos lotes esos
-            # escalones son matemáticamente inalcanzables, así que no se le ofrecen a Claude.
-            c_sell = len(list_gain)
-            escenarios_disponibles = ["100%"]
-            if c_sell >= 3:
-                escenarios_disponibles.insert(0, "33%")
-            if c_sell >= 4:
-                escenarios_disponibles.insert(0, "25%")
-
-            _gc_logger.warning(f"GainsCapture: {symbol} → ROI={roi_ref:.1%} (${ganancia_ref:.2f}) | {len(lotes_validos)} lotes")
+            _gc_logger.warning(
+                f"GainsCapture: {symbol} → ROI={roi_ref:.1%} (${ganancia_ref:.2f}) | "
+                f"{len(lotes_validos)}/{len(list_gain)} lotes | escenarios={escenarios_disponibles}"
+            )
 
             state = self.gains_capture_state.get(symbol, {})
             estado = state.get("estado", "normal")
@@ -1020,34 +1023,29 @@ class ClassAgenteIA:
                 )
                 continue
 
-            escenario_default = " 25%" if escenarios_disponibles[0] == "25%" else (
-                " 33%" if escenarios_disponibles[0] == "33%" else "100%"
-            )
-            escenario_key = {" 25%": " 25%", "25%": " 25%", " 33%": " 33%", "33%": " 33%", "100%": "100%"}.get(
-                claude_result.get("escenario"), escenario_default
-            )
-            ventas = DataHub.maximiza_sell_lotes(
-                list_gain=list_gain,
-                position=sym_data.get("position"),
-                costobase=sym_data.get("costobase"),
-            )
-            sell_data = ventas.get(escenario_key, ventas.get(" 25%", {}))
-            vender_qty = int(sell_data.get("cantidad sell", 0))
+            # Si Claude elige una clase que no está entre las válidas, se usa la más chica (fail-closed)
+            _elegido = (claude_result.get("escenario") or "").strip()
+            escenario_key = next((k for k in claves if k.strip() == _elegido), claves[0])
+            sell_data = escenarios[escenario_key]
+            roi_ref = sell_data["roi"]
+            ganancia_ref = sell_data["profit"]
+            vender_qty = int(sell_data["cantidad sell"])
             if vender_qty <= 0:
                 _gc_logger.warning(
-                    f"GainsCapture({symbol}): Claude decidió vender (escenario={escenario_key.strip()}) pero "
-                    f"vender_qty=0 (lotes_en_ganancia={len(list_gain)}) → anulado por regla fija, sin orden"
+                    f"GainsCapture({symbol}): Claude decidió vender (clase={escenario_key.strip()}) pero "
+                    f"vender_qty=0 (lotes_validos={len(lotes_validos)}) → anulado por regla fija, sin orden"
                 )
                 try:
                     self.RepositorioOportunidades.insert_symbol_decision_history(
                         symbol=symbol,
                         agente="GainsCapture",
                         tag="CANCELLED",
-                        mensaje=f"vender_qty=0 escenario={escenario_key.strip()} lotes={len(list_gain)}",
+                        mensaje=f"vender_qty=0 escenario={escenario_key.strip()} lotes={len(lotes_validos)}",
                         json_contexto={
                             "escenario": escenario_key.strip(),
+                            "lotes_validos": len(lotes_validos),
                             "lotes_en_ganancia": len(list_gain),
-                            "roi_lote": round(float(roi_ref), 4),
+                            "roi_escenario": round(float(roi_ref), 4),
                         },
                         order_trader_id=None
                     )
@@ -1055,25 +1053,61 @@ class ClassAgenteIA:
                     _gc_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CANCELLED (vender_qty=0) → {_e}")
                 continue
 
+            # Tope duro contra la posición real del broker — los lotes salen de booktrading y
+            # pueden descuadrar (splits, dividendos en acciones): nunca pedir más de lo que hay
+            _pos = int(sym_data.get("position") or 0)
+            if 0 < _pos < vender_qty:
+                ganancia_ref *= _pos / vender_qty
+                _gc_logger.warning(
+                    f"GainsCapture({symbol}): qty {vender_qty} > position {_pos} → recortado a {_pos} "
+                    f"(ganancia prorrateada ${ganancia_ref:.0f})"
+                )
+                vender_qty = _pos
+                if ganancia_ref < min_ganancia:
+                    _gc_logger.warning(
+                        f"GainsCapture({symbol}): tras recorte ${ganancia_ref:.0f} < min_ganancia "
+                        f"${min_ganancia:.0f} → sin orden"
+                    )
+                    try:
+                        self.RepositorioOportunidades.insert_symbol_decision_history(
+                            symbol=symbol,
+                            agente="GainsCapture",
+                            tag="CANCELLED",
+                            mensaje=f"qty recortada a position={_pos}, ganancia < min_ganancia",
+                            json_contexto={
+                                "escenario": escenario_key.strip(),
+                                "position": _pos,
+                                "ganancia_prorrateada": round(float(ganancia_ref), 2),
+                                "min_ganancia": min_ganancia,
+                            },
+                            order_trader_id=None
+                        )
+                    except Exception as _e:
+                        _gc_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CANCELLED (recorte) → {_e}")
+                    continue
+
             lmt_price = round(last * 0.995, 2)
             _det = {
                 "tipo": "gains_capture",
-                "roi_lote": roi_ref,
-                "ganancia_lote": ganancia_ref,
+                "roi_escenario": roi_ref,
+                "ganancia_escenario": ganancia_ref,
+                "lotes": sell_data["lotes"],
                 "escenario": escenario_key.strip(),
                 "modo": gc_modo,
                 "claude": claude_result,
                 "orden": {"qty": vender_qty, "lmt_price": lmt_price},
             }
 
-            # Evalúa modo operativo propio de GainsCapture: fail-closed — solo AUTONOMO ejecuta en vivo,
-            # cualquier otro valor (incluido uno no reconocido) pide confirmación por Telegram
+            # Fail-closed — solo AUTONOMO ejecuta en vivo, cualquier otro valor (incluido uno no
+            # reconocido) pide confirmación por Telegram. GainsCapture siempre notifica: nunca
+            # ejecuta solo, así que silenciarlo en OBSERVACION solo haría perder oportunidades
             if gc_modo != "AUTONOMO":
                 razon = claude_result.get("razon", "")
                 msg = (
                     f"📈 *GainsCapture — {symbol}*\n"
-                    f"ROI lote: {roi_ref:.1%} | Ganancia: ${ganancia_ref:.0f}\n"
-                    f"Escenario: {escenario_key.strip()} | Vender {vender_qty} acc LMT ${lmt_price:.2f}\n"
+                    f"ROI: {roi_ref:.1%} | Ganancia: ${ganancia_ref:.0f}\n"
+                    f"Clase {escenario_key.strip()} ({sell_data['lotes']} lotes) | "
+                    f"Vender {vender_qty} acc LMT ${lmt_price:.2f}\n"
                     f"{razon}\n"
                     f"/ok\\_{symbol}  |  /no\\_{symbol}"
                 )
