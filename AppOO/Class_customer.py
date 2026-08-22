@@ -211,6 +211,9 @@ class DataHub:
     # caché de sesion.parameters por vehículo — el TTL lo maneja load_vehiculo_params()
     _params_vehiculo = {}
 
+    # vehículos que operan 24x7 — el resto sigue calendario de días hábiles
+    MERCADO_24X7 = ("Crypto", "BotCrypto")
+
     # Buy
     MinGananciaPrecio = envs_config.get("MinGananciaPrecio") or 0.05  # 5% mínimo de ganancia precio
     MinScoreBuy = envs_config.get("MinScoreBuy") or 0.5  # Score mínimo para Buy
@@ -557,6 +560,13 @@ class DataHub:
             "min_ganancia": float(cfg.get("min_ganancia", DataHub.MinProfit)),
             "min_roi": float(cfg.get("min_roi", DataHub.MaxRoi)),
         }
+
+    # calendario de mercado por vehículo
+    def mercado_abierto(vehiculo="Stock") -> bool:
+        """True si el vehículo opera hoy. Crypto/BotCrypto 24x7; el resto, solo días hábiles."""
+        if vehiculo in DataHub.MERCADO_24X7:
+            return True
+        return datetime.now().weekday() < 5
 
     # write CSV: Oportunity sell
     def csv_OptionSales_write() -> None:

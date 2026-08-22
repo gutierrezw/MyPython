@@ -2803,6 +2803,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
     async def opportunity_handler_message_sell(self, hash_id, row, origen="system"):
         try:
+            # Calendario: si el vehículo no opera hoy, la oportunidad queda en BD pero no se notifica
+            _vehiculo = row.get("vehiculo", "Stock")
+            if not DataHub.mercado_abierto(_vehiculo):
+                self.logger.debug(f"opportunity_handler_message_sell(): {_vehiculo} fuera de calendario → no envía")
+                return
+
             # Para top10: siempre enviar (son los mejores para entrenar)
             # Para otros: filtrar mensajes repetidos o sin mejora
             if origen != "top10" and not self.Agente_message_Manager_sell(row):
@@ -3120,6 +3126,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
 
     async def opportunity_handler_message_buy(self, hash_id, row, origen="system"):
         try:
+            # Calendario: si el vehículo no opera hoy, la oportunidad queda en BD pero no se notifica
+            _vehiculo = row.get("vehiculo", "Stock")
+            if not DataHub.mercado_abierto(_vehiculo):
+                self.logger.debug(f"opportunity_handler_message_buy(): {_vehiculo} fuera de calendario → no envía")
+                return
+
             # Para top10: siempre enviar (son los mejores para entrenar)
             # Para otros: verificar control de frecuencia y mejora de score
             if origen != "top10" and not self.modo_etiquetado_buy and not self.Agente_message_Manager_Buy(row):
