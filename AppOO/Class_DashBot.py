@@ -887,13 +887,13 @@ class ClassAgenteIA:
         params = self._load_params("Stock")
         if not params:
             return
-        gc_config = params.get("gains_capture")
-        if not gc_config:
+        if not params.get("gains_capture"):
             _gc_logger.warning("_gains_capture_run: gains_capture no configurado en sesion Stock → SKIP")
             return
 
-        min_roi = gc_config.get("min_roi", 0.20)
-        min_ganancia = float(gc_config.get("min_ganancia", 100.0))
+        _gc_cfg = DataHub.gains_config("Stock", "gains_capture")
+        min_roi = _gc_cfg["min_roi"]
+        min_ganancia = _gc_cfg["min_ganancia"]
         gc_modo = DataHub.modo_operacion  # semáforo único del sistema — GainsCapture no tiene switch propio
 
         _claude_key = None
@@ -2336,10 +2336,18 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             if not filtrar:
                 return df
 
-            # Filtrar recomendaciones válidas
+            # Filtrar recomendaciones válidas — piso de ganancia por vehículo (BD).
+            # Sin fail-open: si ninguna fila califica se devuelve vacío, antes se
+            # devolvía el df completo sin filtrar y pasaban clases bajo el umbral
             if "%Roi" in df.columns and "Profit" in df.columns:
-                df_recom = df[(df["%Roi"] >= DataHub.MaxRoi) & (df["Profit"] >= DataHub.MinProfit)]
-                return df_recom if not df_recom.empty else df
+                if "vehiculo" in df.columns:
+                    cfgs = {v: DataHub.gains_config(v, "gains_oportunidades") for v in df["vehiculo"].unique()}
+                    pisos = df["vehiculo"].map(lambda v: cfgs[v]["min_ganancia"])
+                    rois = df["vehiculo"].map(lambda v: cfgs[v]["min_roi"])
+                else:
+                    cfg = DataHub.gains_config("Stock", "gains_oportunidades")
+                    pisos, rois = cfg["min_ganancia"], cfg["min_roi"]
+                return df[(df["%Roi"] >= rois) & (df["Profit"] >= pisos)]
             return df
         except (EmptyDataError, FileNotFoundError):
             return vacio
@@ -3022,12 +3030,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 tendencia = 0.0
             return (confianza * 0.50) + (rsi_score * 0.30) + (tendencia * 0.20)
 
-        def _min_ganancia(vehiculo):
-            params = self._load_params(vehiculo) or {}
-            return float(params.get("gains_capture", {}).get("min_ganancia", 100.0))
-
         def _es_candidato(o):
-            if (o.get("Profit") or 0) < _min_ganancia(o.get("vehiculo", "Stock")):
+            cfg = DataHub.gains_config(o.get("vehiculo", "Stock"), "gains_oportunidades")
+            if (o.get("Profit") or 0) < cfg["min_ganancia"]:
                 return False
             if o.get("confianza") is not None:
                 return _score_hibrido(o) >= 0.25

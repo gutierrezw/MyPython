@@ -57,6 +57,7 @@ from Modulos_Utilitarios import (
     read_json_tmp,
     write_json_tmp,
     track_claude_usage,
+    load_vehiculo_params,
 )
 from Modulos_Comunes import (
     diaria_book_performance,
@@ -206,6 +207,9 @@ class DataHub:
     MinProfit = envs_config["MinProfit"] or 50
     Toleranciasell = envs_config["Toleranciasell"] or 0.10
     MaxRoi = envs_config["MaxRoi"] or 0.09
+
+    # caché de sesion.parameters por vehículo — el TTL lo maneja load_vehiculo_params()
+    _params_vehiculo = {}
 
     # Buy
     MinGananciaPrecio = envs_config.get("MinGananciaPrecio") or 0.05  # 5% mínimo de ganancia precio
@@ -540,6 +544,20 @@ class DataHub:
             # caso de not found()
             return 0
 
+    # umbrales de venta por vehículo — gains_capture (evento) y gains_oportunidades (rutina)
+    def gains_config(vehiculo="Stock", bloque="gains_capture") -> dict:
+        """Umbrales del bloque en sesion.parameters del vehículo. Fallback: MinProfit/MaxRoi globales."""
+        try:
+            params = load_vehiculo_params(vehiculo, DataHub._params_vehiculo, BDsystem) or {}
+        except Exception as e:
+            print(f"gains_config({vehiculo}, {bloque}): {e}")
+            params = {}
+        cfg = params.get(bloque) or {}
+        return {
+            "min_ganancia": float(cfg.get("min_ganancia", DataHub.MinProfit)),
+            "min_roi": float(cfg.get("min_roi", DataHub.MaxRoi)),
+        }
+
     # write CSV: Oportunity sell
     def csv_OptionSales_write() -> None:
         """Genera CSV con oportunidades de venta para modelo IA."""
@@ -553,8 +571,11 @@ class DataHub:
                     writer.writerow(DataHub.ColumnCsvSell)
 
                     for item in sells:
-                        # Filtra profit por debajo del umbral
-                        if item["profit"] < DataHub.MinProfit:
+                        # pre-filtro barato: si el símbolo entero no llega al piso, ninguna
+                        # de sus clases puede llegar. El filtro real va por clase, más abajo
+                        _cfg = DataHub.gains_config(item.get("vehiculo", "Stock"), "gains_oportunidades")
+                        min_gan = _cfg["min_ganancia"]
+                        if item["profit"] < min_gan:
                             continue
 
                         ventas = DataHub.maximiza_sell_lotes(
@@ -569,6 +590,11 @@ class DataHub:
                             if venta["profit"] == profit_anterior:
                                 continue
                             profit_anterior = venta["profit"]
+
+                            # el piso se valida sobre la CLASE: es la orden que se ejecuta y
+                            # la que paga comisión. Sobre el símbolo dejaba pasar clases chicas
+                            if venta["profit"] < min_gan:
+                                continue
 
                             datos_tec = json.dumps(item.get("datos_tecnicos", {}))
                             writer.writerow(
