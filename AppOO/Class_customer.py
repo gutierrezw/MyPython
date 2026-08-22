@@ -4090,7 +4090,20 @@ class WidgetVehiculo(TickerInfo):
         except Exception:
             pass
 
-        abrir_tradingview(symbol=symbol, vehiculo=self.vehiculo, posicion=posicion, lotes=lotes)
+        # clases de venta (25/33/100%) — desde la caché del ciclo de oportunidades, sin query extra
+        clases = {}
+        try:
+            _sell = self.info.get(symbol, {}).get("sell", {})
+            if _sell.get("list_gain"):
+                clases = DataHub.maximiza_sell_lotes(
+                    list_gain=_sell.get("list_gain", []),
+                    position=_sell.get("position", 0),
+                    costobase=_sell.get("costobase", 0),
+                )
+        except Exception as e:
+            self.logger.error(f"_abrir_tradingview({symbol}) clases: {e}")
+
+        abrir_tradingview(symbol=symbol, vehiculo=self.vehiculo, posicion=posicion, lotes=lotes, clases=clases)
 
     def _abrir_grafico_estrategia(self, symbol, Xposition=None):
         """Abre el gráfico de estrategia compartido para el símbolo seleccionado."""

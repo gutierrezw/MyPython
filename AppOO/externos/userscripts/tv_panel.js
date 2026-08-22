@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TradingView — App Panel
 // @namespace    http://tampermonkey.net/
-// @version      2.2
+// @version      2.3
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -40,13 +40,13 @@
                 try {
                     const p = ac.getShapeById(s.id).getProperties();
                     const esNuestro =
-                        (s.name === "rectangle"       && p.backgroundColor === "rgba(200,170,0,0.12)") ||
+                        (s.name === "rectangle" && p.backgroundColor === "rgba(200,170,0,0.12)") ||
                         (s.name === "horizontal_line" && p.linecolor === "#FFD700") ||
                         (s.name === "horizontal_line" && p.linecolor === "#2196F3");
                     if (esNuestro) ac.removeEntity(s.id);
-                } catch (_) {}
+                } catch (_) { }
             });
-        } catch (_) {}
+        } catch (_) { }
 
         ["zona", "avgline", "objline"].forEach(k => { _tvShapes[k] = null; });
     }
@@ -95,7 +95,7 @@
                         },
                     }
                 );
-            } catch (_) {}
+            } catch (_) { }
         }
 
         // Línea avgcost punteada amarilla
@@ -116,7 +116,7 @@
                         },
                     }
                 );
-            } catch (_) {}
+            } catch (_) { }
         }
 
         // Línea objetivo azul
@@ -137,7 +137,7 @@
                         },
                     }
                 );
-            } catch (_) {}
+            } catch (_) { }
         }
     }
 
@@ -165,7 +165,7 @@
             unsafeWindow.document.dispatchEvent(new KeyboardEvent("keydown", {
                 key: "s", ctrlKey: true, bubbles: true, cancelable: true
             }));
-        } catch (_) {}
+        } catch (_) { }
     }
 
     // ── Navegar a nuevo símbolo preservando timeframe ─────────────────────
@@ -193,16 +193,18 @@
     // ── Helpers de formato ─────────────────────────────────────────────────
     const fmt = (v, d = 2) => (v != null && v !== 0) ? v.toLocaleString("es", { minimumFractionDigits: d, maximumFractionDigits: d }) : "—";
     const fmtp = (v) => (v != null && v !== 0) ? (v * 100).toFixed(1) + "%" : "—";
-    const fmts = (v) => v == null ? "—" : (v >= 0 ? `+${fmt(v)}` : fmt(v));
+    const fmts = (v, d = 2) => v == null ? "—" : (v >= 0 ? `+${fmt(v, d)}` : fmt(v, d));
     const fmtsp = (v) => v == null ? "—" : (v >= 0 ? `+${fmtp(v)}` : fmtp(v));
 
     // ── Construir HTML del panel ───────────────────────────────────────────
     function buildPanel(data) {
         const pos = data.posicion || {};
         const lotes = data.lotes || [];
+        const clases = data.clases || {};
         const vehiculo = data.vehiculo || "Stock";
         const isCrypto = vehiculo === "Crypto";
         _dec = isCrypto ? 4 : 2;
+        const _qdec = isCrypto ? 4 : 2;   // decimales de cantidad: crypto opera fracciones
 
         const avgcost = pos.avgcost || 0;
         const last = pos.last || 0;
@@ -229,7 +231,8 @@
         const roiLost = costoLost ? sumLost / costoLost : 0;
 
         const th = (txt, align = "right") =>
-            `<th style="text-align:${align};padding:2px 5px;color:#787b86;border-bottom:1px solid #2a2e39;font-weight:normal;font-size:10px;white-space:nowrap">${txt}</th>`;
+            `<th style="text-align:${align};padding:2px 5px;color:#787b86;border-bottom:1px solid #2a2e39;font-weight:normal;` +
+            `font-size:10px;white-space:nowrap;position:sticky;top:0;background:#1e2130;z-index:1">${txt}</th>`;
 
         // fila last — resumen total (azul)
         const cumTotal = costo + gyp_total;
@@ -237,8 +240,8 @@
             <tr style="background:#1a3a6b">
               <td colspan="2" style="padding:3px 5px;color:#d1d4dc;font-weight:bold">last</td>
               <td style="text-align:right;padding:3px 5px;color:cyan">${fmt(last, _dec)}</td>
-              <td style="text-align:right;padding:3px 5px;color:#aaa">${fmts(position)}</td>
-              <td style="text-align:right;padding:3px 5px;color:#aaa">${fmt(position)}</td>
+              <td style="text-align:right;padding:3px 5px;color:#aaa">${fmts(position, _qdec)}</td>
+              <td style="text-align:right;padding:3px 5px;color:#aaa">${fmt(position, _qdec)}</td>
               <td style="text-align:right;padding:3px 5px;color:${gColor}">${fmts(gyp_total)}</td>
               <td style="text-align:right;padding:3px 5px;color:#aaa">${fmt(costo)}</td>
               <td style="text-align:right;padding:3px 5px;color:#aaa">${fmt(cumTotal)}</td>
@@ -251,7 +254,7 @@
             <tr style="background:#1a1a2e;color:#787b86">
               <td colspan="2" style="padding:2px 5px">▷ lost (${losts.length})</td>
               <td></td>
-              <td style="text-align:right;padding:2px 5px">${fmt(cantLost)}</td>
+              <td style="text-align:right;padding:2px 5px">${fmt(cantLost, _qdec)}</td>
               <td></td>
               <td style="text-align:right;padding:2px 5px;color:#FF6060">${fmts(sumLost)}</td>
               <td style="text-align:right;padding:2px 5px">${fmt(costoLost)}</td>
@@ -274,13 +277,30 @@
               <td style="color:#aaa;padding:2px 5px">${i + 1}</td>
               <td style="color:#aaa;padding:2px 5px;font-size:10px;white-space:nowrap">${l.fechahora || l.fecha || ""}</td>
               <td style="text-align:right;padding:2px 5px">${fmt(l.precio, _dec)}</td>
-              <td style="text-align:right;padding:2px 5px;color:#aaa">${fmts(l.cantidad)}</td>
-              <td style="text-align:right;padding:2px 5px;color:#aaa">${fmt(acumCant)}</td>
+              <td style="text-align:right;padding:2px 5px;color:#aaa">${fmts(l.cantidad, _qdec)}</td>
+              <td style="text-align:right;padding:2px 5px;color:#aaa">${fmt(acumCant, _qdec)}</td>
               <td style="text-align:right;padding:2px 5px;color:${ac}">${fmts(acumGyp)}</td>
               <td style="text-align:right;padding:2px 5px;color:#aaa">${fmt(acumCosto)}</td>
               <td style="text-align:right;padding:2px 5px;color:#aaa">${fmt(acumTotal)}</td>
               <td style="text-align:right;padding:2px 5px;color:${ac}">${fmtsp(acumRoi)}</td>
               <td style="text-align:right;padding:2px 5px;color:${lc}">${fmts(l.gyp)}</td>
+            </tr>`;
+        }).join("");
+
+        // clases de venta (25/33/100%) — maximiza_sell_lotes() sobre los lotes en ganancia
+        const filasClases = Object.keys(clases).map(k => {
+            const c = clases[k] || {};
+            if (!(c["cantidad sell"] > 0)) return "";
+            const roi = c.roi || 0;
+            const rc = roi >= 0 ? "#00FF88" : "#FF6060";
+            return `<tr>
+              <td style="color:#d1d4dc;padding:2px 5px;font-weight:bold">${k.trim()}</td>
+              <td style="text-align:right;padding:2px 5px;color:#787b86">${c.lotes || 0}</td>
+              <td style="text-align:right;padding:2px 5px;color:#aaa">${fmt(c["cantidad sell"], _qdec)}</td>
+              <td style="text-align:right;padding:2px 5px;color:${rc}">${fmts(c.profit)}</td>
+              <td style="text-align:right;padding:2px 5px;color:${rc}">${fmtsp(roi)}</td>
+              <td style="text-align:right;padding:2px 5px;color:#aaa">${fmt(c["pos avgCost"], _dec)}</td>
+              <td style="text-align:right;padding:2px 5px;color:#aaa">${fmt(c["pos position"], _qdec)}</td>
             </tr>`;
         }).join("");
 
@@ -292,7 +312,7 @@
                     border-bottom:1px solid #2a2e39;padding-bottom:4px;margin-bottom:6px">Posición</div>
         <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
           <tr><td ${td1}>Precio medio</td><td ${td2}>${fmt(avgcost, _dec)}</td></tr>
-          <tr><td ${td1}>Cantidad</td><td ${td2}>${fmt(position, 4)}</td></tr>
+          <tr><td ${td1}>Cantidad</td><td ${td2}>${fmt(position, _qdec)}</td></tr>
           <tr><td ${td1}>Costo base</td><td ${td2}>${fmt(costo)}</td></tr>
           <tr><td ${td1}>Precio actual</td><td id="tv-last" ${td2} style="padding:2px 0;color:cyan">${fmt(last, _dec)}</td></tr>
           <tr><td ${td1}>G/P</td>
@@ -323,9 +343,22 @@
           <tr><td ${td1}>R/R</td><td ${td2}>1:${rr.toFixed(1)}</td></tr>
         </table>
 
+        ${filasClases ? `
+        <div style="font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:1px;
+                    border-bottom:1px solid #2a2e39;padding-bottom:4px;margin-bottom:6px">Venta por clase</div>
+        <div style="overflow-x:auto;margin-bottom:10px">
+        <table style="border-collapse:collapse;font-size:11px;min-width:100%">
+          <thead><tr>
+            ${th("Clase", "left")}${th("Lotes")}${th("Cant")}${th("Profit")}${th("%ROI")}
+            ${th("avgCost post")}${th("Pos post")}
+          </tr></thead>
+          <tbody>${filasClases}</tbody>
+        </table>
+        </div>` : ""}
+
         <div style="font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:1px;
                     border-bottom:1px solid #2a2e39;padding-bottom:4px;margin-bottom:6px">Lotes</div>
-        <div style="overflow-x:auto">
+        <div style="overflow:auto;max-height:${filasClases ? "17vh" : "27vh"}">
         <table style="border-collapse:collapse;font-size:11px;min-width:100%">
           <thead><tr>
             ${th("Lote", "left")}${th("Fecha", "left")}${th("Precio")}${th("Cant")}
@@ -445,7 +478,7 @@
 
         bodyEl = document.createElement("div");
         Object.assign(bodyEl.style, {
-            padding: "12px", overflowY: "auto", maxHeight: "80vh",
+            padding: "12px", overflowY: "auto", maxHeight: "calc(100vh - 190px)",
         });
 
         panelEl.appendChild(header);
@@ -529,9 +562,9 @@
                     _symbols = d.symbols || [];
                     renderSymbols(_symbols, tvSymbol());
                     if (btnCartera) btnCartera.title = `Cartera (${_symbols.length})`;
-                } catch (_) {}
+                } catch (_) { }
             },
-            onerror: () => {},
+            onerror: () => { },
         });
     }
 
@@ -548,9 +581,9 @@
                         navegarSi(sym);
                         setTimeout(poll, 500);
                     }
-                } catch (_) {}
+                } catch (_) { }
             },
-            onerror: () => {},
+            onerror: () => { },
         });
     }
 
@@ -740,7 +773,7 @@
                                             try {
                                                 const pd = JSON.parse(rp.responseText);
                                                 if (pd.last) data.posicion.last = pd.last;
-                                            } catch (_) {}
+                                            } catch (_) { }
                                             data.posicion.vehiculo = data.vehiculo;
                                             upsertPanel(buildPanel(data), data.posicion, data.lotes || [], sym);
                                         },
@@ -783,13 +816,13 @@
                     const color = gyp >= 0 ? "#00FF88" : "#FF6060";
                     // actualizar celdas sin redibujar el panel completo
                     const elLast = document.getElementById("tv-last");
-                    const elGyp  = document.getElementById("tv-gyp");
+                    const elGyp = document.getElementById("tv-gyp");
                     if (elLast) elLast.textContent = fmt(last, _dec);
-                    if (elGyp)  { elGyp.textContent = `${fmts(gyp)} (${fmtsp(roi)})`; elGyp.style.color = color; }
+                    if (elGyp) { elGyp.textContent = `${fmts(gyp)} (${fmtsp(roi)})`; elGyp.style.color = color; }
                     lastPosicion.last = last;
-                } catch (_) {}
+                } catch (_) { }
             },
-            onerror: () => {},
+            onerror: () => { },
         });
     }
 

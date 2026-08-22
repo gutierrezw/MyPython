@@ -243,13 +243,18 @@ def start_price_sync(datahub_info_fn):
     threading.Thread(target=_loop, args=(), name="TVPriceSync", daemon=True).start()
 
 
-def abrir_tradingview(symbol, vehiculo="Stock", posicion=None, lotes=None):
+def abrir_tradingview(symbol, vehiculo="Stock", posicion=None, lotes=None, clases=None):
     """Pushea datos a Node y abre TradingView en el browser si Tampermonkey no está activo."""
     try:
         posicion = posicion or {}
         lotes = lotes or []
+        clases = clases or {}
 
-        _push("position", {"posicion": posicion, "lotes": lotes, "vehiculo": vehiculo}, symbol=symbol)
+        _push(
+            "position",
+            {"posicion": posicion, "lotes": lotes, "vehiculo": vehiculo, "clases": clases},
+            symbol=symbol,
+        )
         _push("current", {"symbol": symbol})
         _tv_current["symbol"] = symbol
 
