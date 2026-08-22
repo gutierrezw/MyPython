@@ -3,7 +3,9 @@
 ## ⚙️ Protocolo Obligatorio
 
 **Al inicio de CADA SESIÓN y cuando hay CONFLICTO de decisión:**
-- Leer `FEEDBACK.md` (18 patrones validados)
+- Leer `FEEDBACK.md` (18 patrones validados) — vive en el directorio de memoria
+  (`~/.claude/projects/c--Users-InversionesWildaga-Documents-MyPython/memory/FEEDBACK.md`),
+  visible desde el vault como `10-Memoria/FEEDBACK.md`. **No está en la raíz del repo.**
 - Consultar si ya existe solución para el problema
 - Evitar duplicar enfoques ya resueltos
 
@@ -228,12 +230,38 @@ Claude debe ejecutar estos pasos antes de responder al primer mensaje de trabajo
 2. Leer `10-Memoria/MEMORY.md` → ya cargado como contexto automático, confirmar que es coherente con lo anterior
 3. Antes de editar un repo que puede tener otra sesión Claude trabajando en paralelo (AppOO, vault Obsidian, `MyNode/server-api`) → correr `git log -3` / `git status` en ese repo primero. Si hay commits recientes que esta sesión no generó, revisar qué cambió antes de seguir editando — evita duplicar trabajo o pisar cambios. Repetir el chequeo cada vez que la sesión pasa a tocar un repo distinto, no solo al inicio. Caso real: 2026-07-12, una sesión VS Code comiteó cambios de OAuth junto con la implementación de `get_schema_health`/`get_slow_queries` que esta sesión acababa de escribir en `MyNode/server-api` — sin pérdida, pero por casualidad de timing, no por chequeo previo.
 
-### Checklist al CERRAR sesión
+### Checklist al COMITEAR
 
-Antes de hacer commit, verificar:
+Se ejecuta en **cada `git commit`**, no al final de la sesión — una sesión puede tener
+varios commits y el último no es más importante que el primero.
 
-1. ¿Quedó algún acuerdo de UI/columnas sin registrar?
-2. ¿Hay ideas o decisiones relevantes para guardar en MEMORY/FEEDBACK?
-3. ¿Todos los cambios de código tienen su contraparte en datos (header + valor en mismo orden)?
-4. ¿Se documentaron nuevos índices o cambios en la BD?
-5. Si `00-Home.md` quedó desactualizado → actualizarlo (módulos nuevos, estado cambiado)
+1. **¿El commit cambia el comportamiento descrito en algún doc?** → actualizar el doc en el
+   MISMO commit lógico (ver mapa abajo). Un doc que describe código que ya no existe es peor
+   que no tener doc: las decisiones de subir a PROD se leen desde ahí.
+2. ¿Quedó algún acuerdo de UI/columnas sin registrar?
+3. ¿Hay ideas o decisiones relevantes para guardar en MEMORY/FEEDBACK?
+4. ¿Todos los cambios de código tienen su contraparte en datos (header + valor en mismo orden)?
+5. ¿Se documentaron nuevos índices o cambios en la BD?
+6. Si `00-Home.md` quedó desactualizado → actualizarlo (módulos nuevos, estado cambiado)
+
+**Regla de oro del punto 1:** si un hallazgo previo quedó registrado como *resuelto* y este
+commit lo revierte o lo cambia de enfoque, **anotar la reversión con el motivo**, no borrar la
+entrada. Sin eso, la próxima lectura parece una regresión.
+
+#### Mapa código → doc
+
+Si el commit toca el código de la izquierda, revisar el doc de la derecha antes de cerrar:
+
+| Código | Doc a revisar |
+|---|---|
+| `_gains_capture_run`, `maximiza_sell_lotes`, `lotesGain*` | `20-Proyecto/design-gains-capture.md` |
+| `_preservation_run_vehiculo`, `preservation_*` | `20-Proyecto/design-preservation.md` |
+| `readCSV_sell`, `get_top_sell`, `csv_OptionSales_write`, `oportunidades_*` | `20-Proyecto/ref-oportunidades.md` |
+| `DataHub` (class vars, config, `gains_config`) | `20-Proyecto/ref-datahub.md` |
+| `Class_Screener`, consenso, votos | `20-Proyecto/ref-consenso.md` + tabla de columnas en este archivo |
+| `Class_tradingBot`, `Class_BotCryptoUI` | `20-Proyecto/spec-botcrypto.md` |
+| Agentes nuevos / `AGENTES_SCHEDULE` | sección "Patrón para agregar un nuevo agente" en este archivo |
+| Cualquier hallazgo de la revisión Opus (H1–H10) | `30-Gestion/resultado-revision-opus-preservation-gainscapture.md` + `30-Gestion/BACKLOG.md` |
+
+Los docs viven en `AppOO/Doc/` (= `20-Proyecto/` del vault vía junction) y se comitean en el
+repo del vault, aparte del commit de código. Que sean dos repos no los hace dos tareas.
