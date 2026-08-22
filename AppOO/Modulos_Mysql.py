@@ -1943,22 +1943,26 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         except (Exception, EncodingWarning, connect.Error) as error:
             print("[Mysql::insert_market()]: {}".format(error))
 
-    def sync_sector_to_inversion(self, account: str) -> int:
-        """Propaga market.sector → inversion.sector para todos los símbolos en cartera."""
+    def sync_market_to_inversion(self, account: str) -> int:
+        """Propaga market.sector y market.categoriaActivo → inversion, para los Stock en cartera.
+
+        market es la fuente de verdad de Stock: pisa el valor de inversion salvo que venga vacío.
+        """
         try:
             conn = self._conectar(tabla="update.market")
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE inversion i "
                 "JOIN market m ON m.symbol = i.ticket AND m.account = %s "
-                "SET i.sector = m.sector "
-                "WHERE m.sector IS NOT NULL AND m.sector != '' AND i.tipoinv = 'Stock'",
+                "SET i.sector = IFNULL(NULLIF(m.sector, ''), i.sector), "
+                "    i.categoriaActivo = IFNULL(NULLIF(m.categoriaActivo, ''), i.categoriaActivo) "
+                "WHERE i.tipoinv = 'Stock'",
                 (account,),
             )
             conn.commit()
             return cursor.rowcount
         except (Exception, connect.Error) as error:
-            _logger.error(f"sync_sector_to_inversion(): {error}")
+            _logger.error(f"sync_market_to_inversion(): {error}")
             return 0
         finally:
             cursor.close()
@@ -4053,7 +4057,8 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                                                 factor_cambio = '%s', deuda = '%s',  mrkprice = '%s', open = '%s',
                                                 dgyp = '%s', iactiva = '%s', empresa = '%s', region = '%s',
                                                 country = '%s', timestamp = '%s',
-                                                estrategia = CASE WHEN estrategia IN ('A01','A02','A03','A04','A05','A99','C01','C02') OR estrategia IS NULL THEN '%s' ELSE estrategia END
+                                                estrategia = CASE WHEN estrategia IN ('A01','A02','A03','A04','A05','A99','C01','C02') OR estrategia IS NULL THEN '%s' ELSE estrategia END,
+                                                categoriaActivo = IFNULL(categoriaActivo, NULLIF('%s',''))
                         WHERE ticket ='%s' AND useraccount ='%s';"""
 
                 factor = keys["factor_cambio"] if "factor_cambio" in keys else 1
@@ -4096,6 +4101,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 xlistvalues.append(keys["country"] if "country" in keys else "")
                 xlistvalues.append(datetime.now())
                 xlistvalues.append(keys["estrategia"] if "estrategia" in keys else "")
+                xlistvalues.append("N" if vehiculo == "Crypto" else keys.get("categoriaActivo", ""))
 
                 xlistvalues.append(ticket)
                 xlistvalues.append(account)
@@ -4110,7 +4116,8 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 if not found:
                     qry = """INSERT INTO inversion (ticket, iactiva, fealta, febaja, estrategia, empresa, costobase, conid, 
                                                             mrkprice, position, sector, exDividendDate, factor_cambio,
-                                                            divisa, tipoinv, useraccount, region, country"""
+                                                            divisa, tipoinv, useraccount, region, country,
+                                                            categoriaActivo"""
                     fectime = datetime.now()
                     exdiv = keys["exDividendDate"] if "exDividendDate" in keys else "9999-12-31"
                     factor = keys["factor_cambio"] if "factor_cambio" in keys else 1
@@ -4136,6 +4143,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                         account,
                         region,
                         country,
+                        "N" if vehiculo == "Crypto" else keys.get("categoriaActivo") or None,
                         str(datetime.now()),
                     ]
 

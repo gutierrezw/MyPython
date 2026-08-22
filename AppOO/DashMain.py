@@ -1875,6 +1875,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # Sin datos de dividendo — garantizar registro en market con encartera='Y'
                     cat = "X" if qt in _ETF_TYPES else "N"
                     update_tabla_market(symbol, ["encartera", "categoriaActivo", "account"], ["Y", cat, self.account])
+
+            filas = self.Market.sync_market_to_inversion(self.account)
+            self.logger.warning("dividends_en_market_stock(): sync market -> inversion, {} filas".format(filas))
         except Exception as e:
             self.logger.error("dividends_en_market_stock(): {}".format(e))
 

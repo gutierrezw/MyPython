@@ -143,10 +143,14 @@ AGENTES_SCHEDULE = {
 }
 
 
-def wait_rate(intervalo_segundos: int, persist: bool = False, initial_delay: int = 0, desc: str = "", nivel: int = 1):
+def wait_rate(intervalo_segundos: int, persist: bool = False, initial_delay: int = 0, desc: str = "", nivel: int = 1,
+              ventana: tuple = None):
     """Decorador: restringe la ejecución a una vez por intervalo. persist=True sobrevive reinicios.
     initial_delay: segundos a esperar en el primer arranque antes de ejecutar por primera vez.
-    desc/nivel: si se pasan, registra el agente en AGENTES_SCHEDULE automáticamente."""
+    desc/nivel: si se pasan, registra el agente en AGENTES_SCHEDULE automáticamente.
+    ventana: (hora_desde, hora_hasta) restringe la ejecución a esa franja horaria. Fuera de la franja
+    NO se toca last_run — el turno queda pendiente en vez de consumirse sin trabajo. El atraso se
+    acumula y, pasado intervalo*1.5, se ejecuta igual (_overdue)."""
     _FILE = "agents_schedule.json"
 
     def decorator(func):
@@ -179,6 +183,12 @@ def wait_rate(intervalo_segundos: int, persist: bool = False, initial_delay: int
                 wrapper._overdue = False
                 return None
             wrapper._overdue = transcurrido > intervalo_segundos * 1.5
+            if ventana and not forced and not wrapper._overdue:
+                if not (ventana[0] <= datetime.now().hour < ventana[1]):
+                    logging.getLogger("ClassAgenteIA").debug(
+                        f"wait_rate: '{func.__name__}' fuera de ventana {ventana} — turno pendiente"
+                    )
+                    return None
             import inspect  # import diferido — evita ciclo de inicialización con módulos que importan wait_rate
             if "forced" in inspect.signature(func).parameters:
                 resultado = func(*args, forced=forced, **kwargs)

@@ -190,20 +190,16 @@ class AgentManager:
         except Exception as e:
             self._log_institucion.error(f"Agente_ConsensoCache(): {e}")
 
-    @wait_rate(2592000, persist=True)
+    @wait_rate(2592000, persist=True, ventana=(0, 6))
     def Agente_EdgarFunds(self):
-        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_EdgarFunds._overdue:
-            return
         try:
             result = sync_edgar_funds()
             self._log_edgar.warning(f"EdgarFunds: total={result['total']} insertados={result['inserted']}")
         except Exception as e:
             self._log_edgar.error(f"Agente_EdgarFunds(): {e}")
 
-    @wait_rate(604800, persist=True)
+    @wait_rate(604800, persist=True, ventana=(0, 6))
     def Agente_FundFilings(self):
-        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_FundFilings._overdue:
-            return
         try:
             task_name = "Agente_FundFilings()"
 
@@ -218,10 +214,8 @@ class AgentManager:
         except Exception as e:
             self._log_edgar.error(f"Agente_FundFilings(): {e}")
 
-    @wait_rate(86400, persist=True)
+    @wait_rate(86400, persist=True, ventana=(0, 6))
     def Agente_13FScores(self):
-        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_13FScores._overdue:
-            return
         try:
             result = sync_13f_scores(account=self.account)
             self._log_edgar.warning(
@@ -230,10 +224,8 @@ class AgentManager:
         except Exception as e:
             self._log_edgar.error(f"Agente_13FScores(): {e}")
 
-    @wait_rate(86400, persist=True)
+    @wait_rate(86400, persist=True, ventana=(0, 6))
     def Agente_13FHoldings(self):
-        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_13FHoldings._overdue:
-            return
         try:
             result = sync_13f_holdings(account=self.account)
             self._log_edgar.warning(
@@ -245,10 +237,8 @@ class AgentManager:
         except Exception as e:
             self._log_edgar.error(f"Agente_13FHoldings(): {e}")
 
-    @wait_rate(2592000, persist=True)
+    @wait_rate(2592000, persist=True, ventana=(0, 6))
     def Agente_AuditPortfolio(self):
-        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_AuditPortfolio._overdue:
-            return
         try:
             result = audit_portfolio(account=self.account)
             self._log_institucion.warning(
@@ -259,14 +249,14 @@ class AgentManager:
         except Exception as e:
             self._log_institucion.error(f"Agente_AuditPortfolio(): {e}")
 
-    @wait_rate(2592000, persist=True, desc="Actualiza categoriaActivo Screener ex-cartera (30d)", nivel=2)
+    @wait_rate(2592000, persist=True, desc="Actualiza categoriaActivo Screener ex-cartera (30d)",
+               nivel=2, ventana=(0, 6))
     def Agente_DividendStatusScreener(self):
-        if not (0 <= datetime.now().hour < 6) and not type(self).Agente_DividendStatusScreener._overdue:
-            return
         try:
             result = sync_dividend_status_screener(account=self.account)
             self._log_stock.warning(
-                f"DividendStatusScreener: procesados={result['processed']} errores={result['errors']} total={result['total']}"
+                f"DividendStatusScreener: procesados={result['processed']} errores={result['errors']} "
+                f"total={result['total']} sync_inversion={result['sync_inversion']}"
             )
         except Exception as e:
             self._log_stock.error(f"Agente_DividendStatusScreener(): {e}")

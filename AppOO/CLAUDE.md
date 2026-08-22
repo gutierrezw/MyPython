@@ -130,6 +130,26 @@ def Agente_NombreNuevo(self):
 - `persist=True` → sobrevive reinicios (guarda último run en `../tmp/agents_schedule.json`)
 - `desc` presente → se auto-registra en `AGENTES_SCHEDULE` al importar el módulo
 - Sin `desc` → no aparece en el panel de schedule (invisible)
+- `ventana=(desde, hasta)` → restringe la ejecución a esa franja horaria
+
+### Franja horaria: usar `ventana`, nunca una guarda dentro del agente
+
+Si un agente solo debe correr de madrugada, va en el decorador:
+
+```python
+@wait_rate(2592000, persist=True, ventana=(0, 6), desc="...", nivel=2)
+def Agente_Nocturno(self):
+    ...
+```
+
+**No** poner `if not (0 <= datetime.now().hour < 6): return` dentro del método. El decorador
+marca `last_run` apenas invoca la función, así que un `return` temprano **consume el turno sin
+hacer trabajo** y reinicia el reloj del intervalo. Con intervalos largos el agente puede no
+correr nunca: el rescate `_overdue` mide `intervalo * 1.5`, umbral inalcanzable si cada intento
+devuelve el contador a cero. Corregido 2026-08-22 en los 6 agentes que tenían ese patrón.
+
+`ventana` se evalúa **antes** de llamar a la función y no toca `last_run` — el turno queda
+pendiente. `forced` y `_overdue` se saltan la ventana a propósito.
 
 ---
 

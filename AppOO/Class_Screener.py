@@ -2421,7 +2421,7 @@ def sync_market(account):
                 market.update(upd=campos, val=valores, symbol=symbol)
                 data_ok += 1
 
-    sector_ok = market.sync_sector_to_inversion(account)
+    sector_ok = market.sync_market_to_inversion(account)
 
     return {
         "descargados": len(rows),
@@ -3083,7 +3083,9 @@ def sync_dividend_status_screener(account: str, limit: int = 150) -> dict:
             _logger.error(f"sync_dividend_status_screener({symbol}): {e}")
             errors += 1
 
-    return {"processed": processed, "errors": errors, "total": len(symbols)}
+    sincronizados = market.sync_market_to_inversion(account)
+
+    return {"processed": processed, "errors": errors, "total": len(symbols), "sync_inversion": sincronizados}
 
 
 if __name__ == "__main__":
