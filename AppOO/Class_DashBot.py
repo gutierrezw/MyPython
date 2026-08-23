@@ -551,6 +551,11 @@ class ClassAgenteIA:
     @wait_rate(86400, persist=True, desc="AgIA — análisis diario portfolio + candidatos (Fase 1: observación)", nivel=2)
     def Agente_ClaudeIA(self):
         try:
+            # Calendario: Stock y FCI/BBVA.ARS operan solo dias habiles — sin mercado no hay propuesta
+            # que ejecutar, y la guarda va antes de la llamada a la API para no gastar el request
+            if not DataHub.mercado_abierto("Stock"):
+                self.logger.debug("Agente_ClaudeIA: fuera de calendario -> SKIP")
+                return
             params = self._load_params("Stock")
             if not params:
                 return
