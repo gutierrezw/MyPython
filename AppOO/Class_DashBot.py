@@ -1161,12 +1161,16 @@ class ClassAgenteIA:
                     f"{razon}"
                 )
                 # mismos botones que la propuesta IA. Los comandos /ok_SYMBOL y /no_SYMBOL siguen
-                # funcionando: sirven para mensajes viejos y si el callback falla
+                # funcionando: sirven para mensajes viejos y si el callback falla.
+                # El pendiente_id viaja en el callback: el chat acumula propuestas viejas del mismo
+                # simbolo y sin el, tocar el boton de un mensaje de hace una hora ejecutaba la
+                # propuesta vigente — otra clase, otro precio
+                pendiente_id = int(datetime.now().timestamp())
                 markup = InlineKeyboardMarkup(
                     [
                         [
-                            InlineKeyboardButton("✅ Ejecutar", callback_data=f"gc_ok|{symbol}"),
-                            InlineKeyboardButton("⏸ Diferir", callback_data=f"gc_no|{symbol}"),
+                            InlineKeyboardButton("✅ Ejecutar", callback_data=f"gc_ok|{symbol}|{pendiente_id}"),
+                            InlineKeyboardButton("⏸ Diferir", callback_data=f"gc_no|{symbol}|{pendiente_id}"),
                         ]
                     ]
                 )
@@ -1174,6 +1178,7 @@ class ClassAgenteIA:
                 self.gains_capture_state[symbol] = {
                     **state,
                     "estado": "pendiente_autorizacion",
+                    "pendiente_id": pendiente_id,
                     "pendiente": {
                         "escenario": escenario_key.strip(),
                         "vehiculo": vehiculo,
@@ -1766,11 +1771,13 @@ class Telegram:
 
             elif accion == "gc_ok":
                 await self._safe_remove_buttons(query)
-                await self._safe_edit(query, self._gains_capture_aprobar(args[0].upper()))
+                _pid = args[1] if len(args) > 1 else None
+                await self._safe_edit(query, self._gains_capture_aprobar(args[0].upper(), pendiente_id=_pid))
 
             elif accion == "gc_no":
                 await self._safe_remove_buttons(query)
-                await self._safe_edit(query, self._gains_capture_rechazar(args[0].upper()))
+                _pid = args[1] if len(args) > 1 else None
+                await self._safe_edit(query, self._gains_capture_rechazar(args[0].upper(), pendiente_id=_pid))
 
             elif accion == "fci_reset_blocked":
                 from Class_BrowserFCI import BrowserFCI  # import diferido — evita ciclo
@@ -1813,15 +1820,27 @@ class Telegram:
         except Exception as e:
             self.logger.error(f"handle_callback(): {e}\n{traceback.format_exc()}")
 
-    def _gains_capture_aprobar(self, symbol):
+    def _gains_capture_id_vigente(self, state, pendiente_id):
+        """True si pendiente_id corresponde a la propuesta vigente del simbolo.
+
+        Los comandos de texto (/ok_SYMBOL) no lo mandan y actuan sobre la vigente, como siempre.
+        """
+        if pendiente_id is None:
+            return True
+        return str(state.get("pendiente_id", "")) == str(pendiente_id)
+
+    def _gains_capture_aprobar(self, symbol, pendiente_id=None):
         """Aprueba una propuesta GainsCapture pendiente y manda la orden. Devuelve el texto a responder.
 
         La logica vive aca y no en el handler porque entra por dos puertas: el boton Ejecutar del
-        mensaje de Telegram y el comando /ok_SYMBOL.
+        mensaje de Telegram y el comando /ok_SYMBOL. pendiente_id lo manda el boton para asegurar
+        que se ejecuta la propuesta que el usuario esta mirando y no la vigente.
         """
         state = self.gains_capture_state.get(symbol, {})
         if state.get("estado") != "pendiente_autorizacion":
             return f"⚠️ {symbol}: sin propuesta GainsCapture pendiente."
+        if not self._gains_capture_id_vigente(state, pendiente_id):
+            return f"⚠️ {symbol}: esa propuesta ya vencio. Hay una nueva mas abajo en el chat."
         pendiente = state.get("pendiente", {})
         vehiculo = pendiente.get("vehiculo", "Stock")
         trama = DataHub.gains_capture_build_trama_sell(
@@ -1891,11 +1910,13 @@ class Telegram:
             f"${DataHub.format_precio(vehiculo, symbol, pendiente['lmt_price'])}"
         )
 
-    def _gains_capture_rechazar(self, symbol):
+    def _gains_capture_rechazar(self, symbol, pendiente_id=None):
         """Rechaza una propuesta GainsCapture pendiente. Devuelve el texto a responder."""
         state = self.gains_capture_state.get(symbol, {})
         if state.get("estado") != "pendiente_autorizacion":
             return f"⚠️ {symbol}: sin propuesta GainsCapture pendiente."
+        if not self._gains_capture_id_vigente(state, pendiente_id):
+            return f"⚠️ {symbol}: esa propuesta ya vencio. Hay una nueva mas abajo en el chat."
         self.gains_capture_state[symbol] = {**state, "estado": "normal", "pendiente": None}
         write_json_tmp("gains_capture_state.json", self.gains_capture_state)
         logging.getLogger("GainsCapture").warning(f"GainsCapture({symbol}): rechazado por usuario")
