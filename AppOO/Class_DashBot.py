@@ -884,6 +884,9 @@ class ClassAgenteIA:
     def _gains_capture_run(self):
         _gc_logger = logging.getLogger("GainsCapture")
 
+        # granularidad de qty/precio por vehículo — Etapa 3 lo convierte en parámetro del método
+        gc_vehiculo = "Stock"
+
         params = self._load_params("Stock")
         if not params:
             return
@@ -1029,7 +1032,7 @@ class ClassAgenteIA:
             sell_data = escenarios[escenario_key]
             roi_ref = sell_data["roi"]
             ganancia_ref = sell_data["profit"]
-            vender_qty = int(sell_data["cantidad sell"])
+            vender_qty = DataHub.quantiza_qty(gc_vehiculo, symbol, sell_data["cantidad sell"])
             if vender_qty <= 0:
                 _gc_logger.warning(
                     f"GainsCapture({symbol}): Claude decidió vender (clase={escenario_key.strip()}) pero "
@@ -1055,7 +1058,7 @@ class ClassAgenteIA:
 
             # Tope duro contra la posición real del broker — los lotes salen de booktrading y
             # pueden descuadrar (splits, dividendos en acciones): nunca pedir más de lo que hay
-            _pos = int(sym_data.get("position") or 0)
+            _pos = DataHub.quantiza_qty(gc_vehiculo, symbol, sym_data.get("position") or 0)
             if 0 < _pos < vender_qty:
                 ganancia_ref *= _pos / vender_qty
                 _gc_logger.warning(
@@ -1086,7 +1089,7 @@ class ClassAgenteIA:
                         _gc_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CANCELLED (recorte) → {_e}")
                     continue
 
-            lmt_price = round(last * 0.995, 2)
+            lmt_price = DataHub.quantiza_precio(gc_vehiculo, symbol, last * 0.995)
             _det = {
                 "tipo": "gains_capture",
                 "roi_escenario": roi_ref,
@@ -1185,7 +1188,7 @@ class ClassAgenteIA:
                                 mensaje=f"LMT SELL {vender_qty} acc @ ${lmt_price:.2f}",
                                 json_contexto={
                                     "order_id": int(order_id) if order_id else None,
-                                    "qty": int(vender_qty),
+                                    "qty": float(vender_qty),
                                     "lmt_price": round(float(lmt_price), 4),
                                     "nivel_roi": round(float(roi_ref), 4)
                                 },

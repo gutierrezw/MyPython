@@ -1089,6 +1089,32 @@ class DataHub:
         return float(datos[close_col].tail(period).mean()), None
 
     @staticmethod
+    def quantiza_qty(vehiculo, symbol, qty):
+        """Ajusta la cantidad a la granularidad del vehículo: stepSize en Crypto, unidades enteras en el resto."""
+        try:
+            qty = float(qty or 0)
+        except (TypeError, ValueError):
+            return 0
+        if vehiculo != "Crypto":
+            return int(qty)
+        step_size = DataHub.info.get(symbol, {}).get("lotSize", {}).get("stepSize") or 0.00001
+        decimals = calculate_decimal_places(step_size)
+        return round(qty - (qty % step_size), decimals)
+
+    @staticmethod
+    def quantiza_precio(vehiculo, symbol, precio):
+        """Ajusta el precio a la granularidad del vehículo: tickSize en Crypto, 2 decimales en el resto."""
+        try:
+            precio = float(precio or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        if vehiculo != "Crypto":
+            return round(precio, 2)
+        tick_size = DataHub.info.get(symbol, {}).get("lotSize", {}).get("tickSize") or 0.01
+        decimals = calculate_decimal_places(tick_size)
+        return round(precio - (precio % tick_size), decimals)
+
+    @staticmethod
     def preservation_calc_qty(account, vehiculo, symbol, last, base_limit, pct=0.33):
         """Calcula qty a proteger como porcentaje de acciones en ganancia."""
 
@@ -1097,15 +1123,7 @@ class DataHub:
             total_qty = sum(k.get("cantidad", 0) for k in book)
             return round(total_qty * pct)
 
-        qty_raw = cantidad_lote()
-        if vehiculo == "Crypto":
-            info_symbol = DataHub.info.get(symbol, {})
-            lot_info = info_symbol.get("lotSize", {})
-            step_size = lot_info.get("stepSize", 0.00001)
-            decimals = calculate_decimal_places(step_size)
-            return round(qty_raw - (qty_raw % step_size), decimals)
-        else:
-            return qty_raw
+        return DataHub.quantiza_qty(vehiculo, symbol, cantidad_lote())
 
     @staticmethod
     def preservation_build_trama(vehiculo, account, symbol, conid, stop_price, max_price, qty):
@@ -1138,6 +1156,7 @@ class DataHub:
             }
 
         if vehiculo == "Crypto":
+            stop_tick = float(DataHub.quantiza_precio("Crypto", symbol, stop_price))
             return {
                 "account": account,
                 "vehiculo": "Crypto",
@@ -1146,9 +1165,9 @@ class DataHub:
                     "symbol": symbol,
                     "side": "SELL",
                     "type": "STOP_LOSS_LIMIT",
-                    "price": float(round(stop_price, 2)),
-                    "stopPrice": float(round(stop_price, 2)),
-                    "quantity": float(qty),
+                    "price": stop_tick,
+                    "stopPrice": stop_tick,
+                    "quantity": float(DataHub.quantiza_qty("Crypto", symbol, qty)),
                     "timeInForce": "GTC",
                 },
                 "hash_id_Op": hash_id,
