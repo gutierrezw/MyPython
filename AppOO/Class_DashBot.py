@@ -1158,10 +1158,19 @@ class ClassAgenteIA:
                     f"ROI: {roi_ref:.1%} | Ganancia: ${ganancia_ref:.0f}\n"
                     f"Clase {escenario_key.strip()} ({sell_data['lotes']} lotes) | "
                     f"Vender {vender_qty} LMT ${lmt_txt}\n"
-                    f"{razon}\n"
-                    f"/ok\\_{symbol}  |  /no\\_{symbol}"
+                    f"{razon}"
                 )
-                DataHub.add_alert(msg, telegram=True)
+                # mismos botones que la propuesta IA. Los comandos /ok_SYMBOL y /no_SYMBOL siguen
+                # funcionando: sirven para mensajes viejos y si el callback falla
+                markup = InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton("✅ Ejecutar", callback_data=f"gc_ok|{symbol}"),
+                            InlineKeyboardButton("⏸ Diferir", callback_data=f"gc_no|{symbol}"),
+                        ]
+                    ]
+                )
+                self.exec_modulo_async(self.send_Telegram(msg, reply_markup=markup))
                 self.gains_capture_state[symbol] = {
                     **state,
                     "estado": "pendiente_autorizacion",
@@ -1755,6 +1764,14 @@ class Telegram:
                 await self._safe_remove_buttons(query)
                 await self._safe_edit(query, f"⏸ Propuesta diferida (trace #{trace_id})", parse_mode="Markdown")
 
+            elif accion == "gc_ok":
+                await self._safe_remove_buttons(query)
+                await self._safe_edit(query, self._gains_capture_aprobar(args[0].upper()))
+
+            elif accion == "gc_no":
+                await self._safe_remove_buttons(query)
+                await self._safe_edit(query, self._gains_capture_rechazar(args[0].upper()))
+
             elif accion == "fci_reset_blocked":
                 from Class_BrowserFCI import BrowserFCI  # import diferido — evita ciclo
 
@@ -1796,104 +1813,107 @@ class Telegram:
         except Exception as e:
             self.logger.error(f"handle_callback(): {e}\n{traceback.format_exc()}")
 
-    async def handle_gains_capture_ok(self, update, context):
-        """Handler /ok_SYMBOL — aprueba una propuesta GainsCapture pendiente."""
+    def _gains_capture_aprobar(self, symbol):
+        """Aprueba una propuesta GainsCapture pendiente y manda la orden. Devuelve el texto a responder.
+
+        La logica vive aca y no en el handler porque entra por dos puertas: el boton Ejecutar del
+        mensaje de Telegram y el comando /ok_SYMBOL.
+        """
+        state = self.gains_capture_state.get(symbol, {})
+        if state.get("estado") != "pendiente_autorizacion":
+            return f"⚠️ {symbol}: sin propuesta GainsCapture pendiente."
+        pendiente = state.get("pendiente", {})
+        vehiculo = pendiente.get("vehiculo", "Stock")
+        trama = DataHub.gains_capture_build_trama_sell(
+            vehiculo,
+            pendiente["account"],
+            symbol,
+            pendiente["conid"],
+            pendiente["lmt_price"],
+            pendiente["qty"],
+        )
+        if not trama:
+            return f"⚠️ {symbol}: sin trama para el vehiculo {vehiculo}."
+        response = DataHub.preservation_send_order(vehiculo, trama)
+        order_id = DataHub.preservation_extract_order_id(response)
+        if not order_id or str(order_id) in ("None", "null", ""):
+            # el estado queda en pendiente_autorizacion: se puede reintentar con /ok
+            logging.getLogger("GainsCapture").error(
+                f"GainsCapture({symbol}): el broker no devolvio order_id | response={response}"
+            )
+            return f"⚠️ {symbol}: el broker rechazo la orden. La propuesta sigue pendiente, podes reintentar."
+        niveles_ejecutados = state.get("niveles_ejecutados", []) + [pendiente.get("escenario")]
+        self.gains_capture_state[symbol] = {
+            **state,
+            "estado": "escalon_pendiente",
+            "escalon_order_id": str(order_id) if order_id else None,
+            "niveles_ejecutados": niveles_ejecutados,
+            "pendiente": None,
+            "last_check": datetime.now().isoformat(),
+        }
+        write_json_tmp("gains_capture_state.json", self.gains_capture_state)
         try:
-            text = update.message.text.strip()
-            symbol = text.replace("/ok_", "").upper()
-            state = self.gains_capture_state.get(symbol, {})
-            if state.get("estado") != "pendiente_autorizacion":
-                await update.message.reply_text(f"⚠️ {symbol}: sin propuesta GainsCapture pendiente.")
-                return
-            pendiente = state.get("pendiente", {})
-            vehiculo = pendiente.get("vehiculo", "Stock")
-            trama = DataHub.gains_capture_build_trama_sell(
-                vehiculo,
+            if order_id and str(order_id) not in ("None", "null", ""):
+                lmt_price = float(pendiente["lmt_price"])
+                values = {
+                    "account": pendiente["account"],
+                    "vehiculo": vehiculo,
+                    "conid": int(pendiente["conid"] or 0),
+                    "orderType": "LMT",
+                    "price": lmt_price,
+                    "side": "SELL",
+                    "tif": "DAY",
+                    "quantity": float(pendiente["qty"]),
+                    "clientOrderId": str(order_id),
+                    "stampPlace": datetime.now(),
+                    "stampSubmit": datetime.now(),
+                    "hash_id_oportunidad": state.get("hash_id"),
+                    "json_detalle": json.dumps(pendiente.get("det", {})),
+                }
+                self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
+            self.RepositorioOportunidades.insert_preservation_order(
                 pendiente["account"],
+                vehiculo,
                 symbol,
                 pendiente["conid"],
+                str(order_id),
                 pendiente["lmt_price"],
-                pendiente["qty"],
+                float(pendiente["qty"]),
+                json.dumps(pendiente.get("det", {})),
             )
-            if not trama:
-                await update.message.reply_text(f"⚠️ {symbol}: sin trama para el vehiculo {vehiculo}.")
-                return
-            response = DataHub.preservation_send_order(vehiculo, trama)
-            order_id = DataHub.preservation_extract_order_id(response)
-            if not order_id or str(order_id) in ("None", "null", ""):
-                # el estado queda en pendiente_autorizacion: se puede reintentar con /ok
-                logging.getLogger("GainsCapture").error(
-                    f"GainsCapture({symbol}): el broker no devolvio order_id | response={response}"
-                )
-                await update.message.reply_text(
-                    f"⚠️ {symbol}: el broker rechazo la orden. La propuesta sigue pendiente, podes reintentar."
-                )
-                return
-            niveles_ejecutados = state.get("niveles_ejecutados", []) + [pendiente.get("escenario")]
-            self.gains_capture_state[symbol] = {
-                **state,
-                "estado": "escalon_pendiente",
-                "escalon_order_id": str(order_id) if order_id else None,
-                "niveles_ejecutados": niveles_ejecutados,
-                "pendiente": None,
-                "last_check": datetime.now().isoformat(),
-            }
-            write_json_tmp("gains_capture_state.json", self.gains_capture_state)
-            try:
-                if order_id and str(order_id) not in ("None", "null", ""):
-                    lmt_price = float(pendiente["lmt_price"])
-                    limit_price = float(round(lmt_price * 0.99, 2))
-                    values = {
-                        "account": pendiente["account"],
-                        "vehiculo": vehiculo,
-                        "conid": int(pendiente["conid"] or 0),
-                        "orderType": "LMT",
-                        "price": lmt_price,
-                        "side": "SELL",
-                        "tif": "DAY",
-                        "quantity": float(pendiente["qty"]),
-                        "clientOrderId": str(order_id),
-                        "stampPlace": datetime.now(),
-                        "stampSubmit": datetime.now(),
-                        "hash_id_oportunidad": state.get("hash_id"),
-                        "json_detalle": json.dumps(pendiente.get("det", {})),
-                    }
-                    self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
-                self.RepositorioOportunidades.insert_preservation_order(
-                    pendiente["account"],
-                    vehiculo,
-                    symbol,
-                    pendiente["conid"],
-                    str(order_id),
-                    pendiente["lmt_price"],
-                    float(pendiente["qty"]),
-                    json.dumps(pendiente.get("det", {})),
-                )
-            except Exception as _e:
-                self.logger.error(f"handle_gains_capture_ok({symbol}): insert → {_e}")
-            await update.message.reply_text(
-                f"✅ GainsCapture {symbol}: orden enviada — {pendiente['qty']} LMT "
-                f"${DataHub.format_precio(vehiculo, symbol, pendiente['lmt_price'])}"
-            )
-            logging.getLogger("GainsCapture").warning(
-                f"GainsCapture({symbol}): aprobado por usuario → order_id={order_id}"
-            )
+        except Exception as _e:
+            self.logger.error(f"_gains_capture_aprobar({symbol}): insert → {_e}")
+        logging.getLogger("GainsCapture").warning(
+            f"GainsCapture({symbol}): aprobado por usuario → order_id={order_id}"
+        )
+        return (
+            f"✅ GainsCapture {symbol}: orden enviada — {pendiente['qty']} LMT "
+            f"${DataHub.format_precio(vehiculo, symbol, pendiente['lmt_price'])}"
+        )
+
+    def _gains_capture_rechazar(self, symbol):
+        """Rechaza una propuesta GainsCapture pendiente. Devuelve el texto a responder."""
+        state = self.gains_capture_state.get(symbol, {})
+        if state.get("estado") != "pendiente_autorizacion":
+            return f"⚠️ {symbol}: sin propuesta GainsCapture pendiente."
+        self.gains_capture_state[symbol] = {**state, "estado": "normal", "pendiente": None}
+        write_json_tmp("gains_capture_state.json", self.gains_capture_state)
+        logging.getLogger("GainsCapture").warning(f"GainsCapture({symbol}): rechazado por usuario")
+        return f"❌ GainsCapture {symbol}: propuesta cancelada."
+
+    async def handle_gains_capture_ok(self, update, context):
+        """Handler /ok_SYMBOL — mismo camino que el boton Ejecutar."""
+        try:
+            symbol = update.message.text.strip().replace("/ok_", "").upper()
+            await update.message.reply_text(self._gains_capture_aprobar(symbol))
         except Exception as e:
             self.logger.error(f"handle_gains_capture_ok(): {e}")
 
     async def handle_gains_capture_no(self, update, context):
-        """Handler /no_SYMBOL — rechaza una propuesta GainsCapture pendiente."""
+        """Handler /no_SYMBOL — mismo camino que el boton Diferir."""
         try:
-            text = update.message.text.strip()
-            symbol = text.replace("/no_", "").upper()
-            state = self.gains_capture_state.get(symbol, {})
-            if state.get("estado") != "pendiente_autorizacion":
-                await update.message.reply_text(f"⚠️ {symbol}: sin propuesta GainsCapture pendiente.")
-                return
-            self.gains_capture_state[symbol] = {**state, "estado": "normal", "pendiente": None}
-            write_json_tmp("gains_capture_state.json", self.gains_capture_state)
-            await update.message.reply_text(f"❌ GainsCapture {symbol}: propuesta cancelada.")
-            logging.getLogger("GainsCapture").warning(f"GainsCapture({symbol}): rechazado por usuario")
+            symbol = update.message.text.strip().replace("/no_", "").upper()
+            await update.message.reply_text(self._gains_capture_rechazar(symbol))
         except Exception as e:
             self.logger.error(f"handle_gains_capture_no(): {e}")
 
