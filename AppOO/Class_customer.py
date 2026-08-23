@@ -1525,7 +1525,10 @@ class MyOrders:
                             "account": account,
                             "vehiculo": vehiculo,
                             "id_order": response["orderId"],
-                            "conid": pedido["conid"],
+                            # Crypto no tiene conid: la trama de GainsCapture no lo trae y el
+                            # KeyError saltaba DESPUES de mandar la orden a Binance — la orden
+                            # quedaba viva sin registrar y el agente la daba por rechazada
+                            "conid": pedido.get("conid") or 0,
                             "orderType": response["type"],
                             "price": response["price"],
                             "side": response["side"],
