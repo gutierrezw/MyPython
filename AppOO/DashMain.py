@@ -54,7 +54,7 @@ from Class_DataFrame import (
     draw_rentabilidad,
 )
 from Class_ApiIBrks import IB
-from Class_ApiBinnace import BinanceClient
+from Class_ApiBinnace import BinanceClient, comision_a_usd
 from Class_gestion import GestionInversion
 from Modulos_Mysql import (
     EstrategiaInversion,
@@ -771,8 +771,15 @@ class DatosVehivulo(TickerInfo, MyOrders):
                                                 registro.update({"preciotrans": price})
                                                 registro.update({"preciocierre": price})
 
-                                                comision = (
-                                                    float(w_trade[i].get("commission", 0.0)) * registro["preciotrans"]
+                                                # Binance cobra la comision en el activo quote cuando
+                                                # es venta: multiplicar por el precio la infla justo
+                                                # price veces (0.1252 USDT -> 9677 USD en BTCUSDT).
+                                                # comision_a_usd() ya resuelve base/quote/BNB
+                                                comision = comision_a_usd(
+                                                    ticket,
+                                                    w_trade[i].get("commission", 0.0),
+                                                    w_trade[i].get("commissionAsset"),
+                                                    price,
                                                 )
                                                 registro.update({"tarifacomision": comision})
                                                 registro.update({"mtmgp": 0.00})
