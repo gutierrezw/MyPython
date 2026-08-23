@@ -1039,17 +1039,30 @@ class ClassAgenteIA:
                 # Nota: logging en json_audit_log se hace DESPUÉS de insertar en order_trader
                 # (cuando ya existe clientOrderId). Aquí registramos en symbol_decision_history.
                 try:
+                    # el panel Symbol Events solo muestra la columna mensaje, asi que lleva lo que
+                    # hace falta para entender la decision sin abrir el json: que decidio, sobre
+                    # que clase, con que ROI y RSI, y el motivo. urgencia se saco: Claude nunca lo
+                    # devuelve (accion/escenario/razon), siempre logueaba None
+                    _rsi_d = datos_tecnicos.get("diaria", {}).get("rsi")
+                    _razon = claude_result.get("razon") or ""
+                    _clase = (claude_result.get("escenario") or "").strip()
+                    _partes = [claude_result.get("accion") or "?"]
+                    if _clase:
+                        _partes.append(f"clase {_clase}")
+                    _partes.append(f"ROI {roi_ref:.1%}")
+                    if _rsi_d:
+                        _partes.append(f"RSI_d {float(_rsi_d):.1f}")
                     self.RepositorioOportunidades.insert_symbol_decision_history(
                         symbol=symbol,
                         agente="GainsCapture",
                         tag="CLAUDE",
-                        mensaje=f"accion={claude_result.get('accion')} urgencia={claude_result.get('urgencia')}",
+                        mensaje=f"{' | '.join(_partes)} — {_razon[:160]}" if _razon else " | ".join(_partes),
                         json_contexto={
                             "accion": claude_result.get("accion"),
-                            "urgencia": claude_result.get("urgencia"),
+                            "escenario": _clase or None,
                             "roi": round(float(roi_ref), 4),
-                            "rsi_d": float(datos_tecnicos.get("diaria", {}).get("rsi")) if datos_tecnicos.get("diaria", {}).get("rsi") else None,
-                            "razon": claude_result.get("razon")[:100] if claude_result.get("razon") else None
+                            "rsi_d": float(_rsi_d) if _rsi_d else None,
+                            "razon": _razon[:300] or None,
                         },
                         order_trader_id=None
                     )
