@@ -5,7 +5,9 @@ Clases:
 - ServiciosCrypto: Operaciones earn/spot (subscribe, redeem, balances combinados)
 """
 
+import json
 import logging
+import time
 
 
 class ServiciosCrypto:
@@ -89,6 +91,112 @@ class ServiciosCrypto:
             self._logger.error(f"earn_redeem({productId}, {amount}): {e}")
             return None
 
+    def repay_venta(self, importe, symbol=""):
+        """Paga deuda flexible con un porcentaje del importe de una venta Crypto.
+
+        Solo paga si hay deuda viva y nunca mas que ella: el monto se acota por la deuda total y
+        por el USDT libre en spot. El reparto entre prestamos lo hace loan_repay_distribuir(), el
+        mismo que ejecuta el boton Pagar de Analisis Crypto. Se configura en
+        sesion.parameters(Crypto).loan.repay_pct_venta; 0 lo desactiva.
+        Retorna dict con lo pagado o None si no correspondia.
+        """
+        lconfig, _ = self._loan_config()
+        pct = float(lconfig.get("repay_pct_venta", 0) or 0)
+        minimo = float(lconfig.get("delta_minimo", 1.0))
+        importe = float(importe or 0)
+        if pct <= 0 or importe <= 0:
+            return None
+
+        prestamos = self.loan_ongoing()
+        if not prestamos:
+            self._logger.warning(f"repay_venta({symbol}): venta de ${importe:,.2f} sin deuda viva - sin repago")
+            return None
+
+        deuda_total = sum(p["deuda"] for p in prestamos)
+        usdt_libre = self._usdt_free()
+        monto = min(importe * pct, deuda_total, usdt_libre)
+        if monto < minimo:
+            self._logger.warning(
+                f"repay_venta({symbol}): {pct:.0%} de ${importe:,.2f} = ${importe * pct:,.2f} bajo el minimo "
+                f"${minimo:,.2f} | deuda ${deuda_total:,.2f} | USDT libre ${usdt_libre:,.2f} - sin repago"
+            )
+            return None
+
+        resultado = self.loan_repay_distribuir(monto, prestamos=prestamos)
+        if not resultado or resultado["pagado"] <= 0:
+            return None
+
+        self._logger.warning(
+            f"repay_venta({symbol}): pagados ${resultado['pagado']:,.2f} ({pct:.0%} de ${importe:,.2f}) | "
+            f"deuda previa ${deuda_total:,.2f} | {resultado['detalle']}"
+        )
+        return {"importe": importe, "pct": pct, "deuda_previa": deuda_total, **resultado}
+
+    def loan_ongoing(self):
+        """Prestamos flexibles vivos, normalizados igual que _get_loan_data() de Analisis Crypto."""
+        try:
+            resultado = self._spot.get_flexible_loan_ongoing_orders()
+            rows = resultado.get("rows", []) if resultado else []
+        except Exception as e:
+            self._logger.error(f"loan_ongoing(): {e}")
+            return []
+
+        prestamos = []
+        for r in rows:
+            ltv = float(r.get("currentLTV", 0))
+            if ltv == 0:
+                continue
+            loan_usd = float(r.get("loanValueInUSD") or r.get("totalDebt", 0))
+            col_usd = float(r.get("collateralValueInUSD", 0)) or (loan_usd / ltv)
+            prestamos.append(
+                {
+                    "activo": r.get("collateralCoin", ""),
+                    "loan_coin": r.get("loanCoin", "USDT"),
+                    "col_usd": col_usd,
+                    "ltv": ltv,
+                    "deuda": loan_usd,
+                    "col_amount": float(r.get("collateralAmount", 0)),
+                }
+            )
+        return prestamos
+
+    def loan_repay_distribuir(self, monto, prestamos=None):
+        """Reparte un pago entre los prestamos vivos nivelando deudas y lo ejecuta en Binance.
+
+        Cada prestamo recibe en proporcion a cuanto excede la deuda media que quedaria tras el
+        pago: paga mas donde mas deuda hay. Es el criterio del boton Pagar de Analisis Crypto, que
+        ahora entra por aca. Retorna dict con pagado, ok, errores y detalle.
+        """
+        prestamos = self.loan_ongoing() if prestamos is None else prestamos
+        monto = float(monto or 0)
+        if monto <= 0 or not prestamos:
+            return {"pagado": 0.0, "ok": 0, "errores": [], "detalle": []}
+
+        total_deuda = sum(p["deuda"] for p in prestamos)
+        objetivo = (total_deuda - monto) / len(prestamos)
+        exceso = [max(0.0, p["deuda"] - objetivo) for p in prestamos]
+        total_exceso = sum(exceso) or 1.0
+
+        errores, ok, pagado, detalle = [], 0, 0.0, []
+        for p, e in zip(prestamos, exceso):
+            cuota = round(monto * (e / total_exceso), 2)
+            if cuota <= 0:
+                continue
+            time.sleep(2)
+            resp = self._spot.get_flexible_loan_repay(
+                loanCoin=p["loan_coin"], collateralCoin=p["activo"], amount=cuota
+            )
+            self._logger.warning(f"loan_repay [{p['activo']}] ${cuota:.2f} → {resp}")
+            if not resp:
+                errores.append(f"{p['activo']}:sin respuesta")
+            elif "code" in resp and int(resp["code"]) < 0:
+                errores.append(f"{p['activo']}:{resp.get('msg', resp['code'])}")
+            else:
+                ok += 1
+                pagado += cuota
+                detalle.append({"activo": p["activo"], "monto": cuota, "ltv_previo": round(p["ltv"], 4)})
+        return {"pagado": pagado, "ok": ok, "errores": errores, "detalle": detalle}
+
     def ltv_check_and_adjust(self, lconfig):
         """Analiza el LTV de cada préstamo flexible activo y calcula el ajuste necesario.
         DRY RUN — solo calcula y retorna, no ejecuta ninguna llamada de ajuste.
@@ -161,3 +269,27 @@ class ServiciosCrypto:
                 }
             )
         return analisis
+
+    def _loan_config(self):
+        """Lee los bloques loan y ltv de sesion.parameters(Crypto). Devuelve (loan, ltv)."""
+        from Modulos_Mysql import BDsystem  # import diferido — evita ciclo con Modulos_python chain
+
+        try:
+            sesion = BDsystem.get_sesion_by_vehiculo("Crypto")
+            raw = sesion.get("parameters") if sesion else None
+            params = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw) if raw else {}
+        except Exception as e:
+            self._logger.error(f"_loan_config(): {e}")
+            return {}, {}
+        return params.get("loan", {}), params.get("ltv", {})
+
+    def _usdt_free(self):
+        """USDT libre en spot, que es con lo que se paga la deuda."""
+        try:
+            data = self._spot.account_spot() or {}
+            for b in data.get("balances", []):
+                if b.get("asset") == "USDT":
+                    return float(b.get("free", 0))
+        except Exception as e:
+            self._logger.error(f"_usdt_free(): {e}")
+        return 0.0

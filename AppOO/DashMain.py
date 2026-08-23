@@ -118,6 +118,7 @@ from Class_DashBot import AsistenteChatbot
 from Class_IA_modelos import ModeloOportunidadesSell
 from Class_SystemStatus import system_status
 from Class_BotCryptoUI import BotCryptoUI
+from Class_ServiciosCrypto import ServiciosCrypto
 from Class_BrowserBridge import (
     start_tv_server,
     stop_tv_server,
@@ -341,6 +342,11 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     f"executionReport(Crypto): symbol={symbol} orderId={order_id} "
                     f"status={status} side={side} qty={qty} cumFilled={cum_qty}"
                 )
+
+                # Z es el quote acumulado: los USDT que entraron por esta venta. FILLED es terminal,
+                # asi que dispara una sola vez aunque la orden se haya ejecutado en varios fills
+                if status == "FILLED" and side in ("SELL", "Sell"):
+                    self.repay_deuda_venta(symbol, float(msg.get("Z", 0)))
             except Exception as e:
                 print(f"[procesa_execution_report_crypto()]: {e}")
 
@@ -366,6 +372,24 @@ class DatosVehivulo(TickerInfo, MyOrders):
             symbol = data.get("s", "?") if isinstance(data, dict) else "?"
             print(f"[procesa_stream_crypto() vehiculo={self.vehiculo} symbol={symbol}]: {type(error).__name__}: {error}")
             time.sleep(1)
+
+    def repay_deuda_venta(self, symbol, importe):
+        """Paga deuda con un % del importe de una venta Crypto. La logica vive en ServiciosCrypto."""
+
+        def _run():
+            try:
+                resultado = ServiciosCrypto().repay_venta(importe, symbol=symbol)
+                if resultado:
+                    DataHub.add_alert(
+                        f"💵 {symbol}: repago de deuda ${resultado['pagado']:,.2f} "
+                        f"({resultado['pct']:.0%} de la venta de ${importe:,.2f})",
+                        telegram=True,
+                    )
+            except Exception as e:
+                self.logger.error(f"repay_deuda_venta({symbol}): {e}")
+
+        # fuera del hilo del websocket: el repago son tres llamadas REST y no puede frenar el stream
+        threading.Thread(target=_run, name="RepayDeudaVenta", daemon=True).start()
 
     def on_message_IBrks_websocket(self, message):
         def procesa_stock(d_precio=None):

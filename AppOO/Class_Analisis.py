@@ -2269,7 +2269,6 @@ class AnalisisCrypto(AnalisisBase):
                 _logger.error(f"_ejecutar_prestamo(): {e}")
 
         def _ejecutar_pago():
-            from Class_ApiBinnace import BinanceClient  # import diferido — evita ciclo con Modulos_python chain
             from Class_customer import MyMessageBox  # import diferido — evita ciclo
 
             try:
@@ -2278,31 +2277,10 @@ class AnalisisCrypto(AnalisisBase):
                 if requested <= 0:
                     MyMessageBox(frame).showinfo("Pagar", "Ingresa el monto a pagar")
                     return
-                spot = BinanceClient(vehiculo="Crypto").spot
-                n_repay = len(prestamos)
-                target_deuda_repay = (total_deuda - requested) / n_repay if n_repay > 0 else 0
-                raw_repay = [max(0.0, p["deuda"] - target_deuda_repay) for p in prestamos]
-                total_raw_repay = sum(raw_repay) or 1.0
-                errores, ok, total_pagado = [], 0, 0.0
-                for p, r in zip(prestamos, raw_repay):
-                    repay = round(requested * (r / total_raw_repay), 2)
-                    if repay <= 0:
-                        continue
-                    time.sleep(2)
-                    resp = spot.get_flexible_loan_repay(loanCoin="USDT", collateralCoin=p["activo"], amount=repay)
-                    _logger.warning(f"loan_repay [{p['activo']}] ${repay:.2f} → {resp}")
-                    if not resp:
-                        errores.append(f"{p['activo']}:sin respuesta")
-                    elif "code" in resp and int(resp["code"]) < 0:
-                        errores.append(f"{p['activo']}:{resp.get('msg', resp['code'])}")
-                    else:
-                        repay_status = resp.get("repayStatus", resp.get("status", "OK"))
-                        ok += 1
-                        total_pagado += repay
-                        _logger.warning(f"loan_repay [{p['activo']}] → {repay_status}")
-                msg = f"Pago ejecutado: {ok} activos\n${total_pagado:.2f} USDT"
-                if errores:
-                    msg += f"\n\nErrores:\n" + "\n".join(errores)
+                resultado = ServiciosCrypto().loan_repay_distribuir(requested, prestamos=prestamos)
+                msg = f"Pago ejecutado: {resultado['ok']} activos\n${resultado['pagado']:.2f} USDT"
+                if resultado["errores"]:
+                    msg += "\n\nErrores:\n" + "\n".join(resultado["errores"])
                 MyMessageBox(frame).showinfo("Pagar", msg)
             except Exception as e:
                 MyMessageBox(frame).showinfo("Error", str(e))
