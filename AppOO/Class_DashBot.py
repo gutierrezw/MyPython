@@ -443,7 +443,7 @@ class ClassAgenteIA:
                     )
                     await self.send_Telegram(texto, reply_markup=markup)
                 else:
-                    await self.send_Telegram(msg)
+                    await self.send_Telegram(msg, reply_markup=item.get("markup") if isinstance(item, dict) else None)
                 if incidencia_id:
                     BDsystem.mark_incidencia_sent(incidencia_id)
             except Exception as e:
@@ -1174,7 +1174,11 @@ class ClassAgenteIA:
                         ]
                     ]
                 )
-                self.exec_modulo_async(self.send_Telegram(msg, reply_markup=markup))
+                # via add_alert y no exec_modulo_async: _gains_capture_run corre DENTRO de la
+                # corrutina del agente, y ahi create_task() queda pendiente y se descarta cuando
+                # run_until_complete corta el loop — el mensaje no salia nunca. El flush si se
+                # awaitea desde el hilo. Ademas add_alert deja registro en incidencias
+                DataHub.add_alert(msg, telegram=True, markup=markup)
                 self.gains_capture_state[symbol] = {
                     **state,
                     "estado": "pendiente_autorizacion",

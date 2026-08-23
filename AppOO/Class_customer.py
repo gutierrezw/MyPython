@@ -249,13 +249,18 @@ class DataHub:
     system_alerts = []      # alertas de sistema: list[{"msg": str, "telegram": bool}]
 
     @classmethod
-    def add_alert(cls, msg: str, telegram: bool = True, tipo: str = None):
+    def add_alert(cls, msg: str, telegram: bool = True, tipo: str = None, markup=None):
+        """Encola una alerta para Telegram. markup son botones inline, solo en memoria.
+
+        Un markup no se persiste en incidencias: si la app cae antes del flush, la alerta se
+        reenvia como texto plano. Es a proposito — los callback_data referencian estado vivo.
+        """
         incidencia_id = 0
         try:
             incidencia_id = BDsystem.insert_incidencia(msg, telegram, tipo)
         except Exception:
             pass
-        cls.system_alerts.append({"msg": msg, "telegram": telegram, "id": incidencia_id})
+        cls.system_alerts.append({"msg": msg, "telegram": telegram, "id": incidencia_id, "markup": markup})
 
     @classmethod
     def load_pending_alerts(cls):
