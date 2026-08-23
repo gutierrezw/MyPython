@@ -263,6 +263,10 @@ class DataHub:
             incidencia_id = BDsystem.insert_incidencia(msg, telegram, tipo)
         except Exception:
             pass
+        if hash_id:
+            # si habia un borrado encolado para este hash, lo cancela: el mensaje nuevo ya reemplaza
+            # al viejo en el chat. Sin esto el flush de borrados se lleva puesto el recien enviado
+            cls.telegram_deletes = [h for h in cls.telegram_deletes if h != hash_id]
         cls.system_alerts.append(
             {"msg": msg, "telegram": telegram, "id": incidencia_id, "markup": markup, "hash_id": hash_id}
         )
