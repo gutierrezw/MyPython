@@ -3074,9 +3074,18 @@ class TickerInfo(MyOrders):
             return 0.0
 
     def crypto_earn_rescate(self, symbol=None, amount=0):
-        """Redime de Earn flexible. Devuelve True si Binance confirma el rescate."""
+        """Redime de Earn flexible. Devuelve True si Binance confirma el rescate.
+
+        El amount llega como resta de floats (qty - libre) y arrastra la basura binaria:
+        0.0016194699999999998. Binance acepta 8 decimales y responde -1102 "malformed" con mas,
+        asi que se redondea aca, en el unico punto por donde pasan todos los rescates. Hacia
+        arriba: si se rescata un satoshi de menos, la orden que espera ese saldo no entra.
+        """
         try:
-            response = self.BClient.get_redeem_flexible_product(productId=symbol, amount=amount, recvWindow=5000)
+            amount = math.ceil(float(amount or 0) * 1e8) / 1e8
+            response = self.BClient.get_redeem_flexible_product(
+                productId=symbol, amount=f"{amount:.8f}", recvWindow=5000
+            )
             if response and response.get("success"):
                 return True
             self.logger.error(f"crypto_earn_rescate({symbol}): sin confirmacion | amount={amount} | {response}")
