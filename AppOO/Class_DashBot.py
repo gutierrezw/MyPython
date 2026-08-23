@@ -474,11 +474,20 @@ class ClassAgenteIA:
     # agente especulativo: captura ganancias en activos volátiles con ventas parciales por niveles ROI
     @wait_rate(1800, persist=True)
     async def Agente_GainsCapture(self):
+        """Captura de ganancias por escalones en activos especulativos (categoriaActivo='N').
+
+        Crypto entra al loop pero corta antes de proponer: gains_capture_build_trama_sell() todavia
+        no tiene rama Binance (Etapa 4). Hasta entonces solo deja el candidato en el log - no queda
+        simulando en silencio, que es lo que le paso a Preservation con Crypto (H6, 2026-08-21).
+        """
         try:
-            if DataHub.manager_sesion.get("Stock"):
-                self._gains_capture_run()
-            else:
-                self.logger.warning("Agente_GainsCapture: sesion Stock no activa → SKIP (timer consumido)")
+            for vehiculo in ("Stock", "Crypto"):
+                if DataHub.manager_sesion.get(vehiculo):
+                    self._gains_capture_run(vehiculo)
+                else:
+                    self.logger.warning(
+                        f"Agente_GainsCapture: sesion {vehiculo} no activa → SKIP (timer consumido)"
+                    )
         except Exception as e:
             self.logger.error(f"Agente_GainsCapture(): {e}")
 
@@ -881,20 +890,27 @@ class ClassAgenteIA:
         result = self._call_claude(prompt, api_key, "ClaudeAPIP", max_tokens=500, timeout=20)
         return result if result and "decision" in result else None
 
-    def _gains_capture_run(self):
+    def _gains_capture_categorias(self, vehiculo, positions):
+        """Resuelve categoriaActivo por simbolo segun el vehiculo.
+
+        Stock la tiene en market (fuente de verdad, incluye simbolos fuera de cartera); Crypto no
+        esta en market, asi que sale de inversion, que es donde vive su categoria.
+        """
+        if vehiculo == "Stock":
+            return self.Market.load_symbols(self.account)
+        return {p.get("ticket"): p.get("categoriaActivo") for p in positions if p.get("ticket")}
+
+    def _gains_capture_run(self, vehiculo="Stock"):
         _gc_logger = logging.getLogger("GainsCapture")
 
-        # granularidad de qty/precio por vehículo — Etapa 3 lo convierte en parámetro del método
-        gc_vehiculo = "Stock"
-
-        params = self._load_params("Stock")
+        params = self._load_params(vehiculo)
         if not params:
             return
         if not params.get("gains_capture"):
-            _gc_logger.warning("_gains_capture_run: gains_capture no configurado en sesion Stock → SKIP")
+            _gc_logger.warning(f"_gains_capture_run: gains_capture no configurado en sesion {vehiculo} → SKIP")
             return
 
-        _gc_cfg = DataHub.gains_config("Stock", "gains_capture")
+        _gc_cfg = DataHub.gains_config(vehiculo, "gains_capture")
         min_roi = _gc_cfg["min_roi"]
         min_ganancia = _gc_cfg["min_ganancia"]
         gc_modo = DataHub.modo_operacion  # semáforo único del sistema — GainsCapture no tiene switch propio
@@ -906,10 +922,10 @@ class ClassAgenteIA:
         except Exception as e:
             _gc_logger.error(f"GainsCapture: ClaudeAPIP no disponible → {e}")
 
-        categories = self.Market.load_symbols(self.account)
-        positions = self.PlanInversion.select_inversion(tipoin="Stock", ticket="all")
+        positions = self.PlanInversion.select_inversion(tipoin=vehiculo, ticket="all")
         conid_map = {p.get("ticket"): (p.get("conid"), p.get("useraccount")) for p in positions}
-        symbols_gain = DataHub.get_info_symbols_gain()
+        categories = self._gains_capture_categorias(vehiculo, positions)
+        symbols_gain = [s for s in DataHub.get_info_symbols_gain() if s.get("vehiculo") == vehiculo]
 
         symbols_in_gain = [s.get("symbol") for s in symbols_gain if s.get("symbol")]
         for sym_data in symbols_gain:
@@ -964,6 +980,14 @@ class ClassAgenteIA:
                 f"GainsCapture: {symbol} → ROI={roi_ref:.1%} (${ganancia_ref:.2f}) | "
                 f"{len(lotes_validos)}/{len(list_gain)} lotes | escenarios={escenarios_disponibles}"
             )
+
+            # Vehiculo sin rama de trama: el candidato queda logueado (observacion) pero no se
+            # evalua con Claude ni se propone - no tiene sentido pagar una decision que no se puede ejecutar
+            if vehiculo not in DataHub.gains_capture_vehiculos_trama:
+                _gc_logger.warning(
+                    f"GainsCapture[{vehiculo}]({symbol}): candidato en observacion - vehiculo sin trama de orden"
+                )
+                continue
 
             state = self.gains_capture_state.get(symbol, {})
             estado = state.get("estado", "normal")
@@ -1032,7 +1056,7 @@ class ClassAgenteIA:
             sell_data = escenarios[escenario_key]
             roi_ref = sell_data["roi"]
             ganancia_ref = sell_data["profit"]
-            vender_qty = DataHub.quantiza_qty(gc_vehiculo, symbol, sell_data["cantidad sell"])
+            vender_qty = DataHub.quantiza_qty(vehiculo, symbol, sell_data["cantidad sell"])
             if vender_qty <= 0:
                 _gc_logger.warning(
                     f"GainsCapture({symbol}): Claude decidió vender (clase={escenario_key.strip()}) pero "
@@ -1058,7 +1082,7 @@ class ClassAgenteIA:
 
             # Tope duro contra la posición real del broker — los lotes salen de booktrading y
             # pueden descuadrar (splits, dividendos en acciones): nunca pedir más de lo que hay
-            _pos = DataHub.quantiza_qty(gc_vehiculo, symbol, sym_data.get("position") or 0)
+            _pos = DataHub.quantiza_qty(vehiculo, symbol, sym_data.get("position") or 0)
             if 0 < _pos < vender_qty:
                 ganancia_ref *= _pos / vender_qty
                 _gc_logger.warning(
@@ -1089,17 +1113,26 @@ class ClassAgenteIA:
                         _gc_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CANCELLED (recorte) → {_e}")
                     continue
 
-            lmt_price = DataHub.quantiza_precio(gc_vehiculo, symbol, last * 0.995)
+            lmt_price = DataHub.quantiza_precio(vehiculo, symbol, last * 0.995)
             _det = {
                 "tipo": "gains_capture",
                 "roi_escenario": roi_ref,
                 "ganancia_escenario": ganancia_ref,
                 "lotes": sell_data["lotes"],
                 "escenario": escenario_key.strip(),
+                "vehiculo": vehiculo,
                 "modo": gc_modo,
                 "claude": claude_result,
                 "orden": {"qty": vender_qty, "lmt_price": lmt_price},
             }
+
+            trama = DataHub.gains_capture_build_trama_sell(vehiculo, account, symbol, conid, lmt_price, vender_qty)
+            if not trama:
+                _gc_logger.warning(
+                    f"GainsCapture[{vehiculo}]({symbol}): sin trama para el vehiculo → sin orden "
+                    f"(qty={vender_qty} lmt={lmt_price})"
+                )
+                continue
 
             # Fail-closed — solo AUTONOMO ejecuta en vivo, cualquier otro valor (incluido uno no
             # reconocido) pide confirmación por Telegram. GainsCapture siempre notifica: nunca
@@ -1120,6 +1153,7 @@ class ClassAgenteIA:
                     "estado": "pendiente_autorizacion",
                     "pendiente": {
                         "escenario": escenario_key.strip(),
+                        "vehiculo": vehiculo,
                         "qty": vender_qty,
                         "lmt_price": lmt_price,
                         "conid": str(conid) if conid else None,
@@ -1132,9 +1166,8 @@ class ClassAgenteIA:
                 _gc_logger.warning(f"GainsCapture({symbol}): propuesta enviada [{gc_modo}] (confirmación pendiente)")
                 continue
 
-            trama = DataHub.gains_capture_build_trama_sell("Stock", account, symbol, conid, lmt_price, vender_qty)
             try:
-                response = DataHub.preservation_send_order("Stock", trama)
+                response = DataHub.preservation_send_order(vehiculo, trama)
                 order_id = DataHub.preservation_extract_order_id(response)
                 self.gains_capture_state[symbol] = {
                     **state,
@@ -1148,8 +1181,8 @@ class ClassAgenteIA:
                         limit_price = float(round(lmt_price * 0.99, 2))
                         values = {
                             "account": account,
-                            "vehiculo": "Stock",
-                            "conid": int(conid),
+                            "vehiculo": vehiculo,
+                            "conid": int(conid or 0),
                             "orderType": "LMT",
                             "price": lmt_price,
                             "side": "SELL",
@@ -1198,7 +1231,7 @@ class ClassAgenteIA:
                             _gc_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando ENVIADA → {_e2}")
                     self.RepositorioOportunidades.insert_preservation_order(
                         account,
-                        "Stock",
+                        vehiculo,
                         symbol,
                         str(conid),
                         str(order_id),
@@ -1735,15 +1768,19 @@ class Telegram:
                 await update.message.reply_text(f"⚠️ {symbol}: sin propuesta GainsCapture pendiente.")
                 return
             pendiente = state.get("pendiente", {})
+            vehiculo = pendiente.get("vehiculo", "Stock")
             trama = DataHub.gains_capture_build_trama_sell(
-                "Stock",
+                vehiculo,
                 pendiente["account"],
                 symbol,
                 pendiente["conid"],
                 pendiente["lmt_price"],
                 pendiente["qty"],
             )
-            response = DataHub.preservation_send_order("Stock", trama)
+            if not trama:
+                await update.message.reply_text(f"⚠️ {symbol}: sin trama para el vehiculo {vehiculo}.")
+                return
+            response = DataHub.preservation_send_order(vehiculo, trama)
             order_id = DataHub.preservation_extract_order_id(response)
             niveles_ejecutados = state.get("niveles_ejecutados", []) + [pendiente["nivel_roi"]]
             self.gains_capture_state[symbol] = {
@@ -1761,8 +1798,8 @@ class Telegram:
                     limit_price = float(round(lmt_price * 0.99, 2))
                     values = {
                         "account": pendiente["account"],
-                        "vehiculo": "Stock",
-                        "conid": int(pendiente["conid"]),
+                        "vehiculo": vehiculo,
+                        "conid": int(pendiente["conid"] or 0),
                         "orderType": "LMT",
                         "price": lmt_price,
                         "side": "SELL",
@@ -1777,7 +1814,7 @@ class Telegram:
                     self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
                 self.RepositorioOportunidades.insert_preservation_order(
                     pendiente["account"],
-                    "Stock",
+                    vehiculo,
                     symbol,
                     pendiente["conid"],
                     str(order_id),

@@ -229,6 +229,9 @@ class DataHub:
     # Sesiones y managers
     SessionYfinance = None
     QremoteOrder = {"Stock": OrderManagerSync(), "Crypto": OrderManagerSync()}
+
+    # vehiculos con rama propia en gains_capture_build_trama_sell() - Etapa 4 agrega "Crypto"
+    gains_capture_vehiculos_trama = ("Stock",)
     manager_events = {}
     manager_after = {}
     manager_buysell = {}
@@ -1221,7 +1224,11 @@ class DataHub:
 
     @staticmethod
     def gains_capture_build_trama_sell(vehiculo, account, symbol, conid, lmt_price, qty):
-        """Construye trama de orden LMT SELL para escalonamiento parcial de ganancias."""
+        """Construye trama de orden LMT SELL para escalonamiento parcial de ganancias.
+
+        Los vehiculos con rama implementada estan en gains_capture_vehiculos_trama: el resto
+        devuelve None y el agente corta antes de proponer u ordenar.
+        """
         hash_id = DataHub.RepositorioOportunidades.generar_hash_id(
             account=account, symbol=symbol, option=vehiculo, tipo="LMT", subtipo="SELL", recomendado="GAINS_CAPTURE"
         )
