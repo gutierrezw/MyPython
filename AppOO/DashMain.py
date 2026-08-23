@@ -3033,6 +3033,7 @@ class DashMain:
                     "price": 75,
                     "quantity": 60,
                     "importe": 75,
+                    "gp": 75,
                     "status": 90,
                     "hora": 70,
                     "tiempo": 45,
@@ -3047,6 +3048,7 @@ class DashMain:
                     "price": "Price",
                     "quantity": "Qty",
                     "importe": "importe",
+                    "gp": "GyP",
                     "status": "status",
                     "hora": "hora",
                     "tiempo": "TIF",
@@ -3133,8 +3135,14 @@ class DashMain:
 
             def _importe(price, qty):
                 try:
-                    return round(float(price) * float(qty), 4)
+                    return "{:.2f}".format(float(price) * float(qty))
                 except Exception:
+                    return ""
+
+            def _gyp(valor):
+                try:
+                    return "{:.2f}".format(float(valor))
+                except (TypeError, ValueError):
                     return ""
 
             try:
@@ -3167,6 +3175,7 @@ class DashMain:
                             price,
                             qty,
                             _importe(price, qty),
+                            "",
                             st,
                             _hora(orden["stampPlace"]),
                             orden["tif"],
@@ -3206,6 +3215,7 @@ class DashMain:
                             price,
                             qty,
                             _importe(price, qty),
+                            "",
                             st,
                             _hora(str(r.get("stampPlace", ""))),
                             r.get("tif", ""),
@@ -3316,9 +3326,33 @@ class DashMain:
 
             def _importe(price, qty):
                 try:
-                    return round(float(price) * float(qty), 4)
+                    return "{:.2f}".format(float(price) * float(qty))
                 except Exception:
                     return ""
+
+            def _gyp(valor):
+                try:
+                    return "{:.2f}".format(float(valor))
+                except (TypeError, ValueError):
+                    return ""
+
+            def _build_gp_map(rows, ix, cuenta):
+                """GyP realizada de booktrading por (simbolo, codigo, cantidad) - se consume con pop(0).
+
+                Stock viene de la API de IB, que no trae PnL realizada; el match por los tres campos
+                evita adjudicarle a un trade la ganancia de otro del mismo simbolo.
+                """
+                mp = {}
+                for row in rows:
+                    if row[ix.index("cuenta")] != cuenta:
+                        continue
+                    key = (
+                        row[ix.index("simbolo")],
+                        row[ix.index("codigo")],
+                        str(row[ix.index("cantidad")]),
+                    )
+                    mp.setdefault(key, []).append(row[ix.index("gprealizadas")])
+                return mp
 
             try:
                 for padre in tree.get_children():
@@ -3344,6 +3378,8 @@ class DashMain:
 
                 ids_stock = _build_id_map(self.account)
                 ids_crypto = _build_id_map(self.account_crypto)
+                rows, ix = self.RepositorioOportunidades.select_booktrading(accion="hoy")
+                gp_stock = _build_gp_map(rows, ix, self.account)
 
                 # --- Stock: IB API ---
                 trades_ib = self.stock_ts.IClient.trades(account_id=self.stock_ts.account, days=1) or []
@@ -3362,16 +3398,20 @@ class DashMain:
                     sym_count_stock[simbolo] = idx + 1
                     id_list = ids_stock.get(simbolo, [])
                     id_order, id_enviar = id_list[idx] if idx < len(id_list) else ("", "")
+                    gp_list = gp_stock.get((simbolo, "O" if side == "BUY" else "C", str(cant)), [])
+                    gp = _gyp(gp_list.pop(0)) if gp_list else ""
                     values = [
                         "",
                         "",
                         simbolo,
+                        "",
                         side,
                         order_type,
                         "",
                         precio,
                         cant,
                         _importe(precio, cant),
+                        gp,
                         "Filled",
                         fh.strftime("%H:%M:%S"),
                         str(fh),
@@ -3379,12 +3419,12 @@ class DashMain:
                         id_enviar,
                         "",
                         "",
+                        "",
                     ]
                     tree.insert(Stock, "end", text="{:>3.0f}".format(nro), values=values)
                     nro += 1
 
                 # --- Crypto: booktrading hoy ---
-                rows, ix = self.RepositorioOportunidades.select_booktrading(accion="hoy")
                 sym_count_crypto = {}
                 for row in rows:
                     cuenta = row[ix.index("cuenta")]
@@ -3395,7 +3435,7 @@ class DashMain:
                     codigo = "BUY" if raw_cod == "O" else "SELL" if raw_cod == "C" else raw_cod
                     cant = row[ix.index("cantidad")]
                     basico = row[ix.index("basico")]
-                    gp = row[ix.index("gprealizadas")]
+                    gp = _gyp(row[ix.index("gprealizadas")])
                     fh = row[ix.index("fechahora")]
                     idx = sym_count_crypto.get(simbolo, 0)
                     sym_count_crypto[simbolo] = idx + 1
@@ -3405,18 +3445,21 @@ class DashMain:
                         "",
                         "",
                         simbolo,
+                        "",
                         codigo,
                         "LIMIT",
                         "",
                         basico,
                         cant,
                         _importe(basico, cant),
+                        gp,
                         "Filled",
                         _hora(fh),
                         str(fh),
                         id_order,
                         id_enviar,
-                        gp,
+                        "",
+                        "",
                         "",
                     ]
                     tree.insert(Crypto, "end", text="{:>3.0f}".format(nro), values=values)
@@ -3478,6 +3521,7 @@ class DashMain:
                 "price",
                 "quantity",
                 "importe",
+                "gp",
                 "status",
                 "hora",
                 "tiempo",
@@ -3501,6 +3545,7 @@ class DashMain:
                 "price",
                 "quantity",
                 "importe",
+                "gp",
                 "status",
                 "hora",
                 "tiempo",
