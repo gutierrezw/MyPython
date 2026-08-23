@@ -476,9 +476,10 @@ class ClassAgenteIA:
     async def Agente_GainsCapture(self):
         """Captura de ganancias por escalones en activos especulativos (categoriaActivo='N').
 
-        Crypto entra al loop pero corta antes de proponer: gains_capture_build_trama_sell() todavia
-        no tiene rama Binance (Etapa 4). Hasta entonces solo deja el candidato en el log - no queda
-        simulando en silencio, que es lo que le paso a Preservation con Crypto (H6, 2026-08-21).
+        Stock y Crypto emiten orden real: LMT SELL en IB, LIMIT SELL GTC en Binance. Un vehiculo
+        sin rama en gains_capture_build_trama_sell() queda logueado como candidato en observacion y
+        no se propone - no queda simulando en silencio, que es lo que le paso a Preservation con
+        Crypto (H6, 2026-08-21).
         """
         try:
             for vehiculo in ("Stock", "Crypto"):
@@ -976,6 +977,13 @@ class ClassAgenteIA:
             last = sym_data.get("last", 0)
             conid, account = conid_map.get(symbol, (None, None))
 
+            # Contexto de la posicion completa: los lotes en ganancia pueden ser los unicos en verde
+            # de una posicion en rojo, y venderlos sube el costo promedio del remanente
+            _posicion = float(sym_data.get("position") or 0)
+            _costobase = float(sym_data.get("costobase") or 0)
+            roi_posicion = (last * _posicion - _costobase) / _costobase if _costobase > 0 else 0
+            avgcost_actual = _costobase / _posicion if _posicion > 0 else 0
+
             _gc_logger.warning(
                 f"GainsCapture: {symbol} → ROI={roi_ref:.1%} (${ganancia_ref:.2f}) | "
                 f"{len(lotes_validos)}/{len(list_gain)} lotes | escenarios={escenarios_disponibles}"
@@ -1021,7 +1029,7 @@ class ClassAgenteIA:
             claude_result = None
             if _claude_key:
                 claude_result = self._gains_capture_claude_eval(
-                    symbol, roi_ref, ganancia_ref, last, datos_tecnicos, _claude_key, escenarios_disponibles
+                    symbol, last, datos_tecnicos, _claude_key, escenarios, roi_posicion, avgcost_actual
                 )
                 # Nota: logging en json_audit_log se hace DESPUÉS de insertar en order_trader
                 # (cuando ya existe clientOrderId). Aquí registramos en symbol_decision_history.
@@ -1114,6 +1122,7 @@ class ClassAgenteIA:
                     continue
 
             lmt_price = DataHub.quantiza_precio(vehiculo, symbol, last * 0.995)
+            lmt_txt = DataHub.format_precio(vehiculo, symbol, lmt_price)
             _det = {
                 "tipo": "gains_capture",
                 "roi_escenario": roi_ref,
@@ -1143,7 +1152,7 @@ class ClassAgenteIA:
                     f"📈 *GainsCapture — {symbol}*\n"
                     f"ROI: {roi_ref:.1%} | Ganancia: ${ganancia_ref:.0f}\n"
                     f"Clase {escenario_key.strip()} ({sell_data['lotes']} lotes) | "
-                    f"Vender {vender_qty} acc LMT ${lmt_price:.2f}\n"
+                    f"Vender {vender_qty} LMT ${lmt_txt}\n"
                     f"{razon}\n"
                     f"/ok\\_{symbol}  |  /no\\_{symbol}"
                 )
@@ -1169,6 +1178,20 @@ class ClassAgenteIA:
             try:
                 response = DataHub.preservation_send_order(vehiculo, trama)
                 order_id = DataHub.preservation_extract_order_id(response)
+
+                # Un rechazo del broker no levanta excepcion: vuelve como response vacio. Sin este
+                # corte el simbolo queda en escalon_pendiente, que no expira, esperando un fill que
+                # no va a llegar nunca
+                if not order_id or str(order_id) in ("None", "null", ""):
+                    _gc_logger.error(
+                        f"GainsCapture[{vehiculo}]({symbol}): el broker no devolvio order_id → sin escalon, "
+                        f"reintenta el proximo ciclo | response={response}"
+                    )
+                    DataHub.add_alert(
+                        f"⚠️ GainsCapture {symbol}: orden rechazada por el broker — sin order_id", telegram=True
+                    )
+                    continue
+
                 self.gains_capture_state[symbol] = {
                     **state,
                     "estado": "escalon_pendiente",
@@ -1201,7 +1224,7 @@ class ClassAgenteIA:
                             self.RepositorioOportunidades.append_order_audit_log(
                                 order_id=str(order_id),
                                 tag="ENVIADA",
-                                mensaje=f"GainsCapture: LMT SELL {vender_qty} acc @ ${lmt_price:.2f}",
+                                mensaje=f"GainsCapture: LMT SELL {vender_qty} @ ${lmt_txt}",
                                 data={
                                     "order_id": str(order_id),
                                     "qty": vender_qty,
@@ -1218,7 +1241,7 @@ class ClassAgenteIA:
                                 symbol=symbol,
                                 agente="GainsCapture",
                                 tag="ENVIADA",
-                                mensaje=f"LMT SELL {vender_qty} acc @ ${lmt_price:.2f}",
+                                mensaje=f"LMT SELL {vender_qty} @ ${lmt_txt}",
                                 json_contexto={
                                     "order_id": int(order_id) if order_id else None,
                                     "qty": float(vender_qty),
@@ -1242,12 +1265,12 @@ class ClassAgenteIA:
                 except Exception as _e:
                     _gc_logger.error(f"GainsCapture({symbol}): insert_preservation_order → {_e}")
                 DataHub.add_alert(
-                    f"📈 GainsCapture {symbol}: vendiendo {vender_qty} acc LMT ${lmt_price:.2f} "
+                    f"📈 GainsCapture {symbol}: vendiendo {vender_qty} LMT ${lmt_txt} "
                     f"escenario={escenario_key.strip()} — order_id={order_id}",
                     telegram=True,
                 )
                 _gc_logger.warning(
-                    f"GainsCapture({symbol}): LMT SELL {vender_qty} acc @ {lmt_price:.2f} "
+                    f"GainsCapture({symbol}): LMT SELL {vender_qty} @ {lmt_txt} "
                     f"escenario={escenario_key.strip()} roi_lote={roi_ref:.1%} order_id={order_id}"
                 )
             except Exception as e:
@@ -1256,12 +1279,12 @@ class ClassAgenteIA:
     def _gains_capture_claude_eval(
         self,
         symbol: str,
-        roi_lote: float,
-        ganancia_lote: float,
         last: float,
         datos_tecnicos: dict,
         api_key: str,
-        escenarios_disponibles: list,
+        escenarios: dict,
+        roi_posicion: float,
+        avgcost_actual: float,
     ) -> dict | None:
         d = datos_tecnicos.get("diaria", {})
         s = datos_tecnicos.get("semanal", {})
@@ -1278,16 +1301,26 @@ class ClassAgenteIA:
             return fmt.format(v) if v is not None else default
 
         descripciones = {
-            "25%": "- '25%': momentum presente, asegurar algo conservador\n",
-            "33%": "- '33%': señales mixtas, venta moderada\n",
-            "100%": "- '100%': spike claro o sobrecompra extrema, salida total del lote\n",
+            "25%": "momentum presente, asegurar algo conservador\n",
+            "33%": "señales mixtas, venta moderada\n",
+            "100%": "spike claro o sobrecompra extrema, salida total del lote\n",
         }
-        opciones_texto = "".join(descripciones[e] for e in escenarios_disponibles)
+        escenarios_disponibles = [k.strip() for k in escenarios]
+        opciones_texto = "".join(
+            f"- '{k.strip()}': {descripciones[k.strip()]}"
+            f"    {v['lotes']} lotes, ganancia ${v['profit']:.0f}, ROI {v['roi']:.1%}, "
+            f"costo promedio del remanente {v['pos avgCost']:.4f}\n"
+            for k, v in escenarios.items()
+        )
         enum_escenarios = "|".join(f'"{e}"' for e in escenarios_disponibles)
 
         prompt = (
             f"Eres un agente de captura de ganancias para un portfolio especulativo de acciones volátiles.\n"
-            f"El activo {symbol} tiene un lote con ROI={roi_lote:.1%} y ganancia=${ganancia_lote:.0f}. Precio actual: ${last:.2f}.\n\n"
+            f"El activo {symbol} cotiza a ${last:.2f}.\n"
+            f"Posicion completa: ROI={roi_posicion:.1%}, costo promedio actual {avgcost_actual:.4f}.\n"
+            f"Los lotes en ganancia pueden ser los unicos en verde de una posicion en rojo: venderlos\n"
+            f"realiza la ganancia pero sube el costo promedio de lo que queda. Compara el costo promedio\n"
+            f"del remanente de cada escenario contra el actual antes de elegir.\n\n"
             f"Técnico:\n"
             f"- RSI diario: {_f(rsi_d)} | RSI semanal: {_f(rsi_w)} | MACD: {macd_estado}\n"
             f"- Precio vs EMA50: {ema50_rel} | vs EMA200: {ema200_rel}\n\n"
@@ -1782,7 +1815,16 @@ class Telegram:
                 return
             response = DataHub.preservation_send_order(vehiculo, trama)
             order_id = DataHub.preservation_extract_order_id(response)
-            niveles_ejecutados = state.get("niveles_ejecutados", []) + [pendiente["nivel_roi"]]
+            if not order_id or str(order_id) in ("None", "null", ""):
+                # el estado queda en pendiente_autorizacion: se puede reintentar con /ok
+                logging.getLogger("GainsCapture").error(
+                    f"GainsCapture({symbol}): el broker no devolvio order_id | response={response}"
+                )
+                await update.message.reply_text(
+                    f"⚠️ {symbol}: el broker rechazo la orden. La propuesta sigue pendiente, podes reintentar."
+                )
+                return
+            niveles_ejecutados = state.get("niveles_ejecutados", []) + [pendiente.get("escenario")]
             self.gains_capture_state[symbol] = {
                 **state,
                 "estado": "escalon_pendiente",
@@ -1825,7 +1867,8 @@ class Telegram:
             except Exception as _e:
                 self.logger.error(f"handle_gains_capture_ok({symbol}): insert → {_e}")
             await update.message.reply_text(
-                f"✅ GainsCapture {symbol}: orden enviada — {pendiente['qty']} acc LMT ${pendiente['lmt_price']:.2f}"
+                f"✅ GainsCapture {symbol}: orden enviada — {pendiente['qty']} LMT "
+                f"${DataHub.format_precio(vehiculo, symbol, pendiente['lmt_price'])}"
             )
             logging.getLogger("GainsCapture").warning(
                 f"GainsCapture({symbol}): aprobado por usuario → order_id={order_id}"

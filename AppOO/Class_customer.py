@@ -230,8 +230,8 @@ class DataHub:
     SessionYfinance = None
     QremoteOrder = {"Stock": OrderManagerSync(), "Crypto": OrderManagerSync()}
 
-    # vehiculos con rama propia en gains_capture_build_trama_sell() - Etapa 4 agrega "Crypto"
-    gains_capture_vehiculos_trama = ("Stock",)
+    # vehiculos con rama propia en gains_capture_build_trama_sell()
+    gains_capture_vehiculos_trama = ("Stock", "Crypto")
     manager_events = {}
     manager_after = {}
     manager_buysell = {}
@@ -1118,6 +1118,18 @@ class DataHub:
         return round(precio - (precio % tick_size), decimals)
 
     @staticmethod
+    def format_precio(vehiculo, symbol, precio):
+        """Formatea un precio para mensajes: decimales del tickSize en Crypto, 2 en el resto."""
+        try:
+            precio = float(precio or 0)
+        except (TypeError, ValueError):
+            return "0.00"
+        if vehiculo != "Crypto":
+            return "{:.2f}".format(precio)
+        tick_size = DataHub.info.get(symbol, {}).get("lotSize", {}).get("tickSize") or 0.01
+        return "{:.{}f}".format(precio, calculate_decimal_places(tick_size))
+
+    @staticmethod
     def preservation_calc_qty(account, vehiculo, symbol, last, base_limit, pct=0.33):
         """Calcula qty a proteger como porcentaje de acciones en ganancia."""
 
@@ -1251,6 +1263,22 @@ class DataHub:
                 },
                 "hash_id_Op": hash_id,
                 "intent": "GAINS",
+            }
+
+        if vehiculo == "Crypto":
+            return {
+                "account": account,
+                "vehiculo": "Crypto",
+                "symbol": symbol,
+                "pedido": {
+                    "symbol": symbol,
+                    "side": "SELL",
+                    "type": "LIMIT",
+                    "price": float(DataHub.quantiza_precio("Crypto", symbol, lmt_price)),
+                    "quantity": float(DataHub.quantiza_qty("Crypto", symbol, qty)),
+                    "timeInForce": "GTC",
+                },
+                "hash_id_Op": hash_id,
             }
         return None
 
@@ -1428,6 +1456,27 @@ class MyOrders:
                             f"place_OrderCrypto: USDT insuficiente | needed={cost:.2f} disponible={usdt_disp:.2f} | {symbol}"
                         )
                         return {}, {}, {}
+                else:
+                    # La UI valida el spot antes de ceder el control (valida_wallet_spot), pero esa
+                    # funcion vive atada a la ventana Tk: los agentes y Telegram entran por aca
+                    disponible = self.crypto_spot_asegura(symbol=pedido["symbol"], qty=pedido["quantity"])
+                    if disponible < float(pedido["quantity"]):
+                        ajustada = DataHub.quantiza_qty("Crypto", pedido["symbol"], disponible)
+                        if ajustada <= 0:
+                            self.logger.error(
+                                f"place_OrderCrypto: sin saldo en spot ni en Earn | symbol={symbol} | "
+                                f"qty={pedido['quantity']}"
+                            )
+                            return {}, {}, {}
+                        self.logger.warning(
+                            f"place_OrderCrypto: qty recortada {pedido['quantity']} -> {ajustada} | {symbol}"
+                        )
+                        DataHub.add_alert(
+                            f"⚠️ {symbol}: SELL recortada {pedido['quantity']} → {ajustada} — "
+                            f"es todo lo disponible entre spot y Earn",
+                            telegram=True,
+                        )
+                        pedido["quantity"] = ajustada
 
                 response = self.BClient.get_new_order(
                     symbol=pedido["symbol"],
@@ -2993,20 +3042,43 @@ class TickerInfo(MyOrders):
             print("[crypto_wallet_free()]: {}")
 
     # rescata de wallet EARN la cantidad indicada
+    def crypto_spot_asegura(self, symbol=None, qty=0):
+        """Garantiza qty disponible en spot rescatando de Earn lo que falte.
+
+        Mismo circuito que valida_wallet_spot() en la UI, pero sin ventanas: lo usa el riel de
+        ordenes, del que cuelgan los agentes y Telegram. Devuelve el saldo libre en spot al final.
+        """
+        try:
+            qty = float(qty or 0)
+            libre = float(self.crypto_wallet_free(symbol=symbol) or 0)
+            if libre >= qty:
+                return libre
+
+            falta = qty - libre
+            producto = symbol.replace("USDT", "001")
+            if not self.crypto_earn_rescate(symbol=producto, amount=falta):
+                return libre
+
+            libre = float(self.crypto_wallet_free(symbol=symbol) or 0)
+            self.logger.warning(
+                f"crypto_spot_asegura({symbol}): rescatados {falta:,.8f} de Earn -> spot libre {libre:,.8f}"
+            )
+            return libre
+        except Exception as e:
+            self.logger.error(f"crypto_spot_asegura({symbol}): {e}")
+            return 0.0
+
     def crypto_earn_rescate(self, symbol=None, amount=0):
+        """Redime de Earn flexible. Devuelve True si Binance confirma el rescate."""
         try:
             response = self.BClient.get_redeem_flexible_product(productId=symbol, amount=amount, recvWindow=5000)
-            if response:
-                if "success" in response.keys():
-                    if not response["success"]:
-                        ticket = "LD" + symbol.replace("001", "")
-                        disponible = self.crypto_wallert_free(self, Symbol=ticket, wallet="earn")
-                        message = "La disponibilidad para rescatar {} en earn es de {:>,.5f}".format(ticket, disponible)
-
-                        self.messagebox.showinfo(title="Alerta", message=message)
-            return
+            if response and response.get("success"):
+                return True
+            self.logger.error(f"crypto_earn_rescate({symbol}): sin confirmacion | amount={amount} | {response}")
+            return False
         except Exception as e:
-            print(f"crypto_earn_rescate(): {e}")
+            self.logger.error(f"crypto_earn_rescate({symbol}): {e}")
+            return False
 
     # lista los activos del vehículo, si es Stock devuelve los keys de assets
     def list_activos_vehiculo(self):
