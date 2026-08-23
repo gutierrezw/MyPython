@@ -4308,11 +4308,13 @@ class system_status(tk.Frame):
             vsb.configure(command=tree.yview)
             hsb.configure(command=tree.xview)
 
+            # las tres primeras van fijas y al minimo que necesita su contenido; el ancho sobrante
+            # es para el mensaje, que desde la traza CLAUDE trae la razon completa
             tree.column("#0", width=0, stretch=tk.NO)
-            tree.column("timestamp", anchor=tk.W, width=150)
-            tree.column("agente", anchor=tk.W, width=100)
-            tree.column("tag", anchor=tk.W, width=100)
-            tree.column("mensaje", anchor=tk.W, width=300)
+            tree.column("timestamp", anchor=tk.W, width=140, minwidth=140, stretch=tk.NO)
+            tree.column("agente", anchor=tk.W, width=100, minwidth=100, stretch=tk.NO)
+            tree.column("tag", anchor=tk.W, width=80, minwidth=80, stretch=tk.NO)
+            tree.column("mensaje", anchor=tk.W, width=1100, minwidth=300, stretch=tk.YES)
 
             tree.heading("timestamp", text="Timestamp", anchor=tk.W)
             tree.heading("agente", text="Agente", anchor=tk.W)
