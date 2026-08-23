@@ -5452,7 +5452,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 sql = cursor.fetchall()
 
             elif accion == "hoy":
-                qry = """SELECT cuenta, simbolo, codigo, cantidad, basico, gprealizadas, fechahora
+                qry = """SELECT cuenta, simbolo, codigo, cantidad, basico, gprealizadas, fechahora, idtrans
                          FROM booktrading
                          WHERE DATE(fechahora) = CURDATE()
                          ORDER BY cuenta, fechahora DESC;"""

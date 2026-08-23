@@ -3337,22 +3337,17 @@ class DashMain:
                     return ""
 
             def _build_gp_map(rows, ix, cuenta):
-                """GyP realizada de booktrading por (simbolo, codigo, cantidad) - se consume con pop(0).
+                """GyP realizada de booktrading indexada por idtrans.
 
-                Stock viene de la API de IB, que no trae PnL realizada; el match por los tres campos
-                evita adjudicarle a un trade la ganancia de otro del mismo simbolo.
+                Stock viene de la API de IB, que no trae PnL realizada. idtrans guarda el
+                execution_id del mismo trade (ver trader_iteractive), asi que el match es 1 a 1
+                y no hay que adivinar por simbolo o cantidad.
                 """
-                mp = {}
-                for row in rows:
-                    if row[ix.index("cuenta")] != cuenta:
-                        continue
-                    key = (
-                        row[ix.index("simbolo")],
-                        row[ix.index("codigo")],
-                        str(row[ix.index("cantidad")]),
-                    )
-                    mp.setdefault(key, []).append(row[ix.index("gprealizadas")])
-                return mp
+                return {
+                    str(row[ix.index("idtrans")]): row[ix.index("gprealizadas")]
+                    for row in rows
+                    if row[ix.index("cuenta")] == cuenta
+                }
 
             try:
                 for padre in tree.get_children():
@@ -3398,8 +3393,7 @@ class DashMain:
                     sym_count_stock[simbolo] = idx + 1
                     id_list = ids_stock.get(simbolo, [])
                     id_order, id_enviar = id_list[idx] if idx < len(id_list) else ("", "")
-                    gp_list = gp_stock.get((simbolo, "O" if side == "BUY" else "C", str(cant)), [])
-                    gp = _gyp(gp_list.pop(0)) if gp_list else ""
+                    gp = _gyp(gp_stock.get(str(t.get("execution_id", ""))))
                     values = [
                         "",
                         "",
