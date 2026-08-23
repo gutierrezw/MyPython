@@ -175,11 +175,10 @@ class ServiciosCrypto:
         total_deuda = sum(p["deuda"] for p in prestamos)
         objetivo = (total_deuda - monto) / len(prestamos)
         exceso = [max(0.0, p["deuda"] - objetivo) for p in prestamos]
-        total_exceso = sum(exceso) or 1.0
+        cuotas = self._reparte_cuotas(monto, prestamos, exceso)
 
         errores, ok, pagado, detalle = [], 0, 0.0, []
-        for p, e in zip(prestamos, exceso):
-            cuota = round(monto * (e / total_exceso), 2)
+        for p, cuota in zip(prestamos, cuotas):
             if cuota <= 0:
                 continue
             time.sleep(2)
@@ -269,6 +268,33 @@ class ServiciosCrypto:
                 }
             )
         return analisis
+
+    def _reparte_cuotas(self, monto, prestamos, exceso):
+        """Reparte monto entre prestamos proporcional al exceso, descartando cuotas bajo el minimo.
+
+        Binance rechaza los repagos dust, asi que una cuota bajo loan.delta_minimo es una llamada
+        perdida y una linea de error en el log. Se descarta y su parte se redistribuye entre los
+        que quedan; si todas caen bajo el minimo sobrevive la de mayor exceso, que se lleva el
+        monto entero topeado por su deuda.
+        Devuelve una lista de cuotas alineada posicion a posicion con prestamos.
+        """
+        minimo = float(self._loan_config()[0].get("delta_minimo", 1.0))
+        elegibles = [i for i, e in enumerate(exceso) if e > 0]
+        cuotas = [0.0] * len(prestamos)
+
+        while elegibles:
+            total_exceso = sum(exceso[i] for i in elegibles) or 1.0
+            calculo = {i: round(monto * (exceso[i] / total_exceso), 2) for i in elegibles}
+            chicas = [i for i in elegibles if calculo[i] < minimo]
+            if not chicas or len(elegibles) == 1:
+                for i in elegibles:
+                    if calculo[i] >= minimo:
+                        cuotas[i] = round(min(calculo[i], prestamos[i]["deuda"]), 2)
+                break
+            # si todas son chicas hay que quedarse con una, si no el pago entero se pierde
+            elegibles = [i for i in elegibles if i not in chicas] or [max(elegibles, key=lambda i: exceso[i])]
+
+        return cuotas
 
     def _loan_config(self):
         """Lee los bloques loan y ltv de sesion.parameters(Crypto). Devuelve (loan, ltv)."""
