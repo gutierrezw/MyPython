@@ -247,20 +247,35 @@ class DataHub:
     rebalanceo = {}
     telegram_botcrypto = {}
     system_alerts = []      # alertas de sistema: list[{"msg": str, "telegram": bool}]
+    telegram_deletes = []   # hash_id de mensajes a borrar del chat: list[str]
 
     @classmethod
-    def add_alert(cls, msg: str, telegram: bool = True, tipo: str = None, markup=None):
+    def add_alert(cls, msg: str, telegram: bool = True, tipo: str = None, markup=None, hash_id=None):
         """Encola una alerta para Telegram. markup son botones inline, solo en memoria.
 
         Un markup no se persiste en incidencias: si la app cae antes del flush, la alerta se
         reenvia como texto plano. Es a proposito — los callback_data referencian estado vivo.
+        Con hash_id, el mensaje reemplaza en el chat al anterior del mismo hash — mismo mecanismo
+        que usan las oportunidades cuando mejoran.
         """
         incidencia_id = 0
         try:
             incidencia_id = BDsystem.insert_incidencia(msg, telegram, tipo)
         except Exception:
             pass
-        cls.system_alerts.append({"msg": msg, "telegram": telegram, "id": incidencia_id, "markup": markup})
+        cls.system_alerts.append(
+            {"msg": msg, "telegram": telegram, "id": incidencia_id, "markup": markup, "hash_id": hash_id}
+        )
+
+    @classmethod
+    def del_alert(cls, hash_id: str):
+        """Encola el borrado del chat de los mensajes con ese hash_id.
+
+        Se usa cuando un mensaje pierde vigencia y no viene otro a reemplazarlo — una propuesta
+        que expira sin que se genere una nueva. La cola la drena _flush_telegram_deletes().
+        """
+        if hash_id and hash_id not in cls.telegram_deletes:
+            cls.telegram_deletes.append(hash_id)
 
     @classmethod
     def load_pending_alerts(cls):

@@ -443,11 +443,28 @@ class ClassAgenteIA:
                     )
                     await self.send_Telegram(texto, reply_markup=markup)
                 else:
-                    await self.send_Telegram(msg, reply_markup=item.get("markup") if isinstance(item, dict) else None)
+                    await self.send_Telegram(
+                        msg,
+                        hash_id=item.get("hash_id") if isinstance(item, dict) else None,
+                        reply_markup=item.get("markup") if isinstance(item, dict) else None,
+                    )
                 if incidencia_id:
                     BDsystem.mark_incidencia_sent(incidencia_id)
             except Exception as e:
                 self.logger.error(f"_flush_system_alerts: {e}")
+
+    async def _flush_telegram_deletes(self):
+        """Borra del chat los mensajes cuyo hash quedo sin vigencia (DataHub.telegram_deletes)."""
+        while DataHub.telegram_deletes:
+            hash_id = DataHub.telegram_deletes.pop(0)
+            try:
+                for CHAT_ID in self.userAuth:
+                    # message_id=None: ninguno queda excluido, se borran todos los del hash
+                    await self._delete_message_hash(
+                        {"chat_id": int(CHAT_ID), "hash_id": hash_id, "message_id": None}
+                    )
+            except Exception as e:
+                self.logger.error(f"_flush_telegram_deletes({hash_id}): {e}")
 
     async def _flush_reconcile_pending(self):
         """Envía diffs IB pendientes de aprobación (DataHub.reconcile_pending) como botones Telegram."""
@@ -1018,6 +1035,8 @@ class ClassAgenteIA:
                     if elapsed > 1800:
                         self.gains_capture_state[symbol] = {**state, "estado": "normal", "pendiente": None}
                         write_json_tmp("gains_capture_state.json", self.gains_capture_state)
+                        # el mensaje sin vigencia se va del chat: sus botones ya no ejecutan nada
+                        DataHub.del_alert(f"gc_{symbol}")
                         _gc_logger.warning(f"GainsCapture({symbol}): propuesta expirada (30min) → cancelada")
                         estado = "normal"
                     else:
@@ -1166,12 +1185,14 @@ class ClassAgenteIA:
             # ejecuta solo, así que silenciarlo en OBSERVACION solo haría perder oportunidades
             if gc_modo != "AUTONOMO":
                 razon = claude_result.get("razon", "")
+                _rsi_txt = self._rsi_texto(datos_tecnicos)
                 msg = (
                     f"📈 *GainsCapture — {symbol}*\n"
                     f"ROI: {roi_ref:.1%} | Ganancia: ${ganancia_ref:.0f}\n"
                     f"Clase {escenario_key.strip()} ({sell_data['lotes']} lotes) | "
                     f"Vender {vender_qty} LMT ${lmt_txt}\n"
-                    f"{razon}"
+                    + (f"RSI d/w: {_rsi_txt}\n" if _rsi_txt else "")
+                    + f"{razon}"
                 )
                 # mismos botones que la propuesta IA. Los comandos /ok_SYMBOL y /no_SYMBOL siguen
                 # funcionando: sirven para mensajes viejos y si el callback falla.
@@ -1191,7 +1212,9 @@ class ClassAgenteIA:
                 # corrutina del agente, y ahi create_task() queda pendiente y se descarta cuando
                 # run_until_complete corta el loop — el mensaje no salia nunca. El flush si se
                 # awaitea desde el hilo. Ademas add_alert deja registro en incidencias
-                DataHub.add_alert(msg, telegram=True, markup=markup)
+                # hash_id: la propuesta nueva del simbolo borra del chat a la anterior, asi no
+                # quedan mensajes vencidos con botones que ya no ejecutan
+                DataHub.add_alert(msg, telegram=True, markup=markup, hash_id=f"gc_{symbol}")
                 self.gains_capture_state[symbol] = {
                     **state,
                     "estado": "pendiente_autorizacion",
@@ -1556,7 +1579,8 @@ class Telegram:
                 for CHAT_ID in self.userAuth:
                     if reply_markup is not None:
                         sent_message = await _send(bot, CHAT_ID, texto, reply_markup)
-                        await self._save_message(sent_message, CHAT_ID)
+                        # con hash_id el mensaje pisa al anterior del mismo hash en el chat
+                        await self._save_message(sent_message, CHAT_ID, hash_id)
                         return
 
                     elif hash_id is None:
@@ -1836,6 +1860,22 @@ class Telegram:
 
         except Exception as e:
             self.logger.error(f"handle_callback(): {e}\n{traceback.format_exc()}")
+
+    def _rsi_texto(self, datos_tecnicos):
+        """Devuelve '💚 80.4 / 71.2' con el RSI diario/semanal, o None si no hay dato.
+
+        Misma escala de color que los mensajes de oportunidades: en una venta, RSI alto es a favor.
+        """
+        try:
+            rsi_d = (datos_tecnicos or {}).get("diaria", {}).get("rsi")
+            rsi_w = (datos_tecnicos or {}).get("semanal", {}).get("rsi")
+            if rsi_d is None:
+                return None
+            rsi_d = float(rsi_d)
+            emoji = "💚" if rsi_d >= 70 else "🟢" if rsi_d >= 60 else "🟡" if rsi_d >= 50 else "🟠" if rsi_d >= 40 else "🔴"
+            return f"{emoji} {rsi_d:.1f} / {float(rsi_w):.1f}" if rsi_w is not None else f"{emoji} {rsi_d:.1f} / N/A"
+        except Exception:
+            return None
 
     def _gains_capture_id_vigente(self, state, pendiente_id):
         """True si pendiente_id corresponde a la propuesta vigente del simbolo.
@@ -2857,6 +2897,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     self.Agente_SyncOrders()
                     self.Agente_OrderEodCleanup()
                     self.exec_modulo_async(self._flush_system_alerts())
+                    self.exec_modulo_async(self._flush_telegram_deletes())
                     self.exec_modulo_async(self._flush_reconcile_pending())
                     time.sleep(15)
                     self.counter += 1
