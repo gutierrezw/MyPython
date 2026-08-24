@@ -90,6 +90,30 @@ def handle_binance_exceptions(func):
                       args   : {args[1:]}
                       kwargs : {kwargs}
                       """))
+        except requests.exceptions.HTTPError as e:
+            body = {}
+            try:
+                body = e.response.json()
+            except Exception:
+                pass
+            error_code = body.get("code")
+            msg = body.get("msg", str(e))
+            if error_code == -2011 or "-2011" in str(msg):
+                logger.warning(
+                    f"cancel_all_orders {func.__name__}: sin órdenes abiertas (orden ya ejecutada) [{error_code}]"
+                )
+            else:
+                logger.error(textwrap.dedent(f"""
+                      =====================================
+                      handle_binance_exceptions(HTTPError):
+                      =====================================
+                      Code   : {error_code}
+                      status : {e.response.status_code if e.response is not None else None}
+                      message: {msg}
+                      func   : {func.__name__}
+                      args   : {args[1:]}
+                      kwargs : {kwargs}
+                      """))
         except ConnectionError as e:
             logger.error(textwrap.dedent(f"""
                   ==============================================================
