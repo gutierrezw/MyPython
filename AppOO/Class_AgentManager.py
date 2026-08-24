@@ -51,7 +51,7 @@ class AgentManager:
         self._log_performa = logging.getLogger("Agente.Performa")
         self._log_edgar = logging.getLogger("Agente.EDGAR")
         self._log_institucion = logging.getLogger("Agente.Institucion")
-        self._preservation_logger = self._log_stock  # "Agente.Preservation" nunca se registró en Class_debugging.py (sin FileHandler)
+        self._preservation_logger = logging.getLogger("Preservation")
 
         # Preservation state management
         self.preservation_config = {}
@@ -869,6 +869,12 @@ class AgentManager:
         Carga config desde BD una sola vez por vehículo (cache en self.preservation_config).
         En cada ciclo solo verifica si pasó el intervalo — sin tocar BD.
         Retorna (pconfig, intervalo_min, ejecutar) donde ejecutar=True cuando toca revisión.
+
+        Ventana 9-16h (horario de mercado, decisión 2026-08-24): revisiones_dia reparte las
+        revisiones dentro de esa franja en vez de cada 86400/revisiones_dia segundos corridos —
+        antes eso anclaba siempre a la misma hora de arranque y con revisiones_dia=2 (12h) caía
+        siempre en la madrugada (12h × 2 = 24h exactas). Fuera de ventana se devuelve ejecutar=False
+        sin tocar last_run — el turno queda pendiente hasta el próximo ciclo dentro de la franja.
         """
         if vehiculo not in self.preservation_config:
             params = self._load_params(vehiculo)
@@ -884,7 +890,7 @@ class AgentManager:
             self.preservation_config[vehiculo] = pconfig
             roi_minimo = pconfig.get("roi_minimo", 0.10)
             proteccion_base = pconfig.get("proteccion_base", 0.50)
-            self._log_stock.warning(
+            self._preservation_logger.warning(
                 f"Preservation({vehiculo}): config cargada | roi_min={roi_minimo} | prot={proteccion_base}"
             )
 
@@ -893,7 +899,8 @@ class AgentManager:
             return None, 0, False
 
         revisiones_dia = pconfig.get("revisiones_dia", 2)
-        intervalo_min = 86400 / revisiones_dia
+        ventana_desde, ventana_hasta = 9, 16  # horario de mercado NYSE/NASDAQ — evita revisar en la madrugada
+        intervalo_min = ((ventana_hasta - ventana_desde) * 3600) / revisiones_dia
 
         _preservation_state_fresh = read_json_tmp("preservation_state.json")
         last_run_str = _preservation_state_fresh.get(f"_last_run_{vehiculo}")
@@ -904,6 +911,9 @@ class AgentManager:
                 return pconfig, intervalo_min, False
 
         now = datetime.now()
+        if not (ventana_desde <= now.hour < ventana_hasta):
+            return pconfig, intervalo_min, False
+
         self.preservation_last_run[vehiculo] = now
         _state_snap = read_json_tmp("preservation_state.json")
         _state_snap[f"_last_run_{vehiculo}"] = now.isoformat()
@@ -911,7 +921,7 @@ class AgentManager:
         roi_minimo = pconfig.get("roi_minimo", 0.10)
         proteccion_base = pconfig.get("proteccion_base", 0.50)
         elapsed_log = (now - last_run).total_seconds() if last_run else 0
-        self._log_stock.warning(
+        self._preservation_logger.warning(
             f"Preservation({vehiculo}): REVISIÓN | roi_min={roi_minimo} | prot={proteccion_base} | elapsed={elapsed_log:.0f}s"
         )
         return pconfig, intervalo_min, True
@@ -978,7 +988,7 @@ class AgentManager:
                                     str(_order_exit), account, "CANCELED"
                                 )
                             except Exception as _db_e:
-                                self._log_stock.warning(f"[EXIT-DB] {symbol}: no se pudo actualizar status en BD → {_db_e}")
+                                self._preservation_logger.warning(f"[EXIT-DB] {symbol}: no se pudo actualizar status en BD → {_db_e}")
                             self.preservation_state.pop(symbol, None)
                             _snap_exit = {}
                             for _s, _sd in self.preservation_state.items():
@@ -1001,7 +1011,7 @@ class AgentManager:
                                     order_trader_id=None
                                 )
                             except Exception as _e2:
-                                self._log_stock.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando EXIT → {_e2}")
+                                self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando EXIT → {_e2}")
                         except Exception as _e:
                             if "doesn't exist" in str(_e):
                                 self._preservation_logger.info(
@@ -1009,7 +1019,7 @@ class AgentManager:
                                 )
                                 self.preservation_state.pop(symbol, None)
                             else:
-                                self._log_stock.error(f"[EXIT-ERR] {symbol}: no se pudo cancelar {_order_exit} → {_e}")
+                                self._preservation_logger.error(f"[EXIT-ERR] {symbol}: no se pudo cancelar {_order_exit} → {_e}")
                     continue
 
                 base_limit = unrealizedpnl * proteccion_base
@@ -1038,7 +1048,7 @@ class AgentManager:
                 sma_base, sma_error = DataHub.preservation_get_sma(symbol, vehiculo)
                 if sma_base is None:
                     sma_base = last
-                    self._log_stock.warning(
+                    self._preservation_logger.warning(
                         f"Preservation({vehiculo}/{symbol}): SMA20 no disponible ({sma_error}) → usando last={last:.2f}"
                     )
 
@@ -1077,7 +1087,7 @@ class AgentManager:
                                 order_trader_id=None
                             )
                         except Exception as _e:
-                            self._log_stock.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CLAUDE → {_e}")
+                            self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CLAUDE → {_e}")
 
                 stop_max = round(last - atr, 2)
                 if stop_final > stop_max:
@@ -1108,7 +1118,7 @@ class AgentManager:
                     if not is_live:
                         order_id = order_id_prev
                         stop_persistido = stop_final
-                        self._log_stock.warning(f"[DRY-RUN] {msg}")
+                        self._preservation_logger.warning(f"[DRY-RUN] {msg}")
                     else:
                         stop_persistido = stop_anterior
                         if order_id_prev:
@@ -1127,26 +1137,26 @@ class AgentManager:
                                     )
                                     if matched:
                                         order_id = matched.get("order_id")
-                                        self._log_stock.warning(
+                                        self._preservation_logger.warning(
                                             f"[RETRY-OK] {symbol}: order_id recuperado de live orders → {order_id}"
                                         )
                                     else:
-                                        self._log_stock.error(
+                                        self._preservation_logger.error(
                                             f"[RETRY-FAIL] {symbol}: order_id sigue None tras reintento — "
                                             "se preserva estado anterior sin actualizar order_trader"
                                         )
                             except Exception as _retry_e:
-                                self._log_stock.error(f"[RETRY-ERR] {symbol}: {_retry_e}")
+                                self._preservation_logger.error(f"[RETRY-ERR] {symbol}: {_retry_e}")
                         if order_id and str(order_id) not in ("None", "null", ""):
                             stop_persistido = stop_final
                         else:
                             order_id = order_id_prev
-                            self._log_stock.error(
+                            self._preservation_logger.error(
                                 f"[STATE-PRESERVED] {symbol}: sin order_id confirmado tras cancel+send — "
                                 f"se mantiene stop_actual={stop_anterior:.2f} y order_id_prev en el estado, "
                                 "sin asumir que el stop_new quedó vivo en IB"
                             )
-                        self._log_stock.warning(f"[ENVIADA] {msg} | order_id={order_id}")
+                        self._preservation_logger.warning(f"[ENVIADA] {msg} | order_id={order_id}")
                         hash_id = self.RepositorioOportunidades.generar_hash_id(
                             account,
                             symbol,
@@ -1212,7 +1222,7 @@ class AgentManager:
                                         }
                                     )
                                 except Exception as _e:
-                                    self._log_stock.debug(f"[ORDER_AUDIT] {symbol}: error registrando {tag_accion} → {_e}")
+                                    self._preservation_logger.debug(f"[ORDER_AUDIT] {symbol}: error registrando {tag_accion} → {_e}")
                                 try:
                                     tag_accion = "MODIFICADA" if order_id_prev else "ENVIADA"
                                     self.RepositorioOportunidades.insert_symbol_decision_history(
@@ -1229,7 +1239,7 @@ class AgentManager:
                                         order_trader_id=None
                                     )
                                 except Exception as _e:
-                                    self._log_stock.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando ENVIADA → {_e}")
+                                    self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando ENVIADA → {_e}")
                             self.RepositorioOportunidades.insert_preservation_order(
                                 account,
                                 vehiculo,
@@ -1251,7 +1261,7 @@ class AgentManager:
                         f"ROI={roi:.1%} | last={last:.2f} | sma20={sma_base:.2f} | "
                         f"stop={stop_anterior:.2f} ({motivo})"
                     )
-                    self._log_stock.warning(msg)
+                    self._preservation_logger.warning(msg)
 
                 self.preservation_state[symbol] = {
                     "max_price": float(max_price),
