@@ -767,7 +767,13 @@ class AgentManager:
 
     # ── Preservation: Protección de ganancias con STOP dinámicos ────────────────
 
-    @wait_rate(43200, persist=True, desc="Preservación de ganancias (12h)", nivel=1)
+    # Intervalo corto a proposito: el espaciado real de las revisiones lo decide
+    # _preservation_get_config() con revisiones_dia dentro de la ventana 9-16h. El decorador solo
+    # ofrece turnos frecuentes y baratos (un read_json_tmp y vuelve). Con 12h el turno de la
+    # madrugada quedaba consumido por la guarda de ventana y solo corria 1 vez al dia.
+    # La ventana NO va en el decorador: ventana= la saltea cuando _overdue (intervalo*1.5), y de
+    # noche el atraso siempre supera ese umbral, con lo que terminaria corriendo de madrugada igual.
+    @wait_rate(1800, persist=True, desc="Preservación de ganancias (2/día, 9-16h)", nivel=1)
     def Agente_ManagerPreservation(self):
         """
         Agente de Preservación de Ganancias (Stock).
@@ -874,7 +880,12 @@ class AgentManager:
         revisiones dentro de esa franja en vez de cada 86400/revisiones_dia segundos corridos —
         antes eso anclaba siempre a la misma hora de arranque y con revisiones_dia=2 (12h) caía
         siempre en la madrugada (12h × 2 = 24h exactas). Fuera de ventana se devuelve ejecutar=False
-        sin tocar last_run — el turno queda pendiente hasta el próximo ciclo dentro de la franja.
+        sin tocar _last_run_{vehiculo} — el turno queda pendiente hasta el próximo ciclo dentro de
+        la franja.
+
+        Depende de que Agente_ManagerPreservation tenga un intervalo corto (30 min): la guarda de
+        ventana sí consume el turno del decorador, así que con un intervalo largo el turno de la
+        madrugada se perdería entero. Ver el comentario sobre el decorador del agente.
         """
         if vehiculo not in self.preservation_config:
             params = self._load_params(vehiculo)
