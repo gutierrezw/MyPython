@@ -132,6 +132,24 @@ class ServiciosCrypto:
         )
         return {"importe": importe, "pct": pct, "deuda_previa": deuda_total, **resultado}
 
+    def repay_venta_alerta(self, symbol, importe):
+        """repay_venta() + aviso por Telegram si hubo pago.
+
+        Punto unico de los dos disparadores del repago: el executionReport del websocket y el paso
+        a FILLED que detecta sync_orders_from_binance. Bloquea: son tres llamadas REST, el que
+        llama decide si lo corre en un hilo.
+        """
+        from Class_customer import DataHub  # import diferido — evita ciclo: customer→ApiBinnace→ServiciosCrypto
+
+        resultado = self.repay_venta(importe, symbol=symbol)
+        if resultado:
+            DataHub.add_alert(
+                f"💵 {symbol}: repago de deuda ${resultado['pagado']:,.2f} "
+                f"({resultado['pct']:.0%} de la venta de ${importe:,.2f})",
+                telegram=True,
+            )
+        return resultado
+
     def loan_ongoing(self):
         """Prestamos flexibles vivos, normalizados igual que _get_loan_data() de Analisis Crypto."""
         try:

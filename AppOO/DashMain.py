@@ -378,13 +378,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
         def _run():
             try:
-                resultado = ServiciosCrypto().repay_venta(importe, symbol=symbol)
-                if resultado:
-                    DataHub.add_alert(
-                        f"💵 {symbol}: repago de deuda ${resultado['pagado']:,.2f} "
-                        f"({resultado['pct']:.0%} de la venta de ${importe:,.2f})",
-                        telegram=True,
-                    )
+                ServiciosCrypto().repay_venta_alerta(symbol, importe)
             except Exception as e:
                 self.logger.error(f"repay_deuda_venta({symbol}): {e}")
 
@@ -3334,7 +3328,11 @@ class DashMain:
             try:
                 bc = getattr(self.crypto, "BClient", None)
                 if bc:
-                    self.RepositorioOportunidades.sync_orders_from_binance(bc, self.account_crypto)
+                    _, ventas = self.RepositorioOportunidades.sync_orders_from_binance(bc, self.account_crypto)
+                    # este refresh tambien consume la transicion a FILLED: si no dispara el repago
+                    # aca, la venta queda sin pago porque el agente ya no la vera pendiente
+                    for venta in ventas:
+                        self.crypto.repay_deuda_venta(venta["symbol"], venta["importe"])
             except Exception as e:
                 print(f"update_treeview_ordenes Binance sync: {e}")
             try:

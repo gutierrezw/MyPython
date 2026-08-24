@@ -69,6 +69,7 @@ from Modulos_Mysql import (
     IaTraceScreen,
 )
 from Class_customer import DataHub, TickerInfo
+from Class_ServiciosCrypto import ServiciosCrypto
 from Class_BrowserBridge import set_claude_contexto
 from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
 from Modulos_Utilitarios import (
@@ -407,8 +408,13 @@ class ClassAgenteIA:
         try:
             bc = DataHub.clients.get("Crypto")
             if bc:
-                n = self.RepositorioOportunidades.sync_orders_from_binance(bc, self.account_crypto)
+                n, ventas = self.RepositorioOportunidades.sync_orders_from_binance(bc, self.account_crypto)
                 self.logger.warning(f"Agente_SyncOrders Binance: {n} actualizadas")
+                # el repago cuelga de aca y no del executionReport del websocket: ese stream nunca
+                # se suscribe (schedule_WebsocketBinanceApiClient solo hace polling de allOrders),
+                # asi que la venta se detecta al pasar a FILLED en la sincronizacion
+                for venta in ventas:
+                    ServiciosCrypto().repay_venta_alerta(venta["symbol"], venta["importe"])
         except Exception as e:
             self.logger.error(f"Agente_SyncOrders Binance: {e}")
 

@@ -6469,9 +6469,13 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             _logger.warning(f"sync_orders_from_ib: {updated} actualizadas account={account}")
         return updated
 
-    def sync_orders_from_binance(self, b_client, account: str) -> int:
+    def sync_orders_from_binance(self, b_client, account: str):
         """Sincroniza order_trader (Crypto) comparando contra órdenes abiertas en Binance.
-        Órdenes que ya no están abiertas → consulta estado real y actualiza BD."""
+        Órdenes que ya no están abiertas → consulta estado real y actualiza BD.
+
+        Devuelve (actualizadas, ventas): ventas son las SELL que acaban de pasar a FILLED, para
+        que el agente dispare el repago de deuda. Aca solo se detectan — la capa de datos no
+        ejecuta logica de negocio."""
         _STATUS_MAP = {
             "FILLED": "Filled",
             "CANCELED": "CANCELED",
@@ -6484,11 +6488,12 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             open_ids = {str(o.get("orderId", "")) for o in open_orders}
         except Exception as e:
             _logger.error(f"[sync_orders_from_binance] get_open_orders: {e}")
-            return 0
+            return 0, []
 
         rows, ix = self.select_pending_orders(account, "Crypto")
         pending = [dict(zip(ix, r)) for r in rows]
         updated = 0
+        ventas = []
         for r in pending:
             binance_order_id = str(r.get("id_order") or "")
             coid = str(r.get("clientOrderId") or "")
@@ -6503,6 +6508,17 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                     updated += 1
                     # Registrar en symbol_decision_history si es FILLED
                     if detail.get("status") == "FILLED":
+                        if detail.get("side") == "SELL":
+                            # cummulativeQuoteQty = los USDT que entraron por la venta. Se acota a
+                            # fills recientes: una orden vieja que recien se sincroniza no debe
+                            # gatillar un repago tardio con precios que ya no son los de esa venta
+                            if (time.time() * 1000 - float(detail.get("updateTime") or 0)) < 86400000:
+                                ventas.append(
+                                    {
+                                        "symbol": r["symbol"],
+                                        "importe": float(detail.get("cummulativeQuoteQty") or 0),
+                                    }
+                                )
                         try:
                             symbol = r.get("symbol")
                             intent = r.get("intent", "")
@@ -6536,7 +6552,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 _logger.warning(f"[sync_orders_from_binance] {r.get('symbol')}: {e}")
         if updated:
             _logger.warning(f"sync_orders_from_binance: {updated} actualizadas account={account}")
-        return updated
+        return updated, ventas
 
     def cleanup_order_trader_eod(self, account: str) -> int:
         """Elimina órdenes obsoletas por plazo fijo (sin validación API).
