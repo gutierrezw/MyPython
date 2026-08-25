@@ -249,7 +249,8 @@ class AgentManager:
         except Exception as e:
             self._log_institucion.error(f"Agente_AuditPortfolio(): {e}")
 
-    @wait_rate(2592000, persist=True, desc="Actualiza categoriaActivo Screener ex-cartera (30d)",
+    # 150 simbolos por corrida cada 3 dias: el universo ex-cartera (~1320) rota completo en ~27 dias
+    @wait_rate(259200, persist=True, desc="Actualiza categoriaActivo Screener ex-cartera (3d)",
                nivel=2, ventana=(0, 6))
     def Agente_DividendStatusScreener(self):
         try:

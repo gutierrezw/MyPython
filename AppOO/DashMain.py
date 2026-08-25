@@ -1852,10 +1852,16 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 ddatos, x_categoria, x_meses = self.rendimiento_dividends(activo=activo, datos=pdatos, symbol=x_symbol)
                 if not ddatos.empty:
                     campos.update({"categoriaActivo": x_categoria[0]})
+                    campos.update({"categoria_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
                     campos.update({"trazaDividends": ddatos.to_json(orient="split")})
                 else:
+                    # Sin traza de dividendos no hay nada que actualizar: la categoria vigente se
+                    # conserva. Degradarla a 'N' por una descarga vacia mandaba activos con dividendo
+                    # ('I'/'S') al universo de GainsCapture, que solo debe tomar 'N'.
                     qt = (activo.get("quoteType") or "").upper()
-                    campos.update({"categoriaActivo": "X" if qt in _ETF_TYPES else "N"})
+                    if not categorias_actuales.get(x_symbol):
+                        campos.update({"categoriaActivo": "X" if qt in _ETF_TYPES else "N"})
+                        campos.update({"categoria_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
                 campos.update({"trailingAnnualDividendRate": activo.get("trailingAnnualDividendRate", 0)})
                 campos.update({"dividendYield": activo.get("dividendYield", 0)})
                 timestamp = activo.get("exDividendDate")
@@ -1873,6 +1879,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
         try:
             if self.vehiculo != "Stock":
                 return
+            categorias_actuales = self.Market.load_symbols(self.account)
             for symbol in activos:
                 ticket = convierte_ticket_crypto(symbol)
                 yf_activo, datos, ind_update = self.ts_yfinance_symbol(symbol=ticket, vehiculo=self.vehiculo)
@@ -1897,9 +1904,15 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     if symbol in self.info.keys():
                         self.info[symbol]["update"] = True
                 elif not ind_update:
-                    # Sin datos de dividendo — garantizar registro en market con encartera='Y'
-                    cat = "X" if qt in _ETF_TYPES else "N"
-                    update_tabla_market(symbol, ["encartera", "categoriaActivo", "account"], ["Y", cat, self.account])
+                    # Sin datos de dividendo — garantizar registro en market con encartera='Y'.
+                    # La categoria solo se asigna si el simbolo todavia no tiene una.
+                    columnas, values = ["encartera", "account"], ["Y", self.account]
+                    if not categorias_actuales.get(symbol):
+                        columnas.append("categoriaActivo")
+                        values.append("X" if qt in _ETF_TYPES else "N")
+                        columnas.append("categoria_update")
+                        values.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                    update_tabla_market(symbol, columnas, values)
 
             filas = self.Market.sync_market_to_inversion(self.account)
             self.logger.warning("dividends_en_market_stock(): sync market -> inversion, {} filas".format(filas))

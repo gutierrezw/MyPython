@@ -186,6 +186,31 @@ log_queries_not_using_indexes   = ON
 | performa_inversion | idx_idcuenta_vehiculo | idcuenta, vehiculo | Filtro compuesto |
 | order_trader | idx_account_symbol | account, symbol | Filtro compuesto |
 
+### Columnas con semántica propia
+
+| Tabla | Columna | Qué significa |
+|-------|---------|---------------|
+| market | `timestamp` | Última modificación de la fila **por cualquier motivo** (precio incluido). No sirve para saber cuándo se recalculó algo puntual |
+| market | `inst_update` | Última actualización del pipeline 13F |
+| market | `categoria_update` | Última vez que se recalculó `categoriaActivo` (creada 2026-08-25) |
+
+**`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
+`lastPrice DESC` con `LIMIT 150`, así que repetía siempre los mismos 150 símbolos más caros y dejaba
+~1170 sin recalcular nunca. Caso testigo: `C` (Citigroup) quedó en `'I'` con la traza congelada en
+2024 (precio 57.67) mientras cotizaba a 132.95, donde corresponde `'S'`. Ahora la selección ordena por
+`categoria_update ASC` (NULL primero) y el agente corre cada 3 días → los ~1320 ex-cartera rotan
+completos en ~27 días. La sellan los dos caminos que escriben categoría:
+`sync_dividend_status_screener()` (ex-cartera) y `dividends_en_market_stock()` (en cartera).
+El comentario de la columna en MySQL repite este motivo — `SHOW FULL COLUMNS FROM market`.
+
+**Regla: una descarga vacía nunca degrada `categoriaActivo`.** Ambos caminos reescribían la categoría
+en cada corrida y bajaban a `'N'` cuando Yahoo no devolvía dividendos, mandando activos `'I'`/`'S'` al
+universo de GainsCapture (que solo debe tomar `'N'`). Hoy la categoría solo se escribe si hay dato
+real; si no lo hay se conserva la vigente y solo se asigna `'N'` a símbolos que aún no tienen ninguna.
+`trailing_annual == 0` sí escribe `'N'`: es un hallazgo, no un fallo de descarga.
+La fecha, en cambio, se sella **siempre** — un símbolo que falla debe irse al final de la cola o los
+fallos repetidos bloquean la rotación.
+
 ### Script de monitoreo
 `SchemasSQL/mysql_index_analyzer.py` — analiza schema, índices sin uso, full scans y configuración InnoDB.
 

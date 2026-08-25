@@ -2191,7 +2191,10 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
 
     def select_screener_ex_cartera(self, account: str, limit: int = 150) -> list:
         """Retorna símbolos del screener fuera de cartera activa, candidatos para actualizar categoriaActivo.
-        Prioriza símbolos sin categoría calculada (NULL o 'E'), luego por lastPrice DESC."""
+
+        Ordena por categoria_update ascendente (NULL primero): siempre entran los 150 más alejados
+        de su última actualización, así el universo rota completo en vez de repetir los mismos.
+        """
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
         try:
@@ -2202,8 +2205,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                   AND (encartera IS NULL OR encartera != 'Y')
                   AND (categoriaActivo IS NULL OR categoriaActivo NOT IN ('X'))
                 ORDER BY
-                  CASE WHEN categoriaActivo IS NULL OR categoriaActivo = 'E' THEN 0 ELSE 1 END,
-                  lastPrice DESC
+                  CASE WHEN categoria_update IS NULL THEN 0 ELSE 1 END,
+                  categoria_update ASC
                 LIMIT %s
                 """,
                 (account, limit),

@@ -3020,6 +3020,7 @@ def sync_dividend_status_screener(account: str, limit: int = 150) -> dict:
     _ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
     market = MarketScreen()
     symbols = market.select_screener_ex_cartera(account, limit=limit)
+    categorias_actuales = market.load_symbols(account)
     processed, errors = 0, 0
 
     for symbol in symbols:
@@ -3033,14 +3034,19 @@ def sync_dividend_status_screener(account: str, limit: int = 150) -> dict:
 
             if qt in _ETF_TYPES:
                 categoria, traza, meses_str = "X", None, ""
-            elif trailing_annual == 0 or "Dividends" not in datos or datos.empty:
+            elif trailing_annual == 0:
+                # No paga dividendos: 'N' es un hallazgo real, no una descarga fallida
                 categoria, traza, meses_str = "N", None, ""
+            elif "Dividends" not in datos or datos.empty:
+                # Paga dividendo pero la descarga vino vacia: no hay nada que actualizar.
+                # Escribir 'N' aca degradaba 'I'/'S' y mandaba el activo al universo de GainsCapture.
+                categoria, traza, meses_str = None, None, ""
             else:
                 try:
                     datos.index = datos.index.tz_localize(None)
                     m_datos = datos[datos["Dividends"] != 0].copy()
                     if m_datos.empty:
-                        categoria, traza, meses_str = "N", None, ""
+                        categoria, traza, meses_str = None, None, ""
                     else:
                         m_datos["Rendimiento"] = m_datos["Dividends"] / m_datos["Close"]
                         y_datos = pd.DataFrame(columns=["Close", "Dividends", "Rendimiento"])
@@ -3062,15 +3068,24 @@ def sync_dividend_status_screener(account: str, limit: int = 150) -> dict:
                         traza = y_datos.to_json(orient="split")
                 except Exception as inner_e:
                     _logger.warning(f"sync_dividend_status_screener dividend calc ({symbol}): {inner_e}")
-                    categoria, traza, meses_str = "E", None, ""
+                    categoria, traza, meses_str = None, None, ""
 
-            columnas = ["categoriaActivo", "trailingAnnualDividendRate", "dividendYield", "previousClose"]
+            # Sin categoria calculada se conserva la vigente; solo se asigna 'N' si no tiene ninguna
+            if categoria is None and not categorias_actuales.get(symbol):
+                categoria = "N"
+
+            # categoria_update se sella igual aunque no haya dato: el simbolo ya fue intentado y
+            # debe irse al final de la cola, si no los fallos repetidos bloquean la rotacion
+            columnas = ["categoria_update", "trailingAnnualDividendRate", "dividendYield", "previousClose"]
             values = [
-                categoria,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 trailing_annual,
                 activo.get("dividendYield") or 0,
                 activo.get("previousClose") or 0,
             ]
+            if categoria:
+                columnas.append("categoriaActivo")
+                values.append(categoria)
             if traza:
                 columnas.append("trazaDividends")
                 values.append(traza)
