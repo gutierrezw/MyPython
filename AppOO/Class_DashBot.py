@@ -1449,7 +1449,7 @@ class Telegram:
         # Si el usuario está en la lista:
         if update.message.text == "/start":
             await self.send_Telegram(f"¡Bienvenido de nuevo, {nombre_usuario}!")
-            await self.handle_menu()
+            await self.handle_start()
         else:
             # Opcional: Reenvía el mensaje al chat interno (si quieres que el asistente responda)
             self._agregar_mensaje(f"👤 Telegram: {update.message.text}")
@@ -1485,6 +1485,12 @@ class Telegram:
             reply_markup=menu_markup,
         )
 
+    # Menú a pedido del usuario: además del menú, reenvía las oportunidades vigentes
+    async def handle_start(self, update=None, context=None):
+        """/start y /menu: muestra el menú y reenvía las oportunidades vigentes para etiquetar."""
+        await self.handle_menu(update, context)
+        await self._flush_oportunidades_menu()
+
     # Aquí podrías iniciar/parar Telegram ------------------------------------------------------------------------
     async def toggle_telegram(self):
         def polling_callbackTelegram():
@@ -1495,8 +1501,8 @@ class Telegram:
                 # Construir app en el MISMO loop que hará polling
                 self.telegram_app = ApplicationBuilder().token(self.TOKEN).connect_timeout(30).read_timeout(30).build()
 
-                self.telegram_app.add_handler(CommandHandler("menu", self.handle_menu))
-                self.telegram_app.add_handler(CommandHandler("start", self.handle_menu))
+                self.telegram_app.add_handler(CommandHandler("menu", self.handle_start))
+                self.telegram_app.add_handler(CommandHandler("start", self.handle_start))
                 self.telegram_app.add_handler(
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_segurity_message)
                 )
@@ -1722,7 +1728,13 @@ class Telegram:
 
             # opciones de menu seleccionado
             query = update.callback_query
-            await query.answer()
+
+            # answer() solo apaga el reloj del boton: si el callback expiro (mensaje viejo) falla,
+            # pero la accion del usuario sigue siendo valida y no puede perderse en silencio
+            try:
+                await query.answer()
+            except Exception as e:
+                self.logger.warning(f"handle_callback(): query.answer() fallo, se continua → {e}")
 
             accion, *args = query.data.split("|")
 
@@ -2777,6 +2789,32 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             )
         except Exception as e:
             self.logger.error(f"_flush_buy_actual(): {e}")
+
+    async def _flush_oportunidades_menu(self):
+        """Reenvía las oportunidades vigentes (Sell + Buy) cuando el usuario pide el menú.
+
+        Reproduce las condiciones de arranque de la app, que es el único momento en que hoy se ven.
+        Son tres filtros distintos los que bloquean el reenvío:
+        - ultimo_envio / ultimo_envio_buy → exigen mejora de ROI/score (Agente_message_Manager_*)
+        - sell_enviados / buy_enviados → en modo etiquetado, oportunity_handler_buy() corta en seco
+        - MostrarOpcionMenu_enTelegram → cada handler solo notifica si el menú está en su modo
+        """
+        modo_previo = self.MostrarOpcionMenu_enTelegram
+        try:
+            self.ultimo_envio.clear()
+            self.ultimo_envio_buy.clear()
+            self.sell_enviados.clear()
+            self.buy_enviados.clear()
+
+            self.MostrarOpcionMenu_enTelegram = "Sell"
+            await self._flush_sell_actual()
+
+            self.MostrarOpcionMenu_enTelegram = "Buy"
+            await self._flush_buy_actual()
+        except Exception as e:
+            self.logger.error(f"_flush_oportunidades_menu(): {e}")
+        finally:
+            self.MostrarOpcionMenu_enTelegram = modo_previo
 
     async def send_top10_telegram(self, forzar=False):
         """
