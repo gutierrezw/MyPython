@@ -719,6 +719,20 @@ class AgentManager:
         except Exception as e:
             self._log_infra.error(f"Agente_LotesReconcile(): {e}")
 
+    @wait_rate(2592000, persist=True, desc="Distribucion ROI ventas booktrading 6m (30d)", nivel=2)
+    def Agente_RoiVentas(self):
+        try:
+            for vehiculo in ("Stock", "Crypto"):
+                cuenta = BDsystem.get_sesion_by_vehiculo(vehiculo).get("idcuenta")
+                umbrales = {
+                    "Oportunidades": DataHub.gains_config(vehiculo, "gains_oportunidades"),
+                    "GainsCapture": DataHub.gains_config(vehiculo, "gains_capture"),
+                }
+                result = self.PlanInversion.roi_ordenes_venta(account=cuenta, meses=6, umbrales=umbrales)
+                self._log_infra.warning(f"Agente_RoiVentas({vehiculo}): {result['resumen']}")
+        except Exception as e:
+            self._log_infra.error(f"Agente_RoiVentas(): {e}")
+
     @wait_rate(86400, persist=True, desc="Limpia market sin enriquecimiento (24h)", nivel=1)
     def Agente_CleanupMarketNoScore(self):
         """Elimina símbolos sin datos enriquecidos: sin inst_score AND sin fh_count (13F).
@@ -1315,6 +1329,7 @@ class AgentManager:
             ("Agente_NtpCheck", self.Agente_NtpCheck, 300),
             ("Agente_IbFlex", self.Agente_IbFlex, 3600),
             ("Agente_LotesReconcile", self.Agente_LotesReconcile, 3600),
+            ("Agente_RoiVentas", self.Agente_RoiVentas, 3600),
             ("Agente_ManagerPreservation", self.Agente_ManagerPreservation, 1),
         ]
         for name, target, sleep in _threads:

@@ -4869,6 +4869,81 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 conn.close()
 
 
+    def roi_ordenes_venta(self, account: str = None, meses: int = 6, umbrales: dict = None) -> dict:
+        """
+        Distribución de ROI y ganancia por ORDEN de venta (símbolo + día) en booktrading.
+        La orden es la unidad que mide min_ganancia; min_roi mide lotes.
+        ROI de la orden = SUM(gprealizadas) / (SUM(producto) - SUM(gprealizadas))
+        umbrales: {etiqueta: {"min_roi": x, "min_ganancia": y}} — cuenta cuántas órdenes pasarían.
+        Retorna dict con ordenes, percentiles, pasan y resumen (texto listo para log).
+        """
+        def percentil(vals, p):
+            k = (len(vals) - 1) * p / 100.0
+            lo = int(k)
+            hi = min(lo + 1, len(vals) - 1)
+            return vals[lo] + (vals[hi] - vals[lo]) * (k - lo)
+
+        conn = cursor = None
+        desde = (datetime.now() - timedelta(days=meses * 30)).date()
+        try:
+            conn = self._conectar(tabla="select.booktrading.roi_ventas")
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT simbolo, DATE(fechahora) AS fecha, SUM(producto) AS producto,
+                          SUM(gprealizadas) AS gp, COUNT(*) AS lotes
+                     FROM booktrading
+                    WHERE codigo = 'C' AND cuenta = %s AND fechahora >= %s
+                    GROUP BY simbolo, DATE(fechahora)
+                    ORDER BY 2""",
+                (account, desde),
+            )
+            ordenes = []
+            for simbolo, fecha, producto, gp, lotes in cursor.fetchall():
+                producto, gp = float(producto or 0), float(gp or 0)
+                base = producto - gp
+                if base > 0:
+                    ordenes.append({"simbolo": simbolo, "fecha": str(fecha), "roi": gp / base,
+                                    "ganancia": gp, "lotes": int(lotes)})
+
+            if not ordenes:
+                return {"account": account, "desde": str(desde), "ordenes": [], "pasan": {},
+                        "resumen": f"sin ventas desde {desde}"}
+
+            rois = sorted(o["roi"] for o in ordenes)
+            gans = sorted(o["ganancia"] for o in ordenes)
+            roi_p = {p: percentil(rois, p) for p in (25, 50, 75, 90)}
+            gan_p = {p: percentil(gans, p) for p in (25, 50, 75, 90)}
+
+            pasan = {}
+            for etiqueta, cfg in (umbrales or {}).items():
+                min_roi = float(cfg.get("min_roi", 0))
+                min_gan = float(cfg.get("min_ganancia", 0))
+                n = sum(1 for o in ordenes if o["roi"] >= min_roi and o["ganancia"] >= min_gan)
+                pasan[etiqueta] = {"min_roi": min_roi, "min_ganancia": min_gan, "n": n,
+                                   "pct": n / len(ordenes)}
+
+            resumen = "{} ordenes desde {} ({} -> {}) | ROI {} | Ganancia {} max={:.0f}".format(
+                len(ordenes), desde, ordenes[0]["fecha"], ordenes[-1]["fecha"],
+                "/".join("p{}={:.0%}".format(p, roi_p[p]) for p in (25, 50, 75, 90)),
+                "/".join("p{}={:.0f}".format(p, gan_p[p]) for p in (25, 50, 75, 90)),
+                max(gans),
+            )
+            for etiqueta, d in pasan.items():
+                resumen += " | {} (ROI>={:.0%} gan>={:.0f}): {} ({:.0%})".format(
+                    etiqueta, d["min_roi"], d["min_ganancia"], d["n"], d["pct"])
+
+            return {"account": account, "desde": str(desde), "ordenes": ordenes,
+                    "roi_pct": roi_p, "ganancia_pct": gan_p, "pasan": pasan, "resumen": resumen}
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: roi_ordenes_venta()]: {e}")
+            return {"account": account, "desde": str(desde), "ordenes": [], "pasan": {},
+                    "resumen": f"error: {e}"}
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
 class RepositorioOportunidadesBuySell(PlanInversion):  # -------------------------------------------------------------
     """
     -- Class de oportunidades generadas, acciones y trading realziados."""
