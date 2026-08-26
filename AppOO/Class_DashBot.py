@@ -86,6 +86,9 @@ from ConvergIA.Scanner_Sentimiento import scan_sentimiento
 from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
 
 
+GC_PENDIENTE_TTL = 1800  # segundos que una propuesta GainsCapture espera autorizacion antes de vencer
+
+
 # Admistrador de Agentes IA
 class ClassAgenteIA:
     def __init__(self):
@@ -957,6 +960,8 @@ class ClassAgenteIA:
         symbols_gain = [s for s in DataHub.get_info_symbols_gain() if s.get("vehiculo") == vehiculo]
 
         symbols_in_gain = [s.get("symbol") for s in symbols_gain if s.get("symbol")]
+        self._gains_capture_expirar_pendientes()
+
         for sym_data in symbols_gain:
             symbol = sym_data.get("symbol")
             categ = categories.get(symbol)
@@ -1035,21 +1040,10 @@ class ClassAgenteIA:
                 estado = "normal"
 
             if estado == "pendiente_autorizacion":
-                ts_raw = state.get("pendiente_ts")
-                if ts_raw:
-                    elapsed = (datetime.now() - datetime.fromisoformat(ts_raw)).total_seconds()
-                    if elapsed > 1800:
-                        self.gains_capture_state[symbol] = {**state, "estado": "normal", "pendiente": None}
-                        write_json_tmp("gains_capture_state.json", self.gains_capture_state)
-                        # el mensaje sin vigencia se va del chat: sus botones ya no ejecutan nada
-                        DataHub.del_alert(f"gc_{symbol}")
-                        _gc_logger.warning(f"GainsCapture({symbol}): propuesta expirada (30min) → cancelada")
-                        estado = "normal"
-                    else:
-                        _gc_logger.debug(
-                            f"GainsCapture({symbol}): pendiente_autorizacion → esperando ({elapsed/60:.0f}m)"
-                        )
-                        continue
+                # el vencimiento ya lo resolvio _gains_capture_expirar_pendientes(): lo que sigue
+                # pendiente aca esta vigente y espera al usuario
+                _gc_logger.debug(f"GainsCapture({symbol}): pendiente_autorizacion → esperando")
+                continue
 
             if estado == "escalon_pendiente":
                 _gc_logger.debug(f"GainsCapture({symbol}): escalon_pendiente → esperando fill")
@@ -1894,6 +1888,50 @@ class Telegram:
             return f"{emoji} {rsi_d:.1f} / {float(rsi_w):.1f}" if rsi_w is not None else f"{emoji} {rsi_d:.1f} / N/A"
         except Exception:
             return None
+
+    def _gains_capture_expirar_pendientes(self):
+        """Vence las propuestas sin autorizar y borra su mensaje del chat.
+
+        Corre antes del loop de candidatos a proposito. Cuando el chequeo vivia adentro del loop
+        solo se llegaba a el si el simbolo seguia siendo candidato hoy — habia cinco `continue`
+        antes (categoria != 'N', sin lotes, ninguno supera min_roi, ningun escenario supera
+        min_ganancia, vehiculo sin trama). Asi que la propuesta se congelaba con los botones vivos
+        justo cuando dejaba de ser candidata, que es cuando mas hace falta borrarla: BTG quedo
+        pendiente al restaurarsele la categoria a 'S', y cuatro Crypto al pasarse el spike que las
+        habia originado.
+
+        No filtra por vehiculo: el vencimiento es temporal y no depende de quien lo detecte.
+        Un pendiente sin `pendiente_ts` tambien vence — no hay forma de validarlo y sus botones
+        son exactamente el caso huerfano.
+        """
+        _gc_logger = logging.getLogger("GainsCapture")
+        expirados = []
+        for symbol, state in self.gains_capture_state.items():
+            if symbol.startswith("_") or state.get("estado") != "pendiente_autorizacion":
+                continue
+            ts_raw = state.get("pendiente_ts")
+            if not ts_raw:
+                expirados.append((symbol, "sin pendiente_ts"))
+                continue
+            try:
+                elapsed = (datetime.now() - datetime.fromisoformat(ts_raw)).total_seconds()
+            except Exception as e:
+                _gc_logger.error(f"GainsCapture({symbol}): pendiente_ts ilegible {ts_raw!r} → {e}")
+                expirados.append((symbol, "pendiente_ts ilegible"))
+                continue
+            if elapsed > GC_PENDIENTE_TTL:
+                expirados.append((symbol, f"{elapsed / 60:.0f}m"))
+
+        for symbol, motivo in expirados:
+            self.gains_capture_state[symbol] = {
+                **self.gains_capture_state[symbol], "estado": "normal", "pendiente": None
+            }
+            # el mensaje sin vigencia se va del chat: sus botones ya no ejecutan nada
+            DataHub.del_alert(f"gc_{symbol}")
+            _gc_logger.warning(f"GainsCapture({symbol}): propuesta expirada ({motivo}) → cancelada")
+
+        if expirados:
+            write_json_tmp("gains_capture_state.json", self.gains_capture_state)
 
     def _gains_capture_id_vigente(self, state, pendiente_id):
         """True si pendiente_id corresponde a la propuesta vigente del simbolo.
