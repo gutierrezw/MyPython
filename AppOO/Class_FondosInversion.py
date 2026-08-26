@@ -18,7 +18,7 @@ from Modulos_python import (
 _logger = logging.getLogger("FondosInversion")
 from Modulos_Mysql import RepositorioOportunidadesBuySell, DiariaCNV, FinanceScreen, IPerformance
 from Class_customer import WidgetVehiculo, TickerInfo, DataHub
-from Modulos_Utilitarios import delete_file, buscar_ticker, define_FileCache, is_numeric
+from Modulos_Utilitarios import delete_file, buscar_ticker, define_FileCache, is_numeric, posicion_a_usd
 from Modulos_Comunes import diaria_book_performance, proceso_update_performance
 from download_cnv_selenium import descargar_cnv_hoy
 
@@ -614,24 +614,25 @@ class ArsFondosInversion(tk.Frame):
             fc_booktrading = last[0]["factor_cambio"]
             factor = fc_booktrading if fc_booktrading > 0 else (self.get_tasa_cambio_USDT(fiat="ARS", date=datetime.now().date()) or 1)
 
+            # los importes se arman en ARS y los pasa a USD posicion_a_usd() al final — la division
+            # por el factor no se escribe a mano campo por campo
             if cnv_found:
                 fecha_cnv = cnv[ix.index("fecha")]
-                valor_actual = cnv[ix.index("valorActual")] / 1000 / factor
-                valor_anterior = cnv[ix.index("valorAnterior")] / 1000 / factor
+                valor_actual = cnv[ix.index("valorActual")] / 1000
+                valor_anterior = cnv[ix.index("valorAnterior")] / 1000
             else:
                 fecha_cnv = (
                     last[0]["fechahora"].date() if hasattr(last[0]["fechahora"], "date") else last[0]["fechahora"]
                 )
                 precio_cierre = last[0].get("preciocierre") or 0
-                valor_actual = precio_cierre / factor if precio_cierre else 0
+                valor_actual = precio_cierre or 0
                 valor_anterior = valor_actual
 
             p["exDividendDate"] = fecha_cnv
-            p["factor_cambio"] = factor
             p["dividendYield"] = 0
             p["estrategia"] = "P05"
             p["dividendo"] = 0
-            p["costobase"] = (activo[0]["avgcost"] * last[0]["stock"] / factor) if factor > 0 else 0
+            p["costobase"] = activo[0]["avgcost"] * last[0]["stock"]
             p["objetivo"] = 0
             p["position"] = last[0]["stock"]
             p["mrkprice"] = valor_actual
@@ -655,7 +656,7 @@ class ArsFondosInversion(tk.Frame):
             p["unrealizedpnl"] = p["mktvalue"] - p["costobase"]
             p["dgyp"] = p["mrkprice"] - p["open"]
 
-            return p
+            return posicion_a_usd(p, factor=factor, divisa=p["divisa"])
         except Exception as e:
             _logger.error("struct_positions_fci(): {}".format(e))
 

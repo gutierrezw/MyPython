@@ -236,6 +236,62 @@ def format_financiero(width=0, importe=0, divisa="USD"):
     return "{:>{}s}".format(string_final, width)
 
 
+POSICION_CAMPOS_MONETARIOS = (
+    "mrkprice", "open", "costobase", "mktvalue", "unrealizedpnl", "dgyp", "dividendo", "objetivo", "deuda",
+)
+
+
+def posicion_a_usd(posicion, factor=1.0, divisa="USD"):
+    """Convierte a USD los importes de una posicion y sella la divisa y el factor aplicado.
+
+    Contrato de la tabla `inversion`: todo lo que se escribe ahi esta en USD. Los KPI del panel
+    (Total dGyP, Total Inversion, UnP&L, Deuda) suman entre vehiculos sin mirar la moneda, asi que
+    un vehiculo que escriba en moneda nativa contamina el consolidado sin que nada lo detecte.
+
+    Hasta ahora cada `struct_positions_*` dividia por su factor a mano — BBVA.ARS lo hace bien,
+    pero nada obliga a que un vehiculo nuevo se acuerde. Esta funcion es ese lugar unico.
+
+    `divisa` y `factor_cambio` quedan en la posicion como el recibo de la conversion: sirven para
+    reconstruir el valor en moneda nativa cuando la UI lo necesita (la pestana Ars multiplica por
+    `factor_cambio` para mostrar pesos). NO son "lo que falta aplicar" — aplicarlos de nuevo al
+    consumir duplica la conversion.
+
+    Ratios (`retorno`, `peso`, `dividendYield`) y `position` no se tocan: son invariantes de moneda.
+    """
+    divisa = (divisa or "USD").upper()[:3]
+    try:
+        factor = float(factor or 0)
+    except (TypeError, ValueError):
+        factor = 0.0
+
+    if divisa == "USD":
+        posicion["divisa"] = "USD"
+        posicion["factor_cambio"] = 1.0
+        return posicion
+
+    if factor <= 0:
+        # sin factor no hay conversion posible: se deja el importe nativo y se sella factor 0 para
+        # que la fila quede identificable en vez de pasar por USD sin que nadie lo note
+        logging.getLogger().error(
+            f"posicion_a_usd({posicion.get('ticket')}): divisa={divisa} sin factor de cambio valido "
+            f"({factor}) — importes quedan en moneda nativa"
+        )
+        posicion["divisa"] = divisa
+        posicion["factor_cambio"] = 0.0
+        return posicion
+
+    for campo in POSICION_CAMPOS_MONETARIOS:
+        if campo in posicion:
+            try:
+                posicion[campo] = float(posicion[campo] or 0) / factor
+            except (TypeError, ValueError):
+                posicion[campo] = 0.0
+
+    posicion["divisa"] = divisa
+    posicion["factor_cambio"] = factor
+    return posicion
+
+
 def is_null(s):
     """Valida si el parametro contingent valor Null o espacios"""
 

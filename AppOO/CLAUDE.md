@@ -211,6 +211,25 @@ real; si no lo hay se conserva la vigente y solo se asigna `'N'` a símbolos que
 La fecha, en cambio, se sella **siempre** — un símbolo que falla debe irse al final de la cola o los
 fallos repetidos bloquean la rotación.
 
+**`inversion.divisa` / `inversion.factor_cambio` — son el recibo, no el pendiente.** La tabla
+`inversion` guarda **siempre USD**, para todos los vehículos. Los KPI del panel (Total dGyP, Total
+Inversión, UnP&L, Deuda) suman entre vehículos sin mirar la moneda, así que un vehículo que
+escribiera en moneda nativa contaminaría el consolidado sin que nada lo detecte.
+
+`divisa` y `factor_cambio` registran la conversión **ya aplicada** — sirven para reconstruir el valor
+nativo cuando la UI lo necesita (la pestaña Ars multiplica por `factor_cambio` para mostrar pesos).
+**No** son "lo que falta aplicar": multiplicar de nuevo al consumir duplica la conversión.
+
+La conversión vive en `posicion_a_usd()` (`Modulos_Utilitarios.py`), que cada `struct_positions_*`
+llama antes de devolver la posición. Antes cada vehículo dividía por su factor a mano — BBVA.ARS lo
+hacía bien, pero nada obligaba a que un vehículo nuevo se acordara. `factor_cambio = 0` marca una
+fila que quedó en moneda nativa por falta de tasa (queda loggeada, no pasa silenciosa).
+
+**Pendiente conocido:** `inversion.dgyp` significa el total diario en Stock/Crypto pero el delta
+**por unidad** en BBVA.ARS, así que `SUM(dgyp)` → `total_ganancia_dia` de `get_totales_inversiones()`
+no es sumable. El panel KPI lo esquiva usando `DataHub.manager_GyP[vehiculo]["dGyP"]`, donde el
+camino ARS multiplica por `position` antes. Es un problema de unidades, distinto del de moneda.
+
 ### Script de monitoreo
 `SchemasSQL/mysql_index_analyzer.py` — analiza schema, índices sin uso, full scans y configuración InnoDB.
 
