@@ -249,7 +249,7 @@ class ArsFondosInversion(tk.Frame):
 
                 fc = keys.get("factor_cambio", 0)
                 _logger.warning(f"change_a_ARS: {keys.get('ticket')} fc={fc} mrkprice_pre={keys.get('mrkprice'):.6f}")
-                dgyp_usd += keys["dgyp"] * keys["position"]
+                dgyp_usd += keys["dgyp"]
                 keys["mrkprice"] = keys["mrkprice"] * fc
                 keys["mktvalue"] = keys["mrkprice"] * keys["position"]
                 keys["costobase"] = keys["costobase"] * fc
@@ -654,7 +654,7 @@ class ArsFondosInversion(tk.Frame):
             p["open"] = valor_anterior
 
             p["unrealizedpnl"] = p["mktvalue"] - p["costobase"]
-            p["dgyp"] = p["mrkprice"] - p["open"]
+            p["dgyp"] = (p["mrkprice"] - p["open"]) * p["position"]
 
             return posicion_a_usd(p, factor=factor, divisa=p["divisa"])
         except Exception as e:

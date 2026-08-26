@@ -225,10 +225,18 @@ llama antes de devolver la posición. Antes cada vehículo dividía por su facto
 hacía bien, pero nada obligaba a que un vehículo nuevo se acordara. `factor_cambio = 0` marca una
 fila que quedó en moneda nativa por falta de tasa (queda loggeada, no pasa silenciosa).
 
-**Pendiente conocido:** `inversion.dgyp` significa el total diario en Stock/Crypto pero el delta
-**por unidad** en BBVA.ARS, así que `SUM(dgyp)` → `total_ganancia_dia` de `get_totales_inversiones()`
-no es sumable. El panel KPI lo esquiva usando `DataHub.manager_GyP[vehiculo]["dGyP"]`, donde el
-camino ARS multiplica por `position` antes. Es un problema de unidades, distinto del de moneda.
+**`inversion.dgyp` es siempre el total diario de la posición** (corregido 2026-08-26). Hasta ese
+día BBVA.ARS escribía el delta **por unidad** — `struct_positions_fci()` hacía `mrkprice - open` sin
+multiplicar por `position` — mientras Stock y Crypto escribían el total. Con eso `SUM(dgyp)` →
+`total_ganancia_dia` de `get_totales_inversiones()` sumaba dólares con dólares-por-cuotaparte y no
+significaba nada; el consumidor es `Class_Analisis.py:1411`. El panel KPI no se veía afectado porque
+usa `DataHub.manager_GyP[vehiculo]["dGyP"]` y el camino ARS multiplicaba por `position` en
+`change_a_ARS()` antes de publicarlo.
+
+Hoy `struct_positions_fci()` devuelve `(mrkprice - open) * position` y `change_a_ARS()` acumula
+`keys["dgyp"]` directo. Efecto visible: la cabecera de la pestaña Ars muestra el dGyP total en pesos,
+no la suma de deltas por cuotaparte. Las filas viejas se corrigen solas — `update_FCI_en_positions()`
+reconstruye la posición en cada ciclo.
 
 ### Script de monitoreo
 `SchemasSQL/mysql_index_analyzer.py` — analiza schema, índices sin uso, full scans y configuración InnoDB.
