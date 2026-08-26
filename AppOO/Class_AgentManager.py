@@ -1059,13 +1059,6 @@ class AgentManager:
                     self._preservation_logger.warning(f"Preservation({vehiculo}/{symbol}): sin precio → SKIP")
                     continue
 
-                PRECIO_MINIMO = 50.0
-                if last < PRECIO_MINIMO:
-                    self._preservation_logger.warning(
-                        f"Preservation({vehiculo}/{symbol}): last={last:.2f} < PRECIO_MINIMO={PRECIO_MINIMO} → SKIP"
-                    )
-                    continue
-
                 atr, atr_error = DataHub.preservation_get_atr(symbol, vehiculo)
                 if atr is None:
                     self._preservation_logger.warning(f"Preservation({vehiculo}/{symbol}): {atr_error} → SKIP")
