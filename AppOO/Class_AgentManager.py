@@ -1112,11 +1112,26 @@ class AgentManager:
                 if stop_final > stop_max:
                     stop_final = stop_max
 
-                qty = DataHub.preservation_calc_qty(self.account, vehiculo, symbol, last, base_limit, proteccion_qty_pct)
+                qty, costo_lotes = DataHub.preservation_calc_qty(
+                    self.account, vehiculo, symbol, last, proteccion_qty_pct
+                )
                 if qty <= 0:
                     self._preservation_logger.warning(
-                        f"Preservation({vehiculo}/{symbol}): qty calculada={qty} | base_limit={base_limit:.2f} "
-                        f"| last={last:.2f} → SKIP"
+                        f"Preservation({vehiculo}/{symbol}): sin lotes en ganancia para la clase "
+                        f"{proteccion_qty_pct:.0%} | last={last:.2f} → SKIP"
+                    )
+                    continue
+
+                # la ganancia que el STOP asegura de verdad: se vende al stop, no al precio de hoy.
+                # El gate de ROI de mas arriba mide la posicion entera (diluida por los lotes en
+                # perdida) y el `unrealizedpnl` supone vender al mercado — ninguno de los dos dice
+                # cuanto queda asegurado si el stop se ejecuta. Este si.
+                ganancia_protegida = qty * stop_final - costo_lotes
+                if ganancia_protegida < gain_inv_usd:
+                    self._preservation_logger.warning(
+                        f"Preservation({vehiculo}/{symbol}): protege {ganancia_protegida:.2f} < "
+                        f"gainInversion {gain_inv_usd:.2f} | qty={qty} @ stop={stop_final:.2f} "
+                        f"vs costo={costo_lotes:.2f} → SKIP"
                     )
                     continue
 
@@ -1132,7 +1147,7 @@ class AgentManager:
                         f"Preservation({vehiculo}/{symbol}): "
                         f"ROI={roi:.1%} | last={last:.2f} | sma20={sma_base:.2f} | max={max_price:.2f} | "
                         f"ATR={atr:.2f} | stop_prev={stop_anterior:.2f} → stop_new={stop_final:.2f} | "
-                        f"qty={qty} | base_limit={base_limit:.2f} | trama={trama} | {accion}"
+                        f"qty={qty} | protege={ganancia_protegida:.2f} | trama={trama} | {accion}"
                     )
                     if not is_live:
                         order_id = order_id_prev
@@ -1202,7 +1217,7 @@ class AgentManager:
                                 "resultado": {
                                     "stop_final": round(float(stop_final), 4),
                                     "qty_protegida": int(qty),
-                                    "ganancia_protegida_usd": round(float(base_limit), 4),
+                                    "ganancia_protegida_usd": round(float(ganancia_protegida), 4),
                                 },
                             }
                             if order_id and str(order_id) not in ("None", "null", ""):

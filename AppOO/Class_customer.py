@@ -1154,15 +1154,51 @@ class DataHub:
         return "{:.{}f}".format(precio, calculate_decimal_places(tick_size))
 
     @staticmethod
-    def preservation_calc_qty(account, vehiculo, symbol, last, base_limit, pct=0.33):
-        """Calcula qty a proteger como porcentaje de acciones en ganancia."""
+    def preservation_calc_qty(account, vehiculo, symbol, last, pct=0.33):
+        """Cantidad a proteger y costo de esos lotes: la clase de venta que corresponde a `pct`.
 
-        def cantidad_lote():
-            book = DataHub.get_lotesGainLost(opcion="gain", account=account, symbol=symbol, last=last)
-            total_qty = sum(k.get("cantidad", 0) for k in book)
-            return round(total_qty * pct)
+        Devuelve `(qty, costo)`. El costo es el de los mismos lotes que entran en la qty, asi que
+        el llamador puede medir la ganancia que el STOP asegura antes de mandar la orden:
+        `qty * stop - costo`.
 
-        return DataHub.quantiza_qty(vehiculo, symbol, cantidad_lote())
+        Toma las clases de `maximiza_sell_lotes()` — las mismas que usa GainsCapture — en vez de un
+        porcentaje de las acciones en ganancia. Dos motivos:
+
+        - `get_lotesGainLost(opcion="gain")` ya devuelve solo lotes con ROI > 0 y ordenados por ROI
+          DESC, asi que la clase toma los mejores lotes completos. El calculo por acciones mezclaba
+          todos los lotes ganadores y bajaba el costo base efectivo: en NOMD promediaba el lote al
+          11.7% con el del 29.3% y la ganancia asegurada caia de 44 a 33 dolares antes siquiera de
+          aplicar el descuento del stop.
+        - El STOP vende lotes, no fracciones de la posicion. Que la cantidad no coincida con ninguna
+          clase deja al agente pisando lotes que ninguna otra vista del sistema muestra.
+
+        Ojo con el "33%": aca y en GainsCapture significa 33% de los LOTES (por conteo), no de las
+        acciones. Son numeros distintos salvo coincidencia.
+        """
+        book = DataHub.get_lotesGainLost(opcion="gain", account=account, symbol=symbol, last=last)
+        if not book:
+            return 0, 0.0
+
+        clase = " 25%" if pct <= 0.25 else (" 33%" if pct < 1.0 else "100%")
+        venta = DataHub.maximiza_sell_lotes(list_gain=book, position=0, costobase=0).get(clase, {})
+
+        if not venta.get("cantidad sell"):
+            # la clase reparte por conteo de lotes: con 1-2 lotes en ganancia, `33%` (umbral 0.336)
+            # no alcanza ni un lote y la posicion se queda sin proteger. Es el caso de mas ROI de la
+            # cartera — BTG, 2 lotes al 22% — asi que el piso es un lote entero, el de mejor ROI
+            # (`book` viene ordenado ROI DESC). Un lote entero, nunca una fraccion.
+            mejor = book[0]
+            venta = {"cantidad sell": mejor.get("cantidad", 0), "costo lote": mejor.get("costo lote", 0)}
+
+        qty = DataHub.quantiza_qty(vehiculo, symbol, venta.get("cantidad sell", 0))
+        if qty <= 0:
+            return 0, 0.0
+
+        # el costo se prorratea: quantiza_qty puede recortar la cantidad y el costo tiene que
+        # acompaniar o la ganancia protegida sale inflada
+        cantidad_clase = venta.get("cantidad sell", 0) or 0
+        costo = float(venta.get("costo lote", 0) or 0) * (qty / cantidad_clase) if cantidad_clase else 0.0
+        return qty, costo
 
     @staticmethod
     def preservation_build_trama(vehiculo, account, symbol, conid, stop_price, max_price, qty):
