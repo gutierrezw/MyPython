@@ -62,17 +62,112 @@ BINANCE_ENV = {
 
 
 # =============================================================================
+# RELOJ CORREGIDO CONTRA BINANCE
+# =============================================================================
+class BinanceTime:
+    """
+    Fuente de hora para toda request firmada: el reloj de Binance, no el del SO.
+
+    El reloj de esta máquina deriva ~690 ppm (~59 s/día), por encima de lo que W32Time
+    puede corregir por slew. Binance rechaza con -1021 INVALID_TIMESTAMP toda firma cuyo
+    timestamp caiga fuera de recvWindow, así que firmar con time.time() corta las
+    operaciones a las ~2 h de la última sincronización buena.
+
+    Se guarda un offset por base_url (PRODUCTION y TESTNET son servidores distintos) y se
+    refresca cuando envejece. Nunca lanza: si la medición falla se conserva el último
+    offset conocido, que sigue siendo mejor que el reloj local.
+
+    Diagnóstico y mitigación a nivel SO: Scripts/README_time_watchdog.md
+    """
+
+    REFRESCO_SEG = 300
+    REINTENTO_SEG = 30
+
+    def __init__(self):
+        self._offsets = {}  # base_url -> (offset_ms, valido_hasta_epoch)
+        self._lock = threading.Lock()
+        # Session reusa la conexión TLS: sin ella cada refresco paga ~500 ms de handshake
+        self._session = requests.Session()
+        self.logger = logging.getLogger("BinanceSpot")
+
+    def timestamp_ms(self, base_url):
+        """Epoch en ms según el servidor de Binance. Usar en toda request firmada."""
+        return int(time.time() * 1000) + self.offset_ms(base_url)
+
+    def offset_ms(self, base_url):
+        """Offset vigente en ms (servidor - local). Remide si el guardado ya venció."""
+        with self._lock:
+            offset, valido_hasta = self._offsets.get(base_url, (0, 0.0))
+            if time.time() < valido_hasta:
+                return offset
+
+        # Se mide sin el lock tomado: bloquear ~330 ms a todos los hilos que firman sale
+        # más caro que la medición redundante que dos hilos puedan hacer a la vez.
+        nuevo = self._medir(base_url)
+        ahora = time.time()
+
+        with self._lock:
+            if nuevo is None:
+                # Sin red: se conserva el offset previo y se espera REINTENTO_SEG. Sin esto
+                # cada firma reintentaría, pagando el timeout completo una y otra vez.
+                self._offsets[base_url] = (offset, ahora + self.REINTENTO_SEG)
+                return offset
+            self._offsets[base_url] = (nuevo, ahora + self.REFRESCO_SEG)
+            return nuevo
+
+    def invalidar(self, base_url):
+        """Fuerza remedición en la próxima firma. Se llama al recibir un -1021."""
+        with self._lock:
+            offset, _ = self._offsets.get(base_url, (0, 0.0))
+            self._offsets[base_url] = (offset, 0.0)
+
+    def _medir(self, base_url):
+        try:
+            t0 = time.time() * 1000
+            response = self._session.get(f"{base_url}/api/v3/time", timeout=5)
+            t1 = time.time() * 1000
+            if not response.ok:
+                self.logger.error(f"BinanceTime._medir({base_url}): HTTP {response.status_code}")
+                return None
+            server_ms = int(response.json()["serverTime"])
+        except (requests.exceptions.RequestException, ValueError, KeyError, TypeError) as e:
+            self.logger.error(f"BinanceTime._medir({base_url}): {e}")
+            return None
+
+        # (t0 + t1) / 2 descuenta el round-trip: el server respondió a mitad de camino
+        offset = int(server_ms - (t0 + t1) / 2)
+        if abs(offset) > 2000:
+            self.logger.warning(f"BinanceTime: reloj local desviado {offset} ms vs {base_url} — se corrige al firmar")
+        else:
+            self.logger.debug(f"BinanceTime: offset {offset} ms vs {base_url}")
+        return offset
+
+
+binance_time = BinanceTime()
+
+
+# =============================================================================
 # DECORADOR DE EXCEPCIONES
 # =============================================================================
 def handle_binance_exceptions(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        def revisar_timestamp(error_code, msg):
+            # -1021 INVALID_TIMESTAMP: el offset guardado quedó viejo → remedir en la próxima firma
+            if error_code != -1021 and "-1021" not in str(msg):
+                return
+            base_url = getattr(args[0], "_base_url", None) if args else None
+            if base_url:
+                binance_time.invalidar(base_url)
+            logger.warning(f"{func.__name__}: -1021 INVALID_TIMESTAMP — se remide el offset de Binance")
+
         logger = logging.getLogger("BinanceSpot")
         try:
             return func(*args, **kwargs)
         except ClientError as e:
             error_code = getattr(e, "error_code", None)
             msg = getattr(e, "error_message", str(e))
+            revisar_timestamp(error_code, msg)
             # -2011: sin órdenes que cancelar (orden ya ejecutada por Binance) → no es error real
             if error_code == -2011 or "-2011" in str(msg):
                 logger.warning(
@@ -98,6 +193,7 @@ def handle_binance_exceptions(func):
                 pass
             error_code = body.get("code")
             msg = body.get("msg", str(e))
+            revisar_timestamp(error_code, msg)
             if error_code == -2011 or "-2011" in str(msg):
                 logger.warning(
                     f"cancel_all_orders {func.__name__}: sin órdenes abiertas (orden ya ejecutada) [{error_code}]"
@@ -125,6 +221,7 @@ def handle_binance_exceptions(func):
                   """))
         except Exception as e:
             msg = getattr(e, "error_message", str(e))
+            revisar_timestamp(getattr(e, "error_code", None), f"{msg} {e}")
             # -2011 puede venir también como HTTPError genérico
             if "-2011" in str(msg) or "-2011" in str(e):
                 logger.warning(f"{func.__name__}: sin órdenes abiertas (orden ya ejecutada por Binance) [-2011]")
@@ -205,7 +302,7 @@ class BinanceSpot(Spot):
     def signature_spot_message(self, tipo="b64", REQUEST=None):
 
         def ed25519(a_key, p_key, p_params=None):
-            p_params["timestamp"] = int(time.time() * 1000)
+            p_params["timestamp"] = binance_time.timestamp_ms(self._base_url)
             payload = "&".join([f"{param}={value}" for param, value in p_params.items()])
             signature = b64encode(p_key.sign(payload.encode("utf-8")))
             p_params["signature"] = signature.decode("utf-8")
@@ -217,6 +314,19 @@ class BinanceSpot(Spot):
                 return ed25519(self.api_key, private_key, p_params=REQUEST)
         except Exception as e:
             self.logger.error(f"signature_spot_message(): {e}")
+
+    def sign_request(self, http_method, url_path, payload=None):
+        """
+        Override de binance.api.API.sign_request — idéntico salvo la fuente del timestamp,
+        que pasa a ser el reloj de Binance. Cubre todos los métodos heredados de Spot
+        (my_trades, get_open_orders, get_order, margin_account, flexible product, etc.).
+        """
+        if payload is None:
+            payload = {}
+        payload["timestamp"] = binance_time.timestamp_ms(self._base_url)
+        query_string = self._prepare_params(payload)
+        payload["signature"] = self._get_sign(query_string)
+        return self.send_request(http_method, url_path, payload)
 
     # =========================
     # CONECTIVIDAD
@@ -265,7 +375,7 @@ class BinanceSpot(Spot):
             "side": side,
             "type": type,
             "quantity": quantity,
-            "timestamp": int(time.time() * 1000),
+            "timestamp": binance_time.timestamp_ms(self._base_url),
         }
         if price is not None:
             params["price"] = float(price)
@@ -290,7 +400,7 @@ class BinanceSpot(Spot):
         params = {
             "symbol": symbol,
             "orderId": orderId,
-            "timestamp": int(time.time() * 1000),
+            "timestamp": binance_time.timestamp_ms(self._base_url),
         }
 
         self.logger.warning(f"API >> DELETE /api/v3/order | {params}")
@@ -308,7 +418,7 @@ class BinanceSpot(Spot):
     def cancel_all_orders(self, symbol):
         params = {
             "symbol": symbol,
-            "timestamp": int(time.time() * 1000),
+            "timestamp": binance_time.timestamp_ms(self._base_url),
         }
 
         self.logger.warning(f"API >> DELETE /api/v3/openOrders | {params}")
@@ -364,7 +474,7 @@ class BinanceSpot(Spot):
             "collateralCoin": collateralCoin,
             "direction": adjustType,
             "adjustmentAmount": amount,
-            "timestamp": int(time.time() * 1000),
+            "timestamp": binance_time.timestamp_ms(self._base_url),
         }
         try:
             params = self.signature_spot_message(REQUEST=xparams)
@@ -380,7 +490,7 @@ class BinanceSpot(Spot):
             "loanCoin": loanCoin,
             "collateralCoin": collateralCoin,
             "loanAmount": round(amount, 2),
-            "timestamp": int(time.time() * 1000),
+            "timestamp": binance_time.timestamp_ms(self._base_url),
         }
         try:
             params = self.signature_spot_message(REQUEST=xparams)
@@ -402,7 +512,7 @@ class BinanceSpot(Spot):
             "loanCoin": loanCoin,
             "collateralCoin": collateralCoin,
             "repayAmount": amount,
-            "timestamp": int(time.time() * 1000),
+            "timestamp": binance_time.timestamp_ms(self._base_url),
         }
         try:
             params = self.signature_spot_message(REQUEST=xparams)
@@ -433,7 +543,7 @@ class BinanceSpot(Spot):
 
     def get_simple_earn_account(self):
         url_path = f"{self._base_url}/sapi/v1/simple-earn/account"
-        xparams = {"timestamp": int(time.time() * 1000)}
+        xparams = {"timestamp": binance_time.timestamp_ms(self._base_url)}
         try:
             params = self.signature_spot_message(REQUEST=xparams)
             headers = {"X-MBX-APIKEY": self.api_key}
@@ -515,7 +625,7 @@ class BinanceClient:
     def signature_message(self, tipo="b64", REQUEST=None):
 
         def ed25519(a_key, p_key, p_params=None):
-            p_params["timestamp"] = int(time.time() * 1000)
+            p_params["timestamp"] = binance_time.timestamp_ms(self.urls["base_url"])
             p_params["apiKey"] = a_key
             payload = "&".join([f"{param}={value}" for param, value in sorted(p_params.items())])
             signature = b64encode(p_key.sign(payload.encode("utf-8")))
@@ -532,7 +642,7 @@ class BinanceClient:
     def _sign_rest(self, params: dict) -> dict:
         """Firma para endpoints REST SAPI/API — solo timestamp+signature en query, apiKey en header."""
         private_key = serialization.load_pem_private_key(data=self.private_key, password=None)
-        params["timestamp"] = int(time.time() * 1000)
+        params["timestamp"] = binance_time.timestamp_ms(self.urls["base_url"])
         payload = "&".join(f"{k}={v}" for k, v in params.items())
         signature = b64encode(private_key.sign(payload.encode("ASCII"))).decode("ASCII")
         params["signature"] = signature
@@ -783,7 +893,7 @@ class BinanceWSApiClient(SpotWebsocketAPIClient):
     # AUTENTICACIÓN
     # =========================
     def login(self):
-        auth = {"apiKey": self.bclient.API_KEY, "timestamp": int(time.time() * 1000)}
+        auth = {"apiKey": self.bclient.API_KEY, "timestamp": binance_time.timestamp_ms(self.bclient.urls["base_url"])}
         params = self.bclient.signature_message(REQUEST=auth)
         auth_request = {
             "id": "auth_request_bot",
@@ -826,7 +936,7 @@ class BinanceWSApiClient(SpotWebsocketAPIClient):
                 "orderId": idOrder,
                 "apiKey": self.bclient.API_KEY,
                 "signature": params["signature"],
-                "timestamp": int(time.time() * 1000),
+                "timestamp": binance_time.timestamp_ms(self.bclient.urls["base_url"]),
             },
         }
         self.send(auth_order)

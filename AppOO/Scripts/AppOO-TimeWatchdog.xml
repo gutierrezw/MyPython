@@ -1,0 +1,54 @@
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Vigila la deriva del reloj y fuerza w32tm /resync cuando supera el umbral. Log: Documents\deploy\tmp\time_watchdog.csv</Description>
+    <URI>\AppOO-TimeWatchdog</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <!-- Repeticion indefinida: <Interval> SIN <Duration>. Una <Duration> enorme
+         (lo que genera [TimeSpan]::MaxValue) es rechazada por el schema. -->
+    <TimeTrigger>
+      <Repetition>
+        <Interval>PT10M</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>2026-08-27T00:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+    </TimeTrigger>
+    <BootTrigger>
+      <Delay>PT2M</Delay>
+      <Enabled>true</Enabled>
+    </BootTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <!-- S-1-5-18 = NT AUTHORITY\SYSTEM. w32tm /resync exige elevacion. -->
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT5M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\Users\InversionesWildaga\Documents\MyPython\AppOO\Scripts\time_watchdog.ps1"</Arguments>
+    </Exec>
+  </Actions>
+</Task>
