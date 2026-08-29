@@ -406,6 +406,13 @@ class ClassAgenteIA:
             if ib:
                 n = self.RepositorioOportunidades.sync_orders_from_ib(ib, self.account)
                 self.logger.warning(f"Agente_SyncOrders IB: {n} actualizadas")
+                # las SIN_CONFIRMAR no las encuentra sync_orders_from_ib: no tienen clientOrderId
+                # contra que cruzar. Se resuelven aparte, por simbolo y precio de stop
+                conf, huer = self.RepositorioOportunidades.resolve_unconfirmed_orders(ib, self.account)
+                if conf or huer:
+                    self.logger.warning(
+                        f"Agente_SyncOrders sin_confirmar: {conf} confirmadas, {huer} huerfanas"
+                    )
         except Exception as e:
             self.logger.error(f"Agente_SyncOrders IB: {e}")
         try:

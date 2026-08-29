@@ -193,6 +193,7 @@ log_queries_not_using_indexes   = ON
 | market | `timestamp` | Última modificación de la fila **por cualquier motivo** (precio incluido). No sirve para saber cuándo se recalculó algo puntual |
 | market | `inst_update` | Última actualización del pipeline 13F |
 | market | `categoria_update` | Última vez que se recalculó `categoriaActivo` (creada 2026-08-25) |
+| order_trader | `sync_broker` | Si podemos creerle a la fila — **independiente de `status`** (creada 2026-08-29) |
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
 `lastPrice DESC` con `LIMIT 150`, así que repetía siempre los mismos 150 símbolos más caros y dejaba
@@ -210,6 +211,39 @@ real; si no lo hay se conserva la vigente y solo se asigna `'N'` a símbolos que
 `trailing_annual == 0` sí escribe `'N'`: es un hallazgo, no un fallo de descarga.
 La fecha, en cambio, se sella **siempre** — un símbolo que falla debe irse al final de la cola o los
 fallos repetidos bloquean la rotación.
+
+**`order_trader.sync_broker` — status dice qué contestó el broker, sync_broker si le llegamos a preguntar.**
+Son dos preguntas distintas y estaban en una sola columna. `status` traduce al broker
+(`Submitted`/`Filled`/`CANCELED`); `sync_broker` dice si la fila refleja algo confirmado.
+
+| Valor | Qué pasó | Cómo lo trata el gate |
+|---|---|---|
+| `OK` | El broker devolvió `id_order` — la fila es fiable | Según `status`, como siempre |
+| `SIN_CONFIRMAR` | La orden salió pero el broker no devolvió `id_order` | **Cuenta como comprometida**, sin mirar `status` |
+| `HUERFANA` | Se buscó en el broker y no apareció tras el plazo de gracia | Deja de contar |
+
+Existe por el gate cruzado H5. `qty_comprometida_sell()` suma las SELL vivas de `order_trader` antes
+de que Preservation o GainsCapture emitan, así que la tabla tiene que ser el censo completo de lo
+comprometido. No lo era: el camino `[STATE-PRESERVED]` de `_preservation_run_vehiculo()` manda el STOP
+a IB **antes** de escribir la fila, y cuando el `order_id` no volvía no escribía nada. El STOP quedaba
+vivo en el broker e invisible para el sistema — un fantasma que el gate no veía y contra el que
+GainsCapture podía vender las mismas acciones.
+
+No se resolvió con `status` para no mezclar dos semánticas: un `status` inventado ("PENDIENTE") mentiría
+sobre lo que dijo el broker, que es justamente lo único que `status` debe decir.
+
+`SIN_CONFIRMAR` cuenta como comprometida a propósito: ante la duda el gate bloquea de más, nunca de
+menos — perder una venta es barato, comprometer acciones que no existen es lo que H5 existe para evitar.
+`resolve_unconfirmed_orders()` (`Modulos_Mysql.py`, llamada desde `Agente_SyncOrders` cada 300s) la
+resuelve contra IB. No puede cruzar por `clientOrderId` — ese es el dato que falta, y por eso
+`sync_orders_from_ib()` nunca la encuentra —, así que cruza por símbolo y precio de stop, igual que el
+reintento `[RETRY-OK]`; `price` guarda el límite (`stop * 0.99`) y el stop se reconstruye antes de
+comparar. Tras una hora sin aparecer la marca `HUERFANA`: IB publica la orden en live orders apenas la
+acepta, así que no estar significa que nunca entró **o** que ya se ejecutó. Los dos casos no se
+distinguen sin consultar ejecuciones y para el gate dan lo mismo — en ninguno quedan acciones
+comprometidas hacia adelante. Se loguea a ERROR porque el segundo caso sí importa para la auditoría.
+
+El comentario de la columna en MySQL repite este motivo — `SHOW FULL COLUMNS FROM order_trader`.
 
 **`inversion.divisa` / `inversion.factor_cambio` — son el recibo, no el pendiente.** La tabla
 `inversion` guarda **siempre USD**, para todos los vehículos. Los KPI del panel (Total dGyP, Total

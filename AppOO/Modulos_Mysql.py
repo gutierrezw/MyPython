@@ -6461,6 +6461,10 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         `symbol` acota a un símbolo — lo usa el gate de qty comprometida, que necesita saber cuántas
         acciones de ESE símbolo ya están comprometidas en el broker antes de proponer una venta nueva.
         Sin filtro devuelve el vehículo completo, como siempre.
+
+        Una fila con `sync_broker = 'SIN_CONFIRMAR'` entra sin importar su `status`: es una orden que
+        se envió al broker y no devolvió id_order, así que puede estar viva y su `status` no significa
+        nada todavía. Ante la duda cuenta como comprometida — el gate bloquea de más, nunca de menos.
         """
         _PENDING = ("New", "NEW", "Submitted", "PreSubmitted", "PendingSubmit", "PARTIALLY_FILLED")
         conn = self._conectar(tabla="select.order_trader")
@@ -6472,7 +6476,8 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             params = (account, vehiculo, *_PENDING) + ((symbol,) if symbol else ())
             cursor.execute(
                 f"SELECT * FROM order_trader WHERE account = %s AND vehiculo = %s "
-                f"AND status IN ({placeholders}){filtro_symbol} ORDER BY stampPlace DESC",
+                f"AND (status IN ({placeholders}) OR sync_broker = 'SIN_CONFIRMAR'){filtro_symbol} "
+                f"ORDER BY stampPlace DESC",
                 params,
             )
             rows = cursor.fetchall()
@@ -6481,6 +6486,89 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         except (Exception, connect.Error) as error:
             print(f"[Mysql::select_pending_orders]: {error}")
             return [], []
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def resolve_unconfirmed_orders(self, ib_client, account: str, horas_gracia: int = 1) -> tuple:
+        """Resuelve contra IB las filas marcadas `sync_broker = 'SIN_CONFIRMAR'`. Retorna (confirmadas, huerfanas).
+
+        Una fila queda SIN_CONFIRMAR cuando Preservation manda el STOP y IB no devuelve `order_id`:
+        la orden puede estar viva y el sistema no tiene con qué identificarla. Mientras siga así el
+        gate cruzado la cuenta como comprometida, así que hay que resolverla o bloquea el símbolo
+        para siempre.
+
+        No se puede cruzar por `clientOrderId` — ese es justamente el dato que falta, y por eso
+        `sync_orders_from_ib()` nunca la encuentra. Se cruza por símbolo y precio de stop, igual que
+        el reintento `[RETRY-OK]` de Preservation. `order_trader.price` guarda el límite
+        (`stop * 0.99`), así que el stop se reconstruye antes de comparar.
+
+        `horas_gracia` es el margen antes de dar una fila por huérfana. IB publica la orden en live
+        orders apenas la acepta, así que no aparecer tras una hora significa que nunca entró **o**
+        que ya se ejecutó. No se distinguen los dos casos sin consultar ejecuciones, y para el gate
+        dan lo mismo: en ninguno quedan acciones comprometidas hacia adelante. Se loguea fuerte
+        porque el segundo caso sí importa para la auditoría.
+        """
+        conn = self._conectar(tabla="select.order_trader")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, symbol, price, quantity, stampPlace FROM order_trader "
+                "WHERE account = %s AND sync_broker = 'SIN_CONFIRMAR'",
+                (account,),
+            )
+            pendientes = cursor.fetchall()
+            if not pendientes:
+                return 0, 0
+
+            try:
+                stops = ib_client.get_preservation_stops() or []
+            except Exception as e:
+                _logger.error(f"[resolve_unconfirmed_orders] get_preservation_stops: {e}")
+                return 0, 0
+
+            confirmadas = 0
+            huerfanas = 0
+            limite = datetime.now() - timedelta(hours=horas_gracia)
+            for row_id, symbol, price, qty, stamp in pendientes:
+                stop_esperado = float(price or 0) / 0.99
+                match = next(
+                    (
+                        s
+                        for s in stops
+                        if s.get("symbol") == symbol
+                        and abs(float(s.get("stop_price") or 0) - stop_esperado) < 0.02
+                    ),
+                    None,
+                )
+                if match:
+                    cursor.execute(
+                        "UPDATE order_trader SET id_order = %s, clientOrderId = %s, status = %s, "
+                        "sync_broker = 'OK' WHERE id = %s",
+                        (str(match.get("order_id")), str(match.get("order_id")), match.get("status"), row_id),
+                    )
+                    confirmadas += 1
+                    _logger.warning(
+                        f"[resolve_unconfirmed_orders] {symbol}: confirmada contra IB → "
+                        f"order_id={match.get('order_id')} status={match.get('status')}"
+                    )
+                elif stamp and stamp < limite:
+                    cursor.execute(
+                        "UPDATE order_trader SET sync_broker = 'HUERFANA' WHERE id = %s", (row_id,)
+                    )
+                    huerfanas += 1
+                    _logger.error(
+                        f"[resolve_unconfirmed_orders] {symbol}: {qty} acc @ stop {stop_esperado:.2f} no "
+                        f"aparece en IB tras {horas_gracia}h → HUERFANA. Nunca entro o ya se ejecuto; "
+                        "deja de contar como comprometida. Revisar contra las ejecuciones del dia"
+                    )
+            conn.commit()
+            return confirmadas, huerfanas
+        except (Exception, connect.Error) as error:
+            print(f"[Mysql::resolve_unconfirmed_orders]: {error}")
+            return 0, 0
         finally:
             if cursor:
                 cursor.close()

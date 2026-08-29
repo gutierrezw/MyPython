@@ -1287,6 +1287,38 @@ class AgentManager:
                                     )
                                 except Exception as _e:
                                     self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando ENVIADA → {_e}")
+                            else:
+                                # La orden salio a IB pero no volvio order_id. Antes no se escribia nada
+                                # y el STOP quedaba fantasma: vivo en el broker e invisible para
+                                # qty_comprometida_sell(), que es lo que consultan Preservation y
+                                # GainsCapture antes de emitir (gate cruzado H5) — el gate no lo veia y
+                                # entre los dos se podian comprometer mas acciones de las que hay.
+                                # La fila queda con sync_broker=SIN_CONFIRMAR: el gate la cuenta como
+                                # comprometida y Agente_SyncOrders la resuelve contra el broker. Sin
+                                # clientOrderId, que es justamente el dato que falta.
+                                limit_price = float(round(stop_final * 0.99, 2))
+                                values = {
+                                    "account": account,
+                                    "vehiculo": vehiculo,
+                                    "conid": int(conid),
+                                    "orderType": "STP LMT",
+                                    "price": limit_price,
+                                    "side": "SELL",
+                                    "intent": "PRESERV",
+                                    "tif": "GTC",
+                                    "quantity": float(qty),
+                                    "stampPlace": datetime.now(),
+                                    "stampSubmit": datetime.now(),
+                                    "hash_id_oportunidad": hash_id,
+                                    "json_detalle": json.dumps(_det),
+                                    "sync_broker": "SIN_CONFIRMAR",
+                                }
+                                self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
+                                self._preservation_logger.error(
+                                    f"[SIN-CONFIRMAR] {symbol}: STP LMT {qty} acc @ {stop_final:.2f} enviada "
+                                    "sin order_id — fila marcada sync_broker=SIN_CONFIRMAR, cuenta como "
+                                    "comprometida hasta que el broker la confirme o la descarte"
+                                )
                             self.RepositorioOportunidades.insert_preservation_order(
                                 account,
                                 vehiculo,
