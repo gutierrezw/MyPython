@@ -65,19 +65,18 @@ class AnalisisBase:
         self.account = account
         self.positions = positions or []
         self.top = 3
+        # Solo las ventanas que se repueblan sin efectos colaterales muestran el boton ⟳.
+        # AnalisisFCI lo habilita; Crypto/Stock lanzan hilos al poblar y no se pueden redibujar en caliente.
+        self.refresh_habilitado = False
+        # Id del after del ciclo automatico (solo Crypto lo usa). Vive en self y no en una local
+        # porque refrescar() tiene que cancelarlo: si no, cada refresh manual deja un ciclo mas vivo.
+        self._after_id = None
 
         # DataFrames para análisis
         self.df_lotes = pd.DataFrame()
 
     def mostrar_ventana(self):
         """Muestra ventana de análisis con estilo DarkCyan"""
-
-        def eexit():
-            # Desvincular mousewheel antes de cerrar
-            self.canvas.unbind_all("<MouseWheel>")
-            self.analisis_window.destroy()
-            AnalisisBase._ventana_activa = None
-
         try:
             # Cerrar ventana anterior si existe
             if AnalisisBase._ventana_activa is not None:
@@ -99,7 +98,7 @@ class AnalisisBase:
 
             self.analisis_window.resizable(False, False)
             self.analisis_window.config(bg=self.BG_COLOR)
-            self.analisis_window.protocol("WM_DELETE_WINDOW", eexit)
+            self.analisis_window.protocol("WM_DELETE_WINDOW", self.cerrar_ventana)
 
             # Canvas con scroll
             self.canvas = tk.Canvas(self.analisis_window, bg=self.BG_COLOR, highlightthickness=0)
@@ -119,21 +118,126 @@ class AnalisisBase:
             self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-            # Poblar contenido específico del vehículo
-            self._poblar_contenido(self.scrollable_frame)
-
-            # Botón cerrar al final
-            tk.Button(
-                self.scrollable_frame,
-                text="Cancel",
-                width=10,
-                bg="gray",
-                fg="white",
-                command=eexit,
-            ).grid(row=999, column=0, columnspan=2, pady=20)
+            self._render_contenido()
         except Exception as e:
             _logger.error(f"[AnalisisBase.mostrar_ventana]: {e}")
             traceback.print_exc()
+
+    def cerrar_ventana(self):
+        """Cierra la ventana, corta el ciclo automatico y libera el binding global del mousewheel.
+
+        El destroy va protegido y el estado se limpia igual: Tk recorre los hijos y a veces no puede
+        borrar el comando Tcl de un canvas de matplotlib que ya se habia ido. Sin proteccion el
+        destroy corta a mitad, `_ventana_activa` queda apuntando a una ventana rota y no se puede
+        abrir otra hasta reiniciar la app.
+        """
+        self._cancelar_ciclo()
+        try:
+            self.canvas.unbind_all("<MouseWheel>")
+        except tk.TclError:
+            pass
+        self._destruir(self.analisis_window)
+        AnalisisBase._ventana_activa = None
+
+    def refrescar(self):
+        """Vuelve a leer los datos y redibuja el contenido sin cerrar la ventana.
+
+        Conserva la posicion del scroll: el boton vive arriba de cada grafico y el sentido es
+        quedarse mirando el mismo grafico, no volver al encabezado.
+        """
+        try:
+            self._cancelar_ciclo()
+            pos = self.canvas.yview()[0]
+            for w in self.scrollable_frame.winfo_children():
+                self._destruir(w)
+            self._render_contenido()
+            self.scrollable_frame.update_idletasks()
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            self.canvas.yview_moveto(pos)
+        except Exception as e:
+            _logger.error(f"[AnalisisBase.refrescar]: {e}")
+            traceback.print_exc()
+
+    def boton_refrescar(self, parent, propia_fila=False):
+        """Agrega el boton ⟳ a la botonera de un grafico. No hace nada si el vehiculo no lo habilita.
+
+        `propia_fila` es para los graficos que no tienen botonera propia: arma una fila alineada
+        a la derecha dentro del frame del grafico.
+        """
+        if not self.refresh_habilitado:
+            return None
+        if propia_fila:
+            fila = tk.Frame(parent, bg=self.CG_COLOR)
+            fila.pack(anchor="e", padx=4)
+            parent = fila
+        btn = tk.Button(
+            parent,
+            text="⟳",
+            width=3,
+            bg=self.CG_COLOR,
+            fg=self.BG_COLOR,
+            relief=tk.FLAT,
+            command=self.refrescar,
+        )
+        btn.pack(side="left", padx=(6, 0))
+        return btn
+
+    def _destruir(self, widget):
+        """Destruye un widget de abajo hacia arriba, protegiendo cada nodo.
+
+        El destroy de Tk recorre los hijos en cadena: si uno falla — pasa con los canvas de
+        matplotlib, cuyo comando Tcl ya no existe — la cadena se corta ahi y el resto queda vivo.
+        En Crypto eso dejaba la ventana en pie pero vacia, y habia que cerrarla dos veces.
+        Bajando primero y protegiendo cada nivel, un hijo roto no arrastra a los demas.
+        """
+        try:
+            hijos = list(widget.winfo_children())
+        except tk.TclError:
+            hijos = []
+        for h in hijos:
+            self._destruir(h)
+        try:
+            widget.destroy()
+        except tk.TclError as e:
+            _logger.debug(f"[AnalisisBase._destruir] {e}")
+
+    def _cancelar_ciclo(self):
+        """Cancela el after del ciclo automatico si hay uno pendiente."""
+        if self._after_id:
+            try:
+                self.canvas.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+
+    def formato_eje_tiempo(self, eje, dias):
+        """Escala la etiqueta del eje X a la ventana: dia en 1m, semana en 3m, mes de 6m en adelante.
+
+        Con "%b-%y" fijo, en las ventanas cortas todas las marcas repiten el mismo mes y no informan nada.
+        El caso largo vuelve a poner AutoDateLocator a proposito: sin eso, al pasar de 1m a 1y quedaria
+        el locator por dia.
+        """
+        if dias <= 30:
+            eje.xaxis.set_major_locator(mdates.DayLocator(interval=3))
+            eje.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
+        elif dias <= 90:
+            eje.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MO, interval=2))
+            eje.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
+        else:
+            eje.xaxis.set_major_locator(mdates.AutoDateLocator())
+            eje.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
+
+    def _render_contenido(self):
+        """Puebla el frame scrollable y cierra con el boton Cancel. Compartido por mostrar_ventana y refrescar."""
+        self._poblar_contenido(self.scrollable_frame)
+        tk.Button(
+            self.scrollable_frame,
+            text="Cancel",
+            width=10,
+            bg="gray",
+            fg="white",
+            command=self.cerrar_ventana,
+        ).grid(row=999, column=0, columnspan=2, pady=20)
 
     def _poblar_contenido(self, frame):
         """
@@ -303,7 +407,7 @@ class AnalisisBase:
                 ax.set_ylabel("Rend. Acum. (%)", fontsize=7, color="white")
                 ax.yaxis.set_label_position("right")
                 ax.yaxis.tick_right()
-                ax.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
+                self.formato_eje_tiempo(ax, dias)
                 ax.tick_params(axis="x", rotation=45)
                 ax.tick_params(colors="white", labelsize=7)
                 ax.grid(True, alpha=0.3, color="gray")
@@ -360,6 +464,7 @@ class AnalisisBase:
                 command=_toggle_idx,
             )
             btn_idx.pack(side="left", padx=(4, 0))
+            self.boton_refrescar(frame_btns)
 
             # Dibujo inicial: 1 año
             _draw(365)
@@ -579,7 +684,7 @@ class AnalisisBase:
                             fontweight="bold",
                         )
 
-                ax.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
+                self.formato_eje_tiempo(ax, _estado["dias"])
                 ax.set_ylabel("Rend. Acum. (%)", fontsize=6, color="white")
                 ax.yaxis.set_label_position("right")
                 ax.yaxis.tick_right()
@@ -629,7 +734,7 @@ class AnalisisBase:
                 ax2.set_ylabel("Rot", fontsize=5, color="white", rotation=0, labelpad=14)
                 ax2.yaxis.set_label_position("right")
                 ax2.yaxis.tick_right()
-                ax2.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
+                self.formato_eje_tiempo(ax2, _estado["dias"])
                 ax2.tick_params(colors="white", labelsize=5)
                 ax2.tick_params(axis="x", rotation=30, labelsize=5)
                 ax2.spines[["top", "left"]].set_visible(False)
@@ -682,6 +787,7 @@ class AnalisisBase:
                     relief=tk.FLAT,
                     command=lambda m=m: _dibujar(modo=m),
                 ).pack(side="left")
+            self.boton_refrescar(frame_btns)
 
             _dibujar(dias=180)
             return row + 1
@@ -719,6 +825,9 @@ class AnalisisBase:
         try:
             for w in frame_chart.winfo_children():
                 w.destroy()
+            # El boton se arma antes del corte por datos vacios: si la descarga fallo, refrescar
+            # es justo lo que hace falta y no puede quedar fuera de alcance.
+            self.boton_refrescar(frame_chart, propia_fila=True)
             if df_hist.empty or self.df_lotes.empty:
                 tk.Label(
                     frame_chart,
@@ -900,6 +1009,7 @@ class AnalisisFCI(AnalisisBase):
         self.metricas = pd.DataFrame()
         self.fondos_en_cartera: set = set()
         self.fondo_a_ticket: dict = {}
+        self.refresh_habilitado = True
 
     def _rf_rv_split(self, total_ars: float, factor: float) -> dict:
         """Calcula % RF vs RV usando df_lotes (ya poblado por obtener_lotes_desde_info).
@@ -1174,8 +1284,7 @@ class AnalisisFCI(AnalisisBase):
 
                 ax.set_ylabel("Rend. Acum. (%)", color="white", fontsize=7)
                 ax.tick_params(colors="white", labelsize=7)
-                ax.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
-                ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+                self.formato_eje_tiempo(ax, _ctx["dias"])
                 fg.autofmt_xdate(rotation=30, ha="right")
 
                 handles, labels = ax.get_legend_handles_labels()
@@ -1225,6 +1334,7 @@ class AnalisisFCI(AnalisisBase):
                     relief=tk.FLAT,
                     command=lambda m=m: _dibujar(modo=m),
                 ).pack(side="left")
+            self.boton_refrescar(frame_btns)
 
             return row + 1, _dibujar
         except Exception as e:
@@ -1644,6 +1754,7 @@ class AnalisisCrypto(AnalisisBase):
     def __init__(self, master, info, repositorio, colors, vehiculo="Crypto", positions=None):
         super().__init__(master, info, repositorio, colors, vehiculo)
         self._positions = positions or []
+        self.refresh_habilitado = True
 
     def _calcular_beta_portfolio(self, df_hist):
         """Beta portfolio Crypto vs BTC usando la misma data histórica ya descargada."""
@@ -1731,12 +1842,6 @@ class AnalisisCrypto(AnalisisBase):
 
     def _poblar_contenido(self, frame):
         """Implementación específica para Crypto"""
-
-        def _actualizar():
-            for w in frame.winfo_children():
-                w.destroy()
-            self._poblar_contenido(frame)
-
         self.obtener_lotes_desde_info()
         resumen = self.obtener_resumen()
 
@@ -1790,8 +1895,9 @@ class AnalisisCrypto(AnalisisBase):
 
         row = self.crear_grafico_vs_indice(parent=frame, row=row)
 
-        after_id = frame.after(60000, _actualizar)
-        frame.winfo_toplevel().bind("<Destroy>", lambda e: frame.after_cancel(after_id), add="+")
+        # Ciclo automatico cada 60s por el mismo camino que el boton ⟳: un solo repoblado, que ademas
+        # repone el boton Cancel (el ciclo anterior destruia el frame entero y lo dejaba afuera).
+        self._after_id = frame.after(60000, self.refrescar)
 
     def _seccion_deuda(self, frame, row):
         """Sección de análisis de préstamos flexibles Binance con simulador loan_distribute."""
@@ -1971,6 +2077,7 @@ class AnalisisCrypto(AnalisisBase):
             canvas_fig = FigureCanvasTkAgg(fg, master=frm)
             canvas_fig.draw()
             canvas_fig.get_tk_widget().pack(fill="x", expand=True)
+            self.boton_refrescar(frm, propia_fila=True)
             frm._fg = fg
             frm._canvas = canvas_fig
             return row + 1, frm
@@ -2196,42 +2303,46 @@ class AnalisisCrypto(AnalisisBase):
 
         def _actualizar_live():
             nonlocal frm_grafico, prestamos, earn_map
+            # El widget muere en cada repoblado del panel (ciclo de 60s o boton ⟳) y el after seguia
+            # reprogramandose sobre un widget destruido: TclError en cada vuelta. Si no existe, el ciclo
+            # termina — el repoblado ya dejo uno nuevo corriendo sobre el tree nuevo.
+            if not tree_result.winfo_exists():
+                return
             try:
                 nuevos = _get_loan_data()
-                if not nuevos:
-                    tree_result.after(10000, _actualizar_live)
-                    return
-                # actualizar treeview
-                iids = tree_result.get_children()
-                for iid, p in zip(iids, nuevos):
-                    vals = tree_result.item(iid, "values")
-                    if vals[0] == "TOTAL":
-                        continue
-                    tree_result.set(iid, "Col USD", f"{p['col_usd']:,.2f}")
-                    tree_result.set(iid, "LTV actual", f"{p['ltv']:.2%}")
-                    tree_result.set(iid, "USDT Actual", f"{p['deuda']:,.2f}")
-                    tree_result.set(iid, "Pedir USDT", "-")
-                    tree_result.set(iid, "LTV final", f"{p['ltv']:.2%}")
-                total_iid = iids[-1] if iids else None
-                if total_iid:
-                    t_col = sum(p["col_usd"] for p in nuevos)
-                    t_deu = sum(p["deuda"] for p in nuevos)
-                    t_ltv = t_deu / t_col if t_col > 0 else 0
-                    tree_result.set(total_iid, "Col USD", f"{t_col:,.2f}")
-                    tree_result.set(total_iid, "USDT Actual", f"{t_deu:,.2f}")
-                    tree_result.set(total_iid, "LTV final", f"{t_ltv:.2%}")
-                # actualizar closures para que _calcular_distribucion use datos frescos
-                earn_nuevo = {b["asset"]: b.get("usdt_value", 0.0) for b in ServiciosCrypto().earn_spot_balances()}
-                prestamos = nuevos
-                earn_map = earn_nuevo
-                # redibujar gráfico in-place — sin destroy para eliminar parpadeo
-                if frm_grafico is not None and hasattr(frm_grafico, "_fg"):
-                    frm_grafico._fg.clear()
-                    _draw_grafico_en_fig(frm_grafico._fg, nuevos, earn_nuevo)
-                    frm_grafico._canvas.draw_idle()
+                if nuevos:
+                    # actualizar treeview
+                    iids = tree_result.get_children()
+                    for iid, p in zip(iids, nuevos):
+                        vals = tree_result.item(iid, "values")
+                        if vals[0] == "TOTAL":
+                            continue
+                        tree_result.set(iid, "Col USD", f"{p['col_usd']:,.2f}")
+                        tree_result.set(iid, "LTV actual", f"{p['ltv']:.2%}")
+                        tree_result.set(iid, "USDT Actual", f"{p['deuda']:,.2f}")
+                        tree_result.set(iid, "Pedir USDT", "-")
+                        tree_result.set(iid, "LTV final", f"{p['ltv']:.2%}")
+                    total_iid = iids[-1] if iids else None
+                    if total_iid:
+                        t_col = sum(p["col_usd"] for p in nuevos)
+                        t_deu = sum(p["deuda"] for p in nuevos)
+                        t_ltv = t_deu / t_col if t_col > 0 else 0
+                        tree_result.set(total_iid, "Col USD", f"{t_col:,.2f}")
+                        tree_result.set(total_iid, "USDT Actual", f"{t_deu:,.2f}")
+                        tree_result.set(total_iid, "LTV final", f"{t_ltv:.2%}")
+                    # actualizar closures para que _calcular_distribucion use datos frescos
+                    earn_nuevo = {b["asset"]: b.get("usdt_value", 0.0) for b in ServiciosCrypto().earn_spot_balances()}
+                    prestamos = nuevos
+                    earn_map = earn_nuevo
+                    # redibujar gráfico in-place — sin destroy para eliminar parpadeo
+                    if frm_grafico is not None and hasattr(frm_grafico, "_fg"):
+                        frm_grafico._fg.clear()
+                        _draw_grafico_en_fig(frm_grafico._fg, nuevos, earn_nuevo)
+                        frm_grafico._canvas.draw_idle()
             except Exception as e:
                 _logger.error(f"_actualizar_live: {e}")
-            tree_result.after(10000, _actualizar_live)
+            if tree_result.winfo_exists():
+                tree_result.after(10000, _actualizar_live)
 
         tree_result.after(10000, _actualizar_live)
 
@@ -2585,6 +2696,7 @@ class AnalisisStock(AnalisisBase):
         super().__init__(
             master, info, repositorio, colors, vehiculo, summary=summary, account=account, positions=positions
         )
+        self.refresh_habilitado = True
 
     def _poblar_contenido(self, frame):
         """Implementación específica para Stock"""
