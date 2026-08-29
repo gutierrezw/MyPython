@@ -6455,18 +6455,25 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.close()
             conn.close()
 
-    def select_pending_orders(self, account: str, vehiculo: str) -> tuple:
-        """Retorna todas las órdenes pendientes (sin importar fecha) para account/vehiculo."""
+    def select_pending_orders(self, account: str, vehiculo: str, symbol: str = None) -> tuple:
+        """Retorna todas las órdenes pendientes (sin importar fecha) para account/vehiculo.
+
+        `symbol` acota a un símbolo — lo usa el gate de qty comprometida, que necesita saber cuántas
+        acciones de ESE símbolo ya están comprometidas en el broker antes de proponer una venta nueva.
+        Sin filtro devuelve el vehículo completo, como siempre.
+        """
         _PENDING = ("New", "NEW", "Submitted", "PreSubmitted", "PendingSubmit", "PARTIALLY_FILLED")
         conn = self._conectar(tabla="select.order_trader")
         cursor = None
         try:
             cursor = conn.cursor()
             placeholders = ",".join(["%s"] * len(_PENDING))
+            filtro_symbol = " AND symbol = %s" if symbol else ""
+            params = (account, vehiculo, *_PENDING) + ((symbol,) if symbol else ())
             cursor.execute(
                 f"SELECT * FROM order_trader WHERE account = %s AND vehiculo = %s "
-                f"AND status IN ({placeholders}) ORDER BY stampPlace DESC",
-                (account, vehiculo, *_PENDING),
+                f"AND status IN ({placeholders}){filtro_symbol} ORDER BY stampPlace DESC",
+                params,
             )
             rows = cursor.fetchall()
             ix = [col[0] for col in cursor.description]
