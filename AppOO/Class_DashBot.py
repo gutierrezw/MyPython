@@ -1132,7 +1132,9 @@ class ClassAgenteIA:
             # llegaba a comprometer más acciones de las que hay.
             _pos = DataHub.quantiza_qty(vehiculo, symbol, sym_data.get("position") or 0)
             _comprometida = DataHub.qty_comprometida_sell(account, vehiculo, symbol, logger=_gc_logger)
-            _disp = _pos - _comprometida
+            # la resta se cuantiza: `_comprometida` viene crudo de order_trader y en Crypto el
+            # remanente cae fuera del stepSize (Binance rechaza la orden). En Stock es un int().
+            _disp = DataHub.quantiza_qty(vehiculo, symbol, _pos - _comprometida)
             if _pos > 0 and _disp <= 0:
                 _gc_logger.warning(
                     f"GainsCapture({symbol}): position {_pos} ya comprometida en ventas vivas "
