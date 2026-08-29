@@ -4322,7 +4322,34 @@ class WidgetVehiculo(TickerInfo):
         except Exception as e:
             self.logger.error(f"_abrir_tradingview({symbol}) clases: {e}")
 
-        abrir_tradingview(symbol=symbol, vehiculo=self.vehiculo, posicion=posicion, lotes=lotes, clases=clases)
+        # ordenes del activo — pendientes (de cualquier dia) + las que se ejecutaron hoy.
+        # La consulta sale de order_trader, que unifica IB y Binance: el panel no distingue broker.
+        ordenes = []
+        try:
+            _rows, _ix = self.RepositorioOportunidades.select_order_trader_today(
+                self.account, self.vehiculo, symbol=symbol
+            )
+            for _r in _rows or []:
+                _o = dict(zip(_ix, _r))
+                _stamp = _o.get("stampPlace")
+                _qty = float(_o.get("quantity") or 0)
+                _price = float(_o.get("price") or 0)
+                ordenes.append({
+                    "hora": _stamp.strftime("%d/%m %H:%M") if _stamp else "",
+                    "side": (_o.get("side") or "").upper(),
+                    "tipo": _o.get("orderType") or "",
+                    "price": _price,
+                    "qty": _qty,
+                    "total": _price * _qty,
+                    "status": _o.get("status") or "",
+                    "intent": _o.get("intent") or "",
+                    "sync": _o.get("sync_broker") or "",
+                })
+        except Exception as e:
+            self.logger.error(f"_abrir_tradingview({symbol}) ordenes: {e}")
+
+        abrir_tradingview(symbol=symbol, vehiculo=self.vehiculo, posicion=posicion, lotes=lotes, clases=clases,
+                          ordenes=ordenes)
 
     def _abrir_grafico_estrategia(self, symbol, Xposition=None):
         """Abre el gráfico de estrategia compartido para el símbolo seleccionado."""

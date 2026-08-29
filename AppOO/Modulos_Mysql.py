@@ -6430,19 +6430,25 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         except conn.ProgrammingError as error:
             print("[Mysql:: select_order_trader({})]: {}".format(vehiculo, error))
 
-    def select_order_trader_today(self, account: str, vehiculo: str) -> tuple:
-        """Retorna órdenes de hoy (cualquier status) + órdenes activas de días anteriores (ej: STOPs de preservation)."""
+    def select_order_trader_today(self, account: str, vehiculo: str, symbol: str = None) -> tuple:
+        """Retorna órdenes de hoy (cualquier status) + órdenes activas de días anteriores (ej: STOPs de preservation).
+
+        `symbol` acota a un símbolo — lo usa el panel de TradingView, que muestra las órdenes del activo
+        que se está mirando. Sin filtro devuelve el vehículo completo, como siempre.
+        """
         conn = self._conectar(tabla="select.order_trader")
         cursor = None
         try:
             cursor = conn.cursor()
+            filtro_symbol = " AND symbol = %s" if symbol else ""
+            params = (account, vehiculo) + ((symbol,) if symbol else ())
             cursor.execute(
                 "SELECT * FROM order_trader "
                 "WHERE account = %s AND vehiculo = %s "
                 "AND (DATE(stampPlace) = CURDATE() "
                 "     OR status IN ('New','NEW','Submitted','PreSubmitted','PendingSubmit','PARTIALLY_FILLED')) "
-                "ORDER BY stampPlace DESC",
-                (account, vehiculo),
+                f"{filtro_symbol} ORDER BY stampPlace DESC",
+                params,
             )
             rows = cursor.fetchall()
             ix = [col[0] for col in cursor.description]

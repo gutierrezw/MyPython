@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TradingView — App Panel
 // @namespace    http://tampermonkey.net/
-// @version      2.3
+// @version      2.7
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -20,7 +20,9 @@
     let lastPosicion = null;
 
     // ── TV native drawings ─────────────────────────────────────────────────
-    let _tvShapes = { zona: null, avgline: null, objline: null };
+    let _tvShapes = { zona: null, avgline: null, objline: null, ordenes: [] };
+    // status que el broker considera viva — misma lista que select_pending_orders() en Python
+    const _PENDING_TV = ["NEW", "SUBMITTED", "PRESUBMITTED", "PENDINGSUBMIT", "PARTIALLY_FILLED"];
     let _lastDrawKey = "";   // evitar redibujar si los valores no cambiaron
     let _dec = 2;            // decimales precio: 2=Stock/FCI, 4=Crypto
     function tvChart() {
@@ -42,16 +44,20 @@
                     const esNuestro =
                         (s.name === "rectangle" && p.backgroundColor === "rgba(200,170,0,0.12)") ||
                         (s.name === "horizontal_line" && p.linecolor === "#FFD700") ||
-                        (s.name === "horizontal_line" && p.linecolor === "#2196F3");
+                        (s.name === "horizontal_line" && p.linecolor === "#2196F3") ||
+                        (s.name === "horizontal_line" && p.linecolor === "#26a69a") ||
+                        (s.name === "horizontal_line" && p.linecolor === "#ef5350");
                     if (esNuestro) ac.removeEntity(s.id);
                 } catch (_) { }
             });
         } catch (_) { }
 
         ["zona", "avgline", "objline"].forEach(k => { _tvShapes[k] = null; });
+        _tvShapes.ordenes = [];
     }
 
-    function drawTvShapes(posicion, lotes) {
+    function drawTvShapes(posicion, lotes, ordenes) {
+        ordenes = ordenes || [];
         const ac = tvChart();
         if (!ac) return;
 
@@ -74,7 +80,8 @@
 
         // Evitar redibujar si los valores no cambiaron
         const objetivo = posicion.objetivo || 0;
-        const drawKey = `${avgcost}|${minP}|${maxP}|${t1}|${objetivo}`;
+        const ordKey = ordenes.map(o => `${o.side}${o.price}${o.qty}${o.status}`).join(",");
+        const drawKey = `${avgcost}|${minP}|${maxP}|${t1}|${objetivo}|${ordKey}`;
         if (drawKey === _lastDrawKey) return;
         _lastDrawKey = drawKey;
 
@@ -139,6 +146,36 @@
                 );
             } catch (_) { }
         }
+
+        // Una linea punteada por orden, al precio en que se opero o se espera operar.
+        // Verde BUY / rojo SELL, los mismos colores de la botonera. Las ejecutadas van con
+        // la cantidad en la etiqueta — es el "donde se compro"; las abiertas se marcan como tales.
+        ordenes.forEach(o => {
+            const precio = o.price || 0;
+            if (!precio) return;
+            const color = (o.side || "") === "BUY" ? "#26a69a" : "#ef5350";
+            const abierta = _PENDING_TV.includes((o.status || "").toUpperCase()) || o.sync === "SIN_CONFIRMAR";
+            const etiqueta = abierta
+                ? `${o.side} ${fmt(o.qty, _dec)} abierta $${precio.toFixed(_dec)}`
+                : `${o.side} ${fmt(o.qty, _dec)} $${precio.toFixed(_dec)}`;
+            try {
+                _tvShapes.ordenes.push(ac.createShape(
+                    { price: precio },
+                    {
+                        shape: "horizontal_line",
+                        lock: false,
+                        overrides: {
+                            linecolor: color,
+                            linewidth: 1,
+                            linestyle: 1,
+                            showLabel: true,
+                            text: etiqueta,
+                            textcolor: color,
+                        },
+                    }
+                ));
+            } catch (_) { }
+        });
     }
 
     // ── Heartbeat ──────────────────────────────────────────────────────────
@@ -159,13 +196,152 @@
         }, 2000);
     }
 
-    // ── Guardar layout TV antes de navegar (evita mensaje "perderás cambios")
+    function tvApi() {
+        try { return unsafeWindow.TradingViewApi || null; } catch (_) { return null; }
+    }
+
+    // ── Guardar el layout en el servidor de TV ─────────────────────────────
+    // El Ctrl+S sintetico va ultimo a proposito: es un KeyboardEvent con isTrusted=false y TV
+    // puede ignorarlo. Mientras fue el unico camino, lo que parecia "guardo" era la Autosave de
+    // TV disparando sola en el unload — por eso al cambiar temporalidad y salir se perdian cambios.
     function tvSave() {
+        const api = tvApi();
+        if (api) {
+            for (const m of ["saveChartToServer", "saveChart"]) {
+                if (typeof api[m] === "function") {
+                    try {
+                        api[m]();
+                        console.log(`[tv_panel] layout guardado via ${m}()`);
+                        return true;
+                    } catch (e) {
+                        console.warn(`[tv_panel] ${m}() fallo: ${e}`);
+                    }
+                }
+            }
+        }
+        // Clic real sobre el control "Save" de la barra de TV. Un .click() programatico si dispara
+        // el handler de React, a diferencia del KeyboardEvent sintetico. Solo esta presente cuando
+        // el layout tiene cambios sin guardar — que es exactamente cuando hace falta.
+        if (clickSaveDOM()) {
+            console.log("[tv_panel] layout guardado con clic en el boton Save de TV");
+            return true;
+        }
         try {
-            unsafeWindow.document.dispatchEvent(new KeyboardEvent("keydown", {
-                key: "s", ctrlKey: true, bubbles: true, cancelable: true
-            }));
+            const ev = () => new KeyboardEvent("keydown", {
+                key: "s", code: "KeyS", keyCode: 83, which: 83,
+                ctrlKey: true, bubbles: true, cancelable: true
+            });
+            unsafeWindow.document.dispatchEvent(ev());
+            unsafeWindow.dispatchEvent(ev());
+            console.log("[tv_panel] layout: Ctrl+S sintetico (ultimo recurso)");
         } catch (_) { }
+        return false;
+    }
+
+    // Busca el "Save" que TV muestra en rojo bajo el nombre del layout cuando hay cambios sin
+    // guardar. Se acota al bloque de save/load del header para no clickear cualquier cosa que
+    // diga Save en la pagina.
+    function clickSaveDOM() {
+        try {
+            const cont = document.querySelector(
+                "#header-toolbar-save-load, [data-name='save-load-menu'], [class*='saveLoad']"
+            );
+            const raiz = cont || document.querySelector("#header-toolbar") || document;
+            const cand = Array.from(raiz.querySelectorAll("button, [role='button'], a, span, div"))
+                .find(el => /^(save|guardar)$/i.test((el.textContent || "").trim()) && el.offsetParent !== null);
+            if (cand) { cand.click(); return true; }
+        } catch (_) { }
+        return false;
+    }
+
+    // Diagnostico de una sola vez: que expone realmente TradingViewApi en esta version de TV.
+    // Sin esto solo se puede adivinar el nombre del metodo de guardado.
+    function diagnosticoApi() {
+        const api = tvApi();
+        if (!api) { console.log("[tv_panel] TradingViewApi todavia no existe"); return false; }
+        const props = new Set();
+        for (let o = api; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+            Object.getOwnPropertyNames(o).forEach(k => props.add(k));
+        }
+        const todas = [...props].sort();
+        const guardado = todas.filter(k => /save|chart|layout|subscri/i.test(k));
+        console.log("[tv_panel] TradingViewApi — relacionadas con guardado:", guardado);
+        console.log("[tv_panel] TradingViewApi — todas:", todas);
+        return true;
+    }
+
+    // ── Guardado propio del layout ────────────────────────────────────────
+    // La Autosave de TradingView guarda tarde (al descargar la pagina o cada varios minutos), asi
+    // que un cambio de temporalidad o un objeto recien dibujado se pierde si el browser se va antes.
+    // Se vigila una firma del layout y se guarda al detectar un cambio real.
+    let _layoutSig = "";
+    let _saveTimer = null;
+
+    function layoutFirma() {
+        const ac = tvChart();
+        if (!ac) return "";
+        let res = "";
+        try { res = ac.getResolution() || ""; } catch (_) { }
+        // Los shapes que dibuja este script se excluyen: si no, cada redibujo nuestro
+        // dispararia un guardado que el usuario no pidio.
+        const propios = new Set(Object.values(_tvShapes).flat().filter(Boolean).map(String));
+        let shapes = [];
+        try {
+            shapes = (ac.getAllShapes() || [])
+                .filter(s => !propios.has(String(s.id)))
+                .map(s => {
+                    // Los puntos entran en la firma para detectar que un objeto se movio,
+                    // no solo que se agrego o se borro.
+                    let pts = "";
+                    try {
+                        pts = (ac.getShapeById(s.id).getPoints() || [])
+                            .map(p => `${Math.round(p.time || 0)}:${p.price}`).join("/");
+                    } catch (_) { }
+                    return `${s.name}#${s.id}@${pts}`;
+                });
+        } catch (_) { }
+        return `${res}|${shapes.sort().join(",")}`;
+    }
+
+    // Debounce comun a todos los disparadores: mientras se arrastra un objeto o se tipea una
+    // temporalidad el cambio llega varias veces. Se guarda cuando la cosa se queda quieta.
+    function guardarPronto(ms = 3000) {
+        clearTimeout(_saveTimer);
+        _saveTimer = setTimeout(() => { _layoutSig = layoutFirma(); tvSave(); }, ms);
+    }
+
+    function vigilarLayout() {
+        const firma = layoutFirma();
+        if (!firma) return;
+        if (!_layoutSig) { _layoutSig = firma; return; }   // primera lectura: linea base, no se guarda
+        if (firma === _layoutSig) return;
+        _layoutSig = firma;
+        guardarPronto();
+    }
+
+    // Eventos propios de TV — mas fiables que el sondeo, que queda igual como red de seguridad
+    // (el sondeo no ve un cambio que TV revierte y vuelve a aplicar entre dos lecturas).
+    function suscribirEventosTV() {
+        const api = tvApi();
+        if (!api || typeof api.subscribe !== "function") return false;
+        let ok = false;
+        // onAutoSaveNeeded es el evento con el que TV avisa que el layout quedo sucio.
+        ["onAutoSaveNeeded", "drawing_event"].forEach(ev => {
+            try { api.subscribe(ev, () => guardarPronto()); ok = true; } catch (_) { }
+        });
+        try {
+            tvChart().onIntervalChanged().subscribe(null, () => guardarPronto());
+            ok = true;
+        } catch (_) { }
+        if (ok) console.log("[tv_panel] suscrito a los eventos de layout de TV");
+        return ok;
+    }
+
+    // Guardado a la salida — el reclamo concreto: cambiar temporalidad y cerrar sin perder nada.
+    // Se guarda ya, sin esperar el debounce; en ese momento no hay tiempo para esperar.
+    function guardarAlSalir() {
+        clearTimeout(_saveTimer);
+        tvSave();
     }
 
     // ── Navegar a nuevo símbolo preservando timeframe ─────────────────────
@@ -181,10 +357,12 @@
             const m = window.location.href.match(/[?&]interval=([^&]+)/);
             if (m) interval = `&interval=${m[1]}`;
         }
+        clearTimeout(_saveTimer);
         tvSave();
+        // 800ms y no 300: saveChartToServer() sale por red y hay que darle tiempo de despachar.
         setTimeout(() => {
             window.location.href = `https://www.tradingview.com/chart/?symbol=${prefix}${symbol}${interval}`;
-        }, 300);
+        }, 800);
     }
 
     // Auto-scale al cargar la página
@@ -201,6 +379,7 @@
         const pos = data.posicion || {};
         const lotes = data.lotes || [];
         const clases = data.clases || {};
+        const ordenes = data.ordenes || [];
         const vehiculo = data.vehiculo || "Stock";
         const isCrypto = vehiculo === "Crypto";
         _dec = isCrypto ? 4 : 2;
@@ -304,6 +483,31 @@
             </tr>`;
         }).join("");
 
+        // ordenes del activo — mismas columnas que muestra Binance en Open Orders / Order History.
+        // La fuente es order_trader, que unifica IB y Binance: el panel no distingue broker.
+        const esPendiente = (o) =>
+            _PENDING_TV.includes((o.status || "").toUpperCase()) || (o.sync || "") === "SIN_CONFIRMAR";
+        const filaOrden = (o) => {
+            const sc = (o.side || "") === "BUY" ? "#26a69a" : "#ef5350";
+            // SIN_CONFIRMAR: la orden salio al broker y no volvio id_order — puede estar viva.
+            // Se marca en ambar para que no se lea como un estado normal.
+            const sinConf = (o.sync || "") === "SIN_CONFIRMAR";
+            const stc = sinConf ? "#FFB300" : "#787b86";
+            return `<tr>
+              <td style="color:#787b86;padding:2px 5px;white-space:nowrap">${o.hora || "—"}</td>
+              <td style="padding:2px 5px;color:${sc};font-weight:bold">${o.side || "—"}</td>
+              <td style="padding:2px 5px;color:#9598a1">${o.tipo || "—"}</td>
+              <td style="text-align:right;padding:2px 5px;color:#d1d4dc">${fmt(o.price, _dec)}</td>
+              <td style="text-align:right;padding:2px 5px;color:#aaa">${fmt(o.qty, _qdec)}</td>
+              <td style="text-align:right;padding:2px 5px;color:#aaa">${fmt(o.total)}</td>
+              <td style="padding:2px 5px;color:${stc};white-space:nowrap">${sinConf ? "SIN CONFIRMAR" : (o.status || "—")}</td>
+            </tr>`;
+        };
+        const filasPend = ordenes.filter(esPendiente).map(filaOrden).join("");
+        const filasHoy = ordenes.filter(o => !esPendiente(o)).map(filaOrden).join("");
+        const thOrden = `${th("Hora", "left")}${th("Side", "left")}${th("Tipo", "left")}` +
+            `${th("Precio")}${th("Cant")}${th("Total")}${th("Estado", "left")}`;
+
         const td1 = `style="color:#787b86;padding:2px 0;width:55%"`;
         const td2 = `style="text-align:right;padding:2px 0"`;
 
@@ -371,6 +575,26 @@
           </tbody>
         </table>
         </div>
+
+        ${filasPend ? `
+        <div style="font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:1px;
+                    border-bottom:1px solid #2a2e39;padding-bottom:4px;margin:10px 0 6px">Órdenes abiertas</div>
+        <div style="overflow-x:auto;margin-bottom:10px">
+        <table style="border-collapse:collapse;font-size:11px;min-width:100%">
+          <thead><tr>${thOrden}</tr></thead>
+          <tbody>${filasPend}</tbody>
+        </table>
+        </div>` : ""}
+
+        ${filasHoy ? `
+        <div style="font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:1px;
+                    border-bottom:1px solid #2a2e39;padding-bottom:4px;margin:10px 0 6px">Órdenes del día</div>
+        <div style="overflow-x:auto;margin-bottom:10px">
+        <table style="border-collapse:collapse;font-size:11px;min-width:100%">
+          <thead><tr>${thOrden}</tr></thead>
+          <tbody>${filasHoy}</tbody>
+        </table>
+        </div>` : ""}
 
         <div style="margin-top:14px">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
@@ -702,7 +926,7 @@
     }
 
     // ── Actualizar contenido ───────────────────────────────────────────────
-    function upsertPanel(html, posicion, lotes, symbol) {
+    function upsertPanel(html, posicion, lotes, symbol, ordenes) {
         if (!panelEl) crearPanel();
 
         // Preservar qty y foco antes de redibujar
@@ -737,7 +961,7 @@
         // Retry hasta que TV API esté lista (necesario tras navegación/recarga)
         let _attempts = 0;
         const _tryDraw = () => {
-            if (tvChart()) { drawTvShapes(posicion, lotes); }
+            if (tvChart()) { drawTvShapes(posicion, lotes, ordenes || []); }
             else if (_attempts++ < 10) { setTimeout(_tryDraw, 1000); }
         };
         setTimeout(_tryDraw, 800);
@@ -775,11 +999,11 @@
                                                 if (pd.last) data.posicion.last = pd.last;
                                             } catch (_) { }
                                             data.posicion.vehiculo = data.vehiculo;
-                                            upsertPanel(buildPanel(data), data.posicion, data.lotes || [], sym);
+                                            upsertPanel(buildPanel(data), data.posicion, data.lotes || [], sym, data.ordenes || []);
                                         },
                                         onerror: () => {
                                             data.posicion.vehiculo = data.vehiculo;
-                                            upsertPanel(buildPanel(data), data.posicion, data.lotes || [], sym);
+                                            upsertPanel(buildPanel(data), data.posicion, data.lotes || [], sym, data.ordenes || []);
                                         },
                                     });
                                 } else {
@@ -830,5 +1054,25 @@
     setInterval(poll, 3000);
     setInterval(pollPrice, 2000);
     setInterval(fetchSymbols, 30000);
+    setInterval(vigilarLayout, 5000);
+
+    // La API del chart no esta lista al cargar la pagina: se reintenta hasta engancharla.
+    let _intentosSub = 0;
+    const _sub = setInterval(() => {
+        const listo = suscribirEventosTV();
+        if (listo) diagnosticoApi();
+        if (listo || _intentosSub++ > 15) {
+            if (!listo) diagnosticoApi();
+            clearInterval(_sub);
+        }
+    }, 2000);
+
+    // pagehide cubre el cierre de pestaña; visibilitychange cubre el cambio de pestaña o
+    // minimizar, que es cuando el navegador puede descartar la pagina sin avisar.
+    unsafeWindow.addEventListener("pagehide", guardarAlSalir);
+    unsafeWindow.addEventListener("beforeunload", guardarAlSalir);
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") guardarAlSalir();
+    });
     setTimeout(poll, 1500);
 })();
