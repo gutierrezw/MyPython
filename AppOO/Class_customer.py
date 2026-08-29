@@ -1154,6 +1154,55 @@ class DataHub:
         return "{:.{}f}".format(precio, calculate_decimal_places(tick_size))
 
     @staticmethod
+    def qty_comprometida_sell(account, vehiculo, symbol, excluir_order_id=None, logger=None):
+        """Acciones de `symbol` ya comprometidas en ordenes de venta vivas, sin importar que agente
+        las puso ni de que dia sean.
+
+        Preservation (STOP) y GainsCapture (LMT SELL) deciden por separado, cada uno con su JSON de
+        estado, y ninguno ve las ordenes del otro: entre los dos pueden comprometer mas acciones de
+        las que hay en la posicion. Este es el dato que falta para cruzarlos — el llamador exige
+        `qty_propuesta + qty_comprometida <= position` antes de mandar la orden.
+
+        La fuente es `order_trader`, no el broker: es la unica vista que ya unifica IB y Binance, y
+        conserva las ordenes GTC de dias anteriores (IB solo devuelve actividad del dia). Vale, eso
+        si, lo que valga `order_trader.status` — un FILLED sin sincronizar cuenta como vivo y el gate
+        bloquea de mas. Es el fallo conservador y se prefiere sobre comprometer de mas.
+
+        `excluir_order_id` deja fuera una orden propia: Preservation modifica su STOP vigente en vez
+        de agregar uno nuevo, asi que contarlo seria bloquearse a si mismo. Se compara contra
+        `id_order` y `clientOrderId` porque el id que guarda el estado puede venir de cualquiera de
+        los dos (ver `preservation_extract_order_id`).
+
+        `quantity` se suma completa, tambien en las PARTIALLY_FILLED: lo comprometido frente al
+        broker es el total de la orden, no el remanente.
+
+        `logger` lo pasa el agente que llama para que el detalle quede en SU archivo — el metodo lo
+        comparten Preservation y GainsCapture.
+        """
+        rows, ix = DataHub.RepositorioOportunidades.select_pending_orders(account, vehiculo, symbol)
+        if not rows:
+            return 0.0
+
+        total = 0.0
+        detalle = []
+        for row in rows:
+            r = dict(zip(ix, row))
+            if (r.get("side") or "").upper() != "SELL":
+                continue
+            if excluir_order_id and str(excluir_order_id) in (str(r.get("id_order")), str(r.get("clientOrderId"))):
+                continue
+            qty = float(r.get("quantity") or 0)
+            total += qty
+            detalle.append(f"{r.get('id_order')}/{r.get('orderType')}={qty:g}({r.get('status')})")
+
+        if detalle:
+            (logger or logging.getLogger("Preservation")).warning(
+                f"qty_comprometida_sell({vehiculo}/{symbol}): {total:g} en {len(detalle)} orden(es) → "
+                f"{' '.join(detalle)}"
+            )
+        return total
+
+    @staticmethod
     def preservation_calc_qty(account, vehiculo, symbol, last, pct=0.33):
         """Cantidad a proteger y costo de esos lotes: la clase de venta que corresponde a `pct`.
 
