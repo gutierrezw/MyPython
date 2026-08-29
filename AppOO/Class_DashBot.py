@@ -1126,15 +1126,27 @@ class ClassAgenteIA:
                 continue
 
             # Tope duro contra la posición real del broker — los lotes salen de booktrading y
-            # pueden descuadrar (splits, dividendos en acciones): nunca pedir más de lo que hay
+            # pueden descuadrar (splits, dividendos en acciones): nunca pedir más de lo que hay.
+            # Al tope se le descuenta lo que ya está comprometido en ventas vivas (gate cruzado H5):
+            # Preservation puede tener un STOP sobre el mismo símbolo y entre los dos agentes se
+            # llegaba a comprometer más acciones de las que hay.
             _pos = DataHub.quantiza_qty(vehiculo, symbol, sym_data.get("position") or 0)
-            if 0 < _pos < vender_qty:
-                ganancia_ref *= _pos / vender_qty
+            _comprometida = DataHub.qty_comprometida_sell(account, vehiculo, symbol, logger=_gc_logger)
+            _disp = _pos - _comprometida
+            if _pos > 0 and _disp <= 0:
                 _gc_logger.warning(
-                    f"GainsCapture({symbol}): qty {vender_qty} > position {_pos} → recortado a {_pos} "
+                    f"GainsCapture({symbol}): position {_pos} ya comprometida en ventas vivas "
+                    f"({_comprometida:g}) → sin orden"
+                )
+                continue
+            if 0 < _disp < vender_qty:
+                ganancia_ref *= _disp / vender_qty
+                _gc_logger.warning(
+                    f"GainsCapture({symbol}): qty {vender_qty} > disponible {_disp} "
+                    f"(position {_pos} − comprometida {_comprometida:g}) → recortado a {_disp} "
                     f"(ganancia prorrateada ${ganancia_ref:.0f})"
                 )
-                vender_qty = _pos
+                vender_qty = _disp
                 if ganancia_ref < min_ganancia:
                     _gc_logger.warning(
                         f"GainsCapture({symbol}): tras recorte ${ganancia_ref:.0f} < min_ganancia "
@@ -1145,10 +1157,12 @@ class ClassAgenteIA:
                             symbol=symbol,
                             agente="GainsCapture",
                             tag="CANCELLED",
-                            mensaje=f"qty recortada a position={_pos}, ganancia < min_ganancia",
+                            mensaje=f"qty recortada a disponible={_disp}, ganancia < min_ganancia",
                             json_contexto={
                                 "escenario": escenario_key.strip(),
                                 "position": _pos,
+                                "comprometida": _comprometida,
+                                "disponible": _disp,
                                 "ganancia_prorrateada": round(float(ganancia_ref), 2),
                                 "min_ganancia": min_ganancia,
                             },
@@ -1223,6 +1237,8 @@ class ClassAgenteIA:
                         "escenario": escenario_key.strip(),
                         "vehiculo": vehiculo,
                         "qty": vender_qty,
+                        # la revalidacion del gate cruzado al aprobar necesita contra que comparar
+                        "position": _pos,
                         "lmt_price": lmt_price,
                         "conid": str(conid) if conid else None,
                         "account": account,
@@ -1956,6 +1972,24 @@ class Telegram:
             return f"⚠️ {symbol}: esa propuesta ya vencio. Hay una nueva mas abajo en el chat."
         pendiente = state.get("pendiente", {})
         vehiculo = pendiente.get("vehiculo", "Stock")
+
+        # revalidar el gate cruzado (H5): entre la propuesta y este click pueden pasar horas, y
+        # Preservation pudo colocar su STOP sobre el mismo simbolo en el medio. El chequeo del loop
+        # no sirve — describe el estado de entonces, no el de ahora.
+        _pos_ok = DataHub.quantiza_qty(vehiculo, symbol, pendiente.get("position") or 0)
+        _comp = DataHub.qty_comprometida_sell(
+            pendiente["account"], vehiculo, symbol, logger=logging.getLogger("GainsCapture")
+        )
+        if _pos_ok > 0 and float(pendiente["qty"]) + _comp > _pos_ok:
+            logging.getLogger("GainsCapture").warning(
+                f"GainsCapture({symbol}): aprobacion rechazada — qty={pendiente['qty']} + "
+                f"comprometida={_comp:g} > position={_pos_ok:g}"
+            )
+            return (
+                f"⚠️ {symbol}: ya hay una venta viva por {_comp:g} sobre esta posicion "
+                f"({_pos_ok:g}). No se manda la orden para no comprometer mas de lo que hay."
+            )
+
         trama = DataHub.gains_capture_build_trama_sell(
             vehiculo,
             pendiente["account"],
