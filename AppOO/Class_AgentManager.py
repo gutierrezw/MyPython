@@ -1135,9 +1135,22 @@ class AgentManager:
                     )
                     continue
 
-                trama = DataHub.preservation_build_trama(vehiculo, account, symbol, conid, stop_final, max_price, qty)
-
+                # gate cruzado (H5): GainsCapture puede tener una LMT SELL viva sobre el mismo
+                # simbolo. Los dos agentes deciden por separado, cada uno con su JSON, y sin esto
+                # entre los dos pueden comprometer mas acciones de las que hay en la posicion.
+                # El STOP propio no cuenta: se modifica, no se agrega.
                 order_id_prev = state.get("order_id")
+                comprometida = DataHub.qty_comprometida_sell(
+                    account, vehiculo, symbol, excluir_order_id=order_id_prev, logger=self._preservation_logger
+                )
+                if comprometida and qty + comprometida > position_qty:
+                    self._preservation_logger.warning(
+                        f"Preservation({vehiculo}/{symbol}): qty={qty} + comprometida={comprometida:g} "
+                        f"> position={position_qty:g} → SKIP (otra orden de venta viva)"
+                    )
+                    continue
+
+                trama = DataHub.preservation_build_trama(vehiculo, account, symbol, conid, stop_final, max_price, qty)
 
                 is_live = not self._preservation_dry_run and vehiculo == "Stock"
 
