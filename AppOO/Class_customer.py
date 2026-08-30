@@ -6289,7 +6289,7 @@ class WidgetVehiculo(TickerInfo):
             colores = ["mediumseagreen" if r >= 0 else "tomato" for r in df_combinado["Rendimiento_Pct"]]
 
             # en Crypto el sufijo USDT se repite en los 10 simbolos y no distingue nada: sin el
-            # la etiqueta es corta y a 45 grados ocupa menos alto que el simbolo entero a 30
+            # la etiqueta ocupa menos alto con la misma inclinacion y el area de barras crece
             etiquetas = df_combinado["Symbol"]
             corta = self.vehiculo == "Crypto"
             if corta:
@@ -6299,7 +6299,7 @@ class WidgetVehiculo(TickerInfo):
             xlabels = ax.get_xticklabels()
             ylabels = ax.get_yticklabels()
             if corta:
-                plt.setp(xlabels, ha="right", fontsize=7, color=self.cchart["asx"], rotation=45)
+                plt.setp(xlabels, ha="right", fontsize=7, color=self.cchart["asx"], rotation=30)
                 self.graph[1][1].subplots_adjust(bottom=0.15)
             else:
                 plt.setp(xlabels, ha="right", fontsize=6, color=self.cchart["asx"], rotation=30)
