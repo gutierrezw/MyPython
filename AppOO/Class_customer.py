@@ -6288,11 +6288,21 @@ class WidgetVehiculo(TickerInfo):
             # Asignar colores basados en si es ganancia o pérdida
             colores = ["mediumseagreen" if r >= 0 else "tomato" for r in df_combinado["Rendimiento_Pct"]]
 
-            ax.bar(df_combinado["Symbol"], df_combinado["Rendimiento_Pct"], color=colores)
+            # en Crypto el sufijo USDT se repite en los 10 simbolos y no distingue nada: sin el
+            # las etiquetas entran horizontales y el area de barras gana el alto de la rotacion
+            etiquetas = df_combinado["Symbol"]
+            corta = self.vehiculo == "Crypto"
+            if corta:
+                etiquetas = etiquetas.str.replace("USDT$", "", regex=True)
+            ax.bar(etiquetas, df_combinado["Rendimiento_Pct"], color=colores)
 
             xlabels = ax.get_xticklabels()
             ylabels = ax.get_yticklabels()
-            plt.setp(xlabels, ha="right", fontsize=6, color=self.cchart["asx"], rotation=30)
+            if corta:
+                plt.setp(xlabels, ha="center", fontsize=7, color=self.cchart["asx"], rotation=0)
+                self.graph[1][1].subplots_adjust(bottom=0.12)
+            else:
+                plt.setp(xlabels, ha="right", fontsize=6, color=self.cchart["asx"], rotation=30)
             plt.setp(ylabels, ha="right", fontsize=6, color=self.cchart["texto"])
             ax.set_xlabel("", fontsize="x-small", color=self.cchart["texto"])
             ax.set_ylabel("Rendimiento (%)", fontsize=7, color=self.cchart["texto"])
