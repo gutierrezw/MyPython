@@ -362,7 +362,10 @@ class AnalisisBase:
                 if df.empty:
                     return
 
-                df["cartera_pct"] = (df["CumPort"] - df["CumPort"].iloc[0]) * 100
+                # rebase compuesto, no resta: CumPort es un acumulado desde el inicio de la cartera.
+                # Restar dos acumulados aplasta el tramo cuando el acumulado esta cerca de -100%
+                # (de -0,9887 a -0,9880 la resta da +0,07% y el tramo real rindio +6,2%).
+                df["cartera_pct"] = ((1 + df["CumPort"]) / (1 + df["CumPort"].iloc[0]) - 1) * 100
                 last_c = float(df["cartera_pct"].iloc[-1])
 
                 fg.clear()
@@ -380,7 +383,7 @@ class AnalisisBase:
                     p_legend = [mpatches.Patch(label=f"Cartera ({last_c:+.1f}%)", color=c_line)]
                     titulo = f"Performance {self.vehiculo}"
                 else:
-                    df["indice_pct"] = (df[cum_index] - df[cum_index].iloc[0]) * 100
+                    df["indice_pct"] = ((1 + df[cum_index]) / (1 + df[cum_index].iloc[0]) - 1) * 100
                     last_i = float(df["indice_pct"].iloc[-1])
                     alpha = last_c - last_i
                     c_alpha = "#2ecc71" if alpha >= 0 else "#e74c3c"
