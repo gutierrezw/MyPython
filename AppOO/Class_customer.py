@@ -6125,7 +6125,15 @@ class WidgetVehiculo(TickerInfo):
         # ajusta a tempralidad seleccionada
         if self.Ddatos is None or self.Ddatos.empty or not isinstance(self.Ddatos.index, pd.DatetimeIndex):
             return
-        df_plot = self.Ddatos[self.Ddatos.index >= hoy - periodos[tipo]]
+        df_plot = self.Ddatos[self.Ddatos.index >= hoy - periodos[tipo]].copy()
+        # rebase: las series acumuladas vienen desde el inicio de la cartera, asi que un recorte
+        # crudo muestra el mismo % final en las 5 ventanas y solo cambia el zoom. Se reexpresan
+        # contra el primer dia de la ventana. value/costo_base son montos en USD, no se tocan.
+        for col in ("++ Portafolio", cum_index, index_ref):
+            if col in df_plot.columns and not df_plot.empty:
+                base = df_plot[col].iloc[0]
+                if pd.notna(base) and base != -1:
+                    df_plot[col] = (1 + df_plot[col]) / (1 + base) - 1
         if self.vehiculo == "BBVA.ARS":
             df_plot = df_plot.rename(columns={"++ Portafolio": "TWR Cartera"})
             parm["++ index"] = "TWR Cartera"
