@@ -6112,7 +6112,7 @@ class WidgetVehiculo(TickerInfo):
         symbol, rtn_index, cum_index, index_ref = vehiculo_parm(vehiculo=self.vehiculo)
         parm = {
             "BTC": index_ref,
-            "++ index": "++ Portafolio",
+            "++ index": "TWR Portafolio",
             "Value": "Value Market",
             "Costo": "Cost basic",
             "legend": "outside upper left",
@@ -6134,9 +6134,7 @@ class WidgetVehiculo(TickerInfo):
                 base = df_plot[col].iloc[0]
                 if pd.notna(base) and base != -1:
                     df_plot[col] = (1 + df_plot[col]) / (1 + base) - 1
-        if self.vehiculo == "BBVA.ARS":
-            df_plot = df_plot.rename(columns={"++ Portafolio": "TWR Cartera"})
-            parm["++ index"] = "TWR Cartera"
+        df_plot = df_plot.rename(columns={"++ Portafolio": "TWR Portafolio"})
         self.graph_performace_portafolio(fg=self.graph[2][1], data=df_plot, parm=parm)
         self.graph[2][0].draw()
 
