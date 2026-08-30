@@ -869,8 +869,9 @@ class IPerformance(BDsystem):  # -----------------------------------------------
         """
         Retorna flujos netos diarios de capital (USD) inyectado en el vehículo/categoría indicado
         (BBVA.ARS por defecto, o Stock/Crypto pasando categoria+cuentas).
-        Calcula delta_stock × basico / factor_cambio por transacción para reconstruir
-        el costo real sin que basico reseteado distorsione el costo_base acumulado.
+        Usa cantidad × preciotrans / factor_cambio: el cash real que entró o salió en cada
+        transacción. No usar basico — es el promedio móvil de la posición, no el precio de la
+        operación, así que infla el flujo (Stock: 93.068 contra 51.222 reales).
         """
         if isinstance(cuentas, str):
             cuentas = (cuentas,)
@@ -879,16 +880,10 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             cursor = conn.cursor()
             placeholders = ", ".join(["%s"] * len(cuentas))
             qry = f"""
-                WITH bt_lag AS (
-                    SELECT cuenta, simbolo, DATE(fechahora) AS fecha,
-                           basico, stock, factor_cambio,
-                           LAG(stock, 1, 0) OVER (PARTITION BY cuenta, simbolo ORDER BY fechahora) AS prev_stock
-                    FROM booktrading
-                    WHERE cuenta IN ({placeholders}) AND categoria = %s
-                )
-                SELECT fecha,
-                       SUM((stock - prev_stock) * basico / NULLIF(factor_cambio, 0)) AS usd_invested
-                FROM bt_lag
+                SELECT DATE(fechahora) AS fecha,
+                       SUM(cantidad * preciotrans / NULLIF(factor_cambio, 0)) AS usd_invested
+                FROM booktrading
+                WHERE cuenta IN ({placeholders}) AND categoria = %s
                 GROUP BY fecha
                 ORDER BY fecha ASC
             """
