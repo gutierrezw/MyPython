@@ -462,6 +462,10 @@ def get_yfinance(ticket=None, vehiculo="Stock", period="7y", interval="1d", desd
             if hasattr(dividends.index, "tz") and dividends.index.tz is not None:
                 dividends = dividends.tz_localize(None)
 
+            # yfinance entrega el dividendo con hora intradia (09:30) y el precio a medianoche:
+            # sin normalizar a fecha el reindex no matchea ninguno y la columna queda en cero
+            dividends.index = dividends.index.normalize()
+
             # Filtrar solo los días donde hubo dividendos
             dividends = dividends.reindex(pdatos.index)
             pdatos["Dividends"] = dividends
