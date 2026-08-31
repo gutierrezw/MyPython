@@ -896,12 +896,19 @@ class AgentManager:
         En cada ciclo solo verifica si pasó el intervalo — sin tocar BD.
         Retorna (pconfig, intervalo_min, ejecutar) donde ejecutar=True cuando toca revisión.
 
-        Ventana 9-16h (horario de mercado, decisión 2026-08-24): revisiones_dia reparte las
-        revisiones dentro de esa franja en vez de cada 86400/revisiones_dia segundos corridos —
-        antes eso anclaba siempre a la misma hora de arranque y con revisiones_dia=2 (12h) caía
-        siempre en la madrugada (12h × 2 = 24h exactas). Fuera de ventana se devuelve ejecutar=False
-        sin tocar _last_run_{vehiculo} — el turno queda pendiente hasta el próximo ciclo dentro de
-        la franja.
+        Ventana horaria (decisión 2026-08-24): revisiones_dia reparte las revisiones dentro de la
+        franja en vez de cada 86400/revisiones_dia segundos corridos — antes eso anclaba siempre a
+        la misma hora de arranque y con revisiones_dia=2 (12h) caía siempre en la madrugada
+        (12h × 2 = 24h exactas). Fuera de ventana se devuelve ejecutar=False sin tocar
+        _last_run_{vehiculo} — el turno queda pendiente hasta el próximo ciclo dentro de la franja.
+
+        La franja la declara cada vehículo en `parameters.preservation.ventana` (2026-08-31). Era
+        9-16 en duro, horario NYSE/NASDAQ: correcto para Stock, donde fuera de esa franja el precio
+        no se mueve, y erróneo para Crypto, que opera 24x7 — dejaba 17 horas de mercado abierto sin
+        revisar, justo la madrugada donde pasan las caídas que este agente existe para atajar. Se
+        resolvió por configuración y no con un `if vehiculo == "Crypto"` para que un vehículo nuevo
+        declare su franja en vez de esperar un cambio de código. El default sigue siendo 9-16: un
+        vehículo sin `ventana` se comporta como antes.
 
         Depende de que Agente_ManagerPreservation tenga un intervalo corto (30 min): la guarda de
         ventana sí consume el turno del decorador, así que con un intervalo largo el turno de la
@@ -930,7 +937,7 @@ class AgentManager:
             return None, 0, False
 
         revisiones_dia = pconfig.get("revisiones_dia", 2)
-        ventana_desde, ventana_hasta = 9, 16  # horario de mercado NYSE/NASDAQ — evita revisar en la madrugada
+        ventana_desde, ventana_hasta = pconfig.get("ventana", (9, 16))  # default: horario NYSE/NASDAQ
         intervalo_min = ((ventana_hasta - ventana_desde) * 3600) / revisiones_dia
 
         _preservation_state_fresh = read_json_tmp("preservation_state.json")
@@ -953,7 +960,9 @@ class AgentManager:
         proteccion_base = pconfig.get("proteccion_base", 0.50)
         elapsed_log = (now - last_run).total_seconds() if last_run else 0
         self._preservation_logger.warning(
-            f"Preservation({vehiculo}): REVISIÓN | roi_min={roi_minimo} | prot={proteccion_base} | elapsed={elapsed_log:.0f}s"
+            f"Preservation({vehiculo}): REVISIÓN | roi_min={roi_minimo} | prot={proteccion_base} | "
+            f"ventana={ventana_desde}-{ventana_hasta}h cada {intervalo_min / 3600:.1f}h | "
+            f"elapsed={elapsed_log:.0f}s"
         )
         return pconfig, intervalo_min, True
 
