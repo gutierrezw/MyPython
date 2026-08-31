@@ -195,6 +195,7 @@ log_queries_not_using_indexes   = ON
 | market | `categoria_update` | Última vez que se recalculó `categoriaActivo` (creada 2026-08-25) |
 | order_trader | `sync_broker` | Si podemos creerle a la fila — **independiente de `status`** (creada 2026-08-29) |
 | symbol_decision_history | `veces` / `primera_vez` | Repeticiones consecutivas colapsadas en la fila y arranque de esa corrida — `timestamp` es la última (creadas 2026-08-31) |
+| diaria_performance | `Dividends` | Dividendo devengado en **fecha ex**, no cobrado. No cuadra contra el extracto IB del mismo mes |
 | symbol_decision_history | `dedup_key` | Parte estable de la decisión. **NULL = evento único, nunca se agrupa** (creada 2026-08-31) |
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
@@ -246,6 +247,23 @@ distinguen sin consultar ejecuciones y para el gate dan lo mismo — en ninguno 
 comprometidas hacia adelante. Se loguea a ERROR porque el segundo caso sí importa para la auditoría.
 
 El comentario de la columna en MySQL repite este motivo — `SHOW FULL COLUMNS FROM order_trader`.
+
+**`diaria_performance.Dividends` es devengo en fecha ex, el extracto IB es caja.** Los dos números
+son correctos y no cuadran entre sí: comparar el mes contra el mes da ~40% de desvío y parece un
+agujero de datos. Medido sobre julio 2026 — ex-dividendos de julio **123,56**, pago IB de julio
+**204,41**; ex-dividendos de **junio** **209,14** contra ese mismo pago: **2,3%**. El desfasaje es el
+lag ex-date→payment, típicamente el mes siguiente.
+
+La fecha ex es la que corresponde acá: yfinance la devuelve así y es donde cae el precio. Acreditar el
+dividendo en fecha de pago dejaría la serie con un pozo sin contrapartida el día ex y un salto
+injustificado semanas después — el retorno total del período quedaría igual, pero ninguno de los dos
+días diría la verdad.
+
+**No se reconcilia contra el extracto sin desplazar el mes.** Una purga y reconstrucción completa del
+tramo (`AppTest/run_rebuild_diaria_cartera.py`, `accion="cartera"`) devolvió exactamente los mismos
+123,56: no había nada roto que arreglar. El residuo de 4,73 sobre el mes desplazado queda sin
+atribuir — candidatos: retención en origen de los ADR (TU, BABA, ABEV, PBR) o un ex-date de junio que
+paga en agosto. Se cierra con el detalle por símbolo del extracto, no con más reconstrucciones.
 
 **`symbol_decision_history.veces` — la tabla contaba turnos del agente, no hechos.** En modo
 `SUPERVISADO` GainsCapture propone y espera autorización, así que repite la misma recomendación
