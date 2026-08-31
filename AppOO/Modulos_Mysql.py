@@ -6299,7 +6299,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.close()
             conn.close()
 
-    def insert_symbol_decision_history(self, symbol: str, agente: str, tag: str, mensaje: str = None, json_contexto: dict = None, order_trader_id: int = None):
+    def insert_symbol_decision_history(self, symbol: str, agente: str, tag: str, mensaje: str = None, json_contexto: dict = None, order_trader_id: int = None, dedup_key: str = None, account: str = None):
         """
         Registra un evento de decisión en symbol_decision_history.
 
@@ -6309,6 +6309,31 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         @param mensaje: descripción legible del evento
         @param json_contexto: dict con contexto técnico (roi, rsi_d, etc)
         @param order_trader_id: referencia a order_trader.id (nullable)
+        @param dedup_key: clave estable de la decisión. Si viene, una repetición consecutiva
+                          suma en `veces` en vez de insertar fila nueva.
+        @param account: cuenta del símbolo. Cierra la corrida cuando aparece una orden nueva.
+
+        `dedup_key` existe porque los agentes que proponen y esperan autorización repiten la
+        misma recomendación en cada turno: GainsCapture escribió 63 filas en dos días y 16 de
+        ellas eran "vender clase 100%" sobre ADAUSDT el mismo día. El `mensaje` no sirve de
+        clave — trae el ROI del momento y la prosa de Claude, que cambian siempre —, así que la
+        arma el que llama con lo estable de la decisión (accion+escenario, o la urgencia).
+
+        Los tags de acción real (ENVIADA, FILLED, EXIT, CANCELLED) no pasan `dedup_key`: cada
+        orden es un evento único y agruparlas perdería el hecho.
+
+        Solo colapsa repeticiones **consecutivas** — compara contra la última fila de ese
+        (symbol, agente). Si en el medio pasó otra cosa, empieza fila nueva: `veces=16` dice
+        "16 veces seguidas lo mismo", no "16 veces en la historia", y la línea de tiempo del
+        panel sigue leyéndose en orden.
+
+        **Una orden nueva cierra la corrida**, aunque no la haya emitido el agente. El corte no
+        puede depender de que el propio agente escriba un ENVIADA: BTG se vendió a mano el
+        25/08 (`order_trader.intent='MANUAL'`) mientras GainsCapture recomendaba vender, y sin
+        este chequeo la fecha "hasta" se habría seguido estirando por encima de una decisión ya
+        tomada — el panel mostraría como pendiente algo que el usuario ya resolvió. `order_trader`
+        es donde queda la acción venga del agente, de la autorización por Telegram o del broker,
+        así que el corte se mide ahí y no contra los tags de esta misma tabla.
         """
         conn = self._conectar(tabla="insert.symbol_decision_history")
         cursor = None
@@ -6317,13 +6342,50 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             from datetime import datetime
 
             json_str = json.dumps(json_contexto) if json_contexto else None
-
+            ahora = datetime.now()
             cursor = conn.cursor()
+
+            if dedup_key:
+                cursor.execute(
+                    """SELECT id, tag, dedup_key, timestamp FROM symbol_decision_history
+                       WHERE symbol = %s AND agente = %s
+                       ORDER BY timestamp DESC, id DESC LIMIT 1""",
+                    (symbol, agente)
+                )
+                ultima = cursor.fetchone()
+                hubo_orden = False
+                if ultima:
+                    if account:
+                        cursor.execute(
+                            """SELECT 1 FROM order_trader
+                               WHERE account = %s AND symbol = %s AND stampPlace > %s LIMIT 1""",
+                            (account, symbol, ultima[3])
+                        )
+                    else:
+                        cursor.execute(
+                            "SELECT 1 FROM order_trader WHERE symbol = %s AND stampPlace > %s LIMIT 1",
+                            (symbol, ultima[3])
+                        )
+                    hubo_orden = cursor.fetchone() is not None
+
+                if ultima and not hubo_orden and ultima[1] == tag and ultima[2] == dedup_key:
+                    # se conserva el mensaje y el contexto del último turno: el ROI y el precio
+                    # de ahora dicen más que los de la primera vez que se recomendó
+                    cursor.execute(
+                        """UPDATE symbol_decision_history
+                           SET veces = veces + 1, timestamp = %s, mensaje = %s, json_contexto = %s
+                           WHERE id = %s""",
+                        (ahora, mensaje, json_str, ultima[0])
+                    )
+                    conn.commit()
+                    return
+
             cursor.execute(
                 """INSERT INTO symbol_decision_history
-                   (symbol, agente, tag, mensaje, json_contexto, order_trader_id, timestamp)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                (symbol, agente, tag, mensaje, json_str, order_trader_id, datetime.now())
+                   (symbol, agente, tag, mensaje, json_contexto, order_trader_id, timestamp,
+                    primera_vez, veces, dedup_key)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1, %s)""",
+                (symbol, agente, tag, mensaje, json_str, order_trader_id, ahora, ahora, dedup_key)
             )
             conn.commit()
         except (Exception, connect.Error) as error:

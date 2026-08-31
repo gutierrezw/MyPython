@@ -1090,7 +1090,9 @@ class ClassAgenteIA:
                             "rsi_d": float(_rsi_d) if _rsi_d else None,
                             "razon": _razon[:300] or None,
                         },
-                        order_trader_id=None
+                        order_trader_id=None,
+                        dedup_key=f"{claude_result.get('accion') or '?'}|{_clase}",
+                        account=account
                     )
                 except Exception as _e:
                     _gc_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CLAUDE → {_e}")

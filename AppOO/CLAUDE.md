@@ -194,6 +194,8 @@ log_queries_not_using_indexes   = ON
 | market | `inst_update` | Última actualización del pipeline 13F |
 | market | `categoria_update` | Última vez que se recalculó `categoriaActivo` (creada 2026-08-25) |
 | order_trader | `sync_broker` | Si podemos creerle a la fila — **independiente de `status`** (creada 2026-08-29) |
+| symbol_decision_history | `veces` / `primera_vez` | Repeticiones consecutivas colapsadas en la fila y arranque de esa corrida — `timestamp` es la última (creadas 2026-08-31) |
+| symbol_decision_history | `dedup_key` | Parte estable de la decisión. **NULL = evento único, nunca se agrupa** (creada 2026-08-31) |
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
 `lastPrice DESC` con `LIMIT 150`, así que repetía siempre los mismos 150 símbolos más caros y dejaba
@@ -244,6 +246,21 @@ distinguen sin consultar ejecuciones y para el gate dan lo mismo — en ninguno 
 comprometidas hacia adelante. Se loguea a ERROR porque el segundo caso sí importa para la auditoría.
 
 El comentario de la columna en MySQL repite este motivo — `SHOW FULL COLUMNS FROM order_trader`.
+
+**`symbol_decision_history.veces` — la tabla contaba turnos del agente, no hechos.** En modo
+`SUPERVISADO` GainsCapture propone y espera autorización, así que repite la misma recomendación
+en cada turno: 16 de las 64 filas acumuladas eran "vender clase 100%" sobre ADAUSDT del mismo
+día. Consolidando, quedaron **9 filas**.
+
+`dedup_key` la arma el que llama con la parte estable de la decisión (`accion|escenario`,
+`stop|urgencia`) porque el `mensaje` trae el ROI del momento y la prosa de Claude, que cambian
+siempre. Los tags de acción real (`ENVIADA`, `FILLED`, `EXIT`, `CANCELLED`) no la pasan: cada
+orden es un hecho único.
+
+Una corrida se cierra cuando cambia la decisión **o cuando aparece una orden nueva en
+`order_trader`, la haya emitido el agente o no** — BTG se vendió a mano el 25/08 mientras el
+agente seguía recomendando vender, y sin ese corte la fecha "hasta" se estira por encima de una
+decisión ya tomada. Los comentarios de las columnas en MySQL repiten este motivo.
 
 **`inversion.divisa` / `inversion.factor_cambio` — son el recibo, no el pendiente.** La tabla
 `inversion` guarda **siempre USD**, para todos los vehículos. Los KPI del panel (Total dGyP, Total

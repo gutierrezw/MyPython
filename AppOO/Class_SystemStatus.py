@@ -4299,7 +4299,7 @@ class system_status(tk.Frame):
             # Treeview con columnas
             tree = ttk.Treeview(
                 tree_frame,
-                columns=("timestamp", "agente", "tag", "mensaje"),
+                columns=("timestamp", "veces", "agente", "tag", "mensaje"),
                 height=10,
                 yscrollcommand=vsb.set,
                 xscrollcommand=hsb.set
@@ -4312,11 +4312,13 @@ class system_status(tk.Frame):
             # es para el mensaje, que desde la traza CLAUDE trae la razon completa
             tree.column("#0", width=0, stretch=tk.NO)
             tree.column("timestamp", anchor=tk.W, width=140, minwidth=140, stretch=tk.NO)
+            tree.column("veces", anchor=tk.W, width=150, minwidth=60, stretch=tk.NO)
             tree.column("agente", anchor=tk.W, width=100, minwidth=100, stretch=tk.NO)
             tree.column("tag", anchor=tk.W, width=80, minwidth=80, stretch=tk.NO)
             tree.column("mensaje", anchor=tk.W, width=1100, minwidth=300, stretch=tk.YES)
 
-            tree.heading("timestamp", text="Timestamp", anchor=tk.W)
+            tree.heading("timestamp", text="Última", anchor=tk.W)
+            tree.heading("veces", text="Veces", anchor=tk.W)
             tree.heading("agente", text="Agente", anchor=tk.W)
             tree.heading("tag", text="Tag", anchor=tk.W)
             tree.heading("mensaje", text="Mensaje", anchor=tk.W)
@@ -4354,7 +4356,7 @@ class system_status(tk.Frame):
                 cursor = conn.cursor()
                 try:
                     cursor.execute("""
-                        SELECT timestamp, agente, tag, mensaje
+                        SELECT timestamp, agente, tag, mensaje, veces, primera_vez
                         FROM symbol_decision_history
                         WHERE symbol = %s
                         ORDER BY timestamp DESC
@@ -4362,8 +4364,15 @@ class system_status(tk.Frame):
                     """, (symbol,))
 
                     for row in cursor.fetchall():
-                        timestamp, agente, tag, mensaje = row
-                        tree.insert("", tk.END, values=(timestamp, agente, tag, mensaje))
+                        timestamp, agente, tag, mensaje, veces, primera_vez = row
+                        # una fila con veces>1 es una recomendacion que se repitio sin que pasara
+                        # nada en el medio: lo que interesa es cuantas y desde cuando
+                        if veces and veces > 1:
+                            _desde = primera_vez.strftime("%d/%m %H:%M") if primera_vez else "?"
+                            veces_txt = f"{veces} × desde {_desde}"
+                        else:
+                            veces_txt = "1"
+                        tree.insert("", tk.END, values=(timestamp, veces_txt, agente, tag, mensaje))
                 except Exception as e:
                     self.messagebox.showinfo("Error", f"Error cargando eventos: {e}")
                 finally:

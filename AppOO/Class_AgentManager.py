@@ -1117,7 +1117,9 @@ class AgentManager:
                                     "rsi_d": float(ctx.get("rsi_d")) if ctx.get("rsi_d") else None,
                                     "razon": claude_result.get("razon")[:100] if claude_result.get("razon") else None
                                 },
-                                order_trader_id=None
+                                order_trader_id=None,
+                                dedup_key=f"stop|{claude_result.get('urgencia')}",
+                                account=account
                             )
                         except Exception as _e:
                             self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CLAUDE → {_e}")
