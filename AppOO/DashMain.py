@@ -3166,6 +3166,38 @@ class DashMain:
             return result
 
         # agrega orders a treeview
+        def _build_gp_map(rows, ix, cuenta, key="idtrans"):
+            """GyP realizada de booktrading, indexada segun lo que tenga quien pregunta.
+
+            `idtrans` — Stock viene de la API de IB, que no trae PnL realizada. idtrans guarda el
+            execution_id del mismo trade (ver trader_iteractive), asi que el match es 1 a 1
+            y no hay que adivinar por simbolo o cantidad.
+
+            `trade` — la lista de ordenes no tiene idtrans: order_trader guarda el id de orden de
+            IB, que no es el de ejecucion, y las dos tablas no comparten ninguna clave. El unico
+            dato que cruza es (simbolo, cantidad), y devuelve lista FIFO por fechahora porque el
+            mismo par se repite en el dia — BTG vendio 32 y 72 el 25/08. Ni la hora ni el precio
+            sirven de clave: el fill llega hasta 20 minutos despues de stampPlace (PBR 25/08) y
+            preciotrans es el promedio de ejecucion, no el limite (TLT 83.305 contra 83.32).
+            """
+            if key == "idtrans":
+                return {
+                    str(row[ix.index("idtrans")]): row[ix.index("gprealizadas")]
+                    for row in rows
+                    if row[ix.index("cuenta")] == cuenta
+                }
+
+            mapa = {}
+            for row in sorted(rows, key=lambda r: r[ix.index("fechahora")]):
+                if row[ix.index("cuenta")] != cuenta:
+                    continue
+                try:
+                    clave = (row[ix.index("simbolo")], abs(float(row[ix.index("cantidad")])))
+                except (TypeError, ValueError):
+                    continue
+                mapa.setdefault(clave, []).append(row[ix.index("gprealizadas")])
+            return mapa
+
         def insert_ordenes_treeview(tree):
             def _hora(stamp_str):
                 s = str(stamp_str)
@@ -3183,7 +3215,22 @@ class DashMain:
                 except (TypeError, ValueError):
                     return ""
 
+            def _gp_orden(mapa, symbol, side, qty, status):
+                # solo la venta realiza ganancia, y solo cuando el fill ya bajo a booktrading:
+                # en la compra gprealizadas viene 0 y mostrar "0.00" en cada fila es ruido
+                if side != "SELL" or "fill" not in str(status).lower():
+                    return ""
+                try:
+                    pendientes = mapa.get((symbol, abs(float(qty))))
+                except (TypeError, ValueError):
+                    return ""
+                return _gyp(pendientes.pop(0)) if pendientes else ""
+
             try:
+                rows_bt, ix_bt = self.RepositorioOportunidades.select_booktrading(accion="hoy")
+                gp_stock = _build_gp_map(rows_bt, ix_bt, self.account, key="trade")
+                gp_crypto = _build_gp_map(rows_bt, ix_bt, self.account_crypto, key="trade")
+
                 for i, orden in enumerate(_load_stock_orders_today()):
                     st = orden["status"]
                     side = orden["side"]
@@ -3213,7 +3260,7 @@ class DashMain:
                             price,
                             qty,
                             _importe(price, qty),
-                            "",
+                            _gp_orden(gp_stock, orden["symbol"], side, qty, st),
                             st,
                             _hora(orden["stampPlace"]),
                             orden["tif"],
@@ -3253,7 +3300,7 @@ class DashMain:
                             price,
                             qty,
                             _importe(price, qty),
-                            "",
+                            _gp_orden(gp_crypto, r.get("symbol", ""), side, qty, st),
                             st,
                             _hora(str(r.get("stampPlace", ""))),
                             r.get("tif", ""),
@@ -3377,19 +3424,6 @@ class DashMain:
                     return "{:.2f}".format(float(valor))
                 except (TypeError, ValueError):
                     return ""
-
-            def _build_gp_map(rows, ix, cuenta):
-                """GyP realizada de booktrading indexada por idtrans.
-
-                Stock viene de la API de IB, que no trae PnL realizada. idtrans guarda el
-                execution_id del mismo trade (ver trader_iteractive), asi que el match es 1 a 1
-                y no hay que adivinar por simbolo o cantidad.
-                """
-                return {
-                    str(row[ix.index("idtrans")]): row[ix.index("gprealizadas")]
-                    for row in rows
-                    if row[ix.index("cuenta")] == cuenta
-                }
 
             try:
                 for padre in tree.get_children():
