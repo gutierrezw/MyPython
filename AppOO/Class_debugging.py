@@ -422,6 +422,7 @@ class Debugging:
         self.logger["GainsCapture"].setLevel(logging.WARNING)
         self.logger.update({"Preservation": logging.getLogger("Preservation")})
         self.logger["Preservation"].setLevel(logging.WARNING)
+        self._logger_a_su_archivo("Preservation", "preservation.log")
         self.logger.update({"BrowserFCI": logging.getLogger("BrowserFCI")})
         self.logger["BrowserFCI"].setLevel(logging.WARNING)
         self.logger.update({"ClaudeIA": logging.getLogger("ClaudeIA")})
@@ -437,6 +438,35 @@ class Debugging:
         # restaurar niveles guardados por el usuario desde el panel Debugging
         self._apply_saved_levels()
         self._apply_saved_agents()
+
+    def _logger_a_su_archivo(self, key, filename, max_bytes=5_000_000, backup_count=10):
+        """Saca un logger del archivo comun y le da uno propio, fuera de la rotacion par/impar.
+
+        El log principal se borra cada dos dias (handled_CacheLogger_name alterna log_even/log_old),
+        asi que no sirve para seguir la evolucion de un modulo en el tiempo. Aca la rotacion es por
+        tamanio y conserva backup_count archivos.
+
+        propagate=False: el logger deja de escribir tambien en el archivo comun. El nivel se sigue
+        manejando desde el panel Debugging, que actua sobre el mismo objeto logger.
+        """
+        lpath = os.path.dirname(self.loggerName)
+        destino = os.path.join(lpath, filename)
+
+        # el logger de logging es un singleton: si Debugging se instancia dos veces, sin esto el
+        # archivo queda con cada linea repetida
+        for h in self.logger[key].handlers:
+            if getattr(h, "baseFilename", None) == os.path.abspath(destino):
+                return
+
+        handler = RotatingFileHandler(
+            filename=destino,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding="utf-8",
+        )
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(name)s - %(threadName)s - %(message)s"))
+        self.logger[key].addHandler(handler)
+        self.logger[key].propagate = False
 
     def _apply_saved_agents(self):
         """Carga agents_config.json y aplica estado active/inactive sobre AGENTES_SCHEDULE."""
