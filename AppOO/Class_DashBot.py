@@ -1740,8 +1740,24 @@ class Telegram:
         try:
             await query.edit_message_text(text, **kwargs)
         except BadRequest as e:
-            if "not modified" not in str(e).lower():
+            _err = str(e).lower()
+            if "not modified" in _err:
+                return
+            if "not found" not in _err:
                 raise
+
+            # el mensaje original ya no existe (borrado, o de una sesion anterior del bot).
+            # varios callers editan DESPUES de ejecutar la accion — aprobar GainsCapture,
+            # aplicar el reconcile —, asi que el texto es el resultado de algo que ya paso:
+            # se manda como mensaje nuevo en vez de perderse. Mismo criterio que query.answer()
+            # en handle_callback(): la accion del usuario no puede desaparecer en silencio.
+            if query.message is None:
+                self.logger.error(f"_safe_edit(): mensaje inexistente y sin chat al que responder → {e}")
+                return
+            try:
+                await query.get_bot().send_message(chat_id=query.message.chat_id, text=text, **kwargs)
+            except Exception as e2:
+                self.logger.error(f"_safe_edit(): fallback send_message fallo → {e2}")
 
     # Maneja los callbacks de los botones de aprobación/rechazo
     async def handle_callback(self, update, context):
