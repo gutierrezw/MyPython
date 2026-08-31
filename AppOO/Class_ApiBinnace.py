@@ -396,12 +396,17 @@ class BinanceSpot(Spot):
         return r.json()
 
     @handle_binance_exceptions
-    def get_cancel_order(self, symbol: str, orderId: int):
+    def get_cancel_order(self, symbol: str, orderId=None, origClientOrderId=None):
+        # Binance acepta cualquiera de los dos identificadores. Preservation guarda el que devuelve
+        # `preservation_extract_order_id`, que en Binance es el clientOrderId (string, no numerico)
         params = {
             "symbol": symbol,
-            "orderId": orderId,
             "timestamp": binance_time.timestamp_ms(self._base_url),
         }
+        if orderId is not None:
+            params["orderId"] = orderId
+        if origClientOrderId is not None:
+            params["origClientOrderId"] = origClientOrderId
 
         self.logger.warning(f"API >> DELETE /api/v3/order | {params}")
 

@@ -3277,23 +3277,43 @@ class TickerInfo(MyOrders):
                         DataHub.QremoteOrder[self.vehiculo]._complete(future, resp)
 
                 elif vehiculo == "Crypto":
-                    response = self.put_completa_orden(
-                        account=account,
-                        vehiculo=vehiculo,
-                        symbol=symbol,
-                        pedido=pedido,
-                        hash_id_Op=hash_id,
-                        remote=True,
-                        origen="Telegram",
-                        intent=trama_intent,
-                    )
-                    resp = {
-                        "values": response,
-                        "status": response.get("status", "No Submit"),
-                    }
 
-                    # libera recursos y entrega response
-                    DataHub.QremoteOrder[self.vehiculo]._complete(future, resp)
+                    # Preservation cancela+recrea el STOP en cada suba y tambien al salir por ROI.
+                    # Sin esta rama el pedido de cancelacion caia en put_completa_orden como si
+                    # fuera una orden nueva
+                    if isinstance(pedido, dict) and pedido.get("action") == "cancel":
+                        order_id = pedido.get("order_id")
+                        try:
+                            if str(order_id).isdigit():
+                                self.BClient.get_cancel_order(symbol=symbol, orderId=int(order_id))
+                            else:
+                                self.BClient.get_cancel_order(symbol=symbol, origClientOrderId=str(order_id))
+                            self.logger.warning(
+                                f"schedule_order_remote: cancel OK | order_id={order_id} | symbol={symbol}"
+                            )
+                            resp = {"values": {"order_id": order_id}, "status": "Cancelled"}
+                        except Exception as e:
+                            self.logger.error(f"schedule_order_remote: cancel FAIL | order_id={order_id} | {e}")
+                            resp = {"values": {}, "status": "CancelError"}
+                        DataHub.QremoteOrder[self.vehiculo]._complete(future, resp)
+                    else:
+                        response = self.put_completa_orden(
+                            account=account,
+                            vehiculo=vehiculo,
+                            symbol=symbol,
+                            pedido=pedido,
+                            hash_id_Op=hash_id,
+                            remote=True,
+                            origen="Telegram",
+                            intent=trama_intent,
+                        )
+                        resp = {
+                            "values": response,
+                            "status": response.get("status", "No Submit"),
+                        }
+
+                        # libera recursos y entrega response
+                        DataHub.QremoteOrder[self.vehiculo]._complete(future, resp)
         except Exception as e:
             self.logger.error(f"schedule_order_remote({self.vehiculo}): {e}")
             traceback.print_exc()

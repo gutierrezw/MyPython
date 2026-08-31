@@ -57,7 +57,9 @@ class AgentManager:
         self.preservation_config = {}
         self.preservation_state = {}
         self.preservation_last_run = {}
-        self._preservation_dry_run = False
+        # DRY-RUN para los dos vehiculos: Crypto recien entra al loop y Stock acompania hasta que
+        # se vea el comportamiento de los dos juntos. Poner en False habilita el envio real.
+        self._preservation_dry_run = True
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
@@ -795,12 +797,15 @@ class AgentManager:
         Protege ganancias acumuladas mediante órdenes STOP dinámicas.
         No optimiza ventas, no predice mercado, solo protege.
 
-        Crypto queda fuera (H6, decisión 2026-08-21): is_live dependía de vehiculo=="Stock",
-        por lo que Crypto corría siempre en modo [DRY-RUN] sin protección real — ni siquiera Stock
-        tiene el módulo completamente maduro todavía, y Crypto es más volátil. Se saca explícitamente
-        del loop en vez de dejarlo simulando en silencio. Retomar cuando Stock esté sólido.
+        Crypto vuelve al loop (2026-08-31), revirtiendo la decisión H6 del 2026-08-21 que lo había
+        sacado. El motivo de entonces era que `is_live` dependía de vehiculo=="Stock", así que Crypto
+        simulaba en silencio sin que nadie lo supiera. Eso ya no pasa: `is_live` solo mira
+        `_preservation_dry_run`, que hoy vale True para los dos — los dos simulan, y se ve en el log.
+        Antes de pasar a live falta lo que la rama Crypto todavía no tiene: ventana 9-16h que no
+        aplica a un mercado 24x7, `resolve_unconfirmed_orders()` que solo consulta IB, y el límite
+        pegado al stop en la trama Binance.
         """
-        for vehiculo in ("Stock",):
+        for vehiculo in ("Stock", "Crypto"):
             try:
                 if DataHub.manager_sesion.get(vehiculo):
                     self._preservation_run_vehiculo(vehiculo)
@@ -1108,7 +1113,9 @@ class AgentManager:
                         except Exception as _e:
                             self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CLAUDE → {_e}")
 
-                stop_max = round(last - atr, 2)
+                # round(..., 2) fijo dejaba el techo en 0.00 para los simbolos sub-centavo de
+                # Crypto (VTHO cotiza 0.000414) y capaba el stop a cero
+                stop_max = float(DataHub.quantiza_precio(vehiculo, symbol, last - atr))
                 if stop_final > stop_max:
                     stop_final = stop_max
 
@@ -1152,14 +1159,19 @@ class AgentManager:
 
                 trama = DataHub.preservation_build_trama(vehiculo, account, symbol, conid, stop_final, max_price, qty)
 
-                is_live = not self._preservation_dry_run and vehiculo == "Stock"
+                is_live = not self._preservation_dry_run
 
                 if stop_final > stop_anterior or not order_id_prev:
                     accion = "NUEVA" if not order_id_prev else "MODIFICADA (cancel+new)"
+                    # en DRY-RUN este log es la unica salida del agente: con :.2f fijo los simbolos
+                    # sub-centavo de Crypto se leen todos como 0.00 y la corrida no dice nada
+                    _fmt = DataHub.format_precio
                     msg = (
-                        f"Preservation({vehiculo}/{symbol}): "
-                        f"ROI={roi:.1%} | last={last:.2f} | sma20={sma_base:.2f} | max={max_price:.2f} | "
-                        f"ATR={atr:.2f} | stop_prev={stop_anterior:.2f} → stop_new={stop_final:.2f} | "
+                        f"Preservation({vehiculo}/{symbol}): ROI={roi:.1%} | "
+                        f"last={_fmt(vehiculo, symbol, last)} | sma20={_fmt(vehiculo, symbol, sma_base)} | "
+                        f"max={_fmt(vehiculo, symbol, max_price)} | ATR={_fmt(vehiculo, symbol, atr)} | "
+                        f"stop_prev={_fmt(vehiculo, symbol, stop_anterior)} → "
+                        f"stop_new={_fmt(vehiculo, symbol, stop_final)} | "
                         f"qty={qty} | protege={ganancia_protegida:.2f} | trama={trama} | {accion}"
                     )
                     if not is_live:
@@ -1234,7 +1246,7 @@ class AgentManager:
                                 },
                             }
                             if order_id and str(order_id) not in ("None", "null", ""):
-                                limit_price = float(round(stop_final * 0.99, 2))
+                                limit_price = float(DataHub.quantiza_precio(vehiculo, symbol, stop_final * 0.99))
                                 values = {
                                     "account": account,
                                     "vehiculo": vehiculo,
@@ -1296,7 +1308,7 @@ class AgentManager:
                                 # La fila queda con sync_broker=SIN_CONFIRMAR: el gate la cuenta como
                                 # comprometida y Agente_SyncOrders la resuelve contra el broker. Sin
                                 # clientOrderId, que es justamente el dato que falta.
-                                limit_price = float(round(stop_final * 0.99, 2))
+                                limit_price = float(DataHub.quantiza_precio(vehiculo, symbol, stop_final * 0.99))
                                 values = {
                                     "account": account,
                                     "vehiculo": vehiculo,
@@ -1337,8 +1349,9 @@ class AgentManager:
                     motivo = "stop_max capó por debajo de stop_anterior" if stop_final < stop_anterior else "sin cambio"
                     msg = (
                         f"Preservation({vehiculo}/{symbol}): "
-                        f"ROI={roi:.1%} | last={last:.2f} | sma20={sma_base:.2f} | "
-                        f"stop={stop_anterior:.2f} ({motivo})"
+                        f"ROI={roi:.1%} | last={DataHub.format_precio(vehiculo, symbol, last)} | "
+                        f"sma20={DataHub.format_precio(vehiculo, symbol, sma_base)} | "
+                        f"stop={DataHub.format_precio(vehiculo, symbol, stop_anterior)} ({motivo})"
                     )
                     self._preservation_logger.warning(msg)
 
