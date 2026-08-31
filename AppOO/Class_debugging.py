@@ -238,6 +238,7 @@ class Debugging:
         self.DisplayConsole = DisplayConsole
         self.loggerName = None
         self.logger = {}
+        self.handlers_dedicados = {}
         self.spath = None
         self.DataHub = GlobalHub
 
@@ -418,11 +419,14 @@ class Debugging:
         self.logger["Agente.Institucion"].setLevel(logging.WARNING)
 
         # manager logging
+        # los dos agentes de venta van al mismo archivo: se cruzan por el gate H5
+        # (qty_comprometida_sell) y separarlos obliga a leer dos lineas de tiempo en paralelo
         self.logger.update({"GainsCapture": logging.getLogger("GainsCapture")})
         self.logger["GainsCapture"].setLevel(logging.WARNING)
         self.logger.update({"Preservation": logging.getLogger("Preservation")})
         self.logger["Preservation"].setLevel(logging.WARNING)
-        self._logger_a_su_archivo("Preservation", "preservation.log")
+        self._logger_a_su_archivo("Preservation", "agentes_venta.log")
+        self._logger_a_su_archivo("GainsCapture", "agentes_venta.log")
         self.logger.update({"BrowserFCI": logging.getLogger("BrowserFCI")})
         self.logger["BrowserFCI"].setLevel(logging.WARNING)
         self.logger.update({"ClaudeIA": logging.getLogger("ClaudeIA")})
@@ -440,32 +444,39 @@ class Debugging:
         self._apply_saved_agents()
 
     def _logger_a_su_archivo(self, key, filename, max_bytes=5_000_000, backup_count=10):
-        """Saca un logger del archivo comun y le da uno propio, fuera de la rotacion par/impar.
+        """Saca un logger del archivo comun y lo manda a `filename`, fuera de la rotacion par/impar.
 
         El log principal se borra cada dos dias (handled_CacheLogger_name alterna log_even/log_old),
         asi que no sirve para seguir la evolucion de un modulo en el tiempo. Aca la rotacion es por
         tamanio y conserva backup_count archivos.
 
+        Varios loggers pueden compartir el mismo `filename` — es el caso de Preservation y
+        GainsCapture, que se leen mejor en una sola linea de tiempo. Comparten tambien el objeto
+        handler: dos RotatingFileHandler distintos sobre el mismo archivo pelean la rotacion y en
+        Windows uno de los dos falla al renombrar. El formato incluye %(name)s, asi que las lineas
+        se distinguen igual.
+
         propagate=False: el logger deja de escribir tambien en el archivo comun. El nivel se sigue
         manejando desde el panel Debugging, que actua sobre el mismo objeto logger.
         """
-        lpath = os.path.dirname(self.loggerName)
-        destino = os.path.join(lpath, filename)
+        destino = os.path.join(os.path.dirname(self.loggerName), filename)
+        handler = self.handlers_dedicados.get(destino)
+        if handler is None:
+            handler = RotatingFileHandler(
+                filename=destino,
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+                encoding="utf-8",
+            )
+            handler.setFormatter(
+                logging.Formatter("%(asctime)s - %(levelname)s - %(name)s - %(threadName)s - %(message)s")
+            )
+            self.handlers_dedicados[destino] = handler
 
         # el logger de logging es un singleton: si Debugging se instancia dos veces, sin esto el
         # archivo queda con cada linea repetida
-        for h in self.logger[key].handlers:
-            if getattr(h, "baseFilename", None) == os.path.abspath(destino):
-                return
-
-        handler = RotatingFileHandler(
-            filename=destino,
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding="utf-8",
-        )
-        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(name)s - %(threadName)s - %(message)s"))
-        self.logger[key].addHandler(handler)
+        if handler not in self.logger[key].handlers:
+            self.logger[key].addHandler(handler)
         self.logger[key].propagate = False
 
     def _apply_saved_agents(self):
