@@ -1002,6 +1002,10 @@ class AgentManager:
             self._preservation_logger.error(f"Preservation({vehiculo}): error al cargar posiciones → {e}")
             return
 
+        # el filtro de entrada es un solo `continue` que mezcla tres razones distintas: sin posicion,
+        # ROI corto y ganancia corta. Separadas dicen si falta calibrar roi_minimo o gainInversion
+        _desc = {"sin_posicion": 0, "roi_bajo": 0, "ganancia_baja": 0, "evaluados": 0}
+
         for positio in positions:
             try:
                 symbol = positio.get("ticket")
@@ -1011,6 +1015,7 @@ class AgentManager:
                 account = positio.get("useraccount")
 
                 if costobase <= 0 or position_qty <= 0:
+                    _desc["sin_posicion"] += 1
                     continue
 
                 mktvalue = positio.get("mktvalue") or 0
@@ -1018,6 +1023,10 @@ class AgentManager:
 
                 roi = unrealizedpnl / costobase
                 if roi < roi_minimo or unrealizedpnl < gain_inv_usd:
+                    if roi < roi_minimo:
+                        _desc["roi_bajo"] += 1
+                    else:
+                        _desc["ganancia_baja"] += 1
                     _state_exit = self.preservation_state.get(symbol, {})
                     _order_exit = _state_exit.get("order_id")
                     if _order_exit:
@@ -1063,6 +1072,7 @@ class AgentManager:
                     continue
 
                 base_limit = unrealizedpnl * proteccion_base
+                _desc["evaluados"] += 1
 
                 self._preservation_logger.warning(f"Preservation({vehiculo}/{symbol}): ROI={roi:.1%} ≥ {roi_minimo:.0%} → evaluando")
 
@@ -1383,6 +1393,12 @@ class AgentManager:
             except Exception as e:
                 self._preservation_logger.error(f"Preservation({vehiculo}/{symbol}): {e}")
                 continue
+
+        self._preservation_logger.warning(
+            f"Preservation({vehiculo}): CIERRE | evaluados={_desc['evaluados']} | "
+            f"ROI<{roi_minimo:.0%}={_desc['roi_bajo']} | ganancia<{gain_inv_usd:.0f}={_desc['ganancia_baja']} | "
+            f"sin posicion={_desc['sin_posicion']}"
+        )
 
     def register_threads(self):
         """Registra agentes de larga duración como threads independientes."""

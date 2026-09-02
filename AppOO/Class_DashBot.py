@@ -982,6 +982,10 @@ class ClassAgenteIA:
 
         self._gains_capture_expirar_pendientes()
 
+        # los tres descartes de abajo son `continue` mudos y cada uno responde una pregunta distinta
+        # de calibracion: no es lo mismo "ningun lote llega al ROI" que "llega pero no paga la friccion"
+        _desc = {"sin_lotes": 0, "roi_lote": 0, "sin_escenario": 0}
+
         for sym_data in symbols_gain:
             symbol = sym_data.get("symbol")
             categ = categories.get(symbol)
@@ -991,6 +995,7 @@ class ClassAgenteIA:
 
             list_gain = sym_data.get("list_gain", [])
             if not list_gain:
+                _desc["sin_lotes"] += 1
                 continue
 
             # min_roi filtra LOTES (calidad: solo entran lotes maduros); min_ganancia filtra
@@ -1007,6 +1012,7 @@ class ClassAgenteIA:
                     lotes_validos.append(lote)
 
             if not lotes_validos:
+                _desc["roi_lote"] += 1
                 continue
 
             # Escenarios sobre los lotes que califican — maximiza_sell_lotes() reparte por conteo
@@ -1020,6 +1026,7 @@ class ClassAgenteIA:
                 k: v for k, v in ventas.items() if v["cantidad sell"] > 0 and v["profit"] >= min_ganancia
             }
             if not escenarios:
+                _desc["sin_escenario"] += 1
                 continue
 
             claves = list(escenarios)
@@ -1374,6 +1381,12 @@ class ClassAgenteIA:
                 )
             except Exception as e:
                 _gc_logger.error(f"GainsCapture({symbol}): error enviando orden → {e}")
+
+        _gc_logger.warning(
+            f"GainsCapture({vehiculo}): CIERRE | sin lotes en ganancia={_desc['sin_lotes']} | "
+            f"ningun lote llega a min_roi={_desc['roi_lote']} | ningun escenario llega a "
+            f"min_ganancia={_desc['sin_escenario']}"
+        )
 
     def _gains_capture_claude_eval(
         self,
