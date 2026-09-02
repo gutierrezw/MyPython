@@ -37,7 +37,15 @@ def diaria_book_performance(account=None, vehiculo=None, proces=None):
             if path is None:
                 return update
             diaria, iy = read_csv_insert_diaria(path=path, insert=True)
-            update = True
+
+            # sin filas insertadas el dia NO esta procesado: devolver True estamparia la key del
+            # schedule y el dia se perderia para siempre — diaria_app no reconstruye hacia atras
+            update = bool(diaria)
+            if not update:
+                _logger.warning(
+                    f"diaria_book_performance({vehiculo}): 0 filas insertadas — {len(book)} entradas de "
+                    f"booktrading no produjeron ninguna fecha nueva"
+                )
 
         return update
     except Exception as error:
@@ -413,7 +421,7 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                     yf_ticket = convierte_ticket_stock(bkey, divisa)
                     activo, datos = get_yfinance(ticket=yf_ticket, vehiculo="BBVA.ARS", desde=f_desde, hasta=sym_hasta)
 
-                elif categoria == "Crypto":
+                elif categoria in ("Crypto", "BotCrypto"):
                     # para Binance klines se pasa ticker sin convertir (ya está en formato USDT)
                     activo, datos = get_yfinance(ticket=bkey, vehiculo="Crypto", desde=f_desde, hasta=sym_hasta)
 
