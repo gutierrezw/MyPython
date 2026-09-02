@@ -196,6 +196,7 @@ log_queries_not_using_indexes   = ON
 | order_trader | `sync_broker` | Si podemos creerle a la fila — **independiente de `status`** (creada 2026-08-29) |
 | symbol_decision_history | `veces` / `primera_vez` | Repeticiones consecutivas colapsadas en la fila y arranque de esa corrida — `timestamp` es la última (creadas 2026-08-31) |
 | diaria_performance | `Dividends` | Dividendo devengado en **fecha ex**, no cobrado. No cuadra contra el extracto IB del mismo mes |
+| trazaplan | `costobase` | **Columna muerta** — se inserta en 0 y nada la actualiza. El costo base real es `tinversion` |
 | symbol_decision_history | `dedup_key` | Parte estable de la decisión. **NULL = evento único, nunca se agrupa** (creada 2026-08-31) |
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
@@ -214,6 +215,19 @@ real; si no lo hay se conserva la vigente y solo se asigna `'N'` a símbolos que
 `trailing_annual == 0` sí escribe `'N'`: es un hallazgo, no un fallo de descarga.
 La fecha, en cambio, se sella **siempre** — un símbolo que falla debe irse al final de la cola o los
 fallos repetidos bloquean la rotación.
+
+**`trazaplan.costobase` no se usa — el costo base del paso es `tinversion`.** `insert_trazaplan()`
+la escribe literalmente en `0` y ningún camino la actualiza después; los valores que traen las filas
+viejas vienen de un camino que ya no existe (meta 5 y meta 6 comparten el mismo 43984.9). El dato vivo
+lo escribe `update_plan()` en `tinversion`.
+
+Importa porque dos consumidores la usaban como "¿esta fila tiene datos?": la tabla del plan
+(`Class_gestion.py`) y `chart_trazaplan()`. Con eso el paso en `Ejecucion` —el año fiscal en curso—
+se veía vacío y sin barra en el gráfico **los doce meses**, aunque `update_plan()` le estuviera
+acumulando el extracto en cada cierre. Corregido 2026-09-02: ambos filtran por `tinversion`.
+
+No se borró la columna: las filas `Cumplido` históricas la traen con dato y nadie verificó qué
+significaba ese número. Se marca muerta y no se lee.
 
 **`order_trader.sync_broker` — status dice qué contestó el broker, sync_broker si le llegamos a preguntar.**
 Son dos preguntas distintas y estaban en una sola columna. `status` traduce al broker
