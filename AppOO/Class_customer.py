@@ -3342,12 +3342,15 @@ class TickerInfo(MyOrders):
                 write_json_tmp(_FILE, data)
                 DataHub.last_process["graph_performace_portafolio"] = False
                 DataHub.last_process[self.vehiculo]["diaria_book_performance"] = ultimo_cierre
-                proceso_update_performance(account=self.account, vehiculo=self.vehiculo)
                 self.logger.warning(f"schedule_diario({self.vehiculo}): diaria {ultimo_cierre} procesada OK")
             else:
                 self.logger.warning(
                     f"schedule_diario({self.vehiculo}): diaria_book_performance devolvió False — JSON no actualizado"
                 )
+
+            # fuera del if: performa cierra la brecha contra lo que ya tiene la diaria, sin importar
+            # si hoy entraron filas nuevas — si no, un tramo cargado por fuera de la app nunca se cierra
+            proceso_update_performance(account=self.account, vehiculo=self.vehiculo)
 
             # contabiliza ejecución del schedule
             task = f"schedule_diario({self.vehiculo})"
