@@ -836,7 +836,9 @@ class GestionInversion(tk.Frame):
                 for tkey in traz:
                     vision = "{:>,.0f}".format(tkey["vision"] or 0)
                     cap = div = efe = sta = rec = ""
-                    if tkey["costobase"] is not None and tkey["costobase"] > 0:
+                    # tinversion, no costobase: costobase solo se escribe en 0 al insertar la fila
+                    # y nada la actualiza — el paso en Ejecucion quedaba en blanco todo el año fiscal
+                    if tkey["tinversion"] is not None and tkey["tinversion"] > 0:
                         cap = "{:>,.1f}".format(tkey["tinversion"] or 0)
                         div = "{:>,.1f}".format(tkey["dividendo"] or 0)
                         efe = "{:>+.1%}".format(tkey["efectividad"] or 0)

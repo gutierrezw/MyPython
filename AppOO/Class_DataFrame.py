@@ -2554,7 +2554,7 @@ def chart_trazaplan(fg=None, traza=None, cchart=None):
         meta, tinv, tvis, efec, tdiv = [], [], [], [], []
         for key in traza:
             # Omitir meta 0 (año de inicio) para alinear años con el gráfico de Ingresos/Costos
-            if key["costobase"] != 0 and key["meta"] != 0:
+            if key["tinversion"] and key["meta"] != 0:
                 meta.append(key["extracto"].year)
                 efec.append(key["efectividad"])
                 tinv.append(float(key["tinversion"]))
