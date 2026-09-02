@@ -514,16 +514,17 @@ class ClassAgenteIA:
         no se propone - no queda simulando en silencio, que es lo que le paso a Preservation con
         Crypto (H6, 2026-08-21).
         """
+        _gc_logger = logging.getLogger("GainsCapture")
         try:
             for vehiculo in ("Stock", "Crypto"):
                 if DataHub.manager_sesion.get(vehiculo):
                     self._gains_capture_run(vehiculo)
                 else:
-                    self.logger.warning(
+                    _gc_logger.warning(
                         f"Agente_GainsCapture: sesion {vehiculo} no activa → SKIP (timer consumido)"
                     )
         except Exception as e:
-            self.logger.error(f"Agente_GainsCapture(): {e}")
+            _gc_logger.error(f"Agente_GainsCapture(): {e}")
 
     @wait_rate(28800, persist=True)
     def Agente_Sentimiento(self):
@@ -967,6 +968,18 @@ class ClassAgenteIA:
         symbols_gain = [s for s in DataHub.get_info_symbols_gain() if s.get("vehiculo") == vehiculo]
 
         symbols_in_gain = [s.get("symbol") for s in symbols_gain if s.get("symbol")]
+
+        # apertura de corrida, simetrica a la de Preservation: sin esto todos los descartes son
+        # `continue` mudos y el log no distingue "corrio y no habia candidatos" de "no corrio"
+        candidatos = [x for x in symbols_in_gain if categories.get(x) == "N"]
+        _gc_logger.warning(
+            f"GainsCapture({vehiculo}): REVISIÓN | min_roi={min_roi:.0%} | min_gan={min_ganancia} | modo={gc_modo}"
+        )
+        _gc_logger.warning(
+            f"GainsCapture({vehiculo}): {len(positions)} posiciones | {len(symbols_in_gain)} en ganancia | "
+            f"{len(candidatos)} con categoriaActivo='N'"
+        )
+
         self._gains_capture_expirar_pendientes()
 
         for sym_data in symbols_gain:
