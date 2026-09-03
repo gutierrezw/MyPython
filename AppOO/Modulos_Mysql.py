@@ -5054,6 +5054,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             "recomendado": row.get("Recomendado"),
             "comentarios": row.get("Comentarios"),
             "indicadores": row.get("Datostecnicos") or {},
+            "capas": row.get("capas") or {},
             "grafico_url": grafico_url,
             "otros": {"modelo": origen, "timestamp_local": str(datetime.now())},
         }
@@ -5206,6 +5207,27 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             return False
 
     # update de una oportunidad existente
+    def actualizar_capas(self, hash_id, capas):
+        """Escribe json_detalle.capas sin tocar timestamp.
+
+        El timestamp dice cuando corrio el pipeline completo; anotar una capa no es una corrida.
+        """
+        try:
+            sql = """
+                UPDATE oportunidadesbuysell
+                SET json_detalle = JSON_SET(COALESCE(json_detalle, '{}'), '$.capas', CAST(%s AS JSON))
+                WHERE hash_id = %s
+            """
+            with self._conectar(tabla="accionoportunidades") as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql, (json.dumps(capas), hash_id))
+                rows_afectadas = cursor.rowcount
+                conn.commit()
+                return True if rows_afectadas > 0 else False
+
+        except (Exception, EncodingWarning, connect.Error) as error:
+            print(f"[Mysql:: RepositorioOportunidadesBuySell.actualizar_capas(): {error}]")
+
     def actualizar_oportunidad(self, hash_id=None, estado=None, origen=None, tipo=None, subtipo=None, row=None):
         try:
             # caso de actualización con hash_id (actualiza oportunidad específica)

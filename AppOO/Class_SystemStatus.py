@@ -3345,106 +3345,94 @@ class system_status(tk.Frame):
                         modelo_pred.load_modelo(modelo_pred.modelo_name)
 
                         if modelo_pred.modelo is not None:
-                            # Preparar datos para predicción
-                            df_pred = df_sell.copy()
-                            df_pred = df_pred.rename(columns=DataHub.SellCsvJsonDcolumnas)
-                            df_aplanado = modelo_pred.aplanar_datos_tecnicos(df_pred)
+                            resultado = modelo_pred.predecir_oportunidades(
+                                df_sell, chatbot.account, DataHub.SellCsvJsonDcolumnas
+                            )
 
-                            if df_aplanado is not None and not df_aplanado.empty:
-                                resultado = modelo_pred.predecir_modelo(df_aplanado)
+                            if resultado is not None and not resultado.empty:
+                                # Contadores
+                                n_vender = 0
+                                n_observar = 0
+                                n_ignorar = 0
 
-                                if resultado is not None and not resultado.empty:
-                                    # Contadores
-                                    n_vender = 0
-                                    n_observar = 0
-                                    n_ignorar = 0
+                                # Recolectar datos para ordenar por ROI
+                                oportunidades = []
+                                for _, row_orig in resultado.iterrows():
+                                    symbol = row_orig.get("Symbol", "???")
+                                    roi = row_orig.get("%Roi", 0) * 100
+                                    conf = row_orig.get("confianza", 0)
+                                    opcion = row_orig.get("Opcion", "")
 
-                                    # Recolectar datos para ordenar por ROI
-                                    oportunidades = []
-                                    for i, (_, row_pred) in enumerate(resultado.iterrows()):
-                                        if i >= len(df_sell):
-                                            break
-                                        row_orig = df_sell.iloc[i]
+                                    # Extraer RSI del JSON si existe
+                                    rsi = 0
+                                    try:
+                                        datos_tec = row_orig.get("Datostecnicos", "{}")
+                                        if isinstance(datos_tec, str):
+                                            datos_tec = json.loads(datos_tec)
+                                        rsi = datos_tec.get("diaria", {}).get("rsi", 0)
+                                    except:
+                                        pass
 
-                                        symbol = row_orig.get("Symbol", "???")
-                                        roi = row_orig.get("%Roi", 0) * 100
-                                        conf = row_pred.get("confianza", 0)
-                                        opcion = row_orig.get("Opcion", "")
+                                    # Determinar estado según umbrales
+                                    if conf >= 0.65:
+                                        estado = "VENDER"
+                                        tag = "vender"
+                                        n_vender += 1
+                                    elif conf >= 0.35:
+                                        estado = "Observar"
+                                        tag = "observar"
+                                        n_observar += 1
+                                    else:
+                                        estado = "Ignorar"
+                                        tag = "ignorar"
+                                        n_ignorar += 1
 
-                                        # Extraer RSI del JSON si existe
-                                        rsi = 0
-                                        try:
-                                            datos_tec = row_orig.get("Datostecnicos", "{}")
-                                            if isinstance(datos_tec, str):
-                                                datos_tec = json.loads(datos_tec)
-                                            rsi = datos_tec.get("diaria", {}).get("rsi", 0)
-                                        except:
-                                            pass
+                                    oportunidades.append(
+                                        {
+                                            "symbol": symbol,
+                                            "opcion": opcion,
+                                            "rsi": rsi,
+                                            "roi": roi,
+                                            "conf": conf,
+                                            "estado": estado,
+                                            "tag": tag,
+                                        }
+                                    )
 
-                                        # Determinar estado según umbrales
-                                        if conf >= 0.65:
-                                            estado = "VENDER"
-                                            tag = "vender"
-                                            n_vender += 1
-                                        elif conf >= 0.35:
-                                            estado = "Observar"
-                                            tag = "observar"
-                                            n_observar += 1
-                                        else:
-                                            estado = "Ignorar"
-                                            tag = "ignorar"
-                                            n_ignorar += 1
+                                # Ordenar por ROI decreciente
+                                oportunidades.sort(key=lambda x: x["roi"], reverse=True)
 
-                                        oportunidades.append(
-                                            {
-                                                "symbol": symbol,
-                                                "opcion": opcion,
-                                                "rsi": rsi,
-                                                "roi": roi,
-                                                "conf": conf,
-                                                "estado": estado,
-                                                "tag": tag,
-                                            }
-                                        )
-
-                                    # Ordenar por ROI decreciente
-                                    oportunidades.sort(key=lambda x: x["roi"], reverse=True)
-
-                                    # Insertar ordenados
-                                    for opp in oportunidades:
-                                        opp_tree.insert(
-                                            "",
-                                            "end",
-                                            text=opp["symbol"],
-                                            values=(
-                                                opp["opcion"],
-                                                f"{opp['rsi']:.1f}",
-                                                f"{opp['roi']:.1f}",
-                                                f"{opp['conf']:.2f}",
-                                                opp["estado"],
-                                            ),
-                                            tags=(opp["tag"],),
-                                        )
-
-                                    # Resumen en una línea simple
+                                # Insertar ordenados
+                                for opp in oportunidades:
                                     opp_tree.insert(
                                         "",
                                         "end",
-                                        text=f"Total: {len(resultado)}",
-                                        values=("", f"V:{n_vender}", f"O:{n_observar}", f"I:{n_ignorar}", ""),
-                                        tags=("header",),
+                                        text=opp["symbol"],
+                                        values=(
+                                            opp["opcion"],
+                                            f"{opp['rsi']:.1f}",
+                                            f"{opp['roi']:.1f}",
+                                            f"{opp['conf']:.2f}",
+                                            opp["estado"],
+                                        ),
+                                        tags=(opp["tag"],),
                                     )
-                                else:
-                                    opp_tree.insert(
-                                        "",
-                                        "end",
-                                        text="Sin predicciones",
-                                        values=("", "", "", "", ""),
-                                        tags=("ignorar",),
-                                    )
+
+                                # Resumen en una línea simple
+                                opp_tree.insert(
+                                    "",
+                                    "end",
+                                    text=f"Total: {len(resultado)}",
+                                    values=("", f"V:{n_vender}", f"O:{n_observar}", f"I:{n_ignorar}", ""),
+                                    tags=("header",),
+                                )
                             else:
                                 opp_tree.insert(
-                                    "", "end", text="Error aplanando", values=("", "", "", "", ""), tags=("ignorar",)
+                                    "",
+                                    "end",
+                                    text="Sin predicciones",
+                                    values=("", "", "", "", ""),
+                                    tags=("ignorar",),
                                 )
                         else:
                             # Sin modelo entrenado: mostrar oportunidades para etiquetar
@@ -3922,108 +3910,96 @@ class system_status(tk.Frame):
                         modelo_pred.load_modelo(modelo_pred.modelo_name)
 
                         if modelo_pred.modelo is not None:
-                            # Preparar datos para predicción
-                            df_pred = df_buy.copy()
-                            df_pred = df_pred.rename(columns=DataHub.BuyCsvJsonDcolumnas)
-                            df_aplanado = modelo_pred.aplanar_datos_tecnicos(df_pred)
+                            resultado = modelo_pred.predecir_oportunidades(
+                                df_buy, chatbot.account, DataHub.BuyCsvJsonDcolumnas
+                            )
 
-                            if df_aplanado is not None and not df_aplanado.empty:
-                                resultado = modelo_pred.predecir_modelo(df_aplanado)
+                            if resultado is not None and not resultado.empty:
+                                # Contadores
+                                n_comprar = 0
+                                n_observar = 0
+                                n_ignorar = 0
 
-                                if resultado is not None and not resultado.empty:
-                                    # Contadores
-                                    n_comprar = 0
-                                    n_observar = 0
-                                    n_ignorar = 0
+                                # Recolectar datos para ordenar por score
+                                oportunidades = []
+                                for _, row_orig in resultado.iterrows():
+                                    symbol = row_orig.get("Symbol", "???")
+                                    ganancia = row_orig.get("ganancia_precio", 0) * 100
+                                    conf = row_orig.get("confianza", 0)
+                                    vehiculo = row_orig.get("vehiculo", "")
+                                    score = row_orig.get("score", 0)
 
-                                    # Recolectar datos para ordenar por score
-                                    oportunidades = []
-                                    for i, (_, row_pred) in enumerate(resultado.iterrows()):
-                                        if i >= len(df_buy):
-                                            break
-                                        row_orig = df_buy.iloc[i]
+                                    # Extraer RSI del JSON si existe
+                                    rsi = 0
+                                    try:
+                                        datos_tec = row_orig.get("Datostecnicos", "{}")
+                                        if isinstance(datos_tec, str):
+                                            datos_tec = json.loads(datos_tec)
+                                        rsi = datos_tec.get("diaria", {}).get("rsi", 0)
+                                    except:
+                                        pass
 
-                                        symbol = row_orig.get("Symbol", "???")
-                                        ganancia = row_orig.get("ganancia_precio", 0) * 100
-                                        conf = row_pred.get("confianza", 0)
-                                        vehiculo = row_orig.get("vehiculo", "")
-                                        score = row_orig.get("score", 0)
+                                    # Determinar estado según umbrales
+                                    if conf >= 0.65:
+                                        estado = "COMPRAR"
+                                        tag = "comprar"
+                                        n_comprar += 1
+                                    elif conf >= 0.35:
+                                        estado = "Observar"
+                                        tag = "observar"
+                                        n_observar += 1
+                                    else:
+                                        estado = "Ignorar"
+                                        tag = "ignorar"
+                                        n_ignorar += 1
 
-                                        # Extraer RSI del JSON si existe
-                                        rsi = 0
-                                        try:
-                                            datos_tec = row_orig.get("Datostecnicos", "{}")
-                                            if isinstance(datos_tec, str):
-                                                datos_tec = json.loads(datos_tec)
-                                            rsi = datos_tec.get("diaria", {}).get("rsi", 0)
-                                        except:
-                                            pass
+                                    oportunidades.append(
+                                        {
+                                            "symbol": symbol,
+                                            "vehiculo": vehiculo,
+                                            "rsi": rsi,
+                                            "ganancia": ganancia,
+                                            "score": score,
+                                            "conf": conf,
+                                            "estado": estado,
+                                            "tag": tag,
+                                        }
+                                    )
 
-                                        # Determinar estado según umbrales
-                                        if conf >= 0.65:
-                                            estado = "COMPRAR"
-                                            tag = "comprar"
-                                            n_comprar += 1
-                                        elif conf >= 0.35:
-                                            estado = "Observar"
-                                            tag = "observar"
-                                            n_observar += 1
-                                        else:
-                                            estado = "Ignorar"
-                                            tag = "ignorar"
-                                            n_ignorar += 1
+                                # Ordenar por score decreciente
+                                oportunidades.sort(key=lambda x: x["score"], reverse=True)
 
-                                        oportunidades.append(
-                                            {
-                                                "symbol": symbol,
-                                                "vehiculo": vehiculo,
-                                                "rsi": rsi,
-                                                "ganancia": ganancia,
-                                                "score": score,
-                                                "conf": conf,
-                                                "estado": estado,
-                                                "tag": tag,
-                                            }
-                                        )
-
-                                    # Ordenar por score decreciente
-                                    oportunidades.sort(key=lambda x: x["score"], reverse=True)
-
-                                    # Insertar ordenados
-                                    for opp in oportunidades:
-                                        opp_tree.insert(
-                                            "",
-                                            "end",
-                                            text=opp["symbol"],
-                                            values=(
-                                                opp["vehiculo"],
-                                                f"{opp['rsi']:.1f}",
-                                                f"{opp['ganancia']:.1f}",
-                                                f"{opp['conf']:.2f}",
-                                                opp["estado"],
-                                            ),
-                                            tags=(opp["tag"],),
-                                        )
-
-                                    # Resumen en una línea simple
+                                # Insertar ordenados
+                                for opp in oportunidades:
                                     opp_tree.insert(
                                         "",
                                         "end",
-                                        text=f"Total: {len(resultado)}",
-                                        values=("", f"C:{n_comprar}", f"O:{n_observar}", f"I:{n_ignorar}", ""),
-                                        tags=("header",),
+                                        text=opp["symbol"],
+                                        values=(
+                                            opp["vehiculo"],
+                                            f"{opp['rsi']:.1f}",
+                                            f"{opp['ganancia']:.1f}",
+                                            f"{opp['conf']:.2f}",
+                                            opp["estado"],
+                                        ),
+                                        tags=(opp["tag"],),
                                     )
-                                else:
-                                    opp_tree.insert(
-                                        "",
-                                        "end",
-                                        text="Sin predicciones",
-                                        values=("", "", "", "", ""),
-                                        tags=("ignorar",),
-                                    )
+
+                                # Resumen en una línea simple
+                                opp_tree.insert(
+                                    "",
+                                    "end",
+                                    text=f"Total: {len(resultado)}",
+                                    values=("", f"C:{n_comprar}", f"O:{n_observar}", f"I:{n_ignorar}", ""),
+                                    tags=("header",),
+                                )
                             else:
                                 opp_tree.insert(
-                                    "", "end", text="Error aplanando", values=("", "", "", "", ""), tags=("ignorar",)
+                                    "",
+                                    "end",
+                                    text="Sin predicciones",
+                                    values=("", "", "", "", ""),
+                                    tags=("ignorar",),
                                 )
                         else:
                             # Sin modelo entrenado: mostrar oportunidades para etiquetar

@@ -193,11 +193,23 @@ class ClassAgenteIA:
         # Regla 1: mejora ROI
         if symbol in self.ultimo_envio:
             if roi <= self.ultimo_envio[symbol]["roi"]:
+                self._marca_capa(
+                    row,
+                    "6_Agente_message_Manager_sell",
+                    False,
+                    f"roi {roi:.2%} sin mejora sobre {self.ultimo_envio[symbol]['roi']:.2%}",
+                )
                 return False  # no hay mejora
 
             # Regla 2: tiempo mínimo desde último mensaje
             delta = (ahora - self.ultimo_envio[symbol]["time"]).total_seconds()
             if delta < DataHub.min_tiempo:
+                self._marca_capa(
+                    row,
+                    "6_Agente_message_Manager_sell",
+                    False,
+                    f"ultimo envio hace {delta:.0f}s < {DataHub.min_tiempo}s",
+                )
                 return False
 
         # Regla 3: máximo de mensajes por ciclo
@@ -210,7 +222,15 @@ class ClassAgenteIA:
         if confianza < self.Sellumbral:
             tag = self._consenso_tag(symbol)
             if tag and tag not in self._SELL_TAGS and roi < DataHub.MaxRoi:
+                self._marca_capa(
+                    row,
+                    "6_Agente_message_Manager_sell",
+                    False,
+                    f"consenso {tag} y roi {roi:.2%} < MaxRoi {DataHub.MaxRoi}",
+                )
                 return False
+
+        self._marca_capa(row, "6_Agente_message_Manager_sell", True)
 
         # si pasó todas las reglas → actualiza registro
         self.ultimo_envio[symbol] = {"roi": roi, "time": ahora}
@@ -2269,6 +2289,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self.MessageTelegram = None
         self.counter = 0
         self.sell_enviados = {}
+        self._capas_ultimo = {}
         self.buy_enviados = {}
 
         # ── BARRA ICONOS (top) ───────────────────────────────────────────────
@@ -3157,11 +3178,58 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         except Exception as e:
             print(f"message_format_sell(): {e}")
 
+    def _marca_capa(self, row, capa, ok, dato=None):
+        """Anota el resultado de una capa en la fila — viaja hasta json_detalle.capas."""
+        capas = row.get("capas")
+        if not isinstance(capas, dict):
+            capas = {}
+        casilla = {"ok": bool(ok)}
+        if dato:
+            casilla["dato"] = str(dato)
+        capas[capa] = casilla
+        row["capas"] = capas
+
+    def _marca_capas_previas(self, row, umbral):
+        """Capas 1 a 3: el CSV filtro por piso, el agente leyo sin filtrar, el modelo puntuo."""
+        conf = row.get("confianza") or 0
+        self._marca_capa(
+            row,
+            "1_csv_OptionSales_write",
+            True,
+            f"roi {row.get('%Roi', 0):.2%} | ganancia {row.get('Profit', 0):.2f}",
+        )
+        self._marca_capa(row, "2_Agente_ManagerSell", True)
+        self._marca_capa(
+            row,
+            "3_evaluar_oportunidades_sell_con_IA",
+            conf >= umbral,
+            f"confianza {conf:.2f} vs umbral {umbral}",
+        )
+
+    def _persistir_capas(self, row, hash_id=None):
+        """Escribe las capas solo cuando cambia el veredicto — el agente relee el CSV cada 15s.
+
+        La firma toma unicamente los ok, nunca el dato: el dato trae ROI y precio vivos, se mueve con
+        cada tick y haria que el candado no frene nada.
+        """
+        hash_id = hash_id or row.get("hash_id")
+        capas = row.get("capas")
+        if not hash_id or not capas:
+            return
+        firma = json.dumps({capa: casilla["ok"] for capa, casilla in capas.items()}, sort_keys=True)
+        if self._capas_ultimo.get(hash_id) == firma:
+            return
+        self._capas_ultimo[hash_id] = firma
+        self.RepositorioOportunidades.actualizar_capas(hash_id, capas)
+
     async def opportunity_handler_message_sell(self, hash_id, row, origen="system"):
         try:
             # Calendario: si el vehículo no opera hoy, la oportunidad queda en BD pero no se notifica
             _vehiculo = row.get("vehiculo", "Stock")
             if not DataHub.mercado_abierto(_vehiculo):
+                self._marca_capa(
+                    row, "7_opportunity_handler_message_sell", False, f"{_vehiculo} fuera de calendario"
+                )
                 self.logger.debug(f"opportunity_handler_message_sell(): {_vehiculo} fuera de calendario → no envía")
                 return
 
@@ -3181,6 +3249,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             # send al chat si esta activo
             if self.estadoOportunidades:
                 self._agregar_mensaje(message)
+
+            self._marca_capa(row, "7_opportunity_handler_message_sell", True, f"enviado ({origen})")
         except Exception as e:
             print(f"opportunity_handler_message_sell(): {e}")
 
@@ -3197,6 +3267,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 "gain",
                 row.get("Recomendado"),
             )
+
+            # Capa 4: a partir de aca la oportunidad queda registrada en BD si o si
+            self._marca_capa(row, "4_oportunity_handler_sell", True)
 
             # válida los mensajes ya enviados o que no tenga el tope Minimo de Profit
             if hash_id in self.sell_enviados.keys():
@@ -3244,8 +3317,15 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             # si insert es True, significa que se insertó correctamente
             if insert:
                 # Verifica que este TRUE mostrar las ventas
-                if self.MostrarOpcionMenu_enTelegram == "Sell":
+                menu_ok = self.MostrarOpcionMenu_enTelegram == "Sell"
+                self._marca_capa(
+                    row, "5_gate_menu", menu_ok, None if menu_ok else f"menu en {self.MostrarOpcionMenu_enTelegram}"
+                )
+                if menu_ok:
                     await self.opportunity_handler_message_sell(hash_id=hash_id, row=row, origen=origen)
+
+                # capas 5 a 7 se resuelven despues del insert — se anotan sobre la fila ya escrita
+                self._persistir_capas(row, hash_id)
         except Exception as e:
             print(f"opportunity_handler(): {e}")
 
@@ -3292,44 +3372,11 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     await self.oportunity_handler_sell(row=row, origen="system")
                 return
 
-            # Generar hash_id para cada fila
-            df_sell["hash_id"] = df_sell.apply(
-                lambda row: self.RepositorioOportunidades.generar_hash_id(
-                    row.get("account"),
-                    row.get("Symbol"),
-                    row.get("Opcion"),
-                    row.get("Fecha"),
-                    "sell",
-                    "gain",
-                    row.get("Recomendado"),
-                ),
-                axis=1,
-            )
-
-            # Renombrar columnas para compatibilidad
-            df_in = df_sell.copy()
-            df_in = df_in.rename(columns=DataHub.SellCsvJsonDcolumnas)
-
-            # Aplicar predicción IA
-            df = self.IAsell.aplanar_datos_tecnicos(df_in)
-            if df is None or df.empty:
-                self.logger.warning("evaluar_oportunidades_sell_con_IA(): df aplanado vacío")
+            # Camino unico de prediccion — el panel Sell IA llama exactamente a este metodo
+            df_merged = self.IAsell.predecir_oportunidades(df_sell, self.account, DataHub.SellCsvJsonDcolumnas)
+            if df_merged is None or df_merged.empty:
+                self.logger.warning("evaluar_oportunidades_sell_con_IA(): sin prediccion")
                 return
-
-            sent_features = MarketScreen().load_sentiment_features(self.account)
-            df = self.IAsell.enriquecer_con_sentimiento(df, sent_features)
-
-            resultado = self.IAsell.predecir_modelo(df)
-            if resultado is None or resultado.empty:
-                self.logger.warning("evaluar_oportunidades_sell_con_IA(): resultado predicción vacío")
-                return
-
-            # Merge por hash_id (O(n) en vez de O(n²))
-            df_merged = df_sell.merge(
-                resultado[["hash_id", "confianza", "clasificacion"]],
-                on="hash_id",
-                how="inner",
-            )
 
             # 1. Aprobadas para venta (confianza >= umbral_venta)
             aprobadas = filtrar_por_confianza(df_merged, umbral_min=umbral_venta)
@@ -3339,8 +3386,18 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             #     df_merged, umbral_min=umbral_observacion, umbral_max=umbral_venta, estado="observacion"
             # )
 
+            # Capas 1 a 3: se anotan para toda fila del CSV, pase o no el umbral.
+            # Las descartadas solo dejan rastro si ya tienen oportunidad en BD.
+            hash_aprobados = set(aprobadas["hash_id"]) if "hash_id" in aprobadas.columns else set()
+            for _, row in df_merged.iterrows():
+                if row.get("hash_id") in hash_aprobados:
+                    continue
+                self._marca_capas_previas(row, umbral_venta)
+                self._persistir_capas(row)
+
             # Procesar aprobadas
             for _, row in aprobadas.iterrows():
+                self._marca_capas_previas(row, umbral_venta)
                 await self.oportunity_handler_sell(row=row, origen="ia")
         except Exception as e:
             self.logger.error(f"evaluar_oportunidades_sell_con_IA(): {e}")
@@ -3611,44 +3668,11 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     await self.oportunity_handler_buy(row=row, origen="system")
                 return
 
-            # Generar hash_id para cada fila
-            df_buy["hash_id"] = df_buy.apply(
-                lambda row: self.RepositorioOportunidades.generar_hash_id(
-                    row.get("account"),
-                    row.get("Symbol"),
-                    row.get("vehiculo"),
-                    row.get("Fecha"),
-                    "buy",
-                    "rebalanceo",
-                    row.get("Recomendado"),
-                ),
-                axis=1,
-            )
-
-            # Renombrar columnas para compatibilidad
-            df_in = df_buy.copy()
-            df_in = df_in.rename(columns=DataHub.BuyCsvJsonDcolumnas)
-
-            # Aplicar predicción IA
-            df = self.IAbuy.aplanar_datos_tecnicos(df_in)
-            if df is None or df.empty:
-                self.logger.warning("evaluar_oportunidades_buy_con_IA(): df aplanado vacío")
+            # Camino unico de prediccion — el panel Buy IA llama exactamente a este metodo
+            df_merged = self.IAbuy.predecir_oportunidades(df_buy, self.account, DataHub.BuyCsvJsonDcolumnas)
+            if df_merged is None or df_merged.empty:
+                self.logger.warning("evaluar_oportunidades_buy_con_IA(): sin prediccion")
                 return
-
-            sent_features = MarketScreen().load_sentiment_features(self.account)
-            df = self.IAbuy.enriquecer_con_sentimiento(df, sent_features)
-
-            resultado = self.IAbuy.predecir_modelo(df)
-            if resultado is None or resultado.empty:
-                self.logger.warning("evaluar_oportunidades_buy_con_IA(): resultado predicción vacío")
-                return
-
-            # Merge por hash_id
-            df_merged = df_buy.merge(
-                resultado[["hash_id", "confianza", "clasificacion"]],
-                on="hash_id",
-                how="inner",
-            )
 
             # Aprobadas para compra (confianza >= umbral_compra)
             aprobadas = filtrar_por_confianza(df_merged, umbral_min=umbral_compra)

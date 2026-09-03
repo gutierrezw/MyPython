@@ -3,6 +3,7 @@ from Modulos_python import (
     pd,
     joblib,
     json,
+    logging,
     warnings,
     np,
     UndefinedMetricWarning,
@@ -14,7 +15,7 @@ from Modulos_python import (
     f1_score,
     roc_auc_score,
 )
-from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem
+from Modulos_Mysql import RepositorioOportunidadesBuySell, BDsystem, MarketScreen
 from Modulos_Utilitarios import define_FileCache
 
 # Parámetros por defecto del modelo
@@ -54,6 +55,7 @@ class ModeloOportunidadesSell:
         self.metrics = None
         self.modelo_name = "modelo_sellv01"
         self.params = DEFAULT_PARAMS_SELL.copy()
+        self.logger = logging.getLogger("ClassMoodeloIA")
 
         # Cargar parámetros desde BD si existen
         self._cargar_params_bd()
@@ -427,9 +429,11 @@ class ModeloOportunidadesSell:
                 print("predecir_modelo(): Modelo no entrenado o cargado.")
                 return None
 
-            for col in self.modelo.feature_names_in_:
-                if col not in df.columns:
-                    df[col] = 0.0
+            ausentes = [col for col in self.modelo.feature_names_in_ if col not in df.columns]
+            for col in ausentes:
+                df[col] = 0.0
+            if ausentes:
+                self.logger.warning(f"predecir_modelo(): features ausentes rellenadas con 0.0 -> {ausentes}")
 
             X_nuevo = df[self.modelo.feature_names_in_].copy()
             X_nuevo = X_nuevo.fillna(0)
@@ -455,6 +459,48 @@ class ModeloOportunidadesSell:
             return df_resultado
         except Exception as e:
             print(f"predecir_modelo(): {e}")
+            return None
+
+    def predecir_oportunidades(self, df_csv, account, columnas_map):
+        """Camino unico de prediccion sobre el CSV de ventas.
+
+        hash_id -> rename -> aplanar -> sentimiento -> modelo -> merge por hash_id.
+        Lo usan el agente y el panel: cualquier atajo vuelve a separar los dos numeros.
+        Devuelve df_csv con las columnas confianza y clasificacion, o None.
+        """
+        try:
+            if self.modelo is None:
+                return None
+
+            df = df_csv.copy()
+            df["hash_id"] = df.apply(
+                lambda row: self.ReOportunidades.generar_hash_id(
+                    row.get("account"),
+                    row.get("Symbol"),
+                    row.get("Opcion"),
+                    row.get("Fecha"),
+                    "sell",
+                    "gain",
+                    row.get("Recomendado"),
+                ),
+                axis=1,
+            )
+
+            df_plano = self.aplanar_datos_tecnicos(df.rename(columns=columnas_map))
+            if df_plano is None or df_plano.empty:
+                self.logger.warning("predecir_oportunidades(): df aplanado vacio")
+                return None
+
+            df_plano = self.enriquecer_con_sentimiento(df_plano, MarketScreen().load_sentiment_features(account))
+
+            resultado = self.predecir_modelo(df_plano)
+            if resultado is None or resultado.empty:
+                self.logger.warning("predecir_oportunidades(): resultado prediccion vacio")
+                return None
+
+            return df.merge(resultado[["hash_id", "confianza", "clasificacion"]], on="hash_id", how="inner")
+        except Exception as e:
+            self.logger.error(f"predecir_oportunidades(): {e}")
             return None
 
     def save_modelo(self, file="modelo_ia"):
@@ -508,6 +554,7 @@ class ModeloOportunidadesBuy:
         self.metrics = None
         self.modelo_name = "modelo_buyv01"
         self.params = DEFAULT_PARAMS_BUY.copy()
+        self.logger = logging.getLogger("ClassMoodeloIA")
 
         # Cargar parámetros desde BD si existen
         self._cargar_params_bd()
@@ -844,9 +891,11 @@ class ModeloOportunidadesBuy:
                 print("predecir_modelo(): Modelo no entrenado o cargado.")
                 return None
 
-            for col in self.modelo.feature_names_in_:
-                if col not in df.columns:
-                    df[col] = 0.0
+            ausentes = [col for col in self.modelo.feature_names_in_ if col not in df.columns]
+            for col in ausentes:
+                df[col] = 0.0
+            if ausentes:
+                self.logger.warning(f"predecir_modelo(): features ausentes rellenadas con 0.0 -> {ausentes}")
 
             X_nuevo = df[self.modelo.feature_names_in_].copy()
             X_nuevo = X_nuevo.fillna(0)
@@ -868,6 +917,48 @@ class ModeloOportunidadesBuy:
             return df_resultado
         except Exception as e:
             print(f"predecir_modelo(): {e}")
+            return None
+
+    def predecir_oportunidades(self, df_csv, account, columnas_map):
+        """Camino unico de prediccion sobre el CSV de compras.
+
+        hash_id -> rename -> aplanar -> sentimiento -> modelo -> merge por hash_id.
+        Lo usan el agente y el panel: cualquier atajo vuelve a separar los dos numeros.
+        Devuelve df_csv con las columnas confianza y clasificacion, o None.
+        """
+        try:
+            if self.modelo is None:
+                return None
+
+            df = df_csv.copy()
+            df["hash_id"] = df.apply(
+                lambda row: self.ReOportunidades.generar_hash_id(
+                    row.get("account"),
+                    row.get("Symbol"),
+                    row.get("vehiculo"),
+                    row.get("Fecha"),
+                    "buy",
+                    "rebalanceo",
+                    row.get("Recomendado"),
+                ),
+                axis=1,
+            )
+
+            df_plano = self.aplanar_datos_tecnicos(df.rename(columns=columnas_map))
+            if df_plano is None or df_plano.empty:
+                self.logger.warning("predecir_oportunidades(): df aplanado vacio")
+                return None
+
+            df_plano = self.enriquecer_con_sentimiento(df_plano, MarketScreen().load_sentiment_features(account))
+
+            resultado = self.predecir_modelo(df_plano)
+            if resultado is None or resultado.empty:
+                self.logger.warning("predecir_oportunidades(): resultado prediccion vacio")
+                return None
+
+            return df.merge(resultado[["hash_id", "confianza", "clasificacion"]], on="hash_id", how="inner")
+        except Exception as e:
+            self.logger.error(f"predecir_oportunidades(): {e}")
             return None
 
     def save_modelo(self, file="modelo_ia"):
