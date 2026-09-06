@@ -560,7 +560,7 @@ class AgentManager:
                             for a in pendientes
                         ),
                     ),
-                    telegram=True,
+                    telegram=True, tipo="datos", dedup_key="monitor_booktrading",
                 )
         except Exception as e:
             self._log_infra.error(f"Agente_MonitorBooktrading(): {e}")
@@ -582,8 +582,7 @@ class AgentManager:
             f"Desde: {data.get('timestamp', '?')}\n"
             f"FCI desactualizado."
         )
-        if not any(isinstance(a, dict) and a.get("msg") == alerta for a in DataHub.system_alerts):
-            DataHub.add_alert(alerta, telegram=True)
+        DataHub.add_alert(alerta, telegram=True, tipo="infra", dedup_key="fci_blocked")
 
     @wait_rate(3600, persist=True, desc="BrowserFCI descarga FCI BBVA+Santander (L-V 8:30)", nivel=2)
     def Agente_BrowserFCI(self, forced=False):
@@ -683,8 +682,8 @@ class AgentManager:
             _last = getattr(self, "_ntp_last_alert_ts", 0)
             if _now - _last > 3600:
                 DataHub.add_alert(
-                    f"⏱ NTP: reloj deriva {offset_ms:.0f}ms — riesgo de rechazo de órdenes IB/Binance",
-                    telegram=True,
+                    "⏱ Reloj desincronizado — IB y Binance pueden rechazar tus órdenes",
+                    telegram=True, tipo="infra", dedup_key="ntp_drift",
                 )
                 self._ntp_last_alert_ts = _now
         return {"offset_ms": offset_ms, "server": "pool.ntp.org"}
@@ -718,7 +717,7 @@ class AgentManager:
                     len(deltas),
                     "\n".join(f"  • {l}" for l in lineas),
                 ),
-                telegram=True,
+                telegram=True, tipo="datos", dedup_key="reconcile_lotes",
             )
         except Exception as e:
             self._log_infra.error(f"Agente_LotesReconcile(): {e}")
@@ -997,8 +996,10 @@ class AgentManager:
         if not time_revision:
             return
 
+        _account_ses = "-"
         try:
             sesion_data = BDsystem.get_sesion_by_vehiculo(vehiculo)
+            _account_ses = (sesion_data or {}).get("idcuenta") or "-"
             gain_inv_usd = sesion_data.get("gainInversion", 100 if vehiculo == "Stock" else 20) if sesion_data else (100 if vehiculo == "Stock" else 20)
         except Exception as _e:
             self._preservation_logger.warning(f"Preservation({vehiculo}): no se pudo obtener gainInversion → usando default | {_e}")
@@ -1019,13 +1020,14 @@ class AgentManager:
 
         try:
             positions = self.PlanInversion.select_inversion(tipoin=vehiculo, ticket="all")
-            # la cuenta del agente sale de la sesion Stock; las posiciones traen la suya
-            # (`useraccount`). Si no coinciden, todo lo que se consulte con la del agente vuelve
-            # vacio sin error — el log tiene que dejar ver las dos para poder descartarlo
+            # la cuenta sale de la sesion del vehiculo, no de `self.account`: AgentManager se
+            # construye con la cuenta de Stock y en Crypto reportaba U4214563 contra posiciones
+            # B0000001. Las posiciones traen la suya (`useraccount`) y el log muestra las dos:
+            # si no coinciden, todo lo que se consulte por cuenta vuelve vacio sin error
             _cuentas_pos = sorted({p.get("useraccount") for p in positions if p.get("useraccount")})
             _diferir(
                 f"Preservation({vehiculo}): {len(positions)} posiciones cargadas | "
-                f"account={self.account} | cuentas={','.join(_cuentas_pos) or '-'}"
+                f"account={_account_ses} | cuentas={','.join(_cuentas_pos) or '-'}"
             )
         except Exception as e:
             self._preservation_logger.error(f"Preservation({vehiculo}): error al cargar posiciones → {e}")
@@ -1170,13 +1172,15 @@ class AgentManager:
                 if stop_final > stop_max:
                     stop_final = stop_max
 
+                # `account` es el de la posicion (`useraccount`), no el del agente: con el de
+                # Stock los lotes de Crypto no aparecen y todo simbolo cae en "sin lotes"
                 qty, costo_lotes = DataHub.preservation_calc_qty(
-                    self.account, vehiculo, symbol, last, proteccion_qty_pct
+                    account, vehiculo, symbol, last, proteccion_qty_pct
                 )
                 if qty <= 0:
                     _diferir(
                         f"Preservation({vehiculo}/{symbol}): sin lotes en ganancia para la clase "
-                        f"{proteccion_qty_pct:.0%} | last={last:.2f} | lotes de account={self.account}"
+                        f"{proteccion_qty_pct:.0%} | last={last:.2f} | lotes de account={account}"
                         f" → SKIP", "sin_lotes", symbol
                     )
                     continue

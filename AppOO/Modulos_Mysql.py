@@ -686,20 +686,48 @@ class BDsystem:  # -------------------------------------------------------------
             return False
 
     @staticmethod
-    def insert_incidencia(msg: str, telegram: bool = True, tipo: str = None) -> int:
+    def insert_incidencia(msg: str, telegram: bool = True, tipo: str = None, dedup_key: str = None) -> tuple:
+        """Registra una incidencia. Devuelve (id, veces) — veces>1 es una repeticion, no un hecho nuevo.
+
+        `dedup_key` existe porque la mayoria de las alertas describen un estado que persiste, no un
+        evento: "IB Gateway caido" se emitio 1238 veces y tapo las otras 556 incidencias del panel.
+        La clave la arma el emisor con lo estable del hecho — el `msg` no sirve, lleva el dato del
+        momento (los ms de deriva NTP, los simbolos del diff) y cambia en cada repeticion.
+
+        Solo agrupa contra una fila **pendiente**: marcarla leida cierra el grupo, y la proxima
+        aparicion abre fila nueva y vuelve a notificar por Telegram. Es lo que hace que "leida"
+        signifique "ya me hice cargo" y no "no me lo muestres mas".
+        """
         conn = cursor = None
         try:
             conn = BDsystem.connect_dbase("insert.incidencias")
             cursor = conn.cursor()
+            if dedup_key:
+                cursor.execute(
+                    "SELECT id, veces FROM incidencias WHERE dedup_key=%s AND leida=0 "
+                    "ORDER BY id DESC LIMIT 1",
+                    (dedup_key,),
+                )
+                ultima = cursor.fetchone()
+                if ultima:
+                    # se conserva el mensaje del ultimo turno: el estado de ahora dice mas que el
+                    # de la primera vez — que banco esta bloqueado hoy, cuantos lotes difieren hoy
+                    cursor.execute(
+                        "UPDATE incidencias SET veces=veces+1, timestamp=NOW(), msg=%s WHERE id=%s",
+                        (msg, ultima[0]),
+                    )
+                    conn.commit()
+                    return ultima[0], ultima[1] + 1
             cursor.execute(
-                "INSERT INTO incidencias (msg, telegram, tipo) VALUES (%s, %s, %s)",
-                (msg, int(telegram), tipo),
+                "INSERT INTO incidencias (msg, telegram, tipo, dedup_key, primera_vez) "
+                "VALUES (%s, %s, %s, %s, NOW())",
+                (msg, int(telegram), tipo, dedup_key),
             )
             conn.commit()
-            return cursor.lastrowid
+            return cursor.lastrowid, 1
         except (Exception, connect.Error) as e:
             _logger.error(f"[Mysql::insert_incidencia()]: {e}")
-            return 0
+            return 0, 1
         finally:
             if cursor:
                 cursor.close()
@@ -747,7 +775,8 @@ class BDsystem:  # -------------------------------------------------------------
         try:
             conn = BDsystem.connect_dbase("select.incidencias")
             cursor = conn.cursor()
-            sql = "SELECT id, timestamp, tipo, msg, telegram, enviado_tg, leida FROM incidencias"
+            sql = ("SELECT id, timestamp, tipo, msg, telegram, enviado_tg, leida, veces, primera_vez "
+                   "FROM incidencias")
             if not leida:
                 sql += " WHERE leida=0"
             sql += " ORDER BY timestamp DESC LIMIT 200"

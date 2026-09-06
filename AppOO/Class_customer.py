@@ -252,19 +252,26 @@ class DataHub:
     telegram_deletes = []   # hash_id de mensajes a borrar del chat: list[str]
 
     @classmethod
-    def add_alert(cls, msg: str, telegram: bool = True, tipo: str = None, markup=None, hash_id=None):
+    def add_alert(cls, msg: str, telegram: bool = True, tipo: str = None, markup=None, hash_id=None,
+                  dedup_key: str = None):
         """Encola una alerta para Telegram. markup son botones inline, solo en memoria.
 
         Un markup no se persiste en incidencias: si la app cae antes del flush, la alerta se
         reenvia como texto plano. Es a proposito — los callback_data referencian estado vivo.
         Con hash_id, el mensaje reemplaza en el chat al anterior del mismo hash — mismo mecanismo
         que usan las oportunidades cuando mejoran.
+
+        Con `dedup_key`, mientras la incidencia siga pendiente la repeticion suma en `veces` y
+        **no vuelve a salir por Telegram**: el estado ya esta reportado y reenviarlo no agrega
+        nada. Un hecho unico (una orden, un repago) va sin clave.
         """
-        incidencia_id = 0
+        incidencia_id, veces = 0, 1
         try:
-            incidencia_id = BDsystem.insert_incidencia(msg, telegram, tipo)
+            incidencia_id, veces = BDsystem.insert_incidencia(msg, telegram, tipo, dedup_key)
         except Exception:
             pass
+        if veces > 1:
+            return
         if hash_id:
             # si habia un borrado encolado para este hash, lo cancela: el mensaje nuevo ya reemplaza
             # al viejo en el chat. Sin esto el flush de borrados se lleva puesto el recien enviado
@@ -1583,7 +1590,7 @@ class MyOrders:
                         DataHub.add_alert(
                             f"⚠️ {symbol}: SELL recortada {pedido['quantity']} → {ajustada} — "
                             f"es todo lo disponible entre spot y Earn",
-                            telegram=True,
+                            telegram=True, tipo="orden",
                         )
                         pedido["quantity"] = ajustada
 

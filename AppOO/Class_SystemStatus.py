@@ -3008,8 +3008,8 @@ class system_status(tk.Frame):
             from Modulos_Mysql import BDsystem as _BDsystem
 
             _AUTO_REFRESH_MS = 10_000
-            _COLS = ("ID", "Fecha", "Tipo", "Mensaje", "TG", "Enviado")
-            _COL_W = (40, 120, 70, 500, 35, 55)
+            _COLS = ("ID", "Fecha", "Veces", "Tipo", "Mensaje", "TG", "Enviado")
+            _COL_W = (40, 120, 130, 70, 500, 35, 55)
             frame = self.alertas
             _cache = {}  # id → msg completo
 
@@ -3066,12 +3066,30 @@ class system_status(tk.Frame):
                         tg_txt = "📨" if tg else "🖥"
                         ts = str(r.get("timestamp", ""))[:16]
                         msg_full = str(r.get("msg", ""))
-                        msg_preview = msg_full[:100] + ("…" if len(msg_full) > 100 else "")
+                        # el Treeview renderiza el salto de linea embebido y la fila pisa a la
+                        # siguiente: los mensajes de GainsCapture traen 4 lineas. En la grilla va
+                        # solo el titular y el detalle completo queda en el panel de abajo
+                        _lineas = [l.strip() for l in msg_full.splitlines() if l.strip()]
+                        msg_preview = _lineas[0] if _lineas else ""
+                        if len(msg_preview) > 100:
+                            msg_preview = msg_preview[:100] + "…"
+                        elif len(_lineas) > 1:
+                            msg_preview += "  …"
                         _cache[str(r["id"])] = msg_full
+                        # una fila con veces>1 es un estado que sigue vivo, no N incidencias:
+                        # lo que interesa es cuantas veces y desde cuando (igual que Symbol Events)
+                        _veces = r.get("veces") or 1
+                        if _veces > 1:
+                            _desde = r.get("primera_vez")
+                            _desde = _desde.strftime("%d/%m %H:%M") if _desde else "?"
+                            veces_txt = f"{_veces} × desde {_desde}"
+                        else:
+                            veces_txt = "1"
                         tree.insert(
                             "", "end",
                             iid=str(r["id"]),
-                            values=(r["id"], ts, r.get("tipo") or "—", msg_preview, tg_txt, enviado),
+                            values=(r["id"], ts, veces_txt, r.get("tipo") or "—", msg_preview,
+                                    tg_txt, enviado),
                             tags=("tg" if tg else "no_tg",),
                         )
                     lbl_status.config(text=f"Incidencias pendientes — {len(rows)}")

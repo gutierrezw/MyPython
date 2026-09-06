@@ -986,8 +986,13 @@ class ClassAgenteIA:
 
         positions = self.PlanInversion.select_inversion(tipoin=vehiculo, ticket="all")
         conid_map = {p.get("ticket"): (p.get("conid"), p.get("useraccount")) for p in positions}
-        # misma constancia que Preservation: la cuenta del agente es la de la sesion Stock y las
-        # posiciones traen la suya — si no coinciden, lo que se consulte por cuenta vuelve vacio
+        # misma constancia que Preservation: la cuenta del agente y las que traen las posiciones
+        # (`useraccount`) — si no coinciden, lo que se consulte por cuenta vuelve vacio sin error.
+        # La cuenta sale de la sesion del vehiculo: `self.account` es siempre la de Stock (DashBot
+        # se construye sobre esa sesion) y en Crypto reportaba U4214563 contra posiciones B0000001,
+        # que es justo el descuadre que esta linea existe para detectar
+        _ses_veh = BDsystem.get_sesion_by_vehiculo(vehiculo)
+        _account_ses = (_ses_veh or {}).get("idcuenta") or "-"
         _cuentas_pos = sorted({p.get("useraccount") for p in positions if p.get("useraccount")})
         categories = self._gains_capture_categorias(vehiculo, positions)
         symbols_gain = [s for s in DataHub.get_info_symbols_gain() if s.get("vehiculo") == vehiculo]
@@ -1285,7 +1290,7 @@ class ClassAgenteIA:
                 # awaitea desde el hilo. Ademas add_alert deja registro en incidencias
                 # hash_id: la propuesta nueva del simbolo borra del chat a la anterior, asi no
                 # quedan mensajes vencidos con botones que ya no ejecutan
-                DataHub.add_alert(msg, telegram=True, markup=markup, hash_id=f"gc_{symbol}")
+                DataHub.add_alert(msg, telegram=True, tipo="orden", markup=markup, hash_id=f"gc_{symbol}")
                 self.gains_capture_state[symbol] = {
                     **state,
                     "estado": "pendiente_autorizacion",
@@ -1320,7 +1325,8 @@ class ClassAgenteIA:
                         f"reintenta el proximo ciclo | response={response}"
                     )
                     DataHub.add_alert(
-                        f"⚠️ GainsCapture {symbol}: orden rechazada por el broker — sin order_id", telegram=True
+                        f"⚠️ GainsCapture {symbol}: orden rechazada por el broker — sin order_id",
+                        telegram=True, tipo="orden",
                     )
                     continue
 
@@ -1399,7 +1405,7 @@ class ClassAgenteIA:
                 DataHub.add_alert(
                     f"📈 GainsCapture {symbol}: vendiendo {vender_qty} LMT ${lmt_txt} "
                     f"escenario={escenario_key.strip()} — order_id={order_id}",
-                    telegram=True,
+                    telegram=True, tipo="orden",
                 )
                 _gc_logger.warning(
                     f"GainsCapture({symbol}): LMT SELL {vender_qty} @ {lmt_txt} "
@@ -1422,7 +1428,7 @@ class ClassAgenteIA:
             _rep = f" | repetidas={_veces}" if _veces else ""
             _gc_logger.warning(
                 f"GainsCapture({vehiculo}): {len(positions)} posiciones | {len(symbols_in_gain)} en ganancia | "
-                f"{len(candidatos)} con categoriaActivo='N' | account={self.account} | "
+                f"{len(candidatos)} con categoriaActivo='N' | account={_account_ses} | "
                 f"cuentas={','.join(_cuentas_pos) or '-'}"
             )
             _gc_logger.warning(

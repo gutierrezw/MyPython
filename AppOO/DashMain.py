@@ -2062,14 +2062,20 @@ class DatosVehivulo(TickerInfo, MyOrders):
                             import time as _time
                             _now = _time.time()
                             if _now - _gw_last_alert_ts > 1800:
-                                DataHub.add_alert("⚠️ IB Gateway caído — reconectando en 30s", telegram=True)
+                                DataHub.add_alert(
+                                    "⚠️ IB Gateway caído — reconectando en 30s",
+                                    telegram=True, tipo="infra", dedup_key="ib_gateway_down",
+                                )
                                 _gw_last_alert_ts = _now
                             _gw_down_alerted = True
                         time.sleep(30)
 
                 except Exception as e:
                     _log.error(f"websocket_stream(Stock): excepción fatal — {e}")
-                    DataHub.add_alert(f"🔴 IB Gateway error fatal: {e}", telegram=True)
+                    DataHub.add_alert(
+                        f"🔴 IB Gateway error fatal: {e}",
+                        telegram=True, tipo="infra", dedup_key="ib_gateway_fatal",
+                    )
 
             try:
                 self.ib_connection = self.IClient.create_session()
@@ -2720,7 +2726,10 @@ class DashMain:
                     self.root.after(100, lambda: self.stock.run_graficos())
                     self.root.after(200, lambda: self.update_widget(vehiculo=vehiculo))
                     _log.warning("✅ IB reconnect: WebSocket + posiciones levantados desde offline")
-                    DataHub.add_alert("✅ IB Gateway reconectado", telegram=True)
+                    DataHub.add_alert(
+                        "✅ IB Gateway reconectado", telegram=True, tipo="infra",
+                        dedup_key="ib_gateway_up",
+                    )
 
                 # en ambos casos la sesión ya está activa
                 DataHub.manager_sesion.update({"Stock": True})

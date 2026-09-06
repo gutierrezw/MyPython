@@ -146,7 +146,7 @@ class ServiciosCrypto:
             DataHub.add_alert(
                 f"💵 {symbol}: repago de deuda ${resultado['pagado']:,.2f} "
                 f"({resultado['pct']:.0%} de la venta de ${importe:,.2f})",
-                telegram=True,
+                telegram=True, tipo="orden",
             )
         return resultado
 

@@ -198,6 +198,7 @@ log_queries_not_using_indexes   = ON
 | diaria_performance | `Dividends` | Dividendo devengado en **fecha ex**, no cobrado. No cuadra contra el extracto IB del mismo mes |
 | trazaplan | `costobase` | **Columna muerta** — se inserta en 0 y nada la actualiza. El costo base real es `tinversion` |
 | symbol_decision_history | `dedup_key` | Parte estable de la decisión. **NULL = evento único, nunca se agrupa** (creada 2026-08-31) |
+| incidencias | `dedup_key` / `veces` / `primera_vez` | Mismo mecanismo que `symbol_decision_history`, aplicado a las alertas. **`leida` es el borde del grupo** (creadas 2026-09-06) |
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
 `lastPrice DESC` con `LIMIT 150`, así que repetía siempre los mismos 150 símbolos más caros y dejaba
@@ -293,6 +294,26 @@ Una corrida se cierra cuando cambia la decisión **o cuando aparece una orden nu
 `order_trader`, la haya emitido el agente o no** — BTG se vendió a mano el 25/08 mientras el
 agente seguía recomendando vender, y sin ese corte la fecha "hasta" se estira por encima de una
 decisión ya tomada. Los comentarios de las columnas en MySQL repiten este motivo.
+
+**`incidencias` — el panel de Alertas estaba inutilizado, no solo ruidoso.** Medido el 2026-09-06:
+1870 filas, **1794 pendientes**, ~30 por día. `⚠️ IB Gateway caído — reconectando en 30s` sola era
+**1238 (66%)**. Como `get_incidencias` lee `LIMIT 200`, **181 de las 200 filas visibles eran esa
+línea**: se veían 5 hechos distintos y ~1594 incidencias pendientes no se renderizaban nunca.
+Consolidando quedaron **72 pendientes** — 6 agrupadas y 66 hechos únicos que antes estaban tapados.
+
+`dedup_key` la arma el emisor con la parte estable del hecho (`ib_gateway_down`, `ntp_drift`,
+`fci_blocked`). El `msg` no sirve de clave: lleva el dato del momento —los ms de deriva NTP iban en
+el texto y habrían generado 30+ grupos para un solo hecho—, así que el mensaje que se conserva es el
+**último**, no el primero: qué banco está bloqueado hoy dice más que cuál lo estaba en julio.
+
+**`leida = 0` es la condición de agrupamiento, y por eso `leida` es el borde del grupo.** Marcar la
+fila leída cierra la corrida: la próxima aparición abre fila nueva y **vuelve a notificar por
+Telegram**. Es lo que hace que "leída" signifique *ya me hice cargo* y no *no me lo muestres más*.
+Mientras la fila sigue pendiente, la repetición suma en `veces` y **no se reenvía a Telegram** —
+`add_alert()` corta antes de encolar; el estado ya está reportado.
+
+El único punto de entrada es `DataHub.add_alert()` → `BDsystem.insert_incidencia()`, que devuelve
+`(id, veces)`. Un hecho único —una orden, un repago— va sin clave y nunca se agrupa.
 
 **`inversion.divisa` / `inversion.factor_cambio` — son el recibo, no el pendiente.** La tabla
 `inversion` guarda **siempre USD**, para todos los vehículos. Los KPI del panel (Total dGyP, Total
@@ -416,6 +437,7 @@ Si el commit toca el código de la izquierda, revisar el doc de la derecha antes
 | `Class_Screener`, consenso, votos | `20-Proyecto/ref-consenso.md` + tabla de columnas en este archivo |
 | `Class_tradingBot`, `Class_BotCryptoUI` | `20-Proyecto/spec-botcrypto.md` |
 | Agentes nuevos / `AGENTES_SCHEDULE` | sección "Patrón para agregar un nuevo agente" en este archivo |
+| `add_alert`, `insert_incidencia`, tab Alertas | sección "Columnas con semántica propia" en este archivo |
 | Cualquier hallazgo de la revisión Opus (H1–H10) | `30-Gestion/resultado-revision-opus-preservation-gainscapture.md` + `30-Gestion/BACKLOG.md` |
 
 Los docs viven en `AppOO/Doc/` (= `20-Proyecto/` del vault vía junction) y se comitean en el
