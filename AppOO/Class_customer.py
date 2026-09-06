@@ -48,6 +48,8 @@ from Modulos_Utilitarios import (
     vehiculo_parm,
     buscar_ticker,
     format_financiero,
+    mask_numero,
+    PANEL_CAMPOS_MONETARIOS,
     E,
     W,
     get_indicadores,
@@ -3852,7 +3854,7 @@ class WidgetVehiculo(TickerInfo):
         gbg = display_red_green(dgyp)
         for i, (key, value) in enumerate(self.resumen.items()):
             if i == 0:  # escribe dGyP
-                t_dgyp = f"dGyP: {int(value):>6d}"
+                t_dgyp = f"dGyP: {mask_numero(value, ancho=6, base=0)}"
                 self.panel_label.append(ttk.Label(wi00, text=t_dgyp, style=gbg, font=("Courier", 24, "bold")))
 
             if i > 0:
@@ -3860,7 +3862,7 @@ class WidgetVehiculo(TickerInfo):
                 self.panel_label.append(
                     tk.Label(
                         wi01,
-                        text=value,
+                        text=mask_numero(value, decimales=2, ancho=11, base=2) if key in PANEL_CAMPOS_MONETARIOS else value,
                         bg=self.colors["bgcolor"],
                         fg="black",
                         font=("Courier", 9),
@@ -4517,15 +4519,18 @@ class WidgetVehiculo(TickerInfo):
                 gbg = display_red_green(dgyp)
                 for i, (key, value) in enumerate(self.resumen.items()):
                     if i == 0:
-                        t_dgyp = f"dGyP: {int(value):>6d}"
+                        t_dgyp = f"dGyP: {mask_numero(value, ancho=6, base=0)}"
                         self.panel_label[i].config(text=t_dgyp, style=gbg, font=("Courier", 24, "bold"))
 
                     if i > 0:
+                        # el mask es solo el texto: `value` sigue siendo el dato que se relee y se suma
+                        texto = mask_numero(value, decimales=2, ancho=11, base=2) if key in PANEL_CAMPOS_MONETARIOS else value
+
                         # display linea superior header
                         k = 2 * i - 1
                         if i < 5:
                             self.panel_label[k].config(text=key, font=("Courier", 9))
-                            self.panel_label[k + 1].config(text=value, font=("Courier", 9))
+                            self.panel_label[k + 1].config(text=texto, font=("Courier", 9))
 
                         # display linea inferior header
                         if i > 4:
@@ -4536,14 +4541,14 @@ class WidgetVehiculo(TickerInfo):
                                 except Exception:
                                     mrg_color = "white"
                                 self.panel_label[k].config(text=key, font=("Courier", 9))
-                                self.panel_label[k + 1].config(text=value, fg=mrg_color, font=("Courier", 9))
+                                self.panel_label[k + 1].config(text=texto, fg=mrg_color, font=("Courier", 9))
                             elif " Conexión   :" == key:
                                 conn_color = "yellow" if "OFFLINE" in str(value) else "yellow"
                                 self.panel_label[k].config(text=key, font=("Courier", 9))
-                                self.panel_label[k + 1].config(text=value, fg=conn_color, font=("Courier", 9))
+                                self.panel_label[k + 1].config(text=texto, fg=conn_color, font=("Courier", 9))
                             else:
                                 self.panel_label[k].config(text=key, font=("Courier", 9))
-                                self.panel_label[k + 1].config(text=value, font=("Courier", 9))
+                                self.panel_label[k + 1].config(text=texto, font=("Courier", 9))
 
             # rescribe valores de oportunidades sell
             message = []
@@ -4724,6 +4729,9 @@ class WidgetVehiculo(TickerInfo):
     def display_format(tipo="rows", data=None) -> list:
         try:
             datos = []
+            # `data` llega en numeros y asi se queda: `create_styles()` colorea contra el numero y la
+            # fila de totales se suma aparte. El mask escala solo los importes (dGyP, costobase,
+            # ValueMkt, GyP); precios, objetivo y %ROI se muestran completos porque son de decision.
             if tipo == "total":
                 datos = [
                     " ",
@@ -4731,9 +4739,9 @@ class WidgetVehiculo(TickerInfo):
                     " ",
                     " ",
                     " ",
-                    "{:>10.2f}".format(data[5]),
-                    "{:>11.2f}".format(data[6]),
-                    "{:>11.2f}".format(data[7]),
+                    mask_numero(data[5], decimales=2, ancho=10, base=2),
+                    mask_numero(data[6], decimales=2, ancho=11, base=2),
+                    mask_numero(data[7], decimales=2, ancho=11, base=2),
                     "{:>+11.2%}".format(data[8]),
                     " ",
                     "{:>10.2f}".format(data[10]),
@@ -4741,13 +4749,13 @@ class WidgetVehiculo(TickerInfo):
             if tipo == "rows":
                 datos = [
                     "{:>11}".format(data[0]),
-                    "{:>10.0f}".format(data[1]),
+                    mask_numero(data[1], ancho=10, base=0),
                     "{:>11.4f}".format(data[2]),
                     "{:>11.4f}".format(data[3]),
                     "{:>11.4f}".format(data[4]),
-                    "{:>10.2f}".format(data[5]),
-                    "{:>11.2f}".format(data[6]),
-                    "{:>11.2f}".format(data[7]),
+                    mask_numero(data[5], decimales=2, ancho=10, base=2),
+                    mask_numero(data[6], decimales=2, ancho=11, base=2),
+                    mask_numero(data[7], decimales=2, ancho=11, base=2),
                     "{:>+11.2%}".format(data[8]),
                     "{:>10.4f}".format(data[9]),
                     "{:>10.2f}".format(data[10]),

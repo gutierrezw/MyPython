@@ -1114,17 +1114,39 @@ def ui_section_bar(parent, text, bg="#37474f", row=0, column=0, columnspan=2, fo
     ).grid(row=row, column=column, columnspan=columnspan, padx=2, pady=pady, sticky="ew")
 
 
-def mask_numero(numero):
-    if abs(numero) >= 1_000_000_000_000:
-        return f"{numero / 1_000_000_000_000:.1f}T"
-    elif abs(numero) >= 1_000_000_000:
-        return f"{numero / 1_000_000_000:.1f}B"
-    elif abs(numero) >= 1_000_000:
-        return f"{numero / 1_000_000:.1f}M"
-    elif abs(numero) >= 1_000:
-        return f"{numero / 1_000:.1f}K"
+PANEL_CAMPOS_MONETARIOS = (
+    " Valor liq. :", " Debit      :", " UnProfit   :", " UnPyl      :", " Dividendos :", " Cash       :",
+)
+
+
+def mask_numero(numero, decimales=1, ancho=0, base=None):
+    """Escala un importe a K/M/B/T para que entre en el ancho del panel sin perder el orden de magnitud.
+
+    Es solo presentacion: quien la llama pinta el resultado, nunca lo guarda. Los importes del panel
+    se releen como numero (`self.resumen` -> `float()` en Cash y Dividendos) y se suman entre filas,
+    asi que enmascarar el dato en vez del texto rompe esas cuentas.
+
+    `base` da los decimales del tramo < 1.000; sin `base` se devuelve `str(numero)`, que es el
+    comportamiento del que depende el Screener. Un valor no numerico vuelve intacto — el header
+    mezcla importes con texto (`Conexion`, `%Mrg/Risk`).
+    """
+    try:
+        n = float(numero)
+    except (TypeError, ValueError):
+        return numero
+
+    if abs(n) >= 1_000_000_000_000:
+        texto = f"{n / 1_000_000_000_000:.{decimales}f}T"
+    elif abs(n) >= 1_000_000_000:
+        texto = f"{n / 1_000_000_000:.{decimales}f}B"
+    elif abs(n) >= 1_000_000:
+        texto = f"{n / 1_000_000:.{decimales}f}M"
+    elif abs(n) >= 1_000:
+        texto = f"{n / 1_000:.{decimales}f}K"
     else:
-        return str(numero)
+        texto = f"{n:.{base}f}" if base is not None else str(numero)
+
+    return "{:>{}s}".format(texto, ancho) if ancho else texto
 
 
 def spaces(s):
