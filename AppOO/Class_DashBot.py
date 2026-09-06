@@ -986,6 +986,9 @@ class ClassAgenteIA:
 
         positions = self.PlanInversion.select_inversion(tipoin=vehiculo, ticket="all")
         conid_map = {p.get("ticket"): (p.get("conid"), p.get("useraccount")) for p in positions}
+        # misma constancia que Preservation: la cuenta del agente es la de la sesion Stock y las
+        # posiciones traen la suya — si no coinciden, lo que se consulte por cuenta vuelve vacio
+        _cuentas_pos = sorted({p.get("useraccount") for p in positions if p.get("useraccount")})
         categories = self._gains_capture_categorias(vehiculo, positions)
         symbols_gain = [s for s in DataHub.get_info_symbols_gain() if s.get("vehiculo") == vehiculo]
 
@@ -1419,7 +1422,8 @@ class ClassAgenteIA:
             _rep = f" | repetidas={_veces}" if _veces else ""
             _gc_logger.warning(
                 f"GainsCapture({vehiculo}): {len(positions)} posiciones | {len(symbols_in_gain)} en ganancia | "
-                f"{len(candidatos)} con categoriaActivo='N'"
+                f"{len(candidatos)} con categoriaActivo='N' | account={self.account} | "
+                f"cuentas={','.join(_cuentas_pos) or '-'}"
             )
             _gc_logger.warning(
                 f"GainsCapture({vehiculo}): CIERRE | sin lotes en ganancia={_desc['sin_lotes']} | "

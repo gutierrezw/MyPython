@@ -57,6 +57,7 @@ class AgentManager:
         self.preservation_config = {}
         self.preservation_state = {}
         self.preservation_last_run = {}
+        self._pres_run_log = {}  # {vehiculo: (snapshot, veces)} — dedup de corridas mudas
         # DRY-RUN para los dos vehiculos: Crypto recien entra al loop y Stock acompania hasta que
         # se vea el comportamiento de los dos juntos. Poner en False habilita el envio real.
         self._preservation_dry_run = True
@@ -914,7 +915,8 @@ class AgentManager:
         ventana sí consume el turno del decorador, así que con un intervalo largo el turno de la
         madrugada se perdería entero. Ver el comentario sobre el decorador del agente.
         """
-        if vehiculo not in self.preservation_config:
+        _config_nueva = vehiculo not in self.preservation_config
+        if _config_nueva:
             params = self._load_params(vehiculo)
             if not params:
                 self._preservation_logger.warning(f"Preservation({vehiculo}): sin parameters en sesion → SKIP")
@@ -926,11 +928,6 @@ class AgentManager:
                 self.preservation_config[vehiculo] = None
                 return None, 0, False
             self.preservation_config[vehiculo] = pconfig
-            roi_minimo = pconfig.get("roi_minimo", 0.10)
-            proteccion_base = pconfig.get("proteccion_base", 0.50)
-            self._preservation_logger.warning(
-                f"Preservation({vehiculo}): config cargada | roi_min={roi_minimo} | prot={proteccion_base}"
-            )
 
         pconfig = self.preservation_config.get(vehiculo)
         if not pconfig:
@@ -939,6 +936,13 @@ class AgentManager:
         revisiones_dia = pconfig.get("revisiones_dia", 2)
         ventana_desde, ventana_hasta = pconfig.get("ventana", (9, 16))  # default: horario NYSE/NASDAQ
         intervalo_min = ((ventana_hasta - ventana_desde) * 3600) / revisiones_dia
+
+        if _config_nueva:
+            self._preservation_logger.warning(
+                f"Preservation({vehiculo}): config cargada | roi_min={pconfig.get('roi_minimo', 0.10)} | "
+                f"prot={pconfig.get('proteccion_base', 0.50)} | "
+                f"ventana={ventana_desde}-{ventana_hasta}h cada {intervalo_min / 3600:.1f}h"
+            )
 
         _preservation_state_fresh = read_json_tmp("preservation_state.json")
         last_run_str = _preservation_state_fresh.get(f"_last_run_{vehiculo}")
@@ -959,7 +963,7 @@ class AgentManager:
         roi_minimo = pconfig.get("roi_minimo", 0.10)
         proteccion_base = pconfig.get("proteccion_base", 0.50)
         elapsed_log = (now - last_run).total_seconds() if last_run else 0
-        self._preservation_logger.warning(
+        self._preservation_logger.debug(
             f"Preservation({vehiculo}): REVISIÓN | roi_min={roi_minimo} | prot={proteccion_base} | "
             f"ventana={ventana_desde}-{ventana_hasta}h cada {intervalo_min / 3600:.1f}h | "
             f"elapsed={elapsed_log:.0f}s"
@@ -970,6 +974,24 @@ class AgentManager:
         """Orquesta la preservación para un vehículo. Lógica de vehículo en DataHub."""
         import time
         import json
+
+        def _diferir(msg, tag=None, symbol=None):
+            """Guarda una linea de descarte: solo se escribe si la corrida cambio."""
+            _pendientes.append(msg)
+            if tag:
+                _huella.append((symbol, tag))
+
+        def _flush():
+            """Vuelca lo diferido y obliga a escribir la corrida — hubo un hecho real."""
+            nonlocal _forzado
+            _forzado = True
+            for _m in _pendientes:
+                self._preservation_logger.warning(_m)
+            _pendientes.clear()
+
+        _pendientes = []
+        _huella = []
+        _forzado = False
 
         pconfig, intervalo_min, time_revision = self._preservation_get_config(vehiculo)
         if not time_revision:
@@ -997,7 +1019,14 @@ class AgentManager:
 
         try:
             positions = self.PlanInversion.select_inversion(tipoin=vehiculo, ticket="all")
-            self._preservation_logger.warning(f"Preservation({vehiculo}): {len(positions)} posiciones cargadas")
+            # la cuenta del agente sale de la sesion Stock; las posiciones traen la suya
+            # (`useraccount`). Si no coinciden, todo lo que se consulte con la del agente vuelve
+            # vacio sin error — el log tiene que dejar ver las dos para poder descartarlo
+            _cuentas_pos = sorted({p.get("useraccount") for p in positions if p.get("useraccount")})
+            _diferir(
+                f"Preservation({vehiculo}): {len(positions)} posiciones cargadas | "
+                f"account={self.account} | cuentas={','.join(_cuentas_pos) or '-'}"
+            )
         except Exception as e:
             self._preservation_logger.error(f"Preservation({vehiculo}): error al cargar posiciones → {e}")
             return
@@ -1030,6 +1059,7 @@ class AgentManager:
                     _state_exit = self.preservation_state.get(symbol, {})
                     _order_exit = _state_exit.get("order_id")
                     if _order_exit:
+                        _flush()
                         try:
                             DataHub.preservation_cancel_order(vehiculo, account, _order_exit, symbol)
                             try:
@@ -1074,24 +1104,24 @@ class AgentManager:
                 base_limit = unrealizedpnl * proteccion_base
                 _desc["evaluados"] += 1
 
-                self._preservation_logger.warning(f"Preservation({vehiculo}/{symbol}): ROI={roi:.1%} ≥ {roi_minimo:.0%} → evaluando")
+                _diferir(f"Preservation({vehiculo}/{symbol}): ROI={roi:.1%} ≥ {roi_minimo:.0%} → evaluando")
 
                 state = self.preservation_state.get(symbol, {})
 
                 last = DataHub.preservation_get_price(symbol, positio)
                 if not last or last <= 0:
-                    self._preservation_logger.warning(f"Preservation({vehiculo}/{symbol}): sin precio → SKIP")
+                    _diferir(f"Preservation({vehiculo}/{symbol}): sin precio → SKIP", "sin_precio", symbol)
                     continue
 
                 atr, atr_error = DataHub.preservation_get_atr(symbol, vehiculo)
                 if atr is None:
-                    self._preservation_logger.warning(f"Preservation({vehiculo}/{symbol}): {atr_error} → SKIP")
+                    _diferir(f"Preservation({vehiculo}/{symbol}): {atr_error} → SKIP", "sin_atr", symbol)
                     continue
 
                 sma_base, sma_error = DataHub.preservation_get_sma(symbol, vehiculo)
                 if sma_base is None:
                     sma_base = last
-                    self._preservation_logger.warning(
+                    _diferir(
                         f"Preservation({vehiculo}/{symbol}): SMA20 no disponible ({sma_error}) → usando last={last:.2f}"
                     )
 
@@ -1144,9 +1174,10 @@ class AgentManager:
                     self.account, vehiculo, symbol, last, proteccion_qty_pct
                 )
                 if qty <= 0:
-                    self._preservation_logger.warning(
+                    _diferir(
                         f"Preservation({vehiculo}/{symbol}): sin lotes en ganancia para la clase "
-                        f"{proteccion_qty_pct:.0%} | last={last:.2f} → SKIP"
+                        f"{proteccion_qty_pct:.0%} | last={last:.2f} | lotes de account={self.account}"
+                        f" → SKIP", "sin_lotes", symbol
                     )
                     continue
 
@@ -1156,10 +1187,10 @@ class AgentManager:
                 # cuanto queda asegurado si el stop se ejecuta. Este si.
                 ganancia_protegida = qty * stop_final - costo_lotes
                 if ganancia_protegida < gain_inv_usd:
-                    self._preservation_logger.warning(
+                    _diferir(
                         f"Preservation({vehiculo}/{symbol}): protege {ganancia_protegida:.2f} < "
                         f"gainInversion {gain_inv_usd:.2f} | qty={qty} @ stop={stop_final:.2f} "
-                        f"vs costo={costo_lotes:.2f} → SKIP"
+                        f"vs costo={costo_lotes:.2f} → SKIP", "protege_poco", symbol
                     )
                     continue
 
@@ -1172,9 +1203,9 @@ class AgentManager:
                     account, vehiculo, symbol, excluir_order_id=order_id_prev, logger=self._preservation_logger
                 )
                 if comprometida and qty + comprometida > position_qty:
-                    self._preservation_logger.warning(
+                    _diferir(
                         f"Preservation({vehiculo}/{symbol}): qty={qty} + comprometida={comprometida:g} "
-                        f"> position={position_qty:g} → SKIP (otra orden de venta viva)"
+                        f"> position={position_qty:g} → SKIP (otra orden de venta viva)", "comprometida", symbol
                     )
                     continue
 
@@ -1183,6 +1214,7 @@ class AgentManager:
                 is_live = not self._preservation_dry_run
 
                 if stop_final > stop_anterior or not order_id_prev:
+                    _flush()
                     accion = "NUEVA" if not order_id_prev else "MODIFICADA (cancel+new)"
                     # en DRY-RUN este log es la unica salida del agente: con :.2f fijo los simbolos
                     # sub-centavo de Crypto se leen todos como 0.00 y la corrida no dice nada
@@ -1374,7 +1406,7 @@ class AgentManager:
                         f"sma20={DataHub.format_precio(vehiculo, symbol, sma_base)} | "
                         f"stop={DataHub.format_precio(vehiculo, symbol, stop_anterior)} ({motivo})"
                     )
-                    self._preservation_logger.warning(msg)
+                    _diferir(msg, "sin_cambio", symbol)
 
                 self.preservation_state[symbol] = {
                     "max_price": float(max_price),
@@ -1391,13 +1423,25 @@ class AgentManager:
                     _snap[f"_last_run_{_veh}"] = _lr.isoformat() if isinstance(_lr, datetime) else str(_lr)
                 write_json_tmp("preservation_state.json", _snap)
             except Exception as e:
+                _flush()
                 self._preservation_logger.error(f"Preservation({vehiculo}/{symbol}): {e}")
                 continue
 
+        # una corrida identica a la anterior no aporta nada: las mismas 5 lineas cada 2h tapan el
+        # evento que si importa. Se cuentan y se resumen al cambiar (mismo patron que GainsCapture)
+        _run_snap = (tuple(sorted(_desc.items())), tuple(_huella))
+        _prev, _veces = self._pres_run_log.get(vehiculo, (None, 0))
+        if _run_snap == _prev and not _forzado:
+            self._pres_run_log[vehiculo] = (_prev, _veces + 1)
+            return
+
+        self._pres_run_log[vehiculo] = (_run_snap, 0)
+        _rep = f" | repetidas={_veces}" if _veces else ""
+        _flush()
         self._preservation_logger.warning(
             f"Preservation({vehiculo}): CIERRE | evaluados={_desc['evaluados']} | "
             f"ROI<{roi_minimo:.0%}={_desc['roi_bajo']} | ganancia<{gain_inv_usd:.0f}={_desc['ganancia_baja']} | "
-            f"sin posicion={_desc['sin_posicion']}"
+            f"sin posicion={_desc['sin_posicion']}{_rep}"
         )
 
     def register_threads(self):
