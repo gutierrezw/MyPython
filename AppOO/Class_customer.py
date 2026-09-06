@@ -1079,8 +1079,7 @@ class DataHub:
         # Fallback: cargar desde yfinance si CacheHut está vacío
         if datos is None or datos.empty or len(datos) < 14:
             try:
-                ticket = convierte_ticket_crypto(symbol) if vehiculo == "Crypto" else symbol
-                result = get_yfinance(ticket=ticket, vehiculo=vehiculo, period="6mo", interval="1d")
+                result = get_yfinance(ticket=symbol, vehiculo=vehiculo, period="6mo", interval="1d")
                 if result:
                     _, datos = result
             except Exception:
@@ -1100,8 +1099,7 @@ class DataHub:
 
         if datos is None or datos.empty or len(datos) < period:
             try:
-                ticket = convierte_ticket_crypto(symbol) if vehiculo == "Crypto" else symbol
-                result = get_yfinance(ticket=ticket, vehiculo=vehiculo, period="6mo", interval="1d")
+                result = get_yfinance(ticket=symbol, vehiculo=vehiculo, period="6mo", interval="1d")
                 if result:
                     _, datos = result
             except Exception:

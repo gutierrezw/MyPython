@@ -156,6 +156,8 @@ class ClassAgenteIA:
         self.gains_capture_state = {k: v for k, v in _gc_saved.items() if not k.startswith("_")}
         _gc_params = self._load_params("Stock") or {}
         DataHub.modo_operacion = (_gc_params or {}).get("agente_ia", {}).get("modo", "OBSERVACION")
+        self._gc_config_log = {}
+        self._gc_run_log = {}
 
         # Inicializar AgentManager — registra todos sus agentes @wait_rate en AGENTES_SCHEDULE
         self.agent_manager = AgentManager(account=self.account, vehiculo=self.vehiculo)
@@ -989,16 +991,17 @@ class ClassAgenteIA:
 
         symbols_in_gain = [s.get("symbol") for s in symbols_gain if s.get("symbol")]
 
-        # apertura de corrida, simetrica a la de Preservation: sin esto todos los descartes son
-        # `continue` mudos y el log no distingue "corrio y no habia candidatos" de "no corrio"
         candidatos = [x for x in symbols_in_gain if categories.get(x) == "N"]
-        _gc_logger.warning(
-            f"GainsCapture({vehiculo}): REVISIÓN | min_roi={min_roi:.0%} | min_gan={min_ganancia} | modo={gc_modo}"
-        )
-        _gc_logger.warning(
-            f"GainsCapture({vehiculo}): {len(positions)} posiciones | {len(symbols_in_gain)} en ganancia | "
-            f"{len(candidatos)} con categoriaActivo='N'"
-        )
+
+        # la config es estatica: se loguea al cargarla y cuando cambia, como ya hace Preservation.
+        # Repetirla en cada corrida son ~96 lineas/dia que no dicen nada nuevo
+        _cfg_snap = (min_roi, min_ganancia, gc_modo)
+        if self._gc_config_log.get(vehiculo) != _cfg_snap:
+            self._gc_config_log[vehiculo] = _cfg_snap
+            _gc_logger.warning(
+                f"GainsCapture({vehiculo}): config cargada | min_roi={min_roi:.0%} | "
+                f"min_gan={min_ganancia} | modo={gc_modo}"
+            )
 
         self._gains_capture_expirar_pendientes()
 
@@ -1402,11 +1405,27 @@ class ClassAgenteIA:
             except Exception as e:
                 _gc_logger.error(f"GainsCapture({symbol}): error enviando orden → {e}")
 
-        _gc_logger.warning(
-            f"GainsCapture({vehiculo}): CIERRE | sin lotes en ganancia={_desc['sin_lotes']} | "
-            f"ningun lote llega a min_roi={_desc['roi_lote']} | ningun escenario llega a "
-            f"min_ganancia={_desc['sin_escenario']}"
-        )
+        # constancia de corrida, simetrica a la de Preservation: sin esto todos los descartes son
+        # `continue` mudos y el log no distingue "corrio y no habia candidatos" de "no corrio".
+        # Pero la respuesta cambia rara vez y ~48 corridas/dia por vehiculo escribian el mismo
+        # desglose, asi que se emite solo cuando algo se movio y `repetidas` dice cuantas corridas
+        # mudas hubo antes — mismo criterio que symbol_decision_history.veces
+        _run_snap = (len(positions), len(symbols_in_gain), len(candidatos), tuple(sorted(_desc.items())))
+        _prev, _veces = self._gc_run_log.get(vehiculo, (None, 0))
+        if _run_snap == _prev:
+            self._gc_run_log[vehiculo] = (_prev, _veces + 1)
+        else:
+            self._gc_run_log[vehiculo] = (_run_snap, 0)
+            _rep = f" | repetidas={_veces}" if _veces else ""
+            _gc_logger.warning(
+                f"GainsCapture({vehiculo}): {len(positions)} posiciones | {len(symbols_in_gain)} en ganancia | "
+                f"{len(candidatos)} con categoriaActivo='N'"
+            )
+            _gc_logger.warning(
+                f"GainsCapture({vehiculo}): CIERRE | sin lotes en ganancia={_desc['sin_lotes']} | "
+                f"ningun lote llega a min_roi={_desc['roi_lote']} | ningun escenario llega a "
+                f"min_ganancia={_desc['sin_escenario']}{_rep}"
+            )
 
     def _gains_capture_claude_eval(
         self,
