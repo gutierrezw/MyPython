@@ -19,6 +19,7 @@ from Modulos_python import (
     tk,
     ttk,
     datetime,
+    math,
     pd,
     np,
     re,
@@ -2415,6 +2416,40 @@ class AnalisisCrypto(AnalisisBase):
     def _seccion_earn_spot(self, frame, row):
         """Sección Gestión Earn ↔ Spot: suscribir / rescatar fondos Simple Earn."""
 
+        def _piso_6(valor):
+            """Trunca hacia abajo a 6 decimales — lo mostrado nunca debe superar al saldo real."""
+            piso = math.floor((valor or 0) * 1_000_000) / 1_000_000
+            return f"{piso:,.6f}" if piso > 0 else "-"
+
+        def _resultado_earn(verbo, hecho, amount, activo, resp):
+            """Traduce la respuesta de Binance — subscribe y redeem contestan con la misma forma."""
+            from Class_customer import MyMessageBox  # import diferido — evita ciclo
+
+            # `earn_subscribe`/`earn_redeem` devuelven None cuando la llamada falló: la excepción la
+            # traga `handle_binance_exceptions` y solo queda en el log. Sin este corte, None caía en
+            # la rama de éxito y el popup decía "Suscrito" sobre una operación que nunca ocurrió
+            if resp is None:
+                MyMessageBox(frame).showinfo(
+                    "Earn",
+                    f"No se pudo {verbo} {amount:g} {activo}.\n\n"
+                    f"Binance rechazó la llamada — el motivo quedó en el log (BinanceSpot).\n"
+                    f"Causa habitual: el saldo libre real es menor al monto solicitado.",
+                )
+                return
+            codigo = int(resp.get("code") or 0) if isinstance(resp, dict) else 0
+            if codigo < 0:
+                MyMessageBox(frame).showinfo(
+                    "Earn",
+                    f"Binance rechazó {verbo} {amount:g} {activo}.\n\n"
+                    f"{resp.get('msg') or 'sin detalle'} (código {codigo})",
+                )
+                return
+            referencia = (resp.get("purchaseId") or resp.get("redeemId")) if isinstance(resp, dict) else None
+            MyMessageBox(frame).showinfo(
+                "Earn",
+                f"{hecho} {amount:g} {activo}." + (f"\n\nOperación {referencia}" if referencia else ""),
+            )
+
         def _cargar_balances():
             from Class_ServiciosCrypto import ServiciosCrypto  # import diferido — evita ciclo con Modulos_python chain
 
@@ -2456,10 +2491,7 @@ class AnalisisCrypto(AnalisisBase):
             try:
                 resp = ServiciosCrypto().earn_subscribe(productId=product_id, amount=amount)
                 _logger.warning(f"earn_subscribe [{vals[0]}] {amount} → {resp}")
-                if resp and "code" in resp and int(resp["code"]) < 0:
-                    MyMessageBox(frame).showinfo("Earn", f"Error: {resp.get('msg', resp['code'])}")
-                else:
-                    MyMessageBox(frame).showinfo("Earn", f"Suscrito: {amount} {vals[0]}\n{resp}")
+                _resultado_earn("suscribir", "Suscrito", amount, vals[0], resp)
             except Exception as e:
                 MyMessageBox(frame).showinfo("Error", str(e))
                 _logger.error(f"_ejecutar_subscribe(): {e}")
@@ -2496,10 +2528,7 @@ class AnalisisCrypto(AnalisisBase):
             try:
                 resp = ServiciosCrypto().earn_redeem(productId=product_id, amount=amount)
                 _logger.warning(f"earn_redeem [{vals[0]}] {amount} → {resp}")
-                if resp and "code" in resp and int(resp["code"]) < 0:
-                    MyMessageBox(frame).showinfo("Earn", f"Error: {resp.get('msg', resp['code'])}")
-                else:
-                    MyMessageBox(frame).showinfo("Earn", f"Rescatado: {amount} {vals[0]}\n{resp}")
+                _resultado_earn("rescatar", "Rescatado", amount, vals[0], resp)
             except Exception as e:
                 MyMessageBox(frame).showinfo("Error", str(e))
                 _logger.error(f"_ejecutar_redeem(): {e}")
@@ -2574,8 +2603,8 @@ class AnalisisCrypto(AnalisisBase):
                 "end",
                 values=(
                     b["asset"],
-                    f"{b['spot_free']:,.6f}" if b["spot_free"] > 0 else "-",
-                    f"{b['earn_amount']:,.6f}" if b["earn_amount"] > 0 else "-",
+                    _piso_6(b["spot_free"]),
+                    _piso_6(b["earn_amount"]),
                     f"{b['earn_apr']:.2%}" if b["earn_apr"] > 0 else "-",
                     "Sí" if b["can_redeem"] else ("No" if b["earn_amount"] > 0 else "-"),
                     f"${usdt_val:,.2f}" if usdt_val > 0 else "-",
