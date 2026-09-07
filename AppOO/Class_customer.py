@@ -3468,6 +3468,11 @@ class TickerInfo(MyOrders):
 
         Solo se ejecuta si manager_buysell ya está poblado por graficos_main().
         """
+
+        def firma_ranking(candidatos):
+            """Identidad del ranking para detectar cambios entre corridas."""
+            return [(c.get("symbol"), round(c.get("score", 0), 4)) for c in candidatos]
+
         try:
             # Validar que manager_buysell esté disponible
             if not hasattr(DataHub, "manager_buysell") or not DataHub.manager_buysell:
@@ -3510,9 +3515,16 @@ class TickerInfo(MyOrders):
                 # Comparar si hay cambios significativos
                 gaps_previos = datos_previos.get("gaps", {})
                 asignaciones_previas = datos_previos.get("asignaciones", [])
+                ranking_previo = datos_previos.get("ranking", [])
 
-                # Considerar que hay cambio si gaps o número de asignaciones cambió
-                if gaps_previos == engine.gaps and len(asignaciones_previas) == len(asignaciones):
+                # El ranking entra en la comparacion: los gaps de Crypto son constantes en 0 y las
+                # asignaciones siempre 1, asi que gaps+len() daban "sin cambio" en cada corrida y el
+                # ranking quedaba congelado en la foto del arranque, con info aun a medio poblar
+                if (
+                    gaps_previos == engine.gaps
+                    and len(asignaciones_previas) == len(asignaciones)
+                    and firma_ranking(ranking_previo) == firma_ranking(ranking[:10])
+                ):
                     hay_cambios = False
 
             if hay_cambios:
