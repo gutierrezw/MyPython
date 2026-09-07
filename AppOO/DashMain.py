@@ -2796,16 +2796,7 @@ class DashMain:
             # Tickle siempre corre — detecta reconexión aunque arranque offline
             ib.start_tickle(interval=30, datahub=DataHub, on_reconnect=_ib_on_reconnect)
 
-            def _switch_tv(symbol):
-                _CRYPTO_SUFFIXES = ("USDT", "BUSD", "BTC", "ETH", "BNB")
-                crypto_syms = {p.get("ticket", "") for p in (self.crypto.positions or [])} if self.crypto else set()
-                is_crypto = symbol in crypto_syms or symbol.endswith(_CRYPTO_SUFFIXES)
-                if is_crypto and self.crypto:
-                    self.crypto._abrir_tradingview(symbol)
-                else:
-                    self.stock._abrir_tradingview(symbol)
-
-            set_switch_callback(_switch_tv)
+            set_switch_callback(self._switch_tv)
             set_symbols_fn(
                 lambda: sorted(
                     set(
@@ -2957,6 +2948,16 @@ class DashMain:
         estilos = self.btn_agente_modo._modos[nuevo]
         self.btn_agente_modo.configure(text=f"⚙ {nuevo}", bg=estilos["bg"], fg=estilos["fg"])
 
+    def _switch_tv(self, symbol):
+        """Abre TradingView resolviendo el vehiculo por el simbolo."""
+        _CRYPTO_SUFFIXES = ("USDT", "BUSD", "BTC", "ETH", "BNB")
+        crypto_syms = {p.get("ticket", "") for p in (self.crypto.positions or [])} if self.crypto else set()
+        is_crypto = symbol in crypto_syms or symbol.endswith(_CRYPTO_SUFFIXES)
+        if is_crypto and self.crypto:
+            self.crypto._abrir_tradingview(symbol)
+        else:
+            self.stock._abrir_tradingview(symbol)
+
     def car_ordenes_activas(self):
         _refresh_id = [None]
 
@@ -3036,6 +3037,11 @@ class DashMain:
                 col_idx = int(col.replace("#", "")) - 1
                 col_name = _display_cols[col_idx] if 0 <= col_idx < len(_display_cols) else ""
             except (ValueError, IndexError):
+                return
+            if col_name == "symbol":
+                _symbol = tree.set(item, "symbol").strip()
+                if _symbol:
+                    self._switch_tv(_symbol)
                 return
             if col_name != "claude" or tree.set(item, "claude") != "🤖":
                 return
