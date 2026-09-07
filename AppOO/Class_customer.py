@@ -1257,14 +1257,21 @@ class DataHub:
         return qty, costo
 
     @staticmethod
-    def preservation_build_trama(vehiculo, account, symbol, conid, stop_price, max_price, qty):
-        """Construye la trama de orden STOP según el vehículo (IB o Binance)."""
+    def preservation_build_trama(vehiculo, account, symbol, conid, stop_price, max_price, qty, stop_limit_pct=0.01):
+        """Construye la trama de orden STOP según el vehículo (IB o Binance).
+
+        `stop_limit_pct` es la holgura entre el disparador y el limite. Un STP LMT vende al limite o
+        mejor, nunca peor: con los dos precios iguales la orden que se coloca al dispararse no se
+        llena si la caida sigue —el escenario que el stop existe para atajar— y encima queda viva en
+        el libro contando como cantidad comprometida. Sale de `parameters.preservation`, asi que
+        cada vehiculo lo afina por su volatilidad.
+        """
 
         hash_id = DataHub.RepositorioOportunidades.generar_hash_id(
             account=account, symbol=symbol, option=vehiculo, tipo="STP", subtipo="LMT", recomendado="PRESERVATION_STOP"
         )
         if vehiculo == "Stock":
-            limit_price = float(round(stop_price * 0.99, 2))
+            limit_price = float(round(stop_price * (1 - stop_limit_pct), 2))
             return {
                 "account": account,
                 "vehiculo": "Stock",
@@ -1288,6 +1295,12 @@ class DataHub:
 
         if vehiculo == "Crypto":
             stop_tick = float(DataHub.quantiza_precio("Crypto", symbol, stop_price))
+            # el tickSize puede ser grueso frente al precio y dejar la holgura dentro del mismo tick:
+            # ahi el limite volveria a quedar pegado al disparador sin que nada lo avise
+            limit_tick = float(DataHub.quantiza_precio("Crypto", symbol, stop_price * (1 - stop_limit_pct)))
+            if limit_tick >= stop_tick:
+                tick = DataHub.info.get(symbol, {}).get("lotSize", {}).get("tickSize") or 0.01
+                limit_tick = float(DataHub.quantiza_precio("Crypto", symbol, stop_tick - tick))
             return {
                 "account": account,
                 "vehiculo": "Crypto",
@@ -1296,7 +1309,7 @@ class DataHub:
                     "symbol": symbol,
                     "side": "SELL",
                     "type": "STOP_LOSS_LIMIT",
-                    "price": stop_tick,
+                    "price": limit_tick,
                     "stopPrice": stop_tick,
                     "quantity": float(DataHub.quantiza_qty("Crypto", symbol, qty)),
                     "timeInForce": "GTC",

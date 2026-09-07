@@ -253,13 +253,29 @@ sobre lo que dijo el broker, que es justamente lo único que `status` debe decir
 `SIN_CONFIRMAR` cuenta como comprometida a propósito: ante la duda el gate bloquea de más, nunca de
 menos — perder una venta es barato, comprometer acciones que no existen es lo que H5 existe para evitar.
 `resolve_unconfirmed_orders()` (`Modulos_Mysql.py`, llamada desde `Agente_SyncOrders` cada 300s) la
-resuelve contra IB. No puede cruzar por `clientOrderId` — ese es el dato que falta, y por eso
-`sync_orders_from_ib()` nunca la encuentra —, así que cruza por símbolo y precio de stop, igual que el
-reintento `[RETRY-OK]`; `price` guarda el límite (`stop * 0.99`) y el stop se reconstruye antes de
-comparar. Tras una hora sin aparecer la marca `HUERFANA`: IB publica la orden en live orders apenas la
-acepta, así que no estar significa que nunca entró **o** que ya se ejecutó. Los dos casos no se
-distinguen sin consultar ejecuciones y para el gate dan lo mismo — en ninguno quedan acciones
-comprometidas hacia adelante. Se loguea a ERROR porque el segundo caso sí importa para la auditoría.
+resuelve contra el broker del vehículo. No puede cruzar por `clientOrderId` — ese es el dato que falta,
+y por eso `sync_orders_from_ib()` nunca la encuentra —, así que cruza por símbolo y precio de disparo,
+igual que el reintento `[RETRY-OK]`. Tras una hora sin aparecer la marca `HUERFANA`: el broker publica
+la orden apenas la acepta, así que no estar significa que nunca entró **o** que ya se ejecutó. Los dos
+casos no se distinguen sin consultar ejecuciones y para el gate dan lo mismo — en ninguno quedan
+acciones comprometidas hacia adelante. Se loguea a ERROR porque el segundo caso sí importa para la
+auditoría.
+
+**Corregido el 2026-09-07 — antes solo servía a Stock.** Se documentaba que el método "resuelve contra
+IB" y que el disparo se reconstruía desde `price` como `stop * 0.99`. Las dos cosas dejaron de valer:
+
+- Consultaba `ib_client.get_preservation_stops()` en duro y se lo llamaba **solo desde la rama IB** de
+  `Agente_SyncOrders`, con la `account` de Stock. Una fila de Crypto ni siquiera entraba en el
+  `SELECT`: no se confirmaba, no llegaba a `HUERFANA`, y el símbolo quedaba comprometido de forma
+  permanente para Preservation y para GainsCapture. Hoy `Class_ApiBinnace` implementa el mismo
+  `get_preservation_stops()` que IB —{symbol, order_id, stop_price, status}— y el método recibe
+  `client` y `vehiculo`, sin saber contra qué broker cruza.
+- La reconstrucción `price / 0.99` daba por hecha una holgura fija. Con `stop_limit_pct` configurable
+  por vehículo (`parameters.preservation`) el cálculo queda mal apenas se afina el parámetro, y mal
+  hacia atrás para las filas ya escritas. El disparo sale ahora de `json_detalle.resultado.stop_final`,
+  que es el valor exacto que se envió; las filas viejas sin ese dato caen al cálculo anterior. La
+  tolerancia pasó a relativa (0,5%) — un margen fijo de centavos no significa lo mismo en una acción
+  de 700 que en una cripto de 0,0004.
 
 El comentario de la columna en MySQL repite este motivo — `SHOW FULL COLUMNS FROM order_trader`.
 

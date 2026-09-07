@@ -6605,55 +6605,72 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.close()
             conn.close()
 
-    def resolve_unconfirmed_orders(self, ib_client, account: str, horas_gracia: int = 1) -> tuple:
-        """Resuelve contra IB las filas marcadas `sync_broker = 'SIN_CONFIRMAR'`. Retorna (confirmadas, huerfanas).
+    def resolve_unconfirmed_orders(self, client, account: str, vehiculo: str, horas_gracia: int = 1) -> tuple:
+        """Resuelve contra el broker las filas `sync_broker = 'SIN_CONFIRMAR'`. Retorna (confirmadas, huerfanas).
 
-        Una fila queda SIN_CONFIRMAR cuando Preservation manda el STOP y IB no devuelve `order_id`:
-        la orden puede estar viva y el sistema no tiene con qué identificarla. Mientras siga así el
-        gate cruzado la cuenta como comprometida, así que hay que resolverla o bloquea el símbolo
-        para siempre.
+        Una fila queda SIN_CONFIRMAR cuando Preservation manda el STOP y el broker no devuelve
+        `order_id`: la orden puede estar viva y el sistema no tiene con que identificarla. Mientras
+        siga asi el gate cruzado la cuenta como comprometida, asi que hay que resolverla o bloquea
+        el simbolo para siempre.
+
+        `client` es el cliente del vehiculo — solo se le pide `get_preservation_stops()`, que IB y
+        Binance implementan con el mismo contrato. Antes el metodo consultaba IB en duro y ademas
+        se lo llamaba solo desde la rama IB del agente, asi que una fila de Crypto no se resolvia
+        nunca: ni siquiera llegaba a marcarse HUERFANA, el bloqueo era permanente.
 
         No se puede cruzar por `clientOrderId` — ese es justamente el dato que falta, y por eso
-        `sync_orders_from_ib()` nunca la encuentra. Se cruza por símbolo y precio de stop, igual que
-        el reintento `[RETRY-OK]` de Preservation. `order_trader.price` guarda el límite
-        (`stop * 0.99`), así que el stop se reconstruye antes de comparar.
+        `sync_orders_from_ib()` nunca la encuentra. Se cruza por simbolo y precio de disparo. El
+        disparo sale de `json_detalle.resultado.stop_final`, que es el valor exacto que se envio:
+        reconstruirlo desde `price` obligaba a conocer la holgura con que se armo esa fila, y
+        `stop_limit_pct` ahora se afina por vehiculo desde `parameters.preservation`. Las filas
+        viejas sin ese dato caen al calculo anterior.
 
-        `horas_gracia` es el margen antes de dar una fila por huérfana. IB publica la orden en live
-        orders apenas la acepta, así que no aparecer tras una hora significa que nunca entró **o**
-        que ya se ejecutó. No se distinguen los dos casos sin consultar ejecuciones, y para el gate
-        dan lo mismo: en ninguno quedan acciones comprometidas hacia adelante. Se loguea fuerte
-        porque el segundo caso sí importa para la auditoría.
+        La tolerancia es relativa: un margen fijo de centavos no significa lo mismo en una accion
+        de 700 que en una cripto de 0.0004.
+
+        `horas_gracia` es el margen antes de dar una fila por huerfana. El broker publica la orden
+        apenas la acepta, asi que no aparecer tras una hora significa que nunca entro **o** que ya
+        se ejecuto. No se distinguen los dos casos sin consultar ejecuciones, y para el gate dan lo
+        mismo: en ninguno quedan acciones comprometidas hacia adelante. Se loguea fuerte porque el
+        segundo caso si importa para la auditoria.
         """
         conn = self._conectar(tabla="select.order_trader")
         cursor = None
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, symbol, price, quantity, stampPlace FROM order_trader "
-                "WHERE account = %s AND sync_broker = 'SIN_CONFIRMAR'",
-                (account,),
+                "SELECT id, symbol, price, quantity, stampPlace, json_detalle FROM order_trader "
+                "WHERE account = %s AND vehiculo = %s AND sync_broker = 'SIN_CONFIRMAR'",
+                (account, vehiculo),
             )
             pendientes = cursor.fetchall()
             if not pendientes:
                 return 0, 0
 
             try:
-                stops = ib_client.get_preservation_stops() or []
+                stops = client.get_preservation_stops() or []
             except Exception as e:
-                _logger.error(f"[resolve_unconfirmed_orders] get_preservation_stops: {e}")
+                _logger.error(f"[resolve_unconfirmed_orders] {vehiculo} get_preservation_stops: {e}")
                 return 0, 0
 
             confirmadas = 0
             huerfanas = 0
             limite = datetime.now() - timedelta(hours=horas_gracia)
-            for row_id, symbol, price, qty, stamp in pendientes:
-                stop_esperado = float(price or 0) / 0.99
+            for row_id, symbol, price, qty, stamp, detalle in pendientes:
+                stop_esperado = 0.0
+                try:
+                    stop_esperado = float((json.loads(detalle or "{}").get("resultado") or {}).get("stop_final") or 0)
+                except (ValueError, TypeError, AttributeError):
+                    stop_esperado = 0.0
+                if not stop_esperado:
+                    stop_esperado = float(price or 0) / 0.99  # filas previas a stop_limit_pct
+                tolerancia = max(abs(stop_esperado) * 0.005, 0.01)
                 match = next(
                     (
                         s
                         for s in stops
                         if s.get("symbol") == symbol
-                        and abs(float(s.get("stop_price") or 0) - stop_esperado) < 0.02
+                        and abs(float(s.get("stop_price") or 0) - stop_esperado) < tolerancia
                     ),
                     None,
                 )
@@ -6665,7 +6682,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                     )
                     confirmadas += 1
                     _logger.warning(
-                        f"[resolve_unconfirmed_orders] {symbol}: confirmada contra IB → "
+                        f"[resolve_unconfirmed_orders] {vehiculo}/{symbol}: confirmada contra el broker -> "
                         f"order_id={match.get('order_id')} status={match.get('status')}"
                     )
                 elif stamp and stamp < limite:
@@ -6674,8 +6691,8 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                     )
                     huerfanas += 1
                     _logger.error(
-                        f"[resolve_unconfirmed_orders] {symbol}: {qty} acc @ stop {stop_esperado:.2f} no "
-                        f"aparece en IB tras {horas_gracia}h → HUERFANA. Nunca entro o ya se ejecuto; "
+                        f"[resolve_unconfirmed_orders] {vehiculo}/{symbol}: {qty} @ stop {stop_esperado:g} no "
+                        f"aparece en el broker tras {horas_gracia}h -> HUERFANA. Nunca entro o ya se ejecuto; "
                         "deja de contar como comprometida. Revisar contra las ejecuciones del dia"
                     )
             conn.commit()

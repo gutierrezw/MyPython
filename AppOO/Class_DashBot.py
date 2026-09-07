@@ -158,12 +158,16 @@ class ClassAgenteIA:
         DataHub.modo_operacion = (_gc_params or {}).get("agente_ia", {}).get("modo", "OBSERVACION")
         self._gc_config_log = {}
         self._gc_run_log = {}
+        self._gc_skip_log = {}
 
         # Inicializar AgentManager — registra todos sus agentes @wait_rate en AGENTES_SCHEDULE
         self.agent_manager = AgentManager(account=self.account, vehiculo=self.vehiculo)
 
     _BUY_TAGS = {"UNANIME", "CONSENSO", "TENDENCIA"}
     _SELL_TAGS = {"ALERTA", "SALIDA"}
+    # cada cuanto una corrida repetida vuelve a escribir aunque no haya cambiado nada — es el latido
+    # que separa "sin novedad" de "el agente dejo de correr"
+    _LATIDO_SEG = 4 * 3600
 
     def _consenso_info(self, symbol):
         rows, ix = MarketScreen().select(account=self.account, symbol=symbol)
@@ -430,10 +434,10 @@ class ClassAgenteIA:
                 self.logger.warning(f"Agente_SyncOrders IB: {n} actualizadas")
                 # las SIN_CONFIRMAR no las encuentra sync_orders_from_ib: no tienen clientOrderId
                 # contra que cruzar. Se resuelven aparte, por simbolo y precio de stop
-                conf, huer = self.RepositorioOportunidades.resolve_unconfirmed_orders(ib, self.account)
+                conf, huer = self.RepositorioOportunidades.resolve_unconfirmed_orders(ib, self.account, "Stock")
                 if conf or huer:
                     self.logger.warning(
-                        f"Agente_SyncOrders sin_confirmar: {conf} confirmadas, {huer} huerfanas"
+                        f"Agente_SyncOrders sin_confirmar Stock: {conf} confirmadas, {huer} huerfanas"
                     )
         except Exception as e:
             self.logger.error(f"Agente_SyncOrders IB: {e}")
@@ -447,6 +451,16 @@ class ClassAgenteIA:
                 # asi que la venta se detecta al pasar a FILLED en la sincronizacion
                 for venta in ventas:
                     ServiciosCrypto().repay_venta_alerta(venta["symbol"], venta["importe"])
+                # mismo motivo que en IB: las SIN_CONFIRMAR no tienen clientOrderId contra que cruzar.
+                # Sin esta llamada una fila de Crypto quedaba comprometida para siempre — ni se
+                # confirmaba ni llegaba a HUERFANA, porque el SELECT filtraba por la account de Stock
+                conf, huer = self.RepositorioOportunidades.resolve_unconfirmed_orders(
+                    bc, self.account_crypto, "Crypto"
+                )
+                if conf or huer:
+                    self.logger.warning(
+                        f"Agente_SyncOrders sin_confirmar Crypto: {conf} confirmadas, {huer} huerfanas"
+                    )
         except Exception as e:
             self.logger.error(f"Agente_SyncOrders Binance: {e}")
 
@@ -542,9 +556,18 @@ class ClassAgenteIA:
                 if DataHub.manager_sesion.get(vehiculo):
                     self._gains_capture_run(vehiculo)
                 else:
-                    _gc_logger.warning(
-                        f"Agente_GainsCapture: sesion {vehiculo} no activa → SKIP (timer consumido)"
-                    )
+                    # el SKIP se repetia cada 30 min las 24h y era el 54% del log; solo importa que
+                    # el turno se consume, no cuantas veces, asi que se resume con el mismo latido
+                    _skip_veces, _skip_ultimo = self._gc_skip_log.get(vehiculo, (0, 0))
+                    if (time.time() - _skip_ultimo) < self._LATIDO_SEG:
+                        self._gc_skip_log[vehiculo] = (_skip_veces + 1, _skip_ultimo)
+                    else:
+                        _skip_rep = f" | repetidas={_skip_veces}" if _skip_veces else ""
+                        _gc_logger.warning(
+                            f"Agente_GainsCapture: sesion {vehiculo} no activa → SKIP (timer consumido)"
+                            f"{_skip_rep}"
+                        )
+                        self._gc_skip_log[vehiculo] = (0, time.time())
         except Exception as e:
             _gc_logger.error(f"Agente_GainsCapture(): {e}")
 
@@ -986,14 +1009,19 @@ class ClassAgenteIA:
 
         positions = self.PlanInversion.select_inversion(tipoin=vehiculo, ticket="all")
         conid_map = {p.get("ticket"): (p.get("conid"), p.get("useraccount")) for p in positions}
-        # misma constancia que Preservation: la cuenta del agente y las que traen las posiciones
-        # (`useraccount`) — si no coinciden, lo que se consulte por cuenta vuelve vacio sin error.
-        # La cuenta sale de la sesion del vehiculo: `self.account` es siempre la de Stock (DashBot
-        # se construye sobre esa sesion) y en Crypto reportaba U4214563 contra posiciones B0000001,
-        # que es justo el descuadre que esta linea existe para detectar
-        _ses_veh = BDsystem.get_sesion_by_vehiculo(vehiculo)
-        _account_ses = (_ses_veh or {}).get("idcuenta") or "-"
+        # la cuenta la traen las posiciones (`useraccount`) y es la que se usa para consultar los
+        # lotes. `self.account` no sirve: es siempre la de Stock, porque DashBot se construye sobre
+        # esa sesion, y en Crypto logueaba U4214563 contra posiciones B0000001
         _cuentas_pos = sorted({p.get("useraccount") for p in positions if p.get("useraccount")})
+        # la cuenta de la sesion del vehiculo no se loguea —es la misma— pero se contrasta: un
+        # descuadre deja toda consulta por cuenta vacia sin excepcion y el sintoma visible seria
+        # "sin lotes en ganancia", que se lee como una posicion que no califica
+        _account_ses = (BDsystem.get_sesion_by_vehiculo(vehiculo) or {}).get("idcuenta")
+        if _cuentas_pos and _account_ses not in _cuentas_pos:
+            _gc_logger.error(
+                f"GainsCapture({vehiculo}): la cuenta de la sesion ({_account_ses or '-'}) no esta "
+                f"entre las de las posiciones ({','.join(_cuentas_pos)})"
+            )
         categories = self._gains_capture_categorias(vehiculo, positions)
         symbols_gain = [s for s in DataHub.get_info_symbols_gain() if s.get("vehiculo") == vehiculo]
 
@@ -1419,17 +1447,18 @@ class ClassAgenteIA:
         # Pero la respuesta cambia rara vez y ~48 corridas/dia por vehiculo escribian el mismo
         # desglose, asi que se emite solo cuando algo se movio y `repetidas` dice cuantas corridas
         # mudas hubo antes — mismo criterio que symbol_decision_history.veces
+        # Pasado _LATIDO_SEG se emite igual aunque nada haya cambiado: sin eso el silencio no se
+        # distingue de un agente caido, que es lo que pasa apenas el desglose se estabiliza
         _run_snap = (len(positions), len(symbols_in_gain), len(candidatos), tuple(sorted(_desc.items())))
-        _prev, _veces = self._gc_run_log.get(vehiculo, (None, 0))
-        if _run_snap == _prev:
-            self._gc_run_log[vehiculo] = (_prev, _veces + 1)
+        _prev, _veces, _ultimo = self._gc_run_log.get(vehiculo, (None, 0, 0))
+        if _run_snap == _prev and (time.time() - _ultimo) < self._LATIDO_SEG:
+            self._gc_run_log[vehiculo] = (_prev, _veces + 1, _ultimo)
         else:
-            self._gc_run_log[vehiculo] = (_run_snap, 0)
+            self._gc_run_log[vehiculo] = (_run_snap, 0, time.time())
             _rep = f" | repetidas={_veces}" if _veces else ""
             _gc_logger.warning(
                 f"GainsCapture({vehiculo}): {len(positions)} posiciones | {len(symbols_in_gain)} en ganancia | "
-                f"{len(candidatos)} con categoriaActivo='N' | account={_account_ses} | "
-                f"cuentas={','.join(_cuentas_pos) or '-'}"
+                f"{len(candidatos)} con categoriaActivo='N' | account={','.join(_cuentas_pos) or '-'}"
             )
             _gc_logger.warning(
                 f"GainsCapture({vehiculo}): CIERRE | sin lotes en ganancia={_desc['sin_lotes']} | "

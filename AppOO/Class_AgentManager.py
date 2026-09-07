@@ -33,6 +33,10 @@ from Class_DataFrame import CacheHut
 class AgentManager:
     """Coordinador de agentes síncronos. Cada dominio tiene su propio logger."""
 
+    # cada cuanto una corrida repetida vuelve a escribir aunque no haya cambiado nada — es el latido
+    # que separa "sin novedad" de "el agente dejo de correr"
+    _LATIDO_SEG = 4 * 3600
+
     def __init__(self, account: str, vehiculo: str = "Stock"):
         self.account = account
         self.vehiculo = vehiculo
@@ -57,7 +61,7 @@ class AgentManager:
         self.preservation_config = {}
         self.preservation_state = {}
         self.preservation_last_run = {}
-        self._pres_run_log = {}  # {vehiculo: (snapshot, veces)} — dedup de corridas mudas
+        self._pres_run_log = {}  # {vehiculo: (snapshot, veces, ultima_escritura)} — dedup de corridas mudas
         # DRY-RUN para los dos vehiculos: Crypto recien entra al loop y Stock acompania hasta que
         # se vea el comportamiento de los dos juntos. Poner en False habilita el envio real.
         self._preservation_dry_run = True
@@ -801,9 +805,12 @@ class AgentManager:
         sacado. El motivo de entonces era que `is_live` dependía de vehiculo=="Stock", así que Crypto
         simulaba en silencio sin que nadie lo supiera. Eso ya no pasa: `is_live` solo mira
         `_preservation_dry_run`, que hoy vale True para los dos — los dos simulan, y se ve en el log.
-        Antes de pasar a live falta lo que la rama Crypto todavía no tiene: ventana 9-16h que no
-        aplica a un mercado 24x7, `resolve_unconfirmed_orders()` que solo consulta IB, y el límite
-        pegado al stop en la trama Binance.
+        Los tres frenos que faltaban para Crypto quedaron cerrados el 2026-09-07: la ventana sale de
+        `parameters.preservation` y Crypto ya trae 0-24h; el limite del stop se separa del disparador
+        por `stop_limit_pct`; y `resolve_unconfirmed_orders()` corre para los dos vehiculos contra el
+        `get_preservation_stops()` de cada broker. Lo que sigue abierto no es especifico de Crypto y esta
+        listado en design-preservation.md (EXIT cancelando en DRY-RUN, colateral del prestamo, contexto
+        Claude vacio, `int(qty)` en la auditoria).
         """
         for vehiculo in ("Stock", "Crypto"):
             try:
@@ -996,10 +1003,9 @@ class AgentManager:
         if not time_revision:
             return
 
-        _account_ses = "-"
+        sesion_data = None
         try:
             sesion_data = BDsystem.get_sesion_by_vehiculo(vehiculo)
-            _account_ses = (sesion_data or {}).get("idcuenta") or "-"
             gain_inv_usd = sesion_data.get("gainInversion", 100 if vehiculo == "Stock" else 20) if sesion_data else (100 if vehiculo == "Stock" else 20)
         except Exception as _e:
             self._preservation_logger.warning(f"Preservation({vehiculo}): no se pudo obtener gainInversion → usando default | {_e}")
@@ -1010,6 +1016,7 @@ class AgentManager:
         correccion_pct = pconfig.get("correccion_pct", 0.08)
         atr_mult = pconfig.get("atr_mult", 2.0)
         proteccion_qty_pct = pconfig.get("proteccion_qty_pct", 0.33)
+        stop_limit_pct = pconfig.get("stop_limit_pct", 0.01)
 
         _claude_key = None
         try:
@@ -1020,14 +1027,22 @@ class AgentManager:
 
         try:
             positions = self.PlanInversion.select_inversion(tipoin=vehiculo, ticket="all")
-            # la cuenta sale de la sesion del vehiculo, no de `self.account`: AgentManager se
-            # construye con la cuenta de Stock y en Crypto reportaba U4214563 contra posiciones
-            # B0000001. Las posiciones traen la suya (`useraccount`) y el log muestra las dos:
-            # si no coinciden, todo lo que se consulte por cuenta vuelve vacio sin error
+            # la cuenta la traen las posiciones (`useraccount`) y es la que se usa para consultar
+            # los lotes. `self.account` no sirve: AgentManager se construye con la de Stock y en
+            # Crypto logueaba U4214563 contra posiciones B0000001
             _cuentas_pos = sorted({p.get("useraccount") for p in positions if p.get("useraccount")})
+            # la cuenta de la sesion del vehiculo no se loguea —es la misma— pero se contrasta: un
+            # descuadre deja toda consulta por cuenta vacia sin excepcion y el sintoma visible
+            # seria "sin lotes en ganancia", que se lee como una posicion que no califica
+            _account_ses = (sesion_data or {}).get("idcuenta")
+            if _cuentas_pos and _account_ses not in _cuentas_pos:
+                self._preservation_logger.error(
+                    f"Preservation({vehiculo}): la cuenta de la sesion ({_account_ses or '-'}) no "
+                    f"esta entre las de las posiciones ({','.join(_cuentas_pos)})"
+                )
             _diferir(
                 f"Preservation({vehiculo}): {len(positions)} posiciones cargadas | "
-                f"account={_account_ses} | cuentas={','.join(_cuentas_pos) or '-'}"
+                f"account={','.join(_cuentas_pos) or '-'}"
             )
         except Exception as e:
             self._preservation_logger.error(f"Preservation({vehiculo}): error al cargar posiciones → {e}")
@@ -1213,7 +1228,9 @@ class AgentManager:
                     )
                     continue
 
-                trama = DataHub.preservation_build_trama(vehiculo, account, symbol, conid, stop_final, max_price, qty)
+                trama = DataHub.preservation_build_trama(
+                    vehiculo, account, symbol, conid, stop_final, max_price, qty, stop_limit_pct
+                )
 
                 is_live = not self._preservation_dry_run
 
@@ -1241,14 +1258,18 @@ class AgentManager:
                             DataHub.preservation_cancel_order(vehiculo, account, order_id_prev, symbol)
                         response = DataHub.preservation_send_order(vehiculo, trama)
                         order_id = DataHub.preservation_extract_order_id(response)
-                        if not order_id and vehiculo == "Stock":
+                        if not order_id:
+                            # el reintento era solo de Stock porque solo IB exponia get_preservation_stops().
+                            # Binance ya implementa el mismo contrato, y este es el freno mas barato: si el
+                            # order_id se recupera aca no se llega a escribir la fila SIN_CONFIRMAR
                             time.sleep(3)
                             try:
-                                ib_client = DataHub.clients.get("Stock")
-                                if ib_client:
-                                    stops = ib_client.get_preservation_stops()
+                                _client = DataHub.clients.get(vehiculo)
+                                if _client:
+                                    stops = _client.get_preservation_stops()
+                                    _tol = max(abs(float(stop_final)) * 0.005, 0.01)
                                     matched = next(
-                                        (s for s in stops if s.get("symbol") == symbol and abs((s.get("stop_price") or 0) - stop_final) < 0.02),
+                                        (s for s in stops if s.get("symbol") == symbol and abs((s.get("stop_price") or 0) - stop_final) < _tol),
                                         None,
                                     )
                                     if matched:
@@ -1302,8 +1323,14 @@ class AgentManager:
                                     "ganancia_protegida_usd": round(float(ganancia_protegida), 4),
                                 },
                             }
+                            # el limite sale de la trama que se envio, no se recalcula: build_trama ya aplico
+                            # el `stop_limit_pct` del vehiculo y, en Crypto, la quantizacion a tickSize con su
+                            # guarda. Recalcularlo con 0.99 en duro dejaba la fila diciendo un precio que el
+                            # broker nunca recibio. `orderType` si queda en "STP LMT" a proposito: es el nombre
+                            # canonico de order_trader para un stop-limit y hay consumidores que filtran por el
+                            _pedido = trama["pedido"]["orders"][0] if vehiculo == "Stock" else trama["pedido"]
+                            limit_price = float(_pedido.get("price") or 0)
                             if order_id and str(order_id) not in ("None", "null", ""):
-                                limit_price = float(DataHub.quantiza_precio(vehiculo, symbol, stop_final * 0.99))
                                 values = {
                                     "account": account,
                                     "vehiculo": vehiculo,
@@ -1357,7 +1384,7 @@ class AgentManager:
                                 except Exception as _e:
                                     self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando ENVIADA → {_e}")
                             else:
-                                # La orden salio a IB pero no volvio order_id. Antes no se escribia nada
+                                # La orden salio al broker pero no volvio order_id. Antes no se escribia nada
                                 # y el STOP quedaba fantasma: vivo en el broker e invisible para
                                 # qty_comprometida_sell(), que es lo que consultan Preservation y
                                 # GainsCapture antes de emitir (gate cruzado H5) — el gate no lo veia y
@@ -1365,7 +1392,6 @@ class AgentManager:
                                 # La fila queda con sync_broker=SIN_CONFIRMAR: el gate la cuenta como
                                 # comprometida y Agente_SyncOrders la resuelve contra el broker. Sin
                                 # clientOrderId, que es justamente el dato que falta.
-                                limit_price = float(DataHub.quantiza_precio(vehiculo, symbol, stop_final * 0.99))
                                 values = {
                                     "account": account,
                                     "vehiculo": vehiculo,
@@ -1384,7 +1410,8 @@ class AgentManager:
                                 }
                                 self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
                                 self._preservation_logger.error(
-                                    f"[SIN-CONFIRMAR] {symbol}: STP LMT {qty} acc @ {stop_final:.2f} enviada "
+                                    f"[SIN-CONFIRMAR] {symbol}: STP LMT {qty} @ "
+                                    f"{DataHub.format_precio(vehiculo, symbol, stop_final)} enviada "
                                     "sin order_id — fila marcada sync_broker=SIN_CONFIRMAR, cuenta como "
                                     "comprometida hasta que el broker la confirme o la descarte"
                                 )
@@ -1433,13 +1460,17 @@ class AgentManager:
 
         # una corrida identica a la anterior no aporta nada: las mismas 5 lineas cada 2h tapan el
         # evento que si importa. Se cuentan y se resumen al cambiar (mismo patron que GainsCapture)
+        # el silencio absoluto tampoco sirve: los contadores de Crypto no se mueven (siempre el mismo
+        # unico evaluado) asi que la corrida no volvia a escribir nunca y el log no distinguia "sin
+        # cambios" de "el thread murio" — 18h mudas medidas el 2026-09-07. Pasado _LATIDO_SEG se
+        # escribe igual: la linea no aporta dato nuevo salvo `repetidas`, pero prueba que el agente vive
         _run_snap = (tuple(sorted(_desc.items())), tuple(_huella))
-        _prev, _veces = self._pres_run_log.get(vehiculo, (None, 0))
-        if _run_snap == _prev and not _forzado:
-            self._pres_run_log[vehiculo] = (_prev, _veces + 1)
+        _prev, _veces, _ultimo = self._pres_run_log.get(vehiculo, (None, 0, 0))
+        if _run_snap == _prev and not _forzado and (time.time() - _ultimo) < self._LATIDO_SEG:
+            self._pres_run_log[vehiculo] = (_prev, _veces + 1, _ultimo)
             return
 
-        self._pres_run_log[vehiculo] = (_run_snap, 0)
+        self._pres_run_log[vehiculo] = (_run_snap, 0, time.time())
         _rep = f" | repetidas={_veces}" if _veces else ""
         _flush()
         self._preservation_logger.warning(

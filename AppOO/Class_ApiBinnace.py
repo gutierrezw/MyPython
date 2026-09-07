@@ -450,6 +450,32 @@ class BinanceSpot(Spot):
         """Consulta estado de una orden específica por orderId — incluye FILLED y CANCELED."""
         return self.get_order(symbol=symbol, orderId=order_id)
 
+    @handle_binance_exceptions
+    def get_preservation_stops(self):
+        """Ordenes STOP_LOSS_LIMIT SELL GTC vivas. Mismo contrato que el metodo homonimo de IB:
+        lista de dicts {symbol, order_id, stop_price, status}.
+
+        Existe para que `resolve_unconfirmed_orders()` no tenga que saber contra que broker cruza.
+        """
+        try:
+            ordenes = self.get_open_orders() or []
+            return [
+                {
+                    "symbol": o.get("symbol", ""),
+                    "order_id": o.get("orderId"),
+                    "stop_price": float(o.get("stopPrice") or 0),
+                    "status": o.get("status", ""),
+                }
+                for o in ordenes
+                if (o.get("type") or "").upper() == "STOP_LOSS_LIMIT"
+                and (o.get("side") or "").upper() == "SELL"
+                and (o.get("timeInForce") or "").upper() == "GTC"
+                and (o.get("status") or "").upper() in ("NEW", "PARTIALLY_FILLED")
+            ]
+        except Exception as e:
+            self.logger.error(f"get_preservation_stops(): {e}")
+            return []
+
     # =========================
     # CUENTA
     # =========================
