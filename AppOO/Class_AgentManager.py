@@ -1151,6 +1151,41 @@ class AgentManager:
                 stop_anterior = state.get("stop_actual", 0)
                 stop_final = max(stop_anterior, stop_calculado)
 
+                # round(..., 2) fijo dejaba el techo en 0.00 para los simbolos sub-centavo de
+                # Crypto (VTHO cotiza 0.000414) y capaba el stop a cero
+                stop_max = float(DataHub.quantiza_precio(vehiculo, symbol, last - atr))
+
+                # `account` es el de la posicion (`useraccount`), no el del agente: con el de
+                # Stock los lotes de Crypto no aparecen y todo simbolo cae en "sin lotes"
+                qty, costo_lotes = DataHub.preservation_calc_qty(
+                    account, vehiculo, symbol, last, proteccion_qty_pct
+                )
+                if qty <= 0:
+                    _diferir(
+                        f"Preservation({vehiculo}/{symbol}): sin lotes en ganancia para la clase "
+                        f"{proteccion_qty_pct:.0%} | last={last:.2f} | lotes de account={account}"
+                        f" → SKIP", "sin_lotes", symbol
+                    )
+                    continue
+
+                # techo del gate de mas abajo, resuelto ANTES de gastar la llamada a Claude. Claude
+                # solo puede SUBIR stop_final y `stop_max` lo capa, asi que esto es lo maximo que la
+                # posicion puede llegar a proteger: si no alcanza, ninguna respuesta lo da vuelta.
+                # El orden estaba invertido respecto de GainsCapture, que ya filtra los escenarios
+                # antes de consultar. Medido sobre symbol_decision_history: 64 evaluaciones Claude
+                # entre 2026-08-28 y 2026-09-09 (BNBUSDT 51, PBR 12, BTG 1), las 64 descartadas aca
+                # abajo sin emitir una sola orden. Lo caro no es el token: es `_build_preservation_
+                # context`, que arma consenso, 13F, analistas, sentimiento, RSI, MACD y rangos.
+                techo_protegido = qty * stop_max - costo_lotes
+                if techo_protegido < gain_inv_usd:
+                    _diferir(
+                        f"Preservation({vehiculo}/{symbol}): techo {techo_protegido:.2f} < "
+                        f"gainInversion {gain_inv_usd:.2f} | qty={qty} @ stop_max={stop_max:.2f} "
+                        f"vs costo={costo_lotes:.2f} → SKIP (sin consultar a Claude)",
+                        "techo_corto", symbol
+                    )
+                    continue
+
                 ctx = {}
                 claude_result = None
                 if _claude_key:
@@ -1181,24 +1216,8 @@ class AgentManager:
                         except Exception as _e:
                             self._preservation_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CLAUDE → {_e}")
 
-                # round(..., 2) fijo dejaba el techo en 0.00 para los simbolos sub-centavo de
-                # Crypto (VTHO cotiza 0.000414) y capaba el stop a cero
-                stop_max = float(DataHub.quantiza_precio(vehiculo, symbol, last - atr))
                 if stop_final > stop_max:
                     stop_final = stop_max
-
-                # `account` es el de la posicion (`useraccount`), no el del agente: con el de
-                # Stock los lotes de Crypto no aparecen y todo simbolo cae en "sin lotes"
-                qty, costo_lotes = DataHub.preservation_calc_qty(
-                    account, vehiculo, symbol, last, proteccion_qty_pct
-                )
-                if qty <= 0:
-                    _diferir(
-                        f"Preservation({vehiculo}/{symbol}): sin lotes en ganancia para la clase "
-                        f"{proteccion_qty_pct:.0%} | last={last:.2f} | lotes de account={account}"
-                        f" → SKIP", "sin_lotes", symbol
-                    )
-                    continue
 
                 # la ganancia que el STOP asegura de verdad: se vende al stop, no al precio de hoy.
                 # El gate de ROI de mas arriba mide la posicion entera (diluida por los lotes en
