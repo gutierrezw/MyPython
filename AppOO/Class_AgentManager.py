@@ -1015,6 +1015,7 @@ class AgentManager:
         proteccion_base = pconfig.get("proteccion_base", 0.50)
         correccion_pct = pconfig.get("correccion_pct", 0.08)
         atr_mult = pconfig.get("atr_mult", 2.0)
+        stop_max_atr_mult = pconfig.get("stop_max_atr_mult", 1.0)
         proteccion_qty_pct = pconfig.get("proteccion_qty_pct", 0.33)
         stop_limit_pct = pconfig.get("stop_limit_pct", 0.01)
 
@@ -1152,8 +1153,14 @@ class AgentManager:
                 stop_final = max(stop_anterior, stop_calculado)
 
                 # round(..., 2) fijo dejaba el techo en 0.00 para los simbolos sub-centavo de
-                # Crypto (VTHO cotiza 0.000414) y capaba el stop a cero
-                stop_max = float(DataHub.quantiza_precio(vehiculo, symbol, last - atr))
+                # Crypto (VTHO cotiza 0.000414) y capaba el stop a cero.
+                # El multiplicador estaba en 1 en duro y era el que decidia: las 5 decisiones registradas
+                # quedaron en `last - 1 ATR`, 16-19% por encima de la base de reglas. A 1 ATR del precio el
+                # stop dura ~4 dias, en alza y en baja por igual, asi que una recuperacion no le da margen.
+                # No es `atr_mult`: aquel mide desde SMA20, este desde `last`. Y no lleva piso en
+                # `stop_calculado`: si el precio ya cruzo la base de reglas, la base queda encima de `last`
+                # y este techo es lo unico que impide mandar el STOP por arriba del mercado.
+                stop_max = float(DataHub.quantiza_precio(vehiculo, symbol, last - stop_max_atr_mult * atr))
 
                 # `account` es el de la posicion (`useraccount`), no el del agente: con el de
                 # Stock los lotes de Crypto no aparecen y todo simbolo cae en "sin lotes"
