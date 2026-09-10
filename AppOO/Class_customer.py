@@ -2067,7 +2067,10 @@ class MyOrders:
         # Selecciona modo QTY o USD y actualiza UI.
         def on_select_modo(event):
             try:
-                modo = lbm.get(lbm.curselection())
+                sel = lbm.curselection()
+                if not sel:
+                    return
+                modo = lbm.get(sel[0])
                 modo_entrada.set(modo)
                 lbm.grid_forget()
                 if modo == "USD":
