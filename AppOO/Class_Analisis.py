@@ -1046,6 +1046,13 @@ class AnalisisFCI(AnalisisBase):
 
     def _crear_barra_rf_rv(self, parent, row: int, resumen: dict) -> int:
         """Barra horizontal RF/RV en el bloque Resumen."""
+        def ancho_texto(texto, font):
+            # Mide el texto sin dejarlo dibujado, para que el tramo nunca sea mas angosto que su importe.
+            item = canvas.create_text(0, 0, text=texto, font=font)
+            x0, _, x1, _ = canvas.bbox(item)
+            canvas.delete(item)
+            return x1 - x0
+
         split = self._rf_rv_split(resumen.get("total_valor", 0), resumen.get("factor_cambio", 1))
         if not split:
             return row
@@ -1058,13 +1065,24 @@ class AnalisisFCI(AnalisisBase):
         outer.grid(row=row, column=0, columnspan=2, padx=10, pady=(2, 6), sticky="ew")
 
         BAR_W, BAR_H = 390, 20
+        FUENTE_ARS = ("Helvetica", 8)
+        MARGEN_TEXTO = 6
         COLOR_RF = "#2980b9"
         COLOR_RV = "#e67e22"
 
         canvas = tk.Canvas(outer, width=BAR_W, height=BAR_H + 22, bg=self.BG_COLOR, highlightthickness=0)
         canvas.pack(anchor="w")
 
-        rf_px = max(1, int(BAR_W * rf_pct / 100))
+        texto_rf = f"${rf_ars:,.0f} ARS"
+        texto_rv = f"${rv_ars:,.0f} ARS"
+        min_rf = int(ancho_texto(texto_rf, FUENTE_ARS)) + MARGEN_TEXTO
+        min_rv = int(ancho_texto(texto_rv, FUENTE_ARS)) + MARGEN_TEXTO
+        # Si los dos minimos no entran en la barra, la barra crece en vez de recortar un importe.
+        if min_rf + min_rv > BAR_W:
+            BAR_W = min_rf + min_rv
+            canvas.config(width=BAR_W)
+
+        rf_px = min(max(int(BAR_W * rf_pct / 100), min_rf), BAR_W - min_rv)
         rv_px = BAR_W - rf_px
 
         canvas.create_rectangle(0, 0, rf_px, BAR_H, fill=COLOR_RF, outline="")
@@ -1077,10 +1095,8 @@ class AnalisisFCI(AnalisisBase):
             canvas.create_text(rf_px + rv_px // 2, BAR_H // 2, text=f"RV {rv_pct:.0f}%",
                                 fill="white", font=("Helvetica", 8, "bold"))
 
-        canvas.create_text(rf_px // 2, BAR_H + 11,
-                            text=f"${rf_ars:,.0f} ARS", fill="white", font=("Helvetica", 8))
-        canvas.create_text(rf_px + rv_px // 2, BAR_H + 11,
-                            text=f"${rv_ars:,.0f} ARS", fill="white", font=("Helvetica", 8))
+        canvas.create_text(rf_px // 2, BAR_H + 11, text=texto_rf, fill="white", font=FUENTE_ARS)
+        canvas.create_text(rf_px + rv_px // 2, BAR_H + 11, text=texto_rv, fill="white", font=FUENTE_ARS)
 
         return row + 1
 
