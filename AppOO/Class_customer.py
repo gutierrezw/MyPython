@@ -6773,11 +6773,13 @@ class WidgetVehiculo(TickerInfo):
                 }
 
             elif self.vehiculo == "Crypto":
+                tir = calcular_tir(account=self.account, vehiculo=self.vehiculo)
                 pdatos = {
                     "Inversión": tcos,
                     "UnProfit": tpro,
                     "UnP&l": tunr,
                     "Cash": -sum(wdebi),
+                    "TIR": tir,
                 }
 
             # Obtiene Dataframe de performance
