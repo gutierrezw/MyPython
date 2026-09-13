@@ -368,7 +368,7 @@ class _CategoryBar(tk.Frame):
         self._rows.clear()
         self._active_cat = None
 
-        max_pct = max((d["pct"] for d in data), default=1) or 1
+        max_pct = max((abs(d["pct"]) for d in data), default=1) or 1
         bar_w = 80
         show_pct_ing = income_total > 0
 
@@ -390,7 +390,7 @@ class _CategoryBar(tk.Frame):
             )
             name_lbl.pack(side=tk.LEFT)
 
-            filled = max(int(bar_w * d["pct"] / max_pct), 2)
+            filled = max(int(bar_w * abs(d["pct"]) / max_pct), 2)
             canvas = tk.Canvas(row_frame, width=bar_w, height=14, bg=self.bgcolor, highlightthickness=0)
             canvas.pack(side=tk.LEFT, padx=4)
             canvas.create_rectangle(0, 2, filled, 12, fill=self._bar_color, outline="", tags="bar")
@@ -1396,12 +1396,11 @@ class FinancePanel(tk.Frame):
                 balance = kpi["ingresos"] - kpi["gastos"]
                 bal_color = _POSITIVE if balance >= 0 else _NEGATIVE
                 pct_gastos = (kpi["gastos"] / kpi["ingresos"] * 100) if kpi["ingresos"] else 0
-                pct_invest = (kpi["invertido"] / kpi["ingresos"] * 100) if kpi["ingresos"] else 0
+                pct_ahorro = (balance / kpi["ingresos"] * 100) if kpi["ingresos"] else 0
 
                 self._kpi_income.update_value(
                     _fmt_usdt(kpi["ingresos"]),
                     sub=f"ARS {kpi['ingresos_ars']:,.0f}".replace(",", ".") if kpi["ingresos_ars"] else "",
-                    sub2=f"{kpi['total_txns']} transacciones",
                 )
                 self._kpi_expense.update_value(
                     _fmt_usdt(kpi["gastos"]),
@@ -1411,10 +1410,10 @@ class FinancePanel(tk.Frame):
                 self._kpi_invest.update_value(
                     _fmt_usdt(kpi["invertido"]),
                     sub=f"ARS {kpi['invertido_ars']:,.0f}".replace(",", ".") if kpi["invertido_ars"] else "",
-                    sub2=f"{pct_invest:.1f}% de ingresos",
+                    sub2=f"Suscr. {_fmt_usdt(kpi['suscripto'])} · Resc. {_fmt_usdt(kpi['rescatado'])}",
                 )
                 self._kpi_balance.update_value(
-                    _fmt_usdt(balance), sub=f"Invertido: {_fmt_usdt(kpi['invertido'])}", color=bal_color
+                    _fmt_usdt(balance), sub=f"Ahorro {pct_ahorro:.1f}% de ingresos", color=bal_color
                 )
             else:
                 for card in (self._kpi_income, self._kpi_expense, self._kpi_invest, self._kpi_balance):

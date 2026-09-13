@@ -7471,6 +7471,15 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
     Tablas: fin_accounts, fin_banks, fin_transactions, fin_categories, fin_import_rules.
     """
 
+    # Grupo de la fila (income/expense/investment/transfer): lo decide la categoría; sin categoría, t.type.
+    _SQL_GRUPO = "COALESCE(c.category_type, t.type)"
+    # Monto con signo dentro de su grupo: suma si la fila va en el sentido del grupo (income entra, el resto
+    # sale) y resta si va en contra — un reintegro baja los gastos, un rescate baja lo invertido.
+    _SQL_NETO = (
+        "CASE WHEN t.type = IF(COALESCE(c.category_type, t.type) = 'income', 'income', 'expense') "
+        "THEN {col} ELSE -{col} END"
+    )
+
     def __init__(self):
         self.display = False
 
@@ -7636,25 +7645,30 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
 
     def get_kpis(self, date_from: str, date_to: str, account_ids: list[int] | None = None) -> dict:
         """
-        Retorna KPIs del período para moneda ARS:
-          ingresos, gastos, ing_usdt, gas_usdt, total_txns.
+        Retorna KPIs del período en USD equivalente, más el subtotal en pesos de las filas en ARS.
+        Montos con el signo de _SQL_NETO: un reintegro baja los gastos, un rescate baja lo invertido.
+          ingresos, gastos, invertido (neto) — suscripto / rescatado son los brutos de inversión.
         account_ids: None=todas, []=ninguna, [1,2,...]=filtro.
         """
         clause, extra = self._ids_clause(account_ids)
         params = [date_from, date_to] + extra
+        grupo = self._SQL_GRUPO
+        neto_usd = self._SQL_NETO.format(col="t.amount_usdt")
+        neto_ars = self._SQL_NETO.format(col="IF(t.currency = 'ARS', t.amount, 0)")
 
         conn = self._conectar("fin_transactions.kpis")
         try:
             cursor = conn.cursor()
             cursor.execute(
                 f"""SELECT
-                       COALESCE(SUM(CASE WHEN COALESCE(c.category_type,'expense') = 'income'      THEN t.amount_usdt ELSE 0 END), 0),
-                       COALESCE(SUM(CASE WHEN COALESCE(c.category_type,'expense') = 'expense'     THEN t.amount_usdt ELSE 0 END), 0),
-                       COALESCE(SUM(CASE WHEN t.currency='ARS' AND COALESCE(c.category_type,'expense') = 'income'     THEN t.amount ELSE 0 END), 0),
-                       COALESCE(SUM(CASE WHEN t.currency='ARS' AND COALESCE(c.category_type,'expense') = 'expense'    THEN t.amount ELSE 0 END), 0),
-                       COUNT(*),
-                       COALESCE(SUM(CASE WHEN COALESCE(c.category_type,'expense') = 'investment'  THEN t.amount_usdt ELSE 0 END), 0),
-                       COALESCE(SUM(CASE WHEN t.currency='ARS' AND COALESCE(c.category_type,'expense') = 'investment' THEN t.amount ELSE 0 END), 0)
+                       COALESCE(SUM(CASE WHEN {grupo} = 'income'     THEN {neto_usd} ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN {grupo} = 'expense'    THEN {neto_usd} ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN {grupo} = 'investment' THEN {neto_usd} ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN {grupo} = 'income'     THEN {neto_ars} ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN {grupo} = 'expense'    THEN {neto_ars} ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN {grupo} = 'investment' THEN {neto_ars} ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN {grupo} = 'investment' AND t.type = 'expense' THEN t.amount_usdt END), 0),
+                       COALESCE(SUM(CASE WHEN {grupo} = 'investment' AND t.type = 'income'  THEN t.amount_usdt END), 0)
                    FROM fin_transactions t
                    LEFT JOIN fin_categories c ON c.id = t.category_id
                    WHERE t.date BETWEEN %s AND %s {clause}""",
@@ -7665,11 +7679,12 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                 return {
                     "ingresos": float(row[0]),  # USD equivalente — coincide con categorías
                     "gastos": float(row[1]),  # USD equivalente — coincide con categorías
-                    "ingresos_ars": float(row[2]),  # subtotal ARS pesos
-                    "gastos_ars": float(row[3]),  # subtotal ARS pesos
-                    "total_txns": int(row[4]),
-                    "invertido": float(row[5]),  # USD equivalente
-                    "invertido_ars": float(row[6]),  # subtotal ARS pesos
+                    "invertido": float(row[2]),  # USD neto: suscripto − rescatado, puede ser negativo
+                    "ingresos_ars": float(row[3]),  # subtotal ARS pesos
+                    "gastos_ars": float(row[4]),  # subtotal ARS pesos
+                    "invertido_ars": float(row[5]),  # subtotal ARS pesos, neto
+                    "suscripto": float(row[6]),  # USD bruto que salió a inversión
+                    "rescatado": float(row[7]),  # USD bruto que volvió de inversión
                 }
             return {}
         except (Exception, connect.Error) as e:
@@ -7681,9 +7696,12 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
     def _get_categories_by_type(
         self, cat_type: str, date_from: str, date_to: str, account_ids: list[int] | None = None
     ) -> list[dict]:
-        """Agrupa transacciones por categoría filtrando por category_type de la categoría."""
+        """Agrupa por categoría las filas del grupo cat_type, con el signo de _SQL_NETO.
+        pct sale de la suma de valores absolutos: conserva el signo y sirve de escala para la barra."""
         clause, extra = self._ids_clause(account_ids)
         params = [cat_type, date_from, date_to] + extra
+        neto_usd = self._SQL_NETO.format(col="t.amount_usdt")
+        neto_monto = self._SQL_NETO.format(col="t.amount")
 
         conn = self._conectar("fin_transactions.categories")
         try:
@@ -7691,17 +7709,17 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             cursor.execute(
                 f"""SELECT
                        COALESCE(c.name, 'Sin categoría'),
-                       COALESCE(SUM(t.amount_usdt), SUM(t.amount)) AS total_usdt
+                       COALESCE(SUM({neto_usd}), SUM({neto_monto})) AS total_usdt
                    FROM fin_transactions t
                    LEFT JOIN fin_categories c ON c.id = t.category_id
-                   WHERE COALESCE(c.category_type, 'expense') = %s
+                   WHERE {self._SQL_GRUPO} = %s
                      AND t.date BETWEEN %s AND %s {clause}
                    GROUP BY c.name
                    ORDER BY total_usdt DESC""",
                 params,
             )
             rows = cursor.fetchall()
-            total = sum(float(r[1]) for r in rows) or 1
+            total = sum(abs(float(r[1])) for r in rows) or 1
             return [{"name": r[0], "total": float(r[1]), "pct": float(r[1]) / total * 100} for r in rows]
         except (Exception, connect.Error) as e:
             print(f"[Mysql:: FinanceScreen._get_categories_by_type({cat_type})]: {e}")
@@ -7724,8 +7742,10 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         return self._get_categories_by_type("investment", date_from, date_to, account_ids)
 
     def get_monthly_evolution(self, months: int = 6, account_ids: list[int] | None = None) -> list[dict]:
-        """Retorna los últimos N meses con totales de ingresos, gastos e inversiones en USD."""
+        """Retorna los últimos N meses con ingresos, gastos e invertido neto en USD (signo de _SQL_NETO)."""
         clause, extra = self._ids_clause(account_ids)
+        grupo = self._SQL_GRUPO
+        neto_usd = self._SQL_NETO.format(col="t.amount_usdt")
         conn = self._conectar("fin_transactions.evolution")
         try:
             cursor = conn.cursor()
@@ -7733,9 +7753,9 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                 f"""SELECT
                         YEAR(t.date)  AS yr,
                         MONTH(t.date) AS mo,
-                        COALESCE(SUM(CASE WHEN COALESCE(c.category_type,'expense')='income'     THEN t.amount_usdt ELSE 0 END), 0),
-                        COALESCE(SUM(CASE WHEN COALESCE(c.category_type,'expense')='expense'    THEN t.amount_usdt ELSE 0 END), 0),
-                        COALESCE(SUM(CASE WHEN COALESCE(c.category_type,'expense')='investment' THEN t.amount_usdt ELSE 0 END), 0)
+                        COALESCE(SUM(CASE WHEN {grupo} = 'income'     THEN {neto_usd} ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN {grupo} = 'expense'    THEN {neto_usd} ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN {grupo} = 'investment' THEN {neto_usd} ELSE 0 END), 0)
                     FROM fin_transactions t
                     LEFT JOIN fin_categories c ON c.id = t.category_id
                     WHERE t.date >= DATE_SUB(CURDATE(), INTERVAL %s MONTH) {clause}
