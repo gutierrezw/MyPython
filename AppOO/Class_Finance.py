@@ -9,6 +9,7 @@ from Modulos_python import (
     time,
     datetime,
     date,
+    timedelta,
     timezone,
     Decimal,
     InvalidOperation,
@@ -1466,11 +1467,14 @@ DESCONOCIDOS_DIR = os.path.join(EXTRACTOS_DIR, "desconocidos")
 DETECTION_RULES = [
     ("CITIBANK, N. A.", "citibank_us", None),
     ("Santander", "santander", None),
+    ("0720175888000037071990", "santander", None),
     ("196-009369/5", "bbva_ahorro", "196-009369/5"),
     ("196-004699/4", "bbva_cuenta", "196-004699/4"),
     ("1269461197", "bbva_tc", "TC-1269461197"),
     ("1175839390", "bbva_tc", "TC-1175839390"),
     ("0102****9412", "bdv_ves", "BDV-9412"),
+    ("01340474784741030611", "banesco_ves", "BANESCO-0611"),
+    ("Historial de órdenes C2C", "binance_c2c", "BINANCE-USDT"),
 ]
 
 MESES_ES = {
@@ -1834,6 +1838,11 @@ class BbvaArTarjeta:
         if not row:
             raise ValueError(f"Cuenta no encontrada: account_ref='{self.account_ref}'")
         account_id, bank_id = row
+        raw_rows = self._extract_rows()
+        stats["rows_found"] = len(raw_rows)
+        if not raw_rows:
+            cursor.close()
+            return stats
         cursor.execute(
             "SELECT id, status FROM fin_statement_imports WHERE file_hash=%s AND section=%s",
             (self.file_hash, self.SECTION_NAME),
@@ -1849,8 +1858,6 @@ class BbvaArTarjeta:
         )
         conn.commit()
         import_id = cursor.lastrowid
-        raw_rows = self._extract_rows()
-        stats["rows_found"] = len(raw_rows)
         txns = _dedup_raw_descriptions(self._build_transactions(raw_rows, account_id, import_id, cursor))
         for txn in txns:
             try:
@@ -2107,6 +2114,11 @@ class BbvaArCuenta:
         if not row:
             raise ValueError(f"Cuenta no encontrada: account_ref='{self.account_ref}'")
         account_id, bank_id = row
+        raw_rows = self._extract_rows()
+        stats["rows_found"] = len(raw_rows)
+        if not raw_rows:
+            cursor.close()
+            return stats
         cursor.execute(
             "SELECT id FROM fin_statement_imports WHERE file_hash=%s AND section=%s",
             (self.file_hash, self.SECTION_NAME),
@@ -2122,8 +2134,6 @@ class BbvaArCuenta:
         )
         conn.commit()
         import_id = cursor.lastrowid
-        raw_rows = self._extract_rows()
-        stats["rows_found"] = len(raw_rows)
         txns = _dedup_raw_descriptions(self._build_transactions(raw_rows, account_id, import_id, cursor))
         for txn in txns:
             try:
@@ -2589,6 +2599,11 @@ class SantanderAr:
             else:
                 _logger.warning(f"  Cuenta no encontrada: {acct_ref} ({section_key}) — omitida")
 
+        all_rows = self._extract_all()
+        stats["rows_found"] = sum(len(rows) for section_key, rows in all_rows.items() if section_key in account_ids)
+        if not stats["rows_found"]:
+            cursor.close()
+            return stats
         import_ids: dict[str, int] = {}
         filename = os.path.basename(self.pdf_path)
         for section_key, section_name in self.SECTION_NAME_MAP.items():
@@ -2610,13 +2625,11 @@ class SantanderAr:
             conn.commit()
             import_ids[section_key] = cursor.lastrowid
 
-        all_rows = self._extract_all()
         for section_key, rows in all_rows.items():
             if import_ids.get(section_key) == -1:
                 continue
             if section_key not in account_ids or section_key not in import_ids:
                 continue
-            stats["rows_found"] += len(rows)
             import_id = import_ids[section_key]
             txns = _dedup_raw_descriptions(
                 self._build_transactions(rows, account_ids[section_key], import_id, section_key, cursor)
@@ -2900,6 +2913,11 @@ class CitibankUs:
             else:
                 _logger.warning(f"  Cuenta no encontrada: {acct_ref} ({section_key}) — omitida")
 
+        all_rows = self._extract_all()
+        stats["rows_found"] = sum(len(rows) for section_key, rows in all_rows.items() if section_key in account_ids)
+        if not stats["rows_found"]:
+            cursor.close()
+            return stats
         import_ids: dict[str, int] = {}
         filename = os.path.basename(self.pdf_path)
         for section_key, section_name in self.SECTION_NAME_MAP.items():
@@ -2921,13 +2939,11 @@ class CitibankUs:
             conn.commit()
             import_ids[section_key] = cursor.lastrowid
 
-        all_rows = self._extract_all()
         for section_key, rows in all_rows.items():
             if import_ids.get(section_key) == -1:
                 continue
             if section_key not in account_ids or section_key not in import_ids:
                 continue
-            stats["rows_found"] += len(rows)
             import_id = import_ids[section_key]
             txns = _dedup_raw_descriptions(
                 self._build_transactions(rows, account_ids[section_key], import_id, section_key, cursor)
@@ -3123,9 +3139,14 @@ class BdvVes:
         row = self._get_account_ids(cursor)
         if not row:
             raise ValueError(
-                f"Cuenta BDV no encontrada (account_ref={self._account_ref!r}) — creala en fin_accounts primero"
+                f"Cuenta no encontrada (account_ref={self._account_ref!r}) — creala en fin_accounts primero"
             )
         account_id, bank_id = row
+        raw_rows = self._parse_rows()
+        stats["rows_found"] = len(raw_rows)
+        if not raw_rows:
+            cursor.close()
+            return stats
         file_hash = self._file_hash()
         cursor.execute(
             "SELECT id FROM fin_statement_imports WHERE file_hash = %s AND section = %s",
@@ -3141,8 +3162,6 @@ class BdvVes:
             (account_id, bank_id, os.path.basename(self._pdf_path), file_hash, self.SECTION_NAME),
         )
         import_id = cursor.lastrowid
-        raw_rows = self._parse_rows()
-        stats["rows_found"] = len(raw_rows)
         txns = _dedup_raw_descriptions(self._build_transactions(raw_rows, account_id, import_id, cursor))
         for txn in txns:
             try:
@@ -3155,7 +3174,7 @@ class BdvVes:
                 else:
                     stats["skipped"] += 1
             except Exception as e:
-                _logger.error(f"  BdvVes insert error: {e}")
+                _logger.error(f"  {type(self).__name__} insert error: {e}")
                 stats["errors"] += 1
         cursor.execute(
             "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,"
@@ -3166,6 +3185,104 @@ class BdvVes:
         conn.commit()
         cursor.close()
         return stats
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parser: Banesco — moneda nacional (VES)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class BanescoVes(BdvVes):
+    """
+    Parser para extractos de Banesco — cuenta corriente en bolívares (VES).
+
+    La hoja 1 es apaisada y trae a la izquierda el titular y el RESUMEN; las hojas de continuación no, así que
+    el detalle queda corrido ~388 pt. Las columnas no se fijan en x absoluta: se miden desde la palabra "DIA"
+    de la cabecera del detalle (la que está en la línea de "CARGOS"), y la hoja se recorta ahí para que las
+    líneas del resumen no se mezclen con las filas.
+
+    Columnas relativas a x("DIA"):
+      x0 < 13         → Día
+      13 ≤ x0 < 56    → Referencia
+      resto sin monto → Concepto
+      x1 < 230        → Cargos  (montos alineados a la derecha → se clasifican por x1)
+      230 ≤ x1 < 300  → Abonos
+      x1 ≥ 300        → Saldo   (se omite)
+
+    La fila solo trae el día: mes y año salen de "Período: MM-YYYY" de la hoja 1.
+    Carga, tasa VES/USDT y reglas se heredan de BdvVes.
+    """
+
+    SECTION_NAME = "banesco_cc"
+
+    _RE_MONTO = re.compile(r"-?[\d.]+,\d{2}")
+    _DX_REF = 13
+    _DX_CONCEPTO = 56
+    _DX1_CARGO = 230
+    _DX1_ABONO = 300
+
+    def _parse_rows(self) -> list[dict]:
+        def x_encabezado(page):
+            words = page.extract_words(x_tolerance=3, y_tolerance=3)
+            tops_cargos = [w["top"] for w in words if w["text"] == "CARGOS"]
+            for w in words:
+                if w["text"] == "DIA" and any(abs(w["top"] - t) < 2 for t in tops_cargos):
+                    return w["x0"]
+            return None
+
+        rows = []
+        with pdfplumber.open(self._pdf_path) as pdf:
+            m = re.search(r"Per[ií]odo:\s*(\d{2})-(\d{4})", pdf.pages[0].extract_text() or "")
+            if not m:
+                return rows
+            month, year = int(m.group(1)), int(m.group(2))
+            for page in pdf.pages:
+                x_dia = x_encabezado(page)
+                if x_dia is None:
+                    continue
+                detalle = page.crop((x_dia - 5, 0, page.width, page.height))
+                row_map: dict[int, list] = {}
+                for w in detalle.extract_words(x_tolerance=3, y_tolerance=3):
+                    row_map.setdefault(round(w["top"] / 3) * 3, []).append(w)
+                for top_key in sorted(row_map):
+                    dia_p, ref_p, concepto_p, cargo_p, abono_p = [], [], [], [], []
+                    for w in sorted(row_map[top_key], key=lambda w: w["x0"]):
+                        dx, t = w["x0"] - x_dia, w["text"]
+                        if dx < self._DX_REF:
+                            dia_p.append(t)
+                        elif dx < self._DX_CONCEPTO:
+                            ref_p.append(t)
+                        elif not self._RE_MONTO.fullmatch(t):
+                            concepto_p.append(t)
+                        elif w["x1"] - x_dia < self._DX1_CARGO:
+                            cargo_p.append(t)
+                        elif w["x1"] - x_dia < self._DX1_ABONO:
+                            abono_p.append(t)
+                    dia = " ".join(dia_p)
+                    if not re.fullmatch(r"\d{1,2}", dia) or not ref_p:
+                        continue
+                    try:
+                        txn_date = date(year, month, int(dia))
+                    except ValueError:
+                        continue
+                    cargo = self._parse_amount(" ".join(cargo_p)) if cargo_p else Decimal("0")
+                    abono = self._parse_amount(" ".join(abono_p)) if abono_p else Decimal("0")
+                    if cargo:
+                        txn_type, amount = "expense", cargo
+                    elif abono:
+                        txn_type, amount = "income", abono
+                    else:
+                        continue
+                    rows.append(
+                        {
+                            "date": txn_date,
+                            "type": txn_type,
+                            "amount": amount,
+                            "description": " ".join(concepto_p),
+                            "comprobante": " ".join(ref_p),
+                        }
+                    )
+        return rows
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3181,7 +3298,8 @@ _RE_C2C_ROW = re.compile(
     r"([\d.]+)\s+"
     r"([\d.]+)\s+"
     r"(.+?)\s+Completed\s+"
-    r"(\d{2}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})"
+    # Binance pasó de "26-03-28" a "2026-03-28": el siglo opcional deja "hora" siempre en yy-mm-dd
+    r"(?:\d{2})?(\d{2}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})"
 )
 
 
@@ -3195,10 +3313,10 @@ class BinanceC2c:
     """
 
     SECTION_NAME = "binance_c2c"
-    ACCOUNT_REF = "BINANCE-USDT"
 
-    def __init__(self, pdf_path: str, dry_run: bool = False):
+    def __init__(self, pdf_path: str, account_ref: str, dry_run: bool = False):
         self.pdf_path = pdf_path
+        self.account_ref = account_ref.strip()
         self.dry_run = dry_run
         self.file_hash = sha256_file(pdf_path)
 
@@ -3291,12 +3409,17 @@ class BinanceC2c:
         cursor = conn.cursor()
         cursor.execute(
             "SELECT id, bank_id FROM fin_accounts WHERE account_ref=%s AND is_active=1",
-            (self.ACCOUNT_REF,),
+            (self.account_ref,),
         )
         row = cursor.fetchone()
         if not row:
-            raise ValueError(f"Cuenta no encontrada: account_ref='{self.ACCOUNT_REF}'")
+            raise ValueError(f"Cuenta no encontrada: account_ref='{self.account_ref}'")
         account_id, bank_id = row
+        raw_rows = self._parse_rows()
+        stats["rows_found"] = len(raw_rows)
+        if not raw_rows:
+            cursor.close()
+            return stats
         cursor.execute(
             "SELECT id FROM fin_statement_imports WHERE file_hash=%s AND section=%s",
             (self.file_hash, self.SECTION_NAME),
@@ -3312,8 +3435,6 @@ class BinanceC2c:
         )
         conn.commit()
         import_id = cursor.lastrowid
-        raw_rows = self._parse_rows()
-        stats["rows_found"] = len(raw_rows)
         txns = _dedup_raw_descriptions(self._build_transactions(raw_rows, account_id, import_id, cursor))
         for txn in txns:
             try:
@@ -3341,6 +3462,128 @@ class BinanceC2c:
         for year, month in months:
             FinanceScreen().sync_binance_investment(year, month)
         return stats
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Carga por API de Binance — compartida por C2C y Pay
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _filtrar_nuevas(cursor, account_id: int, rows: list[dict], id_field: str) -> list[dict]:
+    """Filas cuyo comprobante todavía no está en la cuenta. Va antes de clasificar: apply_rules suma hit_count."""
+    if not rows:
+        return []
+    ids = [str(r[id_field]) for r in rows]
+    marcas = ",".join(["%s"] * len(ids))
+    cursor.execute(
+        f"SELECT comprobante FROM fin_transactions WHERE account_id=%s AND comprobante IN ({marcas})",
+        (account_id, *ids),
+    )
+    existentes = {c for (c,) in cursor.fetchall()}
+    return [r for r in rows if str(r[id_field]) not in existentes]
+
+
+def _load_api_rows(conn, adapter, account_ref: str, rows: list[dict], id_field: str, filename: str) -> dict:
+    """
+    Carga filas traídas por API. A diferencia de un PDF, la misma ventana se vuelve a consultar todos los días:
+    el import se registra solo si hay comprobantes nuevos, con el hash de esos comprobantes (no hay archivo).
+    Si una corrida anterior registró el import y cortó antes de insertar, el mismo hash lo reutiliza.
+    """
+    stats = {"inserted": 0, "skipped": 0, "errors": 0, "rows_found": len(rows)}
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, bank_id FROM fin_accounts WHERE account_ref=%s AND is_active=1", (account_ref,))
+    row = cursor.fetchone()
+    if not row:
+        cursor.close()
+        raise ValueError(f"Cuenta no encontrada: account_ref='{account_ref}'")
+    account_id, bank_id = row
+    nuevas = _filtrar_nuevas(cursor, account_id, rows, id_field)
+    stats["skipped"] = len(rows) - len(nuevas)
+    if not nuevas:
+        cursor.close()
+        return stats
+    file_hash = hashlib.sha256(",".join(sorted(str(r[id_field]) for r in nuevas)).encode()).hexdigest()
+    cursor.execute(
+        "SELECT id FROM fin_statement_imports WHERE file_hash=%s AND section=%s", (file_hash, adapter.SECTION_NAME)
+    )
+    previo = cursor.fetchone()
+    if previo:
+        import_id = previo[0]
+    else:
+        cursor.execute(
+            "INSERT INTO fin_statement_imports (account_id,bank_id,filename,file_hash,section,status) "
+            "VALUES (%s,%s,%s,%s,%s,'pending')",
+            (account_id, bank_id, filename, file_hash, adapter.SECTION_NAME),
+        )
+        conn.commit()
+        import_id = cursor.lastrowid
+    txns = _dedup_raw_descriptions(adapter._build_transactions(nuevas, account_id, import_id, cursor))
+    for txn in txns:
+        try:
+            cursor.execute(_INSERT_TXN_SQL, txn)
+            if cursor.rowcount:
+                stats["inserted"] += 1
+            else:
+                # INSERT IGNORE: el índice único (cuenta/fecha/importe/descripción) la descartó sin error
+                _logger.warning(f"  [{adapter.SECTION_NAME}] Descartada por índice único: {txn['comprobante']}")
+                stats["errors"] += 1
+        except Exception as e:
+            _logger.error(f"  [{adapter.SECTION_NAME}] Error txn {txn.get('comprobante')}: {e}")
+            stats["errors"] += 1
+    conn.commit()
+    cursor.execute(
+        "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s "
+        "WHERE id=%s",
+        (stats["rows_found"], stats["inserted"], stats["skipped"], import_id),
+    )
+    conn.commit()
+    cursor.close()
+    for year, month in {(t["date"].year, t["date"].month) for t in txns}:
+        FinanceScreen().sync_binance_investment(year, month)
+    return stats
+
+
+class BinanceC2cApi(BinanceC2c):
+    """
+    Las mismas órdenes C2C del PDF, traídas de la API. orderNumber es el comprobante del PDF, así que las dos
+    fuentes se deduplican entre sí; hereda _build_transactions para que ambas carguen igual.
+
+    Uso:
+        adapter = BinanceC2cApi(date_from=date(2026,9,1), date_to=date(2026,9,13))
+        stats = adapter.load(conn)
+    """
+
+    ACCOUNT_REF = "BINANCE-USDT"
+
+    def __init__(self, date_from: date, date_to: date, dry_run: bool = False):
+        self.account_ref = self.ACCOUNT_REF
+        self.date_from = date_from
+        self.date_to = date_to
+        self.dry_run = dry_run
+        self._client = BinanceClient(vehiculo="Crypto")
+
+    def load(self, conn) -> dict:
+        filename = f"API {self.date_from}_{self.date_to}"
+        return _load_api_rows(conn, self, self.ACCOUNT_REF, self._parse_rows(), "order_id", filename)
+
+    def _parse_rows(self) -> list[dict]:
+        start_ms = int(datetime.combine(self.date_from, datetime.min.time()).timestamp() * 1000)
+        end_ms = int(datetime.combine(self.date_to, datetime.max.time()).timestamp() * 1000)
+        return [
+            {
+                "order_id": str(o["orderNumber"]),
+                "tipo": o["tradeType"].capitalize(),
+                "fiat": o["fiat"],
+                "precio_total": float(o["totalPrice"]),
+                "precio": float(o["unitPrice"]),
+                "cantidad": float(o["amount"]),
+                "fee": float(o["takerCommission"]),
+                "contraparte": (o.get("counterPartNickName") or "").strip(),
+                # hora local, como la trae el PDF
+                "hora": datetime.fromtimestamp(o["createTime"] / 1000).strftime("%y-%m-%d %H:%M:%S"),
+            }
+            for o in self._client.fetch_c2c_orders(start_ms, end_ms)
+        ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3431,62 +3674,9 @@ class BinancePay:
         return stats
 
     def load(self, conn) -> dict:
-        stats = {"inserted": 0, "skipped": 0, "errors": 0, "rows_found": 0}
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, bank_id FROM fin_accounts WHERE account_ref=%s AND is_active=1",
-            (self.ACCOUNT_REF,),
-        )
-        row = cursor.fetchone()
-        if not row:
-            raise ValueError(f"Cuenta no encontrada: account_ref='{self.ACCOUNT_REF}'")
-        account_id, bank_id = row
-        range_key = f"{self.date_from}_{self.date_to}"
-        cursor.execute(
-            "SELECT id FROM fin_statement_imports WHERE section=%s AND filename=%s",
-            (self.SECTION_NAME, range_key),
-        )
-        if cursor.fetchone():
-            _logger.warning("  Rango ya importado — omitido")
-            cursor.close()
-            return stats
-        cursor.execute(
-            "INSERT INTO fin_statement_imports (account_id,bank_id,filename,file_hash,section,status) "
-            "VALUES (%s,%s,%s,%s,%s,'pending')",
-            (account_id, bank_id, range_key, "", self.SECTION_NAME),
-        )
-        conn.commit()
-        import_id = cursor.lastrowid
-        raw = self._fetch_raw()
-        outgoing = [r for r in raw if float(r.get("amount", "0")) < 0]
-        stats["rows_found"] = len(outgoing)
-        txns = self._build_transactions(outgoing, account_id, import_id, cursor)
-        for txn in txns:
-            try:
-                cursor.execute(
-                    "SELECT id FROM fin_transactions WHERE comprobante=%s AND account_id=%s",
-                    (txn["comprobante"], account_id),
-                )
-                if cursor.fetchone():
-                    stats["skipped"] += 1
-                    continue
-                cursor.execute(_INSERT_TXN_SQL, txn)
-                stats["inserted"] += 1
-            except Exception as e:
-                _logger.error(f"  [BinancePay] Error txn {txn.get('comprobante')}: {e}")
-                stats["errors"] += 1
-        conn.commit()
-        cursor.execute(
-            "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s "
-            "WHERE id=%s",
-            (stats["rows_found"], stats["inserted"], stats["skipped"], import_id),
-        )
-        conn.commit()
-        cursor.close()
-        months = {(t["date"].year, t["date"].month) for t in txns}
-        for year, month in months:
-            FinanceScreen().sync_binance_investment(year, month)
-        return stats
+        outgoing = [r for r in self._fetch_raw() if float(r.get("amount", "0")) < 0]
+        filename = f"{self.date_from}_{self.date_to}"
+        return _load_api_rows(conn, self, self.ACCOUNT_REF, outgoing, "transactionId", filename)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3500,6 +3690,7 @@ ADAPTER_MAP = {
     "santander": SantanderAr,
     "citibank_us": CitibankUs,
     "bdv_ves": BdvVes,
+    "banesco_ves": BanescoVes,
     "binance_c2c": BinanceC2c,
 }
 
@@ -3529,7 +3720,7 @@ def detect_adapter(pdf_path: str) -> tuple[str, str | None] | None:
 
 
 def process_pdf(pdf_path: str) -> bool:
-    """Detecta banco, carga en BD y devuelve True si OK (incluyendo ya-importado)."""
+    """Detecta banco, carga en BD y devuelve True si OK (incluyendo ya-importado); False si no extrajo filas."""
     filename = os.path.basename(pdf_path)
     _logger.info(f"── Procesando: {filename}")
     detected = detect_adapter(pdf_path)
@@ -3556,6 +3747,9 @@ def process_pdf(pdf_path: str) -> bool:
             f"  {stats['rows_found']} filas | {stats['inserted']} ins | "
             f"{stats['skipped']} skip | {stats['errors']} err"
         )
+        if not stats["rows_found"]:
+            _logger.warning(f"  Reconocido pero sin filas extraídas → desconocidos: {filename}")
+            return False
         return True
     except Error as e:
         _logger.error(f"  Error BD: {e}")
@@ -3568,7 +3762,7 @@ def process_pdf(pdf_path: str) -> bool:
 def scan_extractos() -> str:
     """Escanea EXTRACTOS_DIR, procesa PDFs y los elimina.
     - Reconocidos (importados o duplicado interno): se eliminan.
-    - No reconocidos: se mueven a desconocidos/ para revisión.
+    - No reconocidos o sin filas extraídas: se mueven a desconocidos/ para revisión.
     La validación de duplicados es interna vía SHA-256 en BD.
     """
     if not os.path.isdir(EXTRACTOS_DIR):
@@ -3595,4 +3789,45 @@ def scan_extractos() -> str:
                 dest_file = os.path.join(DESCONOCIDOS_DIR, f"{base}_{int(time.time())}{ext}")
             shutil.move(pdf_path, dest_file)
             fail_count += 1
-    return f"Procesados: {ok_count} eliminados, {fail_count} no reconocidos de {len(pdfs)} PDFs"
+    return f"Procesados: {ok_count} eliminados, {fail_count} a desconocidos de {len(pdfs)} PDFs"
+
+
+def _binance_api_desde(conn, section: str, hoy: date) -> date:
+    """3 días antes del último movimiento cargado de la sección; 90 días atrás si todavía no hay ninguno.
+    La fila sintética BINANCE-INV no tiene import_id: el JOIN la deja afuera y no adelanta la ventana."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT MAX(t.date) FROM fin_transactions t JOIN fin_statement_imports i ON i.id = t.import_id "
+        "WHERE i.section = %s",
+        (section,),
+    )
+    ultima = cursor.fetchone()[0]
+    cursor.close()
+    return ultima - timedelta(days=3) if ultima else hoy - timedelta(days=90)
+
+
+def sync_binance_api() -> str:
+    """
+    Carga C2C y Pay de Binance por API, sin descargar el PDF de C2C.
+    Cada fuente arranca 3 días antes de su último movimiento (cubre cortes y el desfase UTC/hora local);
+    lo ya cargado lo descarta el comprobante. Una fuente que falla no frena a la otra.
+    """
+    hoy = date.today()
+    resultados = []
+    conn = connect(**BDsystem.DB_CONFIG)
+    try:
+        for adapter_cls in (BinanceC2cApi, BinancePay):
+            try:
+                desde = _binance_api_desde(conn, adapter_cls.SECTION_NAME, hoy)
+                stats = adapter_cls(date_from=desde, date_to=hoy).load(conn)
+                resultados.append(
+                    f"{adapter_cls.SECTION_NAME} desde {desde}: {stats['inserted']} nuevas, "
+                    f"{stats['skipped']} ya cargadas, {stats['errors']} err"
+                )
+            except Exception as e:
+                conn.rollback()
+                _logger.error(f"  sync_binance_api {adapter_cls.SECTION_NAME}: {e}")
+                resultados.append(f"{adapter_cls.SECTION_NAME}: ERROR {e}")
+    finally:
+        conn.close()
+    return " | ".join(resultados)

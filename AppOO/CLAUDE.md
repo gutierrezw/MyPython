@@ -131,6 +131,9 @@ def Agente_NombreNuevo(self):
 - `desc` presente → se auto-registra en `AGENTES_SCHEDULE` al importar el módulo
 - Sin `desc` → no aparece en el panel de schedule (invisible)
 - `ventana=(desde, hasta)` → restringe la ejecución a esa franja horaria
+- Si el agente ya tiene entrada estática en `AGENTES_SCHEDULE` (`Modulos_Utilitarios.py`), esa entrada manda: el
+  decorador solo registra nombres que no están, así que su `desc` se ignora. Caso `Agente_ExtractosWatcher`: su
+  decorador va sin `desc` y el panel muestra la de la entrada estática
 
 ### Franja horaria: usar `ventana`, nunca una guarda dentro del agente
 
@@ -199,6 +202,7 @@ log_queries_not_using_indexes   = ON
 | trazaplan | `costobase` | **Columna muerta** — se inserta en 0 y nada la actualiza. El costo base real es `tinversion` |
 | symbol_decision_history | `dedup_key` | Parte estable de la decisión. **NULL = evento único, nunca se agrupa** (creada 2026-08-31) |
 | incidencias | `dedup_key` / `veces` / `primera_vez` | Mismo mecanismo que `symbol_decision_history`, aplicado a las alertas. **`leida` es el borde del grupo** (creadas 2026-09-06) |
+| fin_categories | `expense_class` | Clase del gasto: `fixed` + `variable` = costo de vida base del número de libertad financiera, `extraordinary` se promedia aparte. **NULL si la categoría no es gasto** (creada 2026-09-13) |
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
 `lastPrice DESC` con `LIMIT 150`, así que repetía siempre los mismos 150 símbolos más caros y dejaba
@@ -358,6 +362,17 @@ Hoy `struct_positions_fci()` devuelve `(mrkprice - open) * position` y `change_a
 no la suma de deltas por cuotaparte. Las filas viejas se corrigen solas — `update_FCI_en_positions()`
 reconstruye la posición en cada ciclo.
 
+**`fin_categories` — el grupo lo decide `category_type`, la clase `expense_class`.** `category_type`
+(`expense` / `income` / `transfer` / `investment`) es lo que leen los KPIs de Finanzas (`_SQL_GRUPO`); las
+transferencias no cuentan ni como ingreso ni como gasto. La columna `type` se borró el 2026-09-13: nada la
+leía y la clave única `(name, type)` permitía dos categorías con el mismo nombre — hoy `uq_cat_name (name)`.
+`parent_id` sigue existiendo pero está en NULL en todas: el mapa es plano a propósito.
+
+`expense_class` existe para el número de libertad financiera: el costo de vida base es `fixed` + `variable`;
+`extraordinary` (tecnología, viajes, mantenimiento, cancelación de préstamo) no es un gasto de todos los meses
+y se promedia aparte. El mapa vigente y el motivo de cada fusión están en `20-Proyecto/spec-finanzas.md`
+§ "Mapa de categorías". El comentario de la columna en MySQL repite la regla.
+
 ### Script de monitoreo
 `SchemasSQL/mysql_index_analyzer.py` — analiza schema, índices sin uso, full scans y configuración InnoDB.
 
@@ -454,6 +469,7 @@ Si el commit toca el código de la izquierda, revisar el doc de la derecha antes
 | `Class_tradingBot`, `Class_BotCryptoUI` | `20-Proyecto/spec-botcrypto.md` |
 | Agentes nuevos / `AGENTES_SCHEDULE` | sección "Patrón para agregar un nuevo agente" en este archivo |
 | `add_alert`, `insert_incidencia`, tab Alertas | sección "Columnas con semántica propia" en este archivo |
+| `FinanceScreen`, `Class_Finance`, tablas `fin_*` | `20-Proyecto/spec-finanzas.md` (§0: objetivos, etapas, regla de KPIs, mapa de categorías) |
 | Cualquier hallazgo de la revisión Opus (H1–H10) | `30-Gestion/resultado-revision-opus-preservation-gainscapture.md` + `30-Gestion/BACKLOG.md` |
 
 Los docs viven en `AppOO/Doc/` (= `20-Proyecto/` del vault vía junction) y se comitean en el

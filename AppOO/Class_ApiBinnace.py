@@ -566,8 +566,12 @@ class BinanceSpot(Spot):
     # C2C / EARN
     # =========================
     @handle_binance_exceptions
-    def get_c2c_trade_history(self, tradeType=None, startTimestamp=None, endTimestamp=None, rows=100, fiat=None):
-        kwargs = dict(tradeType=tradeType, startTimestamp=startTimestamp, endTimestamp=endTimestamp, rows=rows)
+    def get_c2c_trade_history(
+        self, tradeType=None, startTimestamp=None, endTimestamp=None, rows=100, fiat=None, page=1
+    ):
+        kwargs = dict(
+            tradeType=tradeType, startTimestamp=startTimestamp, endTimestamp=endTimestamp, rows=rows, page=page
+        )
         if fiat:
             kwargs["fiat"] = fiat
         return self.c2c_trade_history(**kwargs)
@@ -684,17 +688,51 @@ class BinanceClient:
         Consulta /sapi/v1/pay/transactions en Binance.
         Requiere que la API key tenga permiso 'Binance Pay' habilitado.
         Retorna lista de transacciones Pay del período.
+        Binance rechaza rangos de más de 90 días (code 403004) e ignora parámetros de fecha con otro nombre
+        (devuelve los últimos 90 días): se consulta en tramos con startTime/endTime.
         """
-        params = {"startTimestamp": start_ms, "endTimestamp": end_ms, "limit": limit}
-        signed = self._sign_rest(params)
+        tramo_ms = 90 * 24 * 60 * 60 * 1000 - 1
         headers = {"X-MBX-APIKEY": self.API_KEY}
         url = "https://api.binance.com/sapi/v1/pay/transactions"
-        r = requests.get(url, headers=headers, params=signed, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        if data.get("code") != "000000":
-            raise ValueError(f"Binance Pay API: {data.get('message')} (code={data.get('code')})")
-        return data.get("data", [])
+        movimientos = []
+        desde = start_ms
+        while desde <= end_ms:
+            hasta = min(desde + tramo_ms, end_ms)
+            params = {"startTime": desde, "endTime": hasta, "limit": limit}
+            r = requests.get(url, headers=headers, params=self._sign_rest(params), timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            if data.get("code") != "000000":
+                raise ValueError(f"Binance Pay API: {data.get('message')} (code={data.get('code')})")
+            movimientos.extend(data.get("data", []))
+            desde = hasta + 1
+        return movimientos
+
+    def fetch_c2c_orders(self, start_ms: int, end_ms: int) -> list[dict]:
+        """
+        Órdenes C2C COMPLETED (BUY y SELL) del período, en tramos de 90 días y de a 100 filas por página.
+        El decorador de BinanceSpot devuelve None ante un error: acá se levanta excepción para no confundir
+        una falla con un período sin órdenes.
+        """
+        tramo_ms = 90 * 24 * 60 * 60 * 1000 - 1
+        ordenes = []
+        for trade_type in ("BUY", "SELL"):
+            desde = start_ms
+            while desde <= end_ms:
+                hasta = min(desde + tramo_ms, end_ms)
+                page = 1
+                while True:
+                    resp = self.spot.get_c2c_trade_history(trade_type, desde, hasta, rows=100, page=page)
+                    if not resp or resp.get("code") != "000000":
+                        detalle = (resp or {}).get("message", "sin respuesta")
+                        raise ValueError(f"Binance C2C API {trade_type}: {detalle}")
+                    data = resp.get("data", [])
+                    ordenes.extend(o for o in data if o.get("orderStatus") == "COMPLETED")
+                    if len(data) < 100:
+                        break
+                    page += 1
+                desde = hasta + 1
+        return ordenes
 
     def sync_trades(self, account: str, symbols: list, desde=None) -> dict:
         """Descarga trades de Binance e inserta los nuevos en booktrading.

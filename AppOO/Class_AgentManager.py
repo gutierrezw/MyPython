@@ -13,7 +13,7 @@ from Modulos_Mysql import (
     EstrategiaInversion,
     IPerformance,
 )
-from Class_Finance import scan_extractos
+from Class_Finance import scan_extractos, sync_binance_api
 from Class_IbFlex import Class_IbFlex
 from Class_IbReconcile import Class_IbReconcile
 from Class_Screener import sync_market, sync_prices, audit_portfolio, refresh_consenso_tags, sync_dividend_status_screener
@@ -527,6 +527,14 @@ class AgentManager:
         except Exception as e:
             self._log_infra.error(f"Agente_ExtractosWatcher(): {e}")
 
+    @wait_rate(86400, persist=True, desc="Binance C2C + Pay — carga por API en Finanzas (24h)", nivel=1)
+    def Agente_BinanceApiSync(self):
+        try:
+            result = sync_binance_api()
+            self._log_infra.warning(f"BinanceApiSync: {result}")
+        except Exception as e:
+            self._log_infra.error(f"Agente_BinanceApiSync(): {e}")
+
     # ── registro ──────────────────────────────────────────────────────────────
 
     @wait_rate(86400, persist=True, desc="Detecta posiciones residuales/fantasma en booktrading (diario)", nivel=1)
@@ -574,7 +582,6 @@ class AgentManager:
         self.Agente_LtvControl()
         self.Agente_StockBeta()
         self.Agente_CryptoBeta()
-        self.Agente_ExtractosWatcher()
         self.Agente_SplitsControl()
         self.Agente_PerformaValidator()
         self.Agente_downloads_filings_EDGAR()
@@ -1529,6 +1536,8 @@ class AgentManager:
             ("Agente_IbFlex", self.Agente_IbFlex, 3600),
             ("Agente_LotesReconcile", self.Agente_LotesReconcile, 3600),
             ("Agente_RoiVentas", self.Agente_RoiVentas, 3600),
+            ("Agente_ExtractosWatcher", self.Agente_ExtractosWatcher, 60),
+            ("Agente_BinanceApiSync", self.Agente_BinanceApiSync, 3600),
             ("Agente_ManagerPreservation", self.Agente_ManagerPreservation, 1),
         ]
         for name, target, sleep in _threads:
