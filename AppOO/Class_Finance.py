@@ -2405,8 +2405,9 @@ class SantanderAr:
         monto_tokens = cols["monto_ca"] or cols["monto_cc"]
         amount = self._parse_signed_tokens(monto_tokens)
         if amount is None:
-            # línea sin monto: es detalle de la transacción anterior
-            if concepto and rows:
+            # línea sin monto: es detalle de la transacción anterior. Vale solo la primera: si el movimiento
+            # cierra la hoja, las que siguen son el pie legal y pisaban la contraparte
+            if concepto and rows and "detail" not in rows[-1]:
                 rows[-1]["detail"] = concepto
             return fecha_str
         rows.append(
@@ -2437,8 +2438,9 @@ class SantanderAr:
         monto_tokens = cols["monto_ca"] or cols["monto_cc"]
         amount = self._parse_signed_tokens(monto_tokens)
         if amount is None:
-            # línea sin monto: es detalle de la transacción anterior
-            if concepto and rows:
+            # línea sin monto: es detalle de la transacción anterior. Vale solo la primera: si el movimiento
+            # cierra la hoja, las que siguen son el pie legal y pisaban la contraparte
+            if concepto and rows and "detail" not in rows[-1]:
                 rows[-1]["detail"] = concepto
             return fecha_str
         rows.append(
