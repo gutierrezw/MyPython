@@ -309,6 +309,10 @@ class _TxnTable(tk.Frame):
     def visible_count(self) -> int:
         return len(self.tree.get_children())
 
+    @property
+    def category_filter(self) -> str | None:
+        return self._cat_filter
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Widget: semáforo de cobertura por cuenta
@@ -322,7 +326,7 @@ class _CoverageTable(tk.Frame):
     """
 
     COLS = ("Cuenta", "Último mov.", "Atraso", "Próximo cierre")
-    WIDTHS = (175, 90, 65, 95)
+    WIDTHS = (260, 120, 90, 130)
 
     def __init__(self, parent, bgcolor):
         super().__init__(parent, bg=bgcolor)
@@ -1194,12 +1198,10 @@ class FinancePanel(tk.Frame):
         tab_income = tk.Frame(cat_nb, bg=self.bgcolor)
         tab_invest = tk.Frame(cat_nb, bg=self.bgcolor)
         tab_transfer = tk.Frame(cat_nb, bg=self.bgcolor)
-        self._tab_cover = tk.Frame(cat_nb, bg=self.bgcolor)
         cat_nb.add(tab_expense, text="Gastos")
         cat_nb.add(tab_income, text="Ingresos")
         cat_nb.add(tab_invest, text="Inversiones")
         cat_nb.add(tab_transfer, text="Transferencias")
-        cat_nb.add(self._tab_cover, text="Cobertura")
 
         self._cat_bar = _CategoryBar(tab_expense, self.bgcolor, on_select=self._on_category_select, bar_color=_NEGATIVE)
         self._cat_bar.pack(fill=tk.BOTH, expand=True, pady=4)
@@ -1219,9 +1221,6 @@ class FinancePanel(tk.Frame):
         )
         self._cat_bar_transfer.pack(fill=tk.BOTH, expand=True, pady=4)
 
-        self._cover_table = _CoverageTable(self._tab_cover, self.bgcolor)
-        self._cover_table.pack(fill=tk.BOTH, expand=True, pady=4)
-
         tk.Frame(left, bg=_NEUTRAL, height=1).pack(fill=tk.X, pady=4)
 
         self._evol_chart = _EvolucionChart(left, self.bgcolor)
@@ -1236,8 +1235,15 @@ class FinancePanel(tk.Frame):
         hdr = tk.Frame(right, bg=self.bgcolor)
         hdr.pack(fill=tk.X)
 
-        self._lbl_txn_section = _SectionLabel(hdr, "Últimas transacciones")
+        # El panel de detalle tiene dos vistas: las transacciones del período y la cobertura de carga. La cobertura
+        # no es una categoría ni depende del período o de los chips, por eso no vive en el notebook de la izquierda.
+        self._lbl_txn_section = _SectionLabel(hdr, "Últimas transacciones", cursor="hand2")
         self._lbl_txn_section.pack(side=tk.LEFT, pady=(0, 6))
+        self._lbl_txn_section.bind("<Button-1>", lambda _e: self._show_transactions())
+
+        self._lbl_cover_section = _SectionLabel(hdr, "Cobertura", cursor="hand2")
+        self._lbl_cover_section.pack(side=tk.LEFT, padx=(6, 0), pady=(0, 6))
+        self._lbl_cover_section.bind("<Button-1>", lambda _e: self._show_coverage())
 
         # botón limpiar filtro de categoría (visible solo cuando hay filtro activo)
         self._btn_clear_cat = tk.Button(
@@ -1262,7 +1268,11 @@ class FinancePanel(tk.Frame):
             on_category_edit=self._on_category_edit,
             on_date_edit=self._on_date_edit,
         )
-        self._txn_table.pack(fill=tk.BOTH, expand=True)
+        self._cover_table = _CoverageTable(right, self.bgcolor)
+
+        self._cover_view = False
+        self._cover_pending = 0
+        self._show_transactions()
 
     def _build_chips(self):
         """Puebla la fila de chips con 'Todas', chips de banco y chips de cuenta."""
@@ -1364,6 +1374,7 @@ class FinancePanel(tk.Frame):
         self._cat_bar_transfer.load(self._db.get_categories_transfer(date_from, date_to, account_ids))
 
     def _on_category_select(self, cat_name: str | None):
+        self._show_transactions()
         self._txn_table.set_category_filter(cat_name)
         if cat_name:
             self._lbl_txn_section.config(text=f"  {cat_name}  ")
@@ -1380,7 +1391,34 @@ class FinancePanel(tk.Frame):
         self._btn_clear_cat.pack_forget()
         self._update_status()
 
+    def _show_transactions(self):
+        """Vuelve al detalle del período. El filtro de categoría se restaura si estaba puesto."""
+        self._cover_view = False
+        self._cover_table.pack_forget()
+        self._txn_table.pack(fill=tk.BOTH, expand=True)
+        self._lbl_txn_section.config(bg=_BLACK, fg=_WHITE)
+        self._lbl_cover_section.config(bg="#2A2A3E", fg=_NEGATIVE if self._cover_pending else _NEUTRAL)
+        if self._txn_table.category_filter:
+            self._btn_clear_cat.pack(side=tk.LEFT, padx=(6, 0), pady=(0, 6))
+        self._update_status()
+
+    def _show_coverage(self):
+        """La cobertura ocupa el panel de detalle: estado de carga por cuenta, sin filtro de categoría."""
+        self._cover_view = True
+        self._txn_table.pack_forget()
+        self._btn_clear_cat.pack_forget()
+        self._cover_table.pack(fill=tk.BOTH, expand=True)
+        self._lbl_cover_section.config(bg=_BLACK, fg=_WHITE)
+        self._lbl_txn_section.config(bg="#2A2A3E", fg=_NEUTRAL)
+        self._update_status()
+
     def _update_status(self):
+        if self._cover_view:
+            total = len(self._cover_table.tree.get_children())
+            pend = self._cover_pending
+            texto = f"{total} cuentas — {pend} esperando extracto" if pend else f"{total} cuentas — todas al día"
+            self._lbl_status.config(text=texto, fg=_NEGATIVE if pend else _POSITIVE)
+            return
         count = self._txn_table.visible_count
         df, dt = self._period()
         self._lbl_status.config(text=f"{count} registros — {df} → {dt}", fg=_WHITE)
@@ -1496,12 +1534,16 @@ class FinancePanel(tk.Frame):
             # la cobertura no depende del período ni de los chips: es el estado de carga de todas las cuentas
             cobertura = self._db.get_coverage()
             self._cover_table.load(cobertura)
-            pendientes = sum(1 for c in cobertura if c["status"] in ("atraso", "sin_datos"))
-            self._cat_nb.tab(self._tab_cover, text=f"Cobertura ({pendientes})" if pendientes else "Cobertura")
+            self._cover_pending = sum(1 for c in cobertura if c["status"] in ("atraso", "sin_datos"))
+            self._lbl_cover_section.config(
+                text=f"  Cobertura ({self._cover_pending})  " if self._cover_pending else "  Cobertura  "
+            )
+            if not self._cover_view:
+                self._lbl_cover_section.config(fg=_NEGATIVE if self._cover_pending else _NEUTRAL)
 
             txns = self._db.get_transactions(date_from, date_to, account_ids)
             self._txn_table.load(txns)
-            self._lbl_status.config(text=f"{len(txns)} registros — {date_from} → {date_to}", fg=_WHITE)
+            self._update_status()
 
         except Exception as e:
             _logger.error(f"FinancePanel.refresh: {e}")
