@@ -311,6 +311,59 @@ class _TxnTable(tk.Frame):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Widget: semáforo de cobertura por cuenta
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _CoverageTable(tk.Frame):
+    """
+    Una fila por cuenta activa: último movimiento cargado, días de atraso y próximo cierre en las tarjetas.
+    Verde al día, naranja por vencer, rojo atrasada, gris sin datos.
+    """
+
+    COLS = ("Cuenta", "Último mov.", "Atraso", "Próximo cierre")
+    WIDTHS = (175, 90, 65, 95)
+
+    def __init__(self, parent, bgcolor):
+        super().__init__(parent, bg=bgcolor)
+        self._build()
+
+    def _build(self):
+        vsb = ttk.Scrollbar(self, orient="vertical")
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.tree = ttk.Treeview(self, columns=self.COLS, show="headings", height=10, yscrollcommand=vsb.set)
+        vsb.config(command=self.tree.yview)
+
+        for col, w in zip(self.COLS, self.WIDTHS):
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=w, anchor=tk.E if col == "Atraso" else tk.W, stretch=False)
+
+        self.tree.tag_configure("ok", foreground=_POSITIVE)
+        self.tree.tag_configure("aviso", foreground=_GOLD)
+        self.tree.tag_configure("atraso", foreground=_NEGATIVE)
+        self.tree.tag_configure("sin_datos", foreground=_NEUTRAL)
+        self.tree.pack(fill=tk.BOTH, expand=True)
+
+    def load(self, rows: list[dict]):
+        """Carga el estado de cada cuenta; rows viene de FinanceScreen.get_coverage()."""
+        self.tree.delete(*self.tree.get_children())
+        for r in rows:
+            dias = r.get("days")
+            self.tree.insert(
+                "",
+                tk.END,
+                values=(
+                    r.get("account", ""),
+                    r.get("last_date") or "nunca",
+                    f"{dias} d" if dias is not None else "—",
+                    r.get("next_closing") or "—",
+                ),
+                tags=(r.get("status", "ok"),),
+            )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Widget: barra de gastos por categoría (clickeable para filtrar)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1135,14 +1188,18 @@ class FinancePanel(tk.Frame):
         cat_nb = ttk.Notebook(cat_wrap, style="Cat.TNotebook")
         cat_nb.pack(fill=tk.BOTH, expand=True)
 
+        self._cat_nb = cat_nb
+
         tab_expense = tk.Frame(cat_nb, bg=self.bgcolor)
         tab_income = tk.Frame(cat_nb, bg=self.bgcolor)
         tab_invest = tk.Frame(cat_nb, bg=self.bgcolor)
         tab_transfer = tk.Frame(cat_nb, bg=self.bgcolor)
+        self._tab_cover = tk.Frame(cat_nb, bg=self.bgcolor)
         cat_nb.add(tab_expense, text="Gastos")
         cat_nb.add(tab_income, text="Ingresos")
         cat_nb.add(tab_invest, text="Inversiones")
         cat_nb.add(tab_transfer, text="Transferencias")
+        cat_nb.add(self._tab_cover, text="Cobertura")
 
         self._cat_bar = _CategoryBar(tab_expense, self.bgcolor, on_select=self._on_category_select, bar_color=_NEGATIVE)
         self._cat_bar.pack(fill=tk.BOTH, expand=True, pady=4)
@@ -1161,6 +1218,9 @@ class FinancePanel(tk.Frame):
             tab_transfer, self.bgcolor, on_select=self._on_category_select, bar_color=_NEUTRAL
         )
         self._cat_bar_transfer.pack(fill=tk.BOTH, expand=True, pady=4)
+
+        self._cover_table = _CoverageTable(self._tab_cover, self.bgcolor)
+        self._cover_table.pack(fill=tk.BOTH, expand=True, pady=4)
 
         tk.Frame(left, bg=_NEUTRAL, height=1).pack(fill=tk.X, pady=4)
 
@@ -1433,6 +1493,12 @@ class FinancePanel(tk.Frame):
 
             self._evol_chart.load(self._db.get_monthly_evolution(12, account_ids))
 
+            # la cobertura no depende del período ni de los chips: es el estado de carga de todas las cuentas
+            cobertura = self._db.get_coverage()
+            self._cover_table.load(cobertura)
+            pendientes = sum(1 for c in cobertura if c["status"] in ("atraso", "sin_datos"))
+            self._cat_nb.tab(self._tab_cover, text=f"Cobertura ({pendientes})" if pendientes else "Cobertura")
+
             txns = self._db.get_transactions(date_from, date_to, account_ids)
             self._txn_table.load(txns)
             self._lbl_status.config(text=f"{len(txns)} registros — {date_from} → {date_to}", fg=_WHITE)
@@ -1466,6 +1532,8 @@ DESCONOCIDOS_DIR = os.path.join(EXTRACTOS_DIR, "desconocidos")
 
 DETECTION_RULES = [
     ("CITIBANK, N. A.", "citibank_us", None),
+    ("1067995586", "santander_tc_resumen", "TC-0925"),
+    ("1068053384", "santander_tc_resumen", "TC-9541"),
     ("Santander", "santander", None),
     ("0720175888000037071990", "santander", None),
     ("196-009369/5", "bbva_ahorro", "196-009369/5"),
@@ -1487,10 +1555,15 @@ MESES_ES = {
     "jul": 7,
     "ago": 8,
     "sep": 9,
+    "set": 9,
     "oct": 10,
     "nov": 11,
     "dic": 12,
 }
+
+RE_IMPORTE_AR = re.compile(r"^\$?-?\d{1,3}(?:\.\d{3})*,\d{2}$")
+RE_MES_CUOTA = re.compile(r"^([^\W\d_]+)(?:/(\d{2}))?$")
+RE_ANIO = re.compile(r"^\d{4}$")
 
 _INSERT_TXN_SQL = """
     INSERT IGNORE INTO fin_transactions
@@ -1619,6 +1692,55 @@ def parse_date_bbva_tc(text: str) -> date | None:
     return None
 
 
+def parse_installments_due(lines: list[list[dict]], max_gap: float = 25.0) -> list[tuple[date, Decimal]]:
+    """Cuotas a vencer de un resumen de tarjeta: fila de meses ('Agosto 2026' o 'SETIEMBRE/26') y el importe
+    de cada mes debajo, a la misma x."""
+    for idx, line in enumerate(lines):
+        months = []
+        for pos, w in enumerate(line):
+            m = RE_MES_CUOTA.match(w["text"])
+            month = MESES_ES.get(m.group(1)[:3].lower()) if m else None
+            if not month:
+                continue
+            if m.group(2):
+                months.append((w, date(2000 + int(m.group(2)), month, 1)))
+            elif pos + 1 < len(line) and RE_ANIO.match(line[pos + 1]["text"]):
+                months.append((w, date(int(line[pos + 1]["text"]), month, 1)))
+        if len(months) < 3:
+            continue
+        top = months[0][0]["top"]
+        due = {}
+        for below in lines[idx + 1 :]:
+            for w in below:
+                if 0 < w["top"] - top <= max_gap and RE_IMPORTE_AR.match(w["text"]):
+                    nearest = min(months, key=lambda mw: abs(mw[0]["x0"] - w["x0"]))[1]
+                    due.setdefault(nearest, parse_amount_ar(w["text"].replace("$", "")))
+        return sorted(due.items())
+    return []
+
+
+def _save_card_cycle(cursor, account_id: int, import_id: int, cycle: dict | None) -> int:
+    """Graba cierre, vencimiento y cuotas a vencer. Un ciclo ya cargado no se pisa. Devuelve las filas insertadas."""
+    if not cycle:
+        return 0
+    cursor.execute(
+        "INSERT IGNORE INTO fin_card_cycles "
+        "(account_id,import_id,closing_date,due_date,next_closing_date,next_due_date) VALUES (%s,%s,%s,%s,%s,%s)",
+        (account_id, import_id, cycle["closing"], cycle["due"], cycle.get("next_closing"), cycle.get("next_due")),
+    )
+    if cursor.rowcount != 1:
+        _logger.info(f"  Ciclo con cierre {cycle['closing']} ya cargado — omitido")
+        return 0
+    cycle_id = cursor.lastrowid
+    for month, amount in cycle["installments"]:
+        cursor.execute(
+            "INSERT INTO fin_card_installments_due (cycle_id,month,amount) VALUES (%s,%s,%s)",
+            (cycle_id, month, amount),
+        )
+    _logger.info(f"  Ciclo con cierre {cycle['closing']}: {len(cycle['installments'])} meses de cuotas a vencer")
+    return 1 + len(cycle["installments"])
+
+
 def apply_rules(desc: str, cursor=None, detail: str = "") -> tuple[int | None, str | None]:
     """Busca la primera regla activa coincidente para desc (y opcionalmente detail).
     Devuelve (category_id, 'rule') o (None, None)."""
@@ -1684,6 +1806,13 @@ class BbvaArTarjeta:
         "DB IVA",
         "PAGO MÍNIMO",
         "TOTAL CONSUMOS DE",
+    }
+    CYCLE_LABELS = {
+        ("CIERRE", "ACTUAL"): "closing",
+        ("VENCIMIENTO", "ACTUAL"): "due",
+        ("CIERRE", "ANTERIOR"): "prev_closing",
+        ("PRÓXIMO", "CIERRE"): "next_closing",
+        ("PRÓXIMO", "VENCIMIENTO"): "next_due",
     }
 
     def __init__(self, pdf_path: str, account_ref: str, dry_run: bool = False):
@@ -1761,6 +1890,31 @@ class BbvaArTarjeta:
                         }
                     )
         return rows
+
+    def _extract_cycle(self) -> dict | None:
+        with pdfplumber.open(self.pdf_path) as pdf:
+            words = [w for w in pdf.pages[0].extract_words(x_tolerance=3, y_tolerance=3) if w["x0"] < 570]
+        lines = self._words_to_lines(words)
+        cycle = {}
+        for line in lines:
+            for first, second in zip(line, line[1:]):
+                key = self.CYCLE_LABELS.get((first["text"], second["text"]))
+                if not key:
+                    continue
+                # la fecha va debajo de la etiqueta, alineada a su primera palabra
+                fechas = [
+                    w["text"]
+                    for w in words
+                    if 0 < w["top"] - first["top"] <= 20
+                    and abs(w["x0"] - first["x0"]) <= 5
+                    and self._is_date(w["text"])
+                ]
+                if fechas:
+                    cycle[key] = parse_date_bbva_tc(fechas[0])
+        if not cycle.get("closing") or not cycle.get("due"):
+            return None
+        cycle["installments"] = parse_installments_due(lines)
+        return cycle
 
     def _build_transactions(self, rows: list[dict], account_id: int, import_id: int, cursor) -> list[dict]:
         txns = []
@@ -1843,12 +1997,17 @@ class BbvaArTarjeta:
         if not raw_rows:
             cursor.close()
             return stats
+        cycle = self._extract_cycle()
         cursor.execute(
             "SELECT id, status FROM fin_statement_imports WHERE file_hash=%s AND section=%s",
             (self.file_hash, self.SECTION_NAME),
         )
-        if cursor.fetchone():
+        imported = cursor.fetchone()
+        if imported:
             _logger.warning("  PDF ya importado — omitido")
+            # el ciclo sí se graba: los resúmenes cargados antes de existir fin_card_cycles se recuperan re-soltándolos
+            _save_card_cycle(cursor, account_id, imported[0], cycle)
+            conn.commit()
             cursor.close()
             return stats
         cursor.execute(
@@ -1869,6 +2028,7 @@ class BbvaArTarjeta:
             except Error as e:
                 _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
                 stats["errors"] += 1
+        _save_card_cycle(cursor, account_id, import_id, cycle)
         cursor.execute(
             "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s,"
             "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
@@ -2345,9 +2505,11 @@ class SantanderAr:
                     if "CONSUMOS DEL MES" in upper and product_ctx in ("visa", "amex"):
                         state = product_ctx
                         continue
-                    if state in ("visa", "amex") and (
-                        upper.startswith("IMPUESTOS")
-                        or upper.startswith("CONSUMOS TOTALES")
+                    if product_ctx in ("visa", "amex") and upper.startswith("IMPUESTOS"):
+                        state = "tc_impuestos"
+                        continue
+                    if state in ("visa", "amex", "tc_impuestos") and (
+                        upper.startswith("CONSUMOS TOTALES")
                         or (upper.startswith("TOTAL CONSUMOS") and "DE " not in upper[:30])
                         or upper.startswith("TOTAL A PAGAR")
                     ):
@@ -2382,7 +2544,7 @@ class SantanderAr:
                         last_fecha_str = self._process_cuenta_usd_line(line, result["cuenta_usd"], last_fecha_str)
                     elif state in ("visa", "amex"):
                         last_fecha_str = self._process_tc_line(line, result[state], last_fecha_str)
-                    elif state == "tc_pagos":
+                    elif state in ("tc_pagos", "tc_impuestos"):
                         last_fecha_str = self._process_tc_line(
                             line, result[product_ctx], last_fecha_str, classifier=self._classify_tc_pagos
                         )
@@ -2469,9 +2631,12 @@ class SantanderAr:
         desc = " ".join(cols["descripcion"]).strip()
         if not desc:
             return fecha_str
+        desc_upper = desc.upper()
+        # Cr.rg 5617 se carga: devuelve la percepción Db.rg 5617 que ahora entra por la sección Impuestos
         if (
-            any(s in desc.upper() for s in ("SALDO ANTERIOR", "CR.", "CR.$", "TRANSFERENCIA DEUDA"))
-            or desc.upper() == "TOTAL"
+            any(s in desc_upper for s in ("SALDO ANTERIOR", "TRANSFERENCIA DEUDA"))
+            or ("CR." in desc_upper and "CR.RG" not in desc_upper)
+            or desc_upper == "TOTAL"
         ):
             return fecha_str
         if cols["pesos"]:
@@ -2662,6 +2827,95 @@ class SantanderAr:
 
         cursor.close()
         return stats
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Adaptador Santander AR — Resumen de tarjeta (ciclo y cuotas a vencer)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class SantanderArTarjetaResumen:
+    """
+    PDF de resumen de tarjeta Santander (Visa / American Express). Los movimientos entran por el extracto de
+    cuenta (SantanderAr); de este PDF se lee solo la hoja 1:
+        línea con 6 fechas dd/mm/yy → cierre y vencimiento anterior, actual y próximo
+        "Próximas cuotas a vencer"  → meses con su importe debajo
+    """
+
+    SECTION_NAME = "santander_tc_resumen"
+    _words_to_lines = SantanderAr._words_to_lines
+
+    def __init__(self, pdf_path: str, account_ref: str):
+        self.pdf_path = pdf_path
+        self.account_ref = account_ref.strip()
+        self.file_hash = sha256_file(pdf_path)
+
+    def load(self, conn) -> dict:
+        stats = {"inserted": 0, "skipped": 0, "errors": 0, "rows_found": 0}
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, bank_id FROM fin_accounts WHERE account_ref=%s AND is_active=1",
+            (self.account_ref,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError(f"Cuenta no encontrada: account_ref='{self.account_ref}'")
+        account_id, bank_id = row
+        cycle = self._extract_cycle()
+        if not cycle:
+            cursor.close()
+            return stats
+        stats["rows_found"] = 1 + len(cycle["installments"])
+        cursor.execute(
+            "SELECT id FROM fin_statement_imports WHERE file_hash=%s AND section=%s",
+            (self.file_hash, self.SECTION_NAME),
+        )
+        if cursor.fetchone():
+            _logger.warning("  PDF ya importado — omitido")
+            cursor.close()
+            return stats
+        cursor.execute(
+            "INSERT INTO fin_statement_imports (account_id,bank_id,filename,file_hash,section,status) "
+            "VALUES (%s,%s,%s,%s,%s,'pending')",
+            (account_id, bank_id, os.path.basename(self.pdf_path), self.file_hash, self.SECTION_NAME),
+        )
+        conn.commit()
+        import_id = cursor.lastrowid
+        stats["inserted"] = _save_card_cycle(cursor, account_id, import_id, cycle)
+        stats["skipped"] = stats["rows_found"] - stats["inserted"]
+        cursor.execute(
+            "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s,"
+            "period_from=%s,period_to=%s WHERE id=%s",
+            (
+                stats["rows_found"],
+                stats["inserted"],
+                stats["skipped"],
+                cycle["prev_closing"],
+                cycle["closing"],
+                import_id,
+            ),
+        )
+        conn.commit()
+        cursor.close()
+        return stats
+
+    def _extract_cycle(self) -> dict | None:
+        with pdfplumber.open(self.pdf_path) as pdf:
+            lines = self._words_to_lines(pdf.pages[0].extract_words(x_tolerance=3, y_tolerance=3))
+        for line in lines:
+            fechas = [w["text"] for w in line if SantanderAr.RE_DATE_DDMMYY.match(w["text"])]
+            if len(fechas) != 6:
+                continue
+            d = [datetime.strptime(f, "%d/%m/%y").date() for f in fechas]
+            return {
+                "prev_closing": d[0],
+                "closing": d[2],
+                "due": d[3],
+                "next_closing": d[4],
+                "next_due": d[5],
+                "installments": parse_installments_due(lines),
+            }
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3690,6 +3944,7 @@ ADAPTER_MAP = {
     "bbva_cuenta": BbvaArCuenta,
     "bbva_ahorro": BbvaArAhorro,
     "santander": SantanderAr,
+    "santander_tc_resumen": SantanderArTarjetaResumen,
     "citibank_us": CitibankUs,
     "bdv_ves": BdvVes,
     "banesco_ves": BanescoVes,

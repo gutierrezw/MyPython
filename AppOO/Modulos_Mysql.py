@@ -7544,6 +7544,51 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         finally:
             conn.close()
 
+    def get_coverage(self) -> list[dict]:
+        """
+        Estado de carga de cada cuenta activa: último movimiento real, días de atraso, próximo cierre y semáforo.
+        Las filas sintéticas (Binance, fecha fin de mes) no cuentan como dato cargado.
+        En una tarjeta el atraso no se mide en días sino contra el cierre: si el próximo cierre ya pasó,
+        falta el resumen que cerró.
+        """
+        conn = self._conectar("fin_accounts.coverage")
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""SELECT CONCAT(b.name, ' — ', a.name), a.type, MAX(t.date),
+                          DATEDIFF(CURDATE(), MAX(t.date)), cc.next_closing,
+                          CASE WHEN MAX(t.date) IS NULL THEN 'sin_datos'
+                               WHEN a.type = 'credit' AND cc.next_closing IS NOT NULL
+                                    THEN IF(cc.next_closing < CURDATE(), 'atraso', 'ok')
+                               WHEN DATEDIFF(CURDATE(), MAX(t.date)) > 35 THEN 'atraso'
+                               WHEN DATEDIFF(CURDATE(), MAX(t.date)) > 28 THEN 'aviso'
+                               ELSE 'ok' END
+                   FROM fin_accounts a
+                   JOIN fin_banks b ON b.id = a.bank_id
+                   LEFT JOIN (SELECT account_id, MAX(next_closing_date) AS next_closing
+                                FROM fin_card_cycles GROUP BY account_id) cc ON cc.account_id = a.id
+                   LEFT JOIN fin_transactions t ON t.account_id = a.id
+                                               AND COALESCE(t.classified_by, '') <> 'synthetic'
+                                               AND t.date <= CURDATE()
+                   WHERE a.is_active = 1
+                   GROUP BY a.id, b.name, a.name, a.type, cc.next_closing
+                   ORDER BY MAX(t.date) IS NULL DESC, DATEDIFF(CURDATE(), MAX(t.date)) DESC""")
+            return [
+                {
+                    "account": row[0],
+                    "type": row[1],
+                    "last_date": row[2],
+                    "days": row[3],
+                    "next_closing": row[4],
+                    "status": row[5],
+                }
+                for row in cursor.fetchall()
+            ]
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.get_coverage()]: {e}")
+            return []
+        finally:
+            conn.close()
+
     @staticmethod
     def _ids_clause(account_ids: list[int] | None) -> tuple[str, list]:
         """Helper: genera cláusula WHERE y params para filtro por lista de account_ids."""
