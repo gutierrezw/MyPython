@@ -7479,6 +7479,9 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         "CASE WHEN t.type = IF(COALESCE(c.category_type, t.type) = 'income', 'income', 'expense') "
         "THEN {col} ELSE -{col} END"
     )
+    # Fecha con la que la fila cuenta en el período: una cuota de tarjeta cuenta en el cierre del resumen que la
+    # cobra, no en la fecha de la compra. billing_date NULL = la fecha del movimiento ya es la que corresponde.
+    _SQL_FECHA = "COALESCE(t.billing_date, t.date)"
 
     def __init__(self):
         self.display = False
@@ -7716,7 +7719,7 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                        COALESCE(SUM(CASE WHEN {grupo} = 'investment' AND t.type = 'income'  THEN t.amount_usdt END), 0)
                    FROM fin_transactions t
                    LEFT JOIN fin_categories c ON c.id = t.category_id
-                   WHERE t.date BETWEEN %s AND %s {clause}""",
+                   WHERE {self._SQL_FECHA} BETWEEN %s AND %s {clause}""",
                 params,
             )
             row = cursor.fetchone()
@@ -7758,7 +7761,7 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                    FROM fin_transactions t
                    LEFT JOIN fin_categories c ON c.id = t.category_id
                    WHERE {self._SQL_GRUPO} = %s
-                     AND t.date BETWEEN %s AND %s {clause}
+                     AND {self._SQL_FECHA} BETWEEN %s AND %s {clause}
                    GROUP BY c.name
                    ORDER BY total_usdt DESC""",
                 params,
@@ -7796,14 +7799,14 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             cursor = conn.cursor()
             cursor.execute(
                 f"""SELECT
-                        YEAR(t.date)  AS yr,
-                        MONTH(t.date) AS mo,
+                        YEAR({self._SQL_FECHA})  AS yr,
+                        MONTH({self._SQL_FECHA}) AS mo,
                         COALESCE(SUM(CASE WHEN {grupo} = 'income'     THEN {neto_usd} ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN {grupo} = 'expense'    THEN {neto_usd} ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN {grupo} = 'investment' THEN {neto_usd} ELSE 0 END), 0)
                     FROM fin_transactions t
                     LEFT JOIN fin_categories c ON c.id = t.category_id
-                    WHERE t.date >= DATE_SUB(CURDATE(), INTERVAL %s MONTH) {clause}
+                    WHERE {self._SQL_FECHA} >= DATE_SUB(CURDATE(), INTERVAL %s MONTH) {clause}
                     GROUP BY yr, mo
                     ORDER BY yr, mo""",
                 [months] + extra,
@@ -7841,7 +7844,7 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             cursor = conn.cursor()
             cursor.execute(
                 f"""SELECT
-                       t.id, t.date, t.type, t.amount, t.currency,
+                       t.id, {self._SQL_FECHA}, t.type, t.amount, t.currency,
                        COALESCE(t.description, t.raw_description),
                        COALESCE(c.name, 'Sin categoría'),
                        t.category_id,
@@ -7852,8 +7855,8 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                    LEFT JOIN fin_categories c ON c.id = t.category_id
                    LEFT JOIN fin_accounts   a ON a.id = t.account_id
                    LEFT JOIN fin_banks      b ON b.id = a.bank_id
-                   WHERE t.date BETWEEN %s AND %s {clause}
-                   ORDER BY t.date DESC
+                   WHERE {self._SQL_FECHA} BETWEEN %s AND %s {clause}
+                   ORDER BY {self._SQL_FECHA} DESC
                    LIMIT %s""",
                 params,
             )
@@ -7934,7 +7937,10 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         conn = self._conectar("fin_transactions.last_period")
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT YEAR(MAX(date)), MONTH(MAX(date)) FROM fin_transactions WHERE date <= CURDATE()")
+            cursor.execute(
+                "SELECT YEAR(MAX(COALESCE(billing_date, date))), MONTH(MAX(COALESCE(billing_date, date))) "
+                "FROM fin_transactions WHERE COALESCE(billing_date, date) <= CURDATE()"
+            )
             row = cursor.fetchone()
             if row and row[0]:
                 return int(row[1]), int(row[0])

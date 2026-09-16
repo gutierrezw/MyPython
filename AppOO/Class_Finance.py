@@ -1741,6 +1741,25 @@ def _save_card_cycle(cursor, account_id: int, import_id: int, cycle: dict | None
     return 1 + len(cycle["installments"])
 
 
+def _set_billing_dates(cursor, import_id: int, closing: date | None = None) -> int:
+    """Sella en las cuotas de este resumen el cierre que las cobra: la cuota se paga en el resumen donde aparece,
+    no en el mes de la compra, así que sin esto un plan entero cae en un solo mes. Sin ciclo parseado cae al
+    último movimiento del resumen, que es el cierre o está a días de él."""
+    if closing is None:
+        cursor.execute("SELECT MAX(date) FROM fin_transactions WHERE import_id = %s", (import_id,))
+        row = cursor.fetchone()
+        closing = row[0] if row else None
+    if closing is None:
+        return 0
+    cursor.execute(
+        "UPDATE fin_transactions SET billing_date = %s WHERE import_id = %s AND installment_current IS NOT NULL",
+        (closing, import_id),
+    )
+    if cursor.rowcount:
+        _logger.info(f"  {cursor.rowcount} cuotas del resumen quedan cobradas el {closing}")
+    return cursor.rowcount
+
+
 def apply_rules(desc: str, cursor=None, detail: str = "") -> tuple[int | None, str | None]:
     """Busca la primera regla activa coincidente para desc (y opcionalmente detail).
     Devuelve (category_id, 'rule') o (None, None)."""
@@ -2007,6 +2026,7 @@ class BbvaArTarjeta:
             _logger.warning("  PDF ya importado — omitido")
             # el ciclo sí se graba: los resúmenes cargados antes de existir fin_card_cycles se recuperan re-soltándolos
             _save_card_cycle(cursor, account_id, imported[0], cycle)
+            _set_billing_dates(cursor, imported[0], cycle.get("closing") if cycle else None)
             conn.commit()
             cursor.close()
             return stats
@@ -2029,6 +2049,7 @@ class BbvaArTarjeta:
                 _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
                 stats["errors"] += 1
         _save_card_cycle(cursor, account_id, import_id, cycle)
+        _set_billing_dates(cursor, import_id, cycle.get("closing") if cycle else None)
         cursor.execute(
             "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s,"
             "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
@@ -2822,6 +2843,7 @@ class SantanderAr:
                 "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
                 (len(rows), inserted_sec, import_id, import_id, import_id),
             )
+            _set_billing_dates(cursor, import_id)
             conn.commit()
             _logger.info(f"  [{section_key}] {len(rows)} filas → {inserted_sec} insertadas")
 

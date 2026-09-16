@@ -203,6 +203,7 @@ log_queries_not_using_indexes   = ON
 | symbol_decision_history | `dedup_key` | Parte estable de la decisión. **NULL = evento único, nunca se agrupa** (creada 2026-08-31) |
 | incidencias | `dedup_key` / `veces` / `primera_vez` | Mismo mecanismo que `symbol_decision_history`, aplicado a las alertas. **`leida` es el borde del grupo** (creadas 2026-09-06) |
 | fin_categories | `expense_class` | Clase del gasto: `fixed` + `variable` = costo de vida base del número de libertad financiera, `extraordinary` se promedia aparte. **NULL si la categoría no es gasto** (creada 2026-09-13) |
+| fin_transactions | `billing_date` | Cierre del resumen que cobra la fila. Los KPIs agrupan por `COALESCE(billing_date, date)`, nunca por `date` sola. **NULL = la fecha del movimiento ya es la del cobro** (creada 2026-09-16) |
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
 `lastPrice DESC` con `LIMIT 150`, así que repetía siempre los mismos 150 símbolos más caros y dejaba
@@ -372,6 +373,15 @@ leía y la clave única `(name, type)` permitía dos categorías con el mismo no
 `extraordinary` (tecnología, viajes, mantenimiento, cancelación de préstamo) no es un gasto de todos los meses
 y se promedia aparte. El mapa vigente y el motivo de cada fusión están en `20-Proyecto/spec-finanzas.md`
 § "Mapa de categorías". El comentario de la columna en MySQL repite la regla.
+
+**`fin_transactions.billing_date` — la cuota se cobra en el resumen donde aparece, no en el mes de la compra.**
+Sin esto un plan de 6 cuotas cae entero en un solo mes: el gasto de ese mes queda inflado y los siguientes vacíos.
+**No se resuelve moviendo `date`**: `uq_tx` es `(account_id, date, amount, raw_description)`, así que reescribirla
+puede colisionar con otra cuota del mismo plan, pierde la fecha real de la compra y una reimportación del resumen
+vuelve a insertar con la fecha vieja. La sella `_set_billing_dates()` (`Class_Finance.py`) al cerrar el import.
+Todo consumidor nuevo de `fin_transactions` que agrupe por período debe usar `FinanceScreen._SQL_FECHA`; la excepción
+deliberada es `get_coverage()`, que mide cuándo se cargó movimiento real. Motivo completo y medición en
+`20-Proyecto/spec-finanzas.md` § "Fase 1 — registro de lo hecho", paso 1.5.
 
 ### Script de monitoreo
 `SchemasSQL/mysql_index_analyzer.py` — analiza schema, índices sin uso, full scans y configuración InnoDB.
