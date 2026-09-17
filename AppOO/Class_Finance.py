@@ -1618,6 +1618,9 @@ MESES_ES = {
 RE_IMPORTE_AR = re.compile(r"^\$?-?\d{1,3}(?:\.\d{3})*,\d{2}$")
 RE_MES_CUOTA = re.compile(r"^([^\W\d_]+)(?:/(\d{2}))?$")
 RE_ANIO = re.compile(r"^\d{4}$")
+# cuota de un plan de financiación dentro de la descripción: 'VISA PLAN V 2-06 (TNA 79,00)'. La cuota no lleva cero
+# adelante, así una fecha '07-12' no pasa por cuota
+RE_CUOTA_PLAN = re.compile(r"(?<![\d/.-])([1-9]\d?)-(\d{2})(?![\d/.-])")
 
 _INSERT_TXN_SQL = """
     INSERT IGNORE INTO fin_transactions
@@ -1744,6 +1747,16 @@ def parse_date_bbva_tc(text: str) -> date | None:
         if month:
             return date(2000 + yy, month, day)
     return None
+
+
+def parse_plan_installment(desc: str) -> tuple[int | None, int | None]:
+    """Cuota de un plan de financiación ('CUOTIFICACION 3-06 (TNA 79,00)' → (3, 6)). BBVA y Santander la escriben
+    así, pegada a la descripción y fuera de su formato de cuota: sin reconocerla el plan entero caía en el mes del
+    alta en vez de repartirse en los resúmenes que lo cobran."""
+    m = RE_CUOTA_PLAN.search(desc)
+    if m and int(m.group(1)) <= int(m.group(2)):
+        return int(m.group(1)), int(m.group(2))
+    return None, None
 
 
 def parse_installments_due(lines: list[list[dict]], max_gap: float = 25.0) -> list[tuple[date, Decimal]]:
@@ -1899,7 +1912,9 @@ class BbvaArTarjeta:
         if m:
             cur, tot = int(m.group(1)), int(m.group(2))
             return cur, tot, self.RE_CUOTA.sub("", desc).strip()
-        return None, None, desc
+        # la cuota del plan queda en la descripción: es lo único que distingue sus filas en la tabla
+        cur, tot = parse_plan_installment(desc)
+        return cur, tot, desc
 
     def _is_date(self, text: str) -> bool:
         return bool(self.RE_DATE.match(text.strip()))
@@ -2728,7 +2743,7 @@ class SantanderAr:
         if amount is None:
             return fecha_str
         cuota_text = " ".join(cols["cuota"]).strip()
-        inst_cur, inst_tot = None, None
+        inst_cur, inst_tot = parse_plan_installment(desc)
         m = self.RE_CUOTA_SAN.match(cuota_text)
         if m:
             inst_cur, inst_tot = int(m.group(1)), int(m.group(2))
