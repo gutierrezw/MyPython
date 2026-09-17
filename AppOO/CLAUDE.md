@@ -204,6 +204,7 @@ log_queries_not_using_indexes   = ON
 | incidencias | `dedup_key` / `veces` / `primera_vez` | Mismo mecanismo que `symbol_decision_history`, aplicado a las alertas. **`leida` es el borde del grupo** (creadas 2026-09-06) |
 | fin_categories | `expense_class` | Clase del gasto: `fixed` + `variable` = costo de vida base del número de libertad financiera, `extraordinary` se promedia aparte. **NULL si la categoría no es gasto** (creada 2026-09-13) |
 | fin_transactions | `billing_date` | Cierre del resumen que cobra la fila. Los KPIs agrupan por `COALESCE(billing_date, date)`, nunca por `date` sola. **NULL = la fecha del movimiento ya es la del cobro** (creada 2026-09-16) |
+| fin_accounts | `tracked_since` | Desde cuándo la cuenta cuenta en el histórico de Finanzas: antes de esa fecha un mes vacío no es hueco de carga. **Default 2026-01-01 = piso del módulo**, no la apertura de la cuenta (creada 2026-09-16) |
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
 `lastPrice DESC` con `LIMIT 150`, así que repetía siempre los mismos 150 símbolos más caros y dejaba

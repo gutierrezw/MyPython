@@ -7482,6 +7482,8 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
     # Fecha con la que la fila cuenta en el período: una cuota de tarjeta cuenta en el cierre del resumen que la
     # cobra, no en la fecha de la compra. billing_date NULL = la fecha del movimiento ya es la que corresponde.
     _SQL_FECHA = "COALESCE(t.billing_date, t.date)"
+    # Primer día del mes calendario en curso: desde ahí el mes está abierto — los extractos cierran después.
+    _SQL_INICIO_MES = "DATE_SUB(CURDATE(), INTERVAL DAYOFMONTH(CURDATE()) - 1 DAY)"
 
     def __init__(self):
         self.display = False
@@ -7790,7 +7792,11 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         return self._get_categories_by_type("investment", date_from, date_to, account_ids)
 
     def get_monthly_evolution(self, months: int = 6, account_ids: list[int] | None = None) -> list[dict]:
-        """Retorna los últimos N meses con ingresos, gastos e invertido neto en USD (signo de _SQL_NETO)."""
+        """
+        Retorna los últimos N meses calendario enteros (el en curso incluido) con ingresos, gastos e invertido neto
+        en USD (signo de _SQL_NETO). Cada fila cuenta desde el tracked_since de su cuenta: antes de esa fecha solo hay
+        escombro de cuotas viejas y meses a medias. en_curso marca el mes abierto, que no es comparable con el resto.
+        """
         clause, extra = self._ids_clause(account_ids)
         grupo = self._SQL_GRUPO
         neto_usd = self._SQL_NETO.format(col="t.amount_usdt")
@@ -7803,13 +7809,16 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                         MONTH({self._SQL_FECHA}) AS mo,
                         COALESCE(SUM(CASE WHEN {grupo} = 'income'     THEN {neto_usd} ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN {grupo} = 'expense'    THEN {neto_usd} ELSE 0 END), 0),
-                        COALESCE(SUM(CASE WHEN {grupo} = 'investment' THEN {neto_usd} ELSE 0 END), 0)
+                        COALESCE(SUM(CASE WHEN {grupo} = 'investment' THEN {neto_usd} ELSE 0 END), 0),
+                        MAX({self._SQL_FECHA}) >= {self._SQL_INICIO_MES}
                     FROM fin_transactions t
+                    JOIN fin_accounts a ON a.id = t.account_id
                     LEFT JOIN fin_categories c ON c.id = t.category_id
-                    WHERE {self._SQL_FECHA} >= DATE_SUB(CURDATE(), INTERVAL %s MONTH) {clause}
+                    WHERE {self._SQL_FECHA} >= a.tracked_since
+                      AND {self._SQL_FECHA} >= DATE_SUB({self._SQL_INICIO_MES}, INTERVAL %s MONTH) {clause}
                     GROUP BY yr, mo
                     ORDER BY yr, mo""",
-                [months] + extra,
+                [months - 1] + extra,
             )
             _MESES = ["", "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
             return [
@@ -7820,6 +7829,7 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                     "ingresos": float(r[2]),
                     "gastos": float(r[3]),
                     "invertido": float(r[4]),
+                    "en_curso": bool(r[5]),
                 }
                 for r in cursor.fetchall()
             ]
@@ -7933,13 +7943,17 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             conn.close()
 
     def get_last_loaded_period(self) -> tuple[int, int]:
-        """Retorna (mes, año) del último mes con transacciones cargadas (sin fechas futuras)."""
+        """
+        Retorna (mes, año) del último mes con movimiento real anterior al mes en curso. El mes en curso nunca abre el
+        panel: sus extractos todavía no cerraron y mostraba gasto 0 como si fuera el mes. Las filas sintéticas de
+        Binance (fecha fin de mes) no cuentan como dato cargado, igual que en get_coverage().
+        """
         conn = self._conectar("fin_transactions.last_period")
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT YEAR(MAX(COALESCE(billing_date, date))), MONTH(MAX(COALESCE(billing_date, date))) "
-                "FROM fin_transactions WHERE COALESCE(billing_date, date) <= CURDATE()"
+                f"SELECT YEAR(MAX({self._SQL_FECHA})), MONTH(MAX({self._SQL_FECHA})) FROM fin_transactions t "
+                f"WHERE {self._SQL_FECHA} < {self._SQL_INICIO_MES} AND COALESCE(t.classified_by, '') <> 'synthetic'"
             )
             row = cursor.fetchone()
             if row and row[0]:

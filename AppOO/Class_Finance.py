@@ -978,8 +978,20 @@ class _EvolucionChart(tk.Frame):
         ax.plot(xs, gastos, color=_NEGATIVE, marker="o", markersize=3, linewidth=1.5, label="Gastos")
         ax.plot(xs, invertido, color=_GOLD, marker="o", markersize=3, linewidth=1.2, linestyle="--", label="Invertido")
 
-        for i, (ing, gas) in enumerate(zip(ingresos, gastos)):
-            if gas > ing:
+        for i, r in enumerate(rows):
+            if r["en_curso"]:
+                ax.axvspan(i - 0.4, i + 0.4, alpha=0.35, color=_NEUTRAL, hatch="///", fill=False)
+                ax.text(
+                    i,
+                    0.97,
+                    "en curso",
+                    transform=ax.get_xaxis_transform(),
+                    ha="center",
+                    va="top",
+                    color=_NEUTRAL,
+                    fontsize=6,
+                )
+            elif r["gastos"] > r["ingresos"]:
                 ax.axvspan(i - 0.4, i + 0.4, alpha=0.12, color=_NEGATIVE)
 
         ax.set_xticks(xs)
