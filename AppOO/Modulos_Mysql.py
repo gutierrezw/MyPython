@@ -4037,8 +4037,13 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
 
                 curs = cursor.fetchall()
             else:
-                qry = """SELECT  * FROM inversion WHERE tipoinv ='%s' AND ticket = '%s';"""
-                cursor.execute(qry % (tipoin, ticket))
+                # con account devuelve la fila de esa cuenta: el conid guardado es el mercado donde operó ella
+                qry = "SELECT * FROM inversion WHERE tipoinv = %s AND ticket = %s"
+                params = [tipoin, ticket]
+                if account:
+                    qry += " AND useraccount = %s"
+                    params.append(account)
+                cursor.execute(qry, tuple(params))
                 curs = cursor.fetchone()
 
             ix = [column[0] for column in cursor.description]

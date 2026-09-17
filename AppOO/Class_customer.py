@@ -1462,8 +1462,14 @@ class MyOrders:
                 for keys in pedido["orders"]:
                     if "conid" in keys:
                         if not keys["conid"]:
-                            resp_sym = self.IClient._get_symbol(symbol=symbol, secType="STK")
-                            keys["conid"] = int(resp_sym["conid"]) if resp_sym and resp_sym.get("conid") else 0
+                            keys["conid"], _ = self._conid_guardado(account=account, symbol=symbol)
+                        if not keys["conid"]:
+                            listings = self.IClient.get_listings(symbol=symbol, secType="STK")
+                            keys["conid"] = int(listings[0]["conid"]) if listings else 0
+                            self.logger.warning(
+                                f"place_OrderStock: {symbol} sin conid guardado → "
+                                f"{listings[0]['companyHeader'] if listings else 'IB sin listado exacto'}"
+                            )
                         keys["conid"] = int(keys["conid"])
                     if "price" in keys:
                         keys["price"] = float(keys["price"])
@@ -2498,6 +2504,20 @@ class MyOrders:
             return cantidad
         except Exception as e:
             pass
+
+    # conid con el que la cuenta ya operó el ticker y la empresa guardada — (0, "") si nunca lo tuvo
+    def _conid_guardado(self, account=None, symbol=None):
+        # inversion lo escribe desde la cartera de IB y lo conserva tras la baja: es el mercado donde se compró.
+        # Recomprar ahí mantiene el activo en un solo listado; la búsqueda de IB mandó ENB a Toronto en CAD
+        try:
+            filas = PlanInversion().select_inversion(account=account, tipoin="Stock", ticket=symbol)
+            conid = str(filas[0].get("conid") or "") if filas else ""
+            if not conid.isdigit():
+                return 0, ""
+            return int(conid), filas[0].get("empresa") or ""
+        except Exception as e:
+            self.logger.error(f"_conid_guardado({symbol}): {e}")
+            return 0, ""
 
 
 # Superclase para unificar atributos de los activos
@@ -6836,9 +6856,35 @@ class WidgetVehiculo(TickerInfo):
                     )
                     return
 
-            # Busca en Interactive Brokers (Stock)
+            # Busca en Interactive Brokers (Stock): el mercado lo elige el usuario entre los listados con el ticker
+            # exacto. El mercado donde la cuenta ya operó va primero y marcado, aunque IB ya no lo liste con ese
+            # ticker (MPW hoy es MPT en NYSE)
             elif self.vehiculo == "Stock":
-                response = self.IClient._get_symbol(symbol=symbol, secType="STK")
+                guardado, empresa = self._conid_guardado(account=self.account, symbol=symbol)
+                listings = self.IClient.get_listings(symbol=symbol, secType="STK")
+                opciones = [(listing["companyHeader"], listing["conid"]) for listing in listings]
+                if guardado:
+                    header = next((texto for texto, valor in opciones if valor == str(guardado)), empresa)
+                    opciones = [(texto, valor) for texto, valor in opciones if valor != str(guardado)]
+                    opciones.insert(0, (f"{header} — ya operado", str(guardado)))
+
+                if not opciones:
+                    MyMessageBox(self.master).showinfo(
+                        title="Buy - New symbol",
+                        message=f"IB no tiene un listado con el ticker exacto {symbol}. "
+                        f"Si el ticker cambió de nombre, ingrese el nuevo",
+                    )
+                    return
+
+                conid = opciones[0][1]
+                if len(opciones) > 1:
+                    conid = MyMessageBox(self.master).askchoice(
+                        title="Buy - New symbol", message=f"Elija el mercado de {symbol}", opciones=opciones
+                    )
+                    if not conid:
+                        return
+
+                response = self.IClient._get_symbol(symbol=symbol, secType="STK", conid=conid)
                 if not response:
                     MyMessageBox(self.master).showinfo(
                         title="Buy - New symbol",
@@ -7476,6 +7522,95 @@ class MyMessageBox(tk.Toplevel):
         self.grab_release()
 
         return ask[0]
+
+    def askchoice(self, title, message, opciones):
+        """Elige una de las opciones [(etiqueta, valor)] con la primera marcada. Devuelve el valor, None si cancela"""
+
+        def respuesta(valor):
+            elegido[0] = valor
+            done.set(True)
+            self.withdraw()
+
+        def aceptar_seleccion(event=None):
+            indice = lista.curselection()
+            respuesta(opciones[indice[0]][1] if indice else None)
+
+        if not self.winfo_exists() or not opciones:
+            return None
+        self._clear_frames()
+
+        done = tk.BooleanVar(value=False)
+        elegido = [None]
+
+        # alto según las filas visibles del listbox, centrada como el resto de los mensajes
+        filas = min(len(opciones), 8)
+        alto = 150 + 18 * filas
+        x = (self.winfo_screenwidth() // 2) - 260
+        y = (self.winfo_screenheight() // 2) - (alto // 2)
+        self.geometry(f"520x{alto}+{x}+{y}")
+        self.deiconify()
+
+        # agrega icono de mensaje ----------------------------------------------------------------------------------
+        imagen0, _ = BDsystem.select_objeto(codigo=19)
+        imagen = Image.open(io.BytesIO(imagen0))
+        imagen = imagen.resize((48, 48), Image.ADAPTIVE)
+        imagen_tk = ImageTk.PhotoImage(imagen)
+        button = tk.Button(self.left, image=imagen_tk, bg=self.bg, relief=tk.FLAT)
+        button.imagen = imagen_tk
+
+        message_label = tk.Label(self.right, text=message, justify="left", bg=self.bg, fg=self.fg, font=self.font)
+        message_label.pack(fill=tk.X, pady=(15, 5))
+
+        # doble clic o Enter aceptan; exportselection=False evita que la marca se pierda al pasar el foco a un botón
+        marco = tk.Frame(self.right, bg=self.bg)
+        marco.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
+        lista = tk.Listbox(marco, width=54, height=filas, font=self.font, activestyle="none", exportselection=False)
+        for etiqueta, _ in opciones:
+            lista.insert(tk.END, etiqueta)
+        lista.selection_set(0)
+        lista.bind("<Double-Button-1>", aceptar_seleccion)
+        lista.bind("<Return>", aceptar_seleccion)
+        lista.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        if len(opciones) > filas:
+            barra = ttk.Scrollbar(marco, orient=tk.VERTICAL, command=lista.yview)
+            lista.config(yscrollcommand=barra.set)
+            barra.pack(side=tk.RIGHT, fill=tk.Y)
+        lista.focus_set()
+
+        aceptar = tk.Button(
+            self.bottom,
+            text="Aceptar",
+            width=8,
+            bg="grey",
+            fg="black",
+            font=self.font,
+            command=aceptar_seleccion,
+        )
+        cancelar = tk.Button(
+            self.bottom,
+            text="Cancelar",
+            width=8,
+            bg="grey",
+            fg="black",
+            font=self.font,
+            command=lambda: respuesta(None),
+        )
+
+        cancelar.pack(side=tk.RIGHT, padx=3, pady=10)
+        aceptar.pack(side=tk.RIGHT, padx=3, pady=10)
+        button.pack(padx=10, pady=10)
+
+        # cerrar con la X equivale a cancelar: sin esto wait_variable no vuelve nunca
+        self.protocol("WM_DELETE_WINDOW", lambda: respuesta(None))
+
+        # Hacer que sea una ventana modal
+        self.title(title)
+        self.transient()
+        self.grab_set()
+        self.wait_variable(done)
+        self.grab_release()
+
+        return elegido[0]
 
     # Asignar un alias al método
     showwarning = showinfo

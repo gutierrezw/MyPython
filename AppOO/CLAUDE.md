@@ -205,6 +205,7 @@ log_queries_not_using_indexes   = ON
 | fin_categories | `expense_class` | Clase del gasto: `fixed` + `variable` = costo de vida base del número de libertad financiera, `extraordinary` se promedia aparte. **NULL si la categoría no es gasto** (creada 2026-09-13) |
 | fin_transactions | `billing_date` | Cierre del resumen que cobra la fila. Los KPIs agrupan por `COALESCE(billing_date, date)`, nunca por `date` sola. **NULL = la fecha del movimiento ya es la del cobro** (creada 2026-09-16) |
 | fin_accounts | `tracked_since` | Desde cuándo la cuenta cuenta en el histórico de Finanzas: antes de esa fecha un mes vacío no es hueco de carga. **Default 2026-01-01 = piso del módulo**, no la apertura de la cuenta (creada 2026-09-16) |
+| inversion | `conid` | Listado de IB (bolsa) donde **la cuenta** operó el ticker; se conserva tras la baja. **No es "el" conid del ticker**: el mismo ticker cotiza en varias bolsas (ENB en NYSE y TSE) |
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
 `lastPrice DESC` con `LIMIT 150`, así que repetía siempre los mismos 150 símbolos más caros y dejaba
@@ -363,6 +364,16 @@ Hoy `struct_positions_fci()` devuelve `(mrkprice - open) * position` y `change_a
 `keys["dgyp"]` directo. Efecto visible: la cabecera de la pestaña Ars muestra el dGyP total en pesos,
 no la suma de deltas por cuotaparte. Las filas viejas se corrigen solas — `update_FCI_en_positions()`
 reconstruye la posición en cada ciclo.
+
+**`inversion.conid` es el mercado donde operó la cuenta, no una propiedad del ticker** (2026-09-16). La
+compra de un símbolo fuera de cartera tomaba el primer resultado de la búsqueda de IB, que es difusa y no
+trae `currency`: ENB salió en Toronto (TSE, en CAD) antes que en NYSE, y BIL devolvía BHP antes que el ETF.
+El filtro anterior por `currency == "USD"` nunca coincidía por eso mismo. Hoy la compra lista los mercados
+con el ticker exacto (`IB.get_listings()`, EE.UU. primero) y el usuario elige; el `conid` guardado para esa
+cuenta va primero, marcado "— ya operado" (`_conid_guardado()` en `Class_customer.py`), aunque IB ya no lo
+liste con ese ticker (MPW hoy es MPT). Por eso `select_inversion()` filtra por `account` cuando la recibe:
+sin cuenta devolvía la fila de cualquier cuenta. La orden (`place_OrderStock`) usa el mismo `conid` guardado
+antes de ir a buscar a IB.
 
 **`fin_categories` — el grupo lo decide `category_type`, la clase `expense_class`.** `category_type`
 (`expense` / `income` / `transfer` / `investment`) es lo que leen los KPIs de Finanzas (`_SQL_GRUPO`); las

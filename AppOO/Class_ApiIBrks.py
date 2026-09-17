@@ -18,6 +18,12 @@ from Class_Ibrks import IBClient
 
 # --- Interactive Brokers -----------------------------------------------------------------------------------------
 class IB(IBClient):
+    # Mercados tal como IB los escribe en el paréntesis de companyHeader. La búsqueda de símbolos no trae currency,
+    # así que ese paréntesis es el único dato del mercado. Los OTC van en un nivel aparte: en BIL, BHP en VALUE
+    # sale antes que el ETF en ARCA
+    MERCADOS_US = ("NYSE", "NASDAQ", "AMEX", "ARCA", "BATS", "IEX")
+    MERCADOS_US_OTC = ("PINK", "VALUE")
+
     def __init__(
         self,
         username: str = None,
@@ -382,6 +388,50 @@ class IB(IBClient):
         """
         return urllib.parse.unquote(urllib.parse.urljoin(self.ib_gateway_path, self.api_version) + r"api/" + endpoint)
 
+    def get_listings(self, symbol: str, secType: str = "STK") -> List[Dict]:
+        """
+        Listados de IB cuyo ticker es exactamente symbol, con los mercados de EE.UU. primero.
+
+        La búsqueda de IB es difusa y el mismo ticker lo usan empresas distintas en otras bolsas: ENB devuelve
+        Enbridge en TSE antes que en NYSE, y BIL devuelve BHP antes que el ETF. Tomar el primer resultado
+        compraba en Toronto en CAD.
+
+        Returns:
+            [{"conid", "symbol", "exchange", "companyHeader"}] — vacío si no hay un listado con ese ticker exacto
+        """
+
+        def mercado(header):
+            # "ENBRIDGE INC (NYSE)" → "NYSE"
+            return header.rsplit("(", 1)[1].rstrip(") ") if "(" in header else ""
+
+        def prioridad(listing):
+            if listing["exchange"] in self.MERCADOS_US:
+                return 0
+            return 1 if listing["exchange"] in self.MERCADOS_US_OTC else 2
+
+        try:
+            content = self._get_conid(symbol=symbol, secType=secType)
+            if not isinstance(content, list):
+                return []
+
+            listings = [
+                {
+                    "conid": str(c["conid"]),
+                    "symbol": c.get("symbol"),
+                    "exchange": mercado(c.get("companyHeader") or ""),
+                    "companyHeader": c.get("companyHeader") or "",
+                }
+                for c in content
+                if c.get("conid")
+                and c.get("secType") == secType
+                and str(c.get("symbol", "")).upper() == symbol.upper()
+            ]
+            # sorted es estable: dentro de cada nivel se conserva el orden de IB
+            return sorted(listings, key=prioridad)
+        except Exception as e:
+            self.logger.exception(f"get_listings(): Error buscando listados de {symbol}: {e}")
+            return []
+
     def _get_conid(self, symbol: str, secType="STK") -> int:
         """
         Obtiene el conid (Contract ID) y otros datos dado un ticker/symbol.
@@ -479,7 +529,7 @@ class IB(IBClient):
 
         return content
 
-    def _get_symbol(self, symbol: str, secType: str = "STK", fields: List[str] = None) -> Dict:
+    def _get_symbol(self, symbol: str, secType: str = "STK", fields: List[str] = None, conid: str = None) -> Dict:
         """
         Obtiene información de mercado para un symbol dado.
         Primero obtiene el conid y luego consulta marketData.
@@ -496,32 +546,28 @@ class IB(IBClient):
         DESC: Lista de campos a obtener del market data
         TYPE: List<String>
 
+        NAME: conid
+        DESC: Listado ya elegido por el llamador. Sin él se toma el primero de get_listings()
+        TYPE: String
+
         Returns:
             Dict con información del symbol incluyendo market data
         """
         try:
-            # 1. Obtener conid desde el symbol
-            conid_data = self._get_conid(symbol=symbol, secType=secType)
+            # 1. Obtener conid desde el symbol. La preferencia anterior filtraba por currency == "USD", campo que la
+            # búsqueda de IB no devuelve: nunca coincidía y quedaba el primer STK de cualquier bolsa
+            if not conid:
+                listings = self.get_listings(symbol=symbol, secType=secType)
+                if not listings:
+                    self.logger.warning(f"_get_symbol(): No hay un listado con el ticker exacto {symbol}")
+                    return None
 
-            if not conid_data or len(conid_data) == 0:
-                self.logger.warning(f"_get_symbol(): No se encontró conid para {symbol}")
-                return None
-
-            # Preferir STK en NYSE/SMART/NASDAQ sobre futuros/índices (CME, etc.)
-            preferred = next(
-                (c for c in conid_data if c.get("secType") == "STK" and c.get("currency", "").upper() == "USD"),
-                next((c for c in conid_data if c.get("secType") == "STK"), conid_data[0]),
-            )
-            self.logger.warning(
-                f"_get_symbol(): {symbol} → conid={preferred.get('conid')} "
-                f"secType={preferred.get('secType')} exchange={preferred.get('primaryExch')} "
-                f"total={len(conid_data)}"
-            )
-            conid = [str(preferred.get("conid", ""))]
-
-            if not conid or not conid[0]:
-                self.logger.warning(f"_get_symbol(): conid vacío para {symbol}")
-                return None
+                conid = listings[0]["conid"]
+                self.logger.warning(
+                    f"_get_symbol(): {symbol} → conid={conid} exchange={listings[0]['exchange']} "
+                    f"listados={len(listings)}"
+                )
+            conid = [str(conid)]
 
             # 2. Obtener market data usando el conid
             FIELD_MAP = {
