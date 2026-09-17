@@ -232,8 +232,12 @@ class Class_IbReconcile:
 
         account      : cuenta booktrading (ej: 'B0000001')
         period_start : fecha inicio 'YYYY-MM-DD'
-        period_end   : fecha fin  'YYYY-MM-DD' (opcional, por defecto hoy)
+        period_end   : fecha fin  'YYYY-MM-DD' (opcional, por defecto el último día que trae Flex)
         exclude      : set de símbolos a omitir (default: CORPORATE_ACTION_SYMBOLS)
+
+        La diferencia se mide a la fecha de corte de Flex, no contra la última fila de booktrading: lo operado
+        después del corte todavía no está en ib_flex_trades y daría diffs falsos. `expected` traslada esa
+        diferencia a la última fila, que es la que corrige la aprobación por Telegram.
         """
         if exclude is None:
             exclude = self.CORPORATE_ACTION_SYMBOLS
@@ -241,6 +245,9 @@ class Class_IbReconcile:
         net_rows = self.db.get_ib_trades_net(ib_account, period_start, period_end)
         if not net_rows:
             return pd.DataFrame()
+        fecha_max = self.db.count_ib_trades(ib_account)["date_max"]
+        corte = min(period_end, fecha_max) if period_end else fecha_max
+        dia_post_corte = (pd.Timestamp(corte) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
 
         results = []
         for row in net_rows:
@@ -251,17 +258,19 @@ class Class_IbReconcile:
             ib_net   = float(row["ib_net"])
 
             bt_start          = self.db.get_bt_stock_before(account, symbol, currency, period_start)
+            bt_corte          = self.db.get_bt_stock_before(account, symbol, currency, dia_post_corte)
             bt_id, bt_current = self.db.get_bt_latest_stock(account, symbol, currency)
 
-            expected = round((bt_start or 0) + ib_net, 4)
             current  = bt_current or 0
-            diff     = round(expected - current, 4)
+            diff     = round((bt_start or 0) + ib_net - (bt_corte or 0), 4)
+            expected = round(current + diff, 4)
 
             results.append({
                 "symbol":     symbol,
                 "currency":   currency,
                 "bt_start":   bt_start if bt_start is not None else 0,
                 "ib_net":     ib_net,
+                "bt_corte":   bt_corte if bt_corte is not None else 0,
                 "expected":   expected,
                 "bt_current": current,
                 "bt_id":      bt_id,
