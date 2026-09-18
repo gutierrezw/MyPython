@@ -1622,6 +1622,10 @@ RE_ANIO = re.compile(r"^\d{4}$")
 # adelante, así una fecha '07-12' no pasa por cuota
 RE_CUOTA_PLAN = re.compile(r"(?<![\d/.-])([1-9]\d?)-(\d{2})(?![\d/.-])")
 
+# un cierre a más de 10 días del último movimiento del resumen es el del mes siguiente, no el de este: medido sobre
+# los 36 resúmenes con cuotas, los que traen su ciclo caen entre 0 y 5 días y el siguiente salta a 28
+CIERRE_MAX_DIAS = 10
+
 _INSERT_TXN_SQL = """
     INSERT IGNORE INTO fin_transactions
         (date, type, amount, currency, amount_usdt, category_id, account_id,
@@ -1810,12 +1814,28 @@ def _save_card_cycle(cursor, account_id: int, import_id: int, cycle: dict | None
 
 def _set_billing_dates(cursor, import_id: int, closing: date | None = None) -> int:
     """Sella en las cuotas de este resumen el cierre que las cobra: la cuota se paga en el resumen donde aparece,
-    no en el mes de la compra, así que sin esto un plan entero cae en un solo mes. Sin ciclo parseado cae al
-    último movimiento del resumen, que es el cierre o está a días de él."""
+    no en el mes de la compra, así que sin esto un plan entero cae en un solo mes. Sin ciclo parseado busca el cierre
+    real de la cuenta (lo trae el resumen de tarjeta, que es otro PDF) y si no lo hay cae al último movimiento del
+    resumen entero — no de la sección: las 5 secciones de un PDF de Santander son 5 imports con el mismo file_hash y
+    una sección con pocas filas termina semanas antes del cierre."""
     if closing is None:
-        cursor.execute("SELECT MAX(date) FROM fin_transactions WHERE import_id = %s", (import_id,))
+        cursor.execute(
+            "SELECT MAX(t.date) FROM fin_transactions t JOIN fin_statement_imports i ON i.id = t.import_id "
+            "WHERE i.file_hash = (SELECT file_hash FROM fin_statement_imports WHERE id = %s)",
+            (import_id,),
+        )
         row = cursor.fetchone()
         closing = row[0] if row else None
+        if closing is not None:
+            cursor.execute(
+                "SELECT MIN(cy.closing_date) FROM fin_card_cycles cy "
+                "JOIN fin_statement_imports i ON i.account_id = cy.account_id "
+                "WHERE i.id = %s AND cy.closing_date BETWEEN %s AND %s + INTERVAL %s DAY",
+                (import_id, closing, closing, CIERRE_MAX_DIAS),
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                closing = row[0]
     if closing is None:
         return 0
     cursor.execute(
@@ -2912,10 +2932,15 @@ class SantanderAr:
                 "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
                 (len(rows), inserted_sec, import_id, import_id, import_id),
             )
-            _set_billing_dates(cursor, import_id)
             conn.commit()
             _logger.info(f"  [{section_key}] {len(rows)} filas → {inserted_sec} insertadas")
 
+        # el sellado va fuera del bucle y sobre todas las secciones del PDF: el cierre que cobra las cuotas es del
+        # resumen entero, y así alcanza también a las secciones que ya estaban cargadas y el bucle se saltea
+        cursor.execute("SELECT id FROM fin_statement_imports WHERE file_hash = %s", (self.file_hash,))
+        for (sec_id,) in cursor.fetchall():
+            _set_billing_dates(cursor, sec_id)
+        conn.commit()
         cursor.close()
         return stats
 
@@ -2986,6 +3011,16 @@ class SantanderArTarjetaResumen:
                 import_id,
             ),
         )
+        if stats["inserted"]:
+            # el cierre real recién quedó en fin_card_cycles: los resúmenes de esta tarjeta que ya se cargaron con el
+            # último movimiento como aproximación se corrigen solos, sin volver a soltar el PDF
+            cursor.execute(
+                "SELECT DISTINCT i.id FROM fin_statement_imports i JOIN fin_transactions t ON t.import_id = i.id "
+                "WHERE i.account_id = %s AND t.installment_current IS NOT NULL",
+                (account_id,),
+            )
+            for (sec_id,) in cursor.fetchall():
+                _set_billing_dates(cursor, sec_id)
         conn.commit()
         cursor.close()
         return stats
