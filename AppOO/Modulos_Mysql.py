@@ -7512,6 +7512,11 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
     _SQL_TEXTO_REGLA = (
         "TRIM(CONCAT(COALESCE(t.raw_description, t.description), ' ', COALESCE(t.raw_description_detail, '')))"
     )
+    # Ventanas del flujo por categoría, en meses cerrados hacia atrás. Cuatro porque una sola no distingue el
+    # gasto que subió del gasto que pasó una vez: el mes contra el año es lo que muestra la deriva.
+    _FLOW_VENTANAS = (1, 3, 6, 12)
+    # Tasa de retiro del número de libertad financiera: 4% anual, o sea 25 veces el gasto de un año.
+    _FLOW_TASA_RETIRO = 0.04
 
     def __init__(self):
         self.display = False
@@ -7936,6 +7941,104 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         except (Exception, connect.Error) as e:
             print(f"[Mysql::FinanceScreen.get_monthly_evolution()]: {e}")
             return []
+        finally:
+            conn.close()
+
+    def get_category_flow(self, account_ids: list[int] | None = None) -> dict:
+        """
+        Flujo por categoría en las ventanas de _FLOW_VENTANAS, como promedio mensual en USD (signo de _SQL_NETO).
+
+        El mes en curso no entra en ninguna ventana: está abierto y arrastra el promedio para abajo. El divisor de
+        cada ventana es la cantidad de meses **con movimiento** que caen dentro, no los meses del calendario — con
+        tracked_since en enero, dividir el año por 12 inventa meses baratos que no existen (el borde de atrás del
+        paso 1.4). La ventana de un mes es el último mes cerrado, sin promediar.
+
+        Retorna {"ventanas": [{label, divisor}], "rows": [{tipo, clase, categoria, promedios}], "totales": {...}}.
+        Las claves de "totales" traen una lista con un valor por ventana, en el orden de _FLOW_VENTANAS.
+        """
+
+        def _promedios(por_mes: dict) -> list:
+            return [sum(por_mes.get(m, 0.0) for m in v["meses"]) / v["divisor"] for v in ventanas]
+
+        def _total(filtro) -> list:
+            return [sum(r["promedios"][i] for r in rows if filtro(r)) for i in range(len(ventanas))]
+
+        clause, extra = self._ids_clause(account_ids)
+        neto_usd = self._SQL_NETO.format(col="t.amount_usdt")
+        ahora = datetime.now()
+        etiquetas, yr, mo = [], ahora.year, ahora.month
+        for _ in range(max(self._FLOW_VENTANAS)):
+            mo -= 1
+            if mo == 0:
+                yr, mo = yr - 1, 12
+            etiquetas.append(f"{yr:04d}-{mo:02d}")
+
+        conn = self._conectar("fin_transactions.flow")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""SELECT
+                        {self._SQL_GRUPO},
+                        COALESCE(c.expense_class, ''),
+                        COALESCE(c.name, 'Sin categoría'),
+                        CONCAT(YEAR({self._SQL_FECHA}), '-', LPAD(MONTH({self._SQL_FECHA}), 2, '0')),
+                        COALESCE(SUM({neto_usd}), 0)
+                    FROM fin_transactions t
+                    JOIN fin_accounts a ON a.id = t.account_id
+                    LEFT JOIN fin_categories c ON c.id = t.category_id
+                    WHERE {self._SQL_FECHA} >= a.tracked_since
+                      AND {self._SQL_FECHA} <  {self._SQL_INICIO_MES}
+                      AND {self._SQL_FECHA} >= DATE_SUB({self._SQL_INICIO_MES}, INTERVAL %s MONTH) {clause}
+                    GROUP BY 1, 2, 3, 4""",
+                [max(self._FLOW_VENTANAS)] + extra,
+            )
+            datos, meses_con_dato = {}, set()
+            for tipo, clase, categoria, mes, usd in cursor.fetchall():
+                datos.setdefault((tipo or "", clase, categoria), {})[mes] = float(usd)
+                meses_con_dato.add(mes)
+
+            ventanas = []
+            for n in self._FLOW_VENTANAS:
+                meses = etiquetas[:n]
+                ventanas.append(
+                    {
+                        "label": "1Y" if n == 12 else f"{n}M",
+                        "meses": meses,
+                        "divisor": len([m for m in meses if m in meses_con_dato]) or 1,
+                    }
+                )
+
+            rows = [
+                {"tipo": t, "clase": cl, "categoria": cat, "promedios": _promedios(por_mes)}
+                for (t, cl, cat), por_mes in datos.items()
+            ]
+            orden = self._FLOW_VENTANAS.index(6)
+            rows.sort(key=lambda r: (r["tipo"], -abs(r["promedios"][orden])))
+
+            ingreso = _total(lambda r: r["tipo"] == "income")
+            gasto = _total(lambda r: r["tipo"] == "expense")
+            costo_vida = _total(lambda r: r["tipo"] == "expense" and r["clase"] in ("fixed", "variable"))
+            return {
+                "ventanas": [{"label": v["label"], "divisor": v["divisor"]} for v in ventanas],
+                "rows": rows,
+                "totales": {
+                    "ingreso": ingreso,
+                    "gasto": gasto,
+                    "costo_vida": costo_vida,
+                    "extraordinario": _total(lambda r: r["tipo"] == "expense" and r["clase"] == "extraordinary"),
+                    "sin_clase": _total(lambda r: r["tipo"] == "expense" and not r["clase"]),
+                    "inversion": _total(lambda r: r["tipo"] == "investment"),
+                    "ahorro": [ingreso[i] - gasto[i] for i in range(len(ventanas))],
+                    "tasa_ahorro": [
+                        (ingreso[i] - gasto[i]) / ingreso[i] * 100 if ingreso[i] else 0.0
+                        for i in range(len(ventanas))
+                    ],
+                    "numero": [c * 12 / self._FLOW_TASA_RETIRO for c in costo_vida],
+                },
+            }
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql::FinanceScreen.get_category_flow()]: {e}")
+            return {}
         finally:
             conn.close()
 

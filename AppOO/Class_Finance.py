@@ -431,6 +431,117 @@ class _CommitmentsTable(tk.Frame):
                 )
 
 
+class _FlowTable(tk.Frame):
+    """
+    Flujo por categoría en cuatro ventanas, en promedio mensual USD: el mes contra el año.
+
+    Una categoría cuyo 1M pesa más que su 1Y está subiendo; una que solo aparece en 1Y fue un gasto de una vez.
+    El encabezado de cada ventana dice sobre cuántos meses con movimiento promedia —no sobre los del calendario—,
+    porque un mes sin extracto no es un mes barato. Al pie, el costo de vida y el número de libertad financiera.
+    """
+
+    COLS = ("Grupo", "Clase", "Categoría", "1M", "3M", "6M", "1Y")
+    WIDTHS = (85, 75, 215, 85, 85, 85, 85)
+    _GRUPOS = (
+        ("income", "INGRESOS"),
+        ("expense", "GASTOS"),
+        ("investment", "INVERSIONES"),
+        ("transfer", "TRANSFERENCIAS"),
+    )
+    # Orden del resumen: primero de dónde sale el número (costo de vida), después el número.
+    _RESUMEN = (
+        ("ingreso", "Ingreso por mes"),
+        ("gasto", "Gasto por mes"),
+        ("ahorro", "Ahorro por mes"),
+        ("tasa_ahorro", "Tasa de ahorro"),
+        ("inversion", "Inversión por mes"),
+        ("costo_vida", "Costo de vida (fijo + variable)"),
+        ("extraordinario", "Extraordinario por mes"),
+        ("sin_clase", "Gasto sin clase — falta clasificar"),
+        ("numero", "Número de libertad financiera"),
+    )
+
+    def __init__(self, parent, bgcolor):
+        super().__init__(parent, bg=bgcolor)
+        self.numero = 0.0
+        self.tasa = 0.0
+        self._build()
+
+    def _build(self):
+        vsb = ttk.Scrollbar(self, orient="vertical")
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.tree = ttk.Treeview(self, columns=self.COLS, show="headings", height=10, yscrollcommand=vsb.set)
+        vsb.config(command=self.tree.yview)
+
+        for col, w in zip(self.COLS, self.WIDTHS):
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=w, anchor=tk.W if col in self.COLS[:3] else tk.E, stretch=False)
+
+        self.tree.tag_configure("grupo", foreground=_GOLD)
+        self.tree.tag_configure("income", foreground=_POSITIVE)
+        self.tree.tag_configure("expense", foreground=_WHITE)
+        self.tree.tag_configure("investment", foreground=_ACCENT)
+        self.tree.tag_configure("transfer", foreground=_NEUTRAL)
+        self.tree.tag_configure("resumen", foreground=_WHITE)
+        self.tree.tag_configure("numero", foreground=_GOLD)
+        self.tree.tag_configure("sucio", foreground=_NEGATIVE)
+        self.tree.pack(fill=tk.BOTH, expand=True)
+
+    def load(self, data: dict):
+        """Carga el flujo; data viene de FinanceScreen.get_category_flow()."""
+        self.tree.delete(*self.tree.get_children())
+        self.numero = 0.0
+        self.tasa = 0.0
+        if not data:
+            return
+
+        ventanas = data.get("ventanas", [])
+        for col, v in zip(self.COLS[3:], ventanas):
+            self.tree.heading(col, text=f"{v['label']} ÷{v['divisor']}")
+
+        rows = data.get("rows", [])
+        totales = data.get("totales", {})
+        n = len(ventanas)
+
+        for tipo, titulo in self._GRUPOS:
+            grupo = [r for r in rows if r["tipo"] == tipo]
+            if not grupo:
+                continue
+            suma = [sum(r["promedios"][i] for r in grupo) for i in range(n)]
+            self.tree.insert(
+                "", tk.END, values=(titulo, "", f"{len(grupo)} categorías", *self._fmt(suma, n)), tags=("grupo",)
+            )
+            for r in grupo:
+                self.tree.insert(
+                    "",
+                    tk.END,
+                    values=("", r["clase"] or "—", r["categoria"][:34], *self._fmt(r["promedios"], n)),
+                    tags=(tipo,),
+                )
+
+        self.tree.insert("", tk.END, values=("",) * len(self.COLS))
+        for clave, etiqueta in self._RESUMEN:
+            vals = totales.get(clave, [])
+            if clave == "tasa_ahorro":
+                celdas = [f"{v:.1f}%" for v in vals]
+                celdas = (celdas + [""] * n)[:n]
+            else:
+                celdas = self._fmt(vals, n)
+            # El gasto sin clase queda en rojo: mientras no sea cero, el costo de vida y el número salen bajos.
+            tag = "numero" if clave == "numero" else "sucio" if clave == "sin_clase" and any(vals) else "resumen"
+            self.tree.insert(
+                "", tk.END, values=("RESUMEN" if clave == "ingreso" else "", "", etiqueta, *celdas), tags=(tag,)
+            )
+
+        self.numero = totales.get("numero", [0])[0] if totales.get("numero") else 0.0
+        self.tasa = totales.get("tasa_ahorro", [0])[0] if totales.get("tasa_ahorro") else 0.0
+
+    @staticmethod
+    def _fmt(vals: list, n: int) -> list:
+        return ([f"{v:,.0f}" for v in vals] + [""] * n)[:n]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Widget: barra de gastos por categoría (clickeable para filtrar)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -605,6 +716,10 @@ class _CategoryEditPopup(tk.Toplevel):
     _CONFIRMAR_DESDE = 10
     _PREVIEW_COLS = ("Fecha", "Monto", "Movimiento", "Hoy en")
     _PREVIEW_WIDTHS = (70, 95, 290, 125)
+    # Con el que los adaptadores unen encabezado y detalle al armar la descripción que se ve en la grilla.
+    _SEP_DETALLE = " — "
+    # Tres palabras alcanzan para identificar un comercio y todavía dejan afuera el resto de la línea.
+    _CLAVE_MAX_TOKENS = 3
 
     def __init__(self, parent, txn_row: dict, categories: list[tuple], on_save, db_preview):
         super().__init__(parent)
@@ -667,7 +782,7 @@ class _CategoryEditPopup(tk.Toplevel):
         self._rule_frame.pack(fill=tk.X, padx=14, pady=(6, 0))
 
         tk.Label(self._rule_frame, text="Patrón:", font=_FONT_LABEL, bg=_CARD_BG, fg=_NEUTRAL).pack(anchor="w")
-        self._var_pattern = tk.StringVar(value=raw_desc.strip())
+        self._var_pattern = tk.StringVar(value=self._clave_corta(raw_desc))
         ent_pattern = tk.Entry(
             self._rule_frame,
             textvariable=self._var_pattern,
@@ -890,6 +1005,49 @@ class _CategoryEditPopup(tk.Toplevel):
             self._var_incluir_manual.get(),
         )
         self.destroy()
+
+    @staticmethod
+    def _clave_corta(texto: str) -> str:
+        """Patrón propuesto: el comercio, sin lo que cambia de un mes al otro.
+
+        La línea entera del resumen no vuelve a coincidir nunca —trae número de tarjeta, comprobante, fecha,
+        cuota o TNA—, así que la regla nacía muerta y el mismo comercio había que reclasificarlo mes a mes.
+        Cuando el movimiento viene partido en encabezado y detalle el comercio está del lado del detalle: el
+        encabezado es el medio de pago ('Compra con tarjeta de debito'), y tomarlo obligaría a una regla por
+        medio de pago. Los tokens variables cortan el texto en tramos y se elige el tramo con más letras, no
+        el primero: el comercio no siempre viene al principio —'COMPRA 4517*1234 FARMACITY 15/08' daba
+        'COMPRA', un comodín que arrastra cientos de filas ajenas, el defecto de la regla #269—. El tramo es
+        contiguo a propósito: el patrón se evalúa como subcadena, así que unir tokens salteados daría una
+        clave que no existe en ningún movimiento.
+        """
+
+        def _letras(seg: list) -> int:
+            return len(re.findall(r"[^\W\d_]", " ".join(seg)))
+
+        texto = (texto or "").strip()
+        if _CategoryEditPopup._SEP_DETALLE in texto:
+            texto = texto.split(_CategoryEditPopup._SEP_DETALLE, 1)[1].strip()
+        # Lo que va entre paréntesis es siempre el dato del mes (TNA, cuota), nunca el comercio.
+        texto = texto.split("(", 1)[0].strip()
+        # La billetera es el medio, no el comercio; además viene en dos formatos (MERPAGO*XXX y Merpago/xxx),
+        # y sin el prefijo una sola regla cubre los dos.
+        texto = re.sub(r"^MERPAGO\s*[*/]\s*", "", texto, flags=re.IGNORECASE)
+
+        tramos, actual = [], []
+        for token in texto.split():
+            if len(re.findall(r"\d", token)) >= 3 or re.fullmatch(r"[\d.,/\-*#]+", token):
+                if actual:
+                    tramos.append(actual)
+                    actual = []
+                continue
+            actual.append(token)
+        if actual:
+            tramos.append(actual)
+        if not tramos:
+            return texto[:30].strip()
+
+        clave = " ".join(max(tramos, key=_letras)[: _CategoryEditPopup._CLAVE_MAX_TOKENS]).strip(" -*/.,")
+        return clave if len(clave) >= 4 else texto[:30].strip()
 
 
 class _DateEditPopup(tk.Toplevel):
@@ -1447,6 +1605,10 @@ class FinancePanel(tk.Frame):
         self._lbl_commit_section.pack(side=tk.LEFT, padx=(6, 0), pady=(0, 6))
         self._lbl_commit_section.bind("<Button-1>", lambda _e: self._show_commitments())
 
+        self._lbl_flow_section = _SectionLabel(hdr, "Flujo", cursor="hand2")
+        self._lbl_flow_section.pack(side=tk.LEFT, padx=(6, 0), pady=(0, 6))
+        self._lbl_flow_section.bind("<Button-1>", lambda _e: self._show_flow())
+
         # botón limpiar filtro de categoría (visible solo cuando hay filtro activo)
         self._btn_clear_cat = tk.Button(
             hdr,
@@ -1472,8 +1634,9 @@ class FinancePanel(tk.Frame):
         )
         self._cover_table = _CoverageTable(right, self.bgcolor)
         self._commit_table = _CommitmentsTable(right, self.bgcolor)
+        self._flow_table = _FlowTable(right, self.bgcolor)
 
-        self._detail = "txn"  # txn | cover | commit — qué vista ocupa el panel derecho
+        self._detail = "txn"  # txn | cover | commit | flow — qué vista ocupa el panel derecho
         self._cover_pending = 0
         self._show_transactions()
 
@@ -1594,9 +1757,16 @@ class FinancePanel(tk.Frame):
         self._btn_clear_cat.pack_forget()
         self._update_status()
 
+    def _pack_solo(self, tabla):
+        """Deja en el panel derecho una sola de las vistas de detalle."""
+        for t in (self._txn_table, self._cover_table, self._commit_table, self._flow_table):
+            if t is not tabla:
+                t.pack_forget()
+        tabla.pack(fill=tk.BOTH, expand=True)
+
     def _mark_section(self, activa):
         """Enciende la etiqueta de la vista activa y apaga las otras. Cobertura conserva su rojo si hay pendientes."""
-        for lbl in (self._lbl_txn_section, self._lbl_cover_section, self._lbl_commit_section):
+        for lbl in (self._lbl_txn_section, self._lbl_cover_section, self._lbl_commit_section, self._lbl_flow_section):
             if lbl is activa:
                 lbl.config(bg=_BLACK, fg=_WHITE)
             elif lbl is self._lbl_cover_section:
@@ -1607,9 +1777,7 @@ class FinancePanel(tk.Frame):
     def _show_transactions(self):
         """Vuelve al detalle del período. El filtro de categoría se restaura si estaba puesto."""
         self._detail = "txn"
-        self._cover_table.pack_forget()
-        self._commit_table.pack_forget()
-        self._txn_table.pack(fill=tk.BOTH, expand=True)
+        self._pack_solo(self._txn_table)
         self._mark_section(self._lbl_txn_section)
         if self._txn_table.category_filter:
             self._btn_clear_cat.pack(side=tk.LEFT, padx=(6, 0), pady=(0, 6))
@@ -1618,21 +1786,26 @@ class FinancePanel(tk.Frame):
     def _show_coverage(self):
         """La cobertura ocupa el panel de detalle: estado de carga por cuenta, sin filtro de categoría."""
         self._detail = "cover"
-        self._txn_table.pack_forget()
-        self._commit_table.pack_forget()
         self._btn_clear_cat.pack_forget()
-        self._cover_table.pack(fill=tk.BOTH, expand=True)
+        self._pack_solo(self._cover_table)
         self._mark_section(self._lbl_cover_section)
         self._update_status()
 
     def _show_commitments(self):
         """Lo comprometido hacia adelante ocupa el panel: cuotas que todavía no llegaron, por mes."""
         self._detail = "commit"
-        self._txn_table.pack_forget()
-        self._cover_table.pack_forget()
         self._btn_clear_cat.pack_forget()
-        self._commit_table.pack(fill=tk.BOTH, expand=True)
+        self._pack_solo(self._commit_table)
         self._mark_section(self._lbl_commit_section)
+        self._update_status()
+
+    def _show_flow(self):
+        """El flujo por categoría ocupa el panel: promedio mensual en cuatro ventanas, y el número al pie.
+        No depende del período ni de la categoría elegida — las ventanas son suyas y el mes en curso no entra."""
+        self._detail = "flow"
+        self._btn_clear_cat.pack_forget()
+        self._pack_solo(self._flow_table)
+        self._mark_section(self._lbl_flow_section)
         self._update_status()
 
     def _update_status(self):
@@ -1650,6 +1823,16 @@ class FinancePanel(tk.Frame):
             prox = min(totals)
             self._lbl_status.config(
                 text=f"{prox}: {_fmt_usdt(totals[prox])} comprometidos — {len(totals)} meses por delante", fg=_GOLD
+            )
+            return
+        if self._detail == "flow":
+            if not self._flow_table.numero:
+                self._lbl_status.config(text="sin costo de vida clasificado", fg=_NEGATIVE)
+                return
+            self._lbl_status.config(
+                text=f"Libertad financiera: {_fmt_usdt(self._flow_table.numero)} — ahorro "
+                f"{self._flow_table.tasa:.1f}% (último mes cerrado)",
+                fg=_GOLD,
             )
             return
         count = self._txn_table.visible_count
@@ -1786,6 +1969,9 @@ class FinancePanel(tk.Frame):
 
             # lo comprometido tampoco depende del período: son las cuotas que caen de acá en adelante
             self._commit_table.load(self._db.get_installments_pending(6, account_ids))
+
+            # el flujo trae sus propias ventanas de meses cerrados: el período elegido no lo mueve, los chips sí
+            self._flow_table.load(self._db.get_category_flow(account_ids))
 
             txns = self._db.get_transactions(date_from, date_to, account_ids)
             self._txn_table.load(txns)
