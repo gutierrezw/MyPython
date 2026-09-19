@@ -7497,8 +7497,20 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
     # Va en el SELECT de candidatos, en el UPDATE y en el preview: cuando el preview usa un predicado y el
     # UPDATE otro, la UI promete filas que después no se mueven — eso fue el bug del paso 2.0.
     _SQL_RECLASIFICABLE = (
-        "(classified_by = 'rule' "
-        "OR (category_id IS NULL AND COALESCE(classified_by, '') NOT IN ('manual', 'synthetic')))"
+        "(t.classified_by = 'rule' "
+        "OR (t.category_id IS NULL AND COALESCE(t.classified_by, '') NOT IN ('manual', 'synthetic')))"
+    )
+    # Texto contra el que se evalúa el patrón de una regla: encabezado + detalle, la misma cadena que arma
+    # apply_rules() al importar. El retro leía solo COALESCE(raw_description, description), y hay cuentas que
+    # parten el movimiento en dos columnas con el comercio del lado del detalle — medido el 2026-09-19: 682 de
+    # 1.539 filas tienen detalle, y en Santander CA/CC (el día a día) las 108 compras con débito traen el
+    # encabezado 'Compra con tarjeta de debito' y el comercio solo en raw_description_detail. Contra el texto
+    # viejo el patrón del comercio no coincidía nunca: la regla clasificaba bien al importar y no se aplicaba
+    # hacia atrás, así que el mismo comercio había que reclasificarlo a mano mes a mes.
+    # Va calificado con el alias `t` —igual que _SQL_FECHA y _SQL_RECLASIFICABLE— porque el preview cruza con
+    # fin_categories y sin alias cualquier columna homónima de esa tabla haría fallar la consulta.
+    _SQL_TEXTO_REGLA = (
+        "TRIM(CONCAT(COALESCE(t.raw_description, t.description), ' ', COALESCE(t.raw_description_detail, '')))"
     )
 
     def __init__(self):
@@ -8112,7 +8124,9 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         finally:
             conn.close()
 
-    def save_rule(self, pattern: str, match_type: str, category_id: int, priority: int = 50) -> bool:
+    def save_rule(
+        self, pattern: str, match_type: str, category_id: int, priority: int = 50, incluir_manual: bool = False
+    ) -> bool:
         """
         Inserta o actualiza una regla en fin_import_rules (creada por el usuario).
         priority=50 → reglas de usuario tienen mayor precedencia que las del sistema (100).
@@ -8123,8 +8137,19 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         Qué puede tocar el retro lo define `_SQL_RECLASIFICABLE`, el mismo predicado en el SELECT, en el UPDATE
         y en el preview. Antes eran dos distintos: el SELECT traía `classified_by IS NULL` y el UPDATE filtraba
         `!= 'manual'`, que en SQL es NULL para esas mismas filas y las descartaba todas.
+
+        Sobre qué texto se evalúa el patrón lo define `_SQL_TEXTO_REGLA`: encabezado + detalle, la misma cadena
+        que arma `apply_rules()` al importar. Cuando el import y el retro leen textos distintos, una regla que
+        clasifica bien la fila nueva no se aplica a las viejas.
+
+        `incluir_manual=True` pisa también lo que clasificó una persona. El caso real es corregir un manual
+        equivocado: el combo del popup cambiaba la categoría con la rueda del mouse, así que hay filas en una
+        categoría que nadie eligió. Nunca toca 'synthetic' — esas son filas calculadas, no decisiones.
         """
-        import re as _re
+        # Qué se puede tocar: lo de siempre, o todo lo que no sea sintético cuando el usuario pide unificar.
+        predicado = (
+            "COALESCE(t.classified_by, '') <> 'synthetic'" if incluir_manual else self._SQL_RECLASIFICABLE
+        )
 
         conn = self._conectar("fin_import_rules.upsert")
         try:
@@ -8144,36 +8169,17 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             inserted = cursor.rowcount >= 1
 
             # ── aplicación retroactiva ────────────────────────────────────────
-            cursor.execute(
-                "SELECT id, COALESCE(raw_description, description) FROM fin_transactions "
-                f"WHERE {self._SQL_RECLASIFICABLE}"
-            )
+            cursor.execute(f"SELECT t.id, {self._SQL_TEXTO_REGLA} FROM fin_transactions t WHERE {predicado}")
             candidates = cursor.fetchall()
 
             p = pattern.strip()
-            p_upper = p.upper()
-            matched_ids = []
-            for txn_id, desc in candidates:
-                if not desc:
-                    continue
-                d = desc.upper()
-                hit = False
-                if match_type == "exact":
-                    hit = d == p_upper
-                elif match_type == "contains":
-                    hit = p_upper in d
-                elif match_type == "startswith":
-                    hit = d.startswith(p_upper)
-                elif match_type == "regex":
-                    hit = bool(_re.search(p, desc, _re.IGNORECASE))
-                if hit:
-                    matched_ids.append(txn_id)
+            matched_ids = [txn_id for txn_id, desc in candidates if self._match_pattern(desc, p, match_type)]
 
             if matched_ids:
                 placeholders = ",".join(["%s"] * len(matched_ids))
                 cursor.execute(
-                    f"UPDATE fin_transactions SET category_id=%s, classified_by='rule' "
-                    f"WHERE id IN ({placeholders}) AND {self._SQL_RECLASIFICABLE}",
+                    f"UPDATE fin_transactions t SET t.category_id=%s, t.classified_by='rule' "
+                    f"WHERE t.id IN ({placeholders}) AND {predicado}",
                     [category_id] + matched_ids,
                 )
                 conn.commit()
@@ -8197,45 +8203,86 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         finally:
             conn.close()
 
-    def save_rule_count_retro(self, pattern: str, match_type: str) -> int:
+    def save_rule_preview(self, pattern: str, match_type: str) -> dict:
         """
-        Cuenta cuántas transacciones coincidirían con el patrón y la regla podría tocar.
-        Útil para mostrar un preview en el popup antes de confirmar.
+        Devuelve qué haría la regla antes de guardarla: cuántas filas movería y desde qué categorías, cuántas no
+        puede tocar porque las clasificó una persona, y el detalle de todas las que coinciden con fecha y monto.
+        `detalle[*]["manual"]` marca las que solo se mueven con `incluir_manual=True`, para que la UI pueda mostrar
+        el mismo listado con y sin la casilla tildada sin volver a consultar.
 
-        Usa el mismo predicado que `save_rule()` a propósito: el preview tiene que contar exactamente las filas
-        que después se van a mover, ni una más.
+        Reemplaza un conteo suelto que además mentía: el label del popup decía "clasificará N transacciones sin
+        categoría" cuando el retro también mueve las que tienen categoría puesta por otra regla. En el caso
+        testigo eran 16 filas en 'Otros gastos' que el texto no mencionaba — aplicar así es aplicar a ciegas.
+        El detalle con fecha y monto está porque el usuario reconoce el movimiento por la compra, no por el texto
+        del resumen.
+
+        Usa el mismo predicado y el mismo texto que `save_rule()`: el preview describe exactamente lo que se mueve.
         """
-        import re as _re
+        vacio = {"mueve": [], "no_toca": [], "detalle": [], "total_mueve": 0, "total_no_toca": 0}
+        p = pattern.strip()
+        if not p or not match_type:
+            return vacio
 
         conn = self._conectar("fin_import_rules.preview")
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, COALESCE(raw_description, description) FROM fin_transactions "
-                f"WHERE {self._SQL_RECLASIFICABLE}"
+                f"SELECT {self._SQL_TEXTO_REGLA}, {self._SQL_FECHA}, t.amount, t.currency, "
+                f"COALESCE(c.name, '(sin categoria)'), CASE WHEN {self._SQL_RECLASIFICABLE} THEN 1 ELSE 0 END "
+                "FROM fin_transactions t LEFT JOIN fin_categories c ON c.id = t.category_id"
             )
-            rows = cursor.fetchall()
-            p = pattern.strip()
-            p_upper = p.upper()
-            count = 0
-            for _, desc in rows:
-                if not desc:
+            mueve, no_toca, detalle = {}, {}, []
+            for texto, fecha, monto, moneda, categoria, reclasificable in cursor.fetchall():
+                if not self._match_pattern(texto, p, match_type):
                     continue
-                d = desc.upper()
-                if match_type == "exact":
-                    count += d == p_upper
-                elif match_type == "contains":
-                    count += p_upper in d
-                elif match_type == "startswith":
-                    count += d.startswith(p_upper)
-                elif match_type == "regex":
-                    count += bool(_re.search(p, desc, _re.IGNORECASE))
-            return count
+                destino = mueve if reclasificable else no_toca
+                destino[categoria] = destino.get(categoria, 0) + 1
+                detalle.append(
+                    {
+                        "fecha": fecha,
+                        "monto": monto,
+                        "moneda": moneda,
+                        "categoria": categoria,
+                        "texto": texto,
+                        "manual": not reclasificable,
+                    }
+                )
+            detalle.sort(key=lambda r: r["fecha"], reverse=True)
+            return {
+                "mueve": sorted(mueve.items(), key=lambda kv: -kv[1]),
+                "no_toca": sorted(no_toca.items(), key=lambda kv: -kv[1]),
+                "detalle": detalle,
+                "total_mueve": sum(mueve.values()),
+                "total_no_toca": sum(no_toca.values()),
+            }
         except (Exception, connect.Error) as e:
-            print(f"[Mysql:: FinanceScreen.save_rule_count_retro()]: {e}")
-            return 0
+            print(f"[Mysql:: FinanceScreen.save_rule_preview()]: {e}")
+            return vacio
         finally:
             conn.close()
+
+    @staticmethod
+    def _match_pattern(texto: str, pattern: str, match_type: str) -> bool:
+        """
+        Evalúa el patrón de una regla contra el texto de una transacción.
+
+        Vive en un solo lugar porque `save_rule()` y `save_rule_preview()` tienen que coincidir fila por fila:
+        dos copias del mismo criterio es lo que hacía que la UI prometiera filas que después no se movían.
+        """
+        import re as _re  # import local: `re` no está expuesto en Modulos_python
+
+        if not texto:
+            return False
+        d, p = texto.upper(), pattern.upper()
+        if match_type == "exact":
+            return d == p
+        if match_type == "contains":
+            return p in d
+        if match_type == "startswith":
+            return d.startswith(p)
+        if match_type == "regex":
+            return bool(_re.search(pattern, texto, _re.IGNORECASE))
+        return False
 
 
 class IaTraceScreen(BDsystem):  # ---------------------------------------------------------------------------------

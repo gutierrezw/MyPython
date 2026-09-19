@@ -46,6 +46,8 @@ _FONT_SUB = ("Segoe UI", 8)
 _FONT_LABEL = ("Segoe UI", 9)
 _FONT_HEADER = ("Segoe UI", 9, "bold")
 _FONT_CHIP = ("Segoe UI", 8, "bold")
+# Monoespaciada: el desglose de lo que va a mover una regla se lee en columnas (conteo, fecha, monto).
+_FONT_MONO = ("Consolas", 8)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -594,11 +596,15 @@ class _CategoryEditPopup(tk.Toplevel):
     Además de actualizar la transacción, permite guardar el patrón como
     regla automática en fin_import_rules (tipo contains/startswith/exact).
 
-    on_save(txn_id, iid, cat_id, cat_name, pattern, match_type)
+    on_save(txn_id, iid, cat_id, cat_name, pattern, match_type, incluir_manual)
       pattern=None → no guardar regla.
     """
 
     _MATCH_TYPES = ["contains", "startswith", "exact", "regex"]
+    # Desde cuántas filas movidas se pide el segundo clic. Diez es lo que entra en la lista sin scrollear.
+    _CONFIRMAR_DESDE = 10
+    _PREVIEW_COLS = ("Fecha", "Monto", "Movimiento", "Hoy en")
+    _PREVIEW_WIDTHS = (70, 95, 290, 125)
 
     def __init__(self, parent, txn_row: dict, categories: list[tuple], on_save, db_preview):
         super().__init__(parent)
@@ -609,7 +615,9 @@ class _CategoryEditPopup(tk.Toplevel):
 
         self._txn_row = txn_row
         self._on_save = on_save
-        self._db_preview = db_preview  # callable(pattern, match_type) → int
+        self._db_preview = db_preview  # callable(pattern, match_type) → dict (ver save_rule_preview)
+        self._confirmar_pendiente = False
+        self._total_mueve = 0
         self._cat_map = {name: cid for cid, name, *_ in categories}
         cat_names = [name for _, name, *_ in categories]
 
@@ -625,12 +633,13 @@ class _CategoryEditPopup(tk.Toplevel):
 
         # ── selector de categoría ──────────────────────────────────────────
         tk.Label(self, text="Categoría:", font=_FONT_LABEL, bg=_CARD_BG, fg=_NEUTRAL).pack(anchor="w", padx=14)
-        self._cb_cat = ttk.Combobox(self, values=cat_names, state="normal", width=34)
+        # readonly y sin foco: editable y enfocado, una flecha o la rueda del mouse cambiaba la categoría sin que
+        # el usuario lo viera — y queda vacío cuando la fila no tiene categoría, que es justo cuando se lo usa.
+        self._cb_cat = ttk.Combobox(self, values=cat_names, state="readonly", width=34)
         cur_cat = txn_row.get("category", "")
         if cur_cat in cat_names:
             self._cb_cat.set(cur_cat)
         self._cb_cat.pack(padx=14, pady=(4, 10))
-        self._cb_cat.focus_set()
 
         # ── separador ──────────────────────────────────────────────────────
         tk.Frame(self, bg=_NEUTRAL, height=1).pack(fill=tk.X, padx=14, pady=(0, 8))
@@ -659,7 +668,7 @@ class _CategoryEditPopup(tk.Toplevel):
 
         tk.Label(self._rule_frame, text="Patrón:", font=_FONT_LABEL, bg=_CARD_BG, fg=_NEUTRAL).pack(anchor="w")
         self._var_pattern = tk.StringVar(value=raw_desc.strip())
-        tk.Entry(
+        ent_pattern = tk.Entry(
             self._rule_frame,
             textvariable=self._var_pattern,
             font=_FONT_LABEL,
@@ -668,7 +677,9 @@ class _CategoryEditPopup(tk.Toplevel):
             insertbackground=_WHITE,
             relief=tk.FLAT,
             width=36,
-        ).pack(fill=tk.X, pady=(2, 6))
+        )
+        ent_pattern.pack(fill=tk.X, pady=(2, 6))
+        ent_pattern.focus_set()
 
         match_row = tk.Frame(self._rule_frame, bg=_CARD_BG)
         match_row.pack(fill=tk.X)
@@ -677,20 +688,56 @@ class _CategoryEditPopup(tk.Toplevel):
         self._cb_match.set("contains")
         self._cb_match.pack(side=tk.LEFT)
 
-        # preview: cuántas transacciones sin categoría coincidirán
-        self._lbl_preview = tk.Label(self._rule_frame, text="", font=_FONT_SUB, bg=_CARD_BG, fg=_GOLD)
+        # preview: el resumen por categoría de lo que la regla va a mover y de lo que no puede tocar
+        self._lbl_preview = tk.Label(
+            self._rule_frame, text="", font=_FONT_MONO, bg=_CARD_BG, fg=_GOLD, justify=tk.LEFT
+        )
         self._lbl_preview.pack(anchor="w", pady=(6, 0))
 
-        # actualizar preview al cambiar patrón o tipo
+        # …y el listado completo, para revisar fila por fila antes de confirmar. Un resumen truncado no se revisa:
+        # el usuario reconoce la compra por la fecha y el monto, así que tienen que estar todas a la vista.
+        self._preview_frame = tk.Frame(self._rule_frame, bg=_CARD_BG)
+        vsb = ttk.Scrollbar(self._preview_frame, orient="vertical")
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._tree_preview = ttk.Treeview(
+            self._preview_frame, columns=self._PREVIEW_COLS, show="headings", height=10, yscrollcommand=vsb.set
+        )
+        vsb.config(command=self._tree_preview.yview)
+        for col, w in zip(self._PREVIEW_COLS, self._PREVIEW_WIDTHS):
+            self._tree_preview.heading(col, text=col)
+            self._tree_preview.column(col, width=w, anchor=tk.E if col == "Monto" else tk.W, stretch=False)
+        # Dorado = la regla la mueve. Gris = queda como está porque la clasificaste a mano.
+        self._tree_preview.tag_configure("mueve", foreground=_GOLD)
+        self._tree_preview.tag_configure("no_toca", foreground=_NEUTRAL)
+        self._tree_preview.pack(fill=tk.BOTH, expand=True)
+
+        # Pisar lo clasificado a mano es opt-in: el default nunca toca una decisión del usuario.
+        self._var_incluir_manual = tk.BooleanVar(value=False)
+        self._chk_manual = tk.Checkbutton(
+            self._rule_frame,
+            text="incluir también las que clasifiqué a mano",
+            variable=self._var_incluir_manual,
+            font=_FONT_SUB,
+            bg=_CARD_BG,
+            fg=_NEUTRAL,
+            activebackground=_CARD_BG,
+            activeforeground=_ACCENT,
+            selectcolor=_BLACK,
+            cursor="hand2",
+            command=self._refresh_preview,
+        )
+
+        # actualizar preview al cambiar patrón, tipo o categoría de destino
         self._var_pattern.trace_add("write", lambda *_: self._refresh_preview())
         self._cb_match.bind("<<ComboboxSelected>>", lambda _e: self._refresh_preview())
+        self._cb_cat.bind("<<ComboboxSelected>>", lambda _e: self._refresh_preview())
         self._refresh_preview()
 
         # ── botones ────────────────────────────────────────────────────────
         btn_row = tk.Frame(self, bg=_CARD_BG)
         btn_row.pack(fill=tk.X, padx=14, pady=14)
 
-        tk.Button(
+        self._btn_save = tk.Button(
             btn_row,
             text="Guardar",
             font=_FONT_LABEL,
@@ -701,7 +748,8 @@ class _CategoryEditPopup(tk.Toplevel):
             pady=4,
             cursor="hand2",
             command=self._save,
-        ).pack(side=tk.LEFT, padx=(0, 8))
+        )
+        self._btn_save.pack(side=tk.LEFT, padx=(0, 8))
 
         tk.Button(
             btn_row,
@@ -728,23 +776,82 @@ class _CategoryEditPopup(tk.Toplevel):
         self.update_idletasks()
 
     def _refresh_preview(self):
-        """Muestra cuántas txns sin categoría coincidirían con el patrón actual."""
+        """
+        Muestra todo lo que la regla va a cambiar antes de guardarla: cuántas filas mueve y desde qué categoría,
+        el detalle de las más recientes con fecha y monto, y cuántas no puede tocar por ser clasificación manual.
+
+        El texto anterior decía "clasificará N transacciones sin categoría" y contaba también las que ya tenían
+        categoría puesta por otra regla — en el caso de prueba ocultaba 16 filas. La fecha y el monto van porque
+        el usuario reconoce el movimiento por la compra, no por la línea del resumen.
+        """
         pattern = self._var_pattern.get().strip()
         match_type = self._cb_match.get()
+        self._reset_confirmacion()
+        self._total_mueve = 0
         if not pattern or not match_type:
             self._lbl_preview.config(text="")
+            self._chk_manual.pack_forget()
             return
         try:
-            count = self._db_preview(pattern, match_type)
-            if count > 0:
-                self._lbl_preview.config(
-                    text=f"↳ clasificará {count} transacción{'es' if count > 1 else ''} sin categoría",
-                    fg=_GOLD,
-                )
-            else:
-                self._lbl_preview.config(text="↳ ninguna transacción sin categoría coincide", fg=_NEUTRAL)
+            prev = self._db_preview(pattern, match_type)
         except Exception:
             self._lbl_preview.config(text="")
+            self._chk_manual.pack_forget()
+            return
+
+        incluir = self._var_incluir_manual.get()
+        por_categoria = dict(prev["mueve"])
+        if incluir:
+            for cat, filas in prev["no_toca"]:
+                por_categoria[cat] = por_categoria.get(cat, 0) + filas
+        self._total_mueve = sum(por_categoria.values())
+
+        lineas = []
+        if self._total_mueve:
+            lineas.append(f"↳ MUEVE {self._total_mueve} fila(s) a {self._cb_cat.get().strip() or '(sin elegir)'}")
+            lineas += [
+                f"     {filas:>3}  {cat}" for cat, filas in sorted(por_categoria.items(), key=lambda kv: -kv[1])
+            ]
+        else:
+            lineas.append("↳ no mueve ninguna fila")
+        if prev["total_no_toca"] and not incluir:
+            lineas.append(f"↳ NO TOCA {prev['total_no_toca']} que clasificaste a mano")
+            lineas += [f"     {filas:>3}  {cat}" for cat, filas in prev["no_toca"]]
+        self._lbl_preview.config(text="\n".join(lineas), fg=_GOLD if self._total_mueve else _NEUTRAL)
+
+        # Se re-packean en orden en cada pasada: si el árbol desaparece y vuelve, sin esto reaparece debajo
+        # de la casilla y el desglose queda desordenado.
+        self._chk_manual.pack_forget()
+        self._tree_preview.delete(*self._tree_preview.get_children())
+        for r in prev["detalle"]:
+            se_mueve = incluir or not r["manual"]
+            self._tree_preview.insert(
+                "",
+                tk.END,
+                values=(
+                    f"{r['fecha']:%d/%m/%y}",
+                    _fmt_amount(r["monto"], r["moneda"]),
+                    str(r["texto"])[:60],
+                    r["categoria"],
+                ),
+                tags=("mueve" if se_mueve else "no_toca",),
+            )
+        if prev["detalle"]:
+            self._preview_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+        else:
+            self._preview_frame.pack_forget()
+
+        if prev["total_no_toca"]:
+            self._chk_manual.pack(anchor="w", pady=(2, 0))
+        else:
+            self._chk_manual.pack_forget()
+        self.update_idletasks()
+
+    def _reset_confirmacion(self):
+        """Vuelve el botón a Guardar: cambiar el patrón invalida la confirmación que el usuario ya dio."""
+        if self._confirmar_pendiente:
+            self._confirmar_pendiente = False
+            self._btn_save.config(text="Guardar", bg=_ACCENT)
 
     def _center(self, parent):
         self.update_idletasks()
@@ -766,7 +873,22 @@ class _CategoryEditPopup(tk.Toplevel):
             if not pattern:
                 pattern = None
 
-        self._on_save(self._txn_row["txn_id"], self._txn_row.get("_iid"), cat_id, name, pattern, match_type)
+        # Un patrón corto alcanza muchas filas de golpe y el retro no se deshace con Ctrl+Z: por encima del umbral
+        # el primer clic solo muestra el número y pide un segundo clic deliberado.
+        if pattern and self._total_mueve > self._CONFIRMAR_DESDE and not self._confirmar_pendiente:
+            self._confirmar_pendiente = True
+            self._btn_save.config(text=f"Confirmar: mover {self._total_mueve}", bg=_GOLD)
+            return
+
+        self._on_save(
+            self._txn_row["txn_id"],
+            self._txn_row.get("_iid"),
+            cat_id,
+            name,
+            pattern,
+            match_type,
+            self._var_incluir_manual.get(),
+        )
         self.destroy()
 
 
@@ -1543,7 +1665,7 @@ class FinancePanel(tk.Frame):
             txn_row,
             self._categories,
             on_save=self._save_category,
-            db_preview=self._db.save_rule_count_retro,
+            db_preview=self._db.save_rule_preview,
         )
 
     def _save_category(
@@ -1554,19 +1676,29 @@ class FinancePanel(tk.Frame):
         cat_name: str,
         pattern: str | None,
         match_type: str | None,
+        incluir_manual: bool = False,
     ):
-        """Persiste el cambio de categoría y, opcionalmente, guarda la regla."""
+        """
+        Persiste el cambio de categoría y, opcionalmente, guarda la regla.
+
+        La regla se aplica hacia atrás sobre toda la base: catalogar un gasto una vez vale para el histórico, no
+        solo para la fila abierta. `incluir_manual` llega tildado desde el popup solo cuando el usuario decidió
+        pisar también lo que había clasificado a mano, con el desglose de esas filas a la vista.
+        """
         ok = self._db.update_txn_category(txn_id, cat_id)
         if ok and iid:
             self._txn_table.update_row_category(iid, cat_name)
             self._update_status()
 
         if pattern and match_type and cat_id is not None:
-            saved = self._db.save_rule(pattern, match_type, cat_id)
+            saved = self._db.save_rule(pattern, match_type, cat_id, incluir_manual=incluir_manual)
             if saved:
                 _logger.warning(f"Regla guardada: [{match_type}] '{pattern}' → {cat_name}")
             else:
                 _logger.warning(f"Regla ya existente o error: [{match_type}] '{pattern}'")
+            # El retro reclasifica filas del mes a la vista: sin recargar, la grilla y los KPIs siguen mostrando
+            # las categorías viejas y parece que la regla no hizo nada.
+            self.refresh()
 
     # ── lógica edición de fecha ───────────────────────────────────────────────
 
