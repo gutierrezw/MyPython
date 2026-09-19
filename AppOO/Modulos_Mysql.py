@@ -7489,6 +7489,17 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
     _SQL_FECHA = "COALESCE(t.billing_date, t.date)"
     # Primer día del mes calendario en curso: desde ahí el mes está abierto — los extractos cierran después.
     _SQL_INICIO_MES = "DATE_SUB(CURDATE(), INTERVAL DAYOFMONTH(CURDATE()) - 1 DAY)"
+    # Qué puede tocar la aplicación retroactiva de una regla: lo que no tiene categoría y lo que puso otra regla.
+    # Nunca lo que decidió una persona. No alcanza con excluir 'manual': hay filas con categoría puesta por SQL
+    # durante el saneamiento que quedaron con classified_by en NULL, y son decisiones igual de deliberadas —
+    # medidas el 2026-09-18: 37 filas, y 26 de ellas coincidían con alguna regla activa (4.156 USD expuestos
+    # contra 205 USD de filas realmente sin clasificar). La condición es "tener categoría", no quién la puso.
+    # Va en el SELECT de candidatos, en el UPDATE y en el preview: cuando el preview usa un predicado y el
+    # UPDATE otro, la UI promete filas que después no se mueven — eso fue el bug del paso 2.0.
+    _SQL_RECLASIFICABLE = (
+        "(classified_by = 'rule' "
+        "OR (category_id IS NULL AND COALESCE(classified_by, '') NOT IN ('manual', 'synthetic')))"
+    )
 
     def __init__(self):
         self.display = False
@@ -7595,6 +7606,78 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             ]
         except (Exception, connect.Error) as e:
             print(f"[Mysql:: FinanceScreen.get_coverage()]: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def get_installments_pending(self, months: int = 6, account_ids: list[int] | None = None) -> list[dict]:
+        """
+        Cuotas de planes vigentes que todavía no aparecieron en ningún resumen, proyectadas hacia adelante.
+
+        Un plan se identifica por (cuenta, comprobante, total de cuotas): el comprobante es estable, la descripción
+        no —el mismo plan llega escrito distinto en cada resumen y agrupar por texto lo parte en dos—. Pendientes
+        son las cuotas posteriores a la última cargada, una por mes desde su cobro. No hay doble conteo con los
+        KPIs: lo ya facturado queda del lado de `ult_cuota` y la proyección arranca recién después.
+
+        El monto en USD es el de la última cuota conocida. En un plan en pesos la cuota es fija en ARS, así que su
+        equivalente en dólares baja con el tipo de cambio: la proyección queda del lado caro, nunca del barato.
+
+        Una cuota proyectada con período anterior al mes en curso no es un error de cálculo — es un resumen que
+        todavía no llegó, el mismo hueco que marca `get_coverage()`.
+        """
+        clause, extra = self._ids_clause(account_ids)
+        hoy = datetime.now()
+        tope = hoy.year * 12 + hoy.month - 1 + months
+
+        conn = self._conectar("fin_transactions.installments")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""SELECT CONCAT(b.name, ' — ', a.name), a.type, MAX(t.raw_description), p.ult_cuota,
+                           p.installment_total, MAX({self._SQL_FECHA}), MAX(t.amount), t.currency,
+                           MAX(t.amount_usdt)
+                   FROM (SELECT t.account_id,
+                                COALESCE(NULLIF(t.comprobante, ''), t.raw_description) AS plan_key,
+                                t.installment_total, MAX(t.installment_current) AS ult_cuota
+                           FROM fin_transactions t
+                           WHERE t.installment_current IS NOT NULL AND t.installment_total > 1 {clause}
+                           GROUP BY t.account_id, plan_key, t.installment_total
+                           HAVING ult_cuota < t.installment_total) p
+                   JOIN fin_transactions t ON t.account_id = p.account_id
+                                          AND COALESCE(NULLIF(t.comprobante, ''), t.raw_description) = p.plan_key
+                                          AND t.installment_total = p.installment_total
+                                          AND t.installment_current = p.ult_cuota
+                   JOIN fin_accounts a ON a.id = p.account_id
+                   JOIN fin_banks b ON b.id = a.bank_id
+                   GROUP BY p.account_id, p.plan_key, p.installment_total, p.ult_cuota, b.name, a.name, a.type,
+                            t.currency""",
+                extra,
+            )
+            filas = []
+            for cuenta, tipo, desc, ult_cuota, total, ult_cobro, monto, moneda, usdt in cursor.fetchall():
+                if not ult_cobro:
+                    continue
+                base = ult_cobro.year * 12 + ult_cobro.month - 1
+                for k in range(1, int(total) - int(ult_cuota) + 1):
+                    idx = base + k
+                    if idx > tope:
+                        break
+                    filas.append(
+                        {
+                            "period": f"{idx // 12:04d}-{idx % 12 + 1:02d}",
+                            "account": cuenta,
+                            "type": tipo or "",
+                            "description": desc or "",
+                            "installment": f"{int(ult_cuota) + k}/{int(total)}",
+                            "amount": float(monto or 0),
+                            "currency": moneda or "",
+                            "usdt": float(usdt or 0),
+                        }
+                    )
+            filas.sort(key=lambda r: (r["period"], -r["usdt"]))
+            return filas
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: FinanceScreen.get_installments_pending()]: {e}")
             return []
         finally:
             conn.close()
@@ -8033,9 +8116,13 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         """
         Inserta o actualiza una regla en fin_import_rules (creada por el usuario).
         priority=50 → reglas de usuario tienen mayor precedencia que las del sistema (100).
-        Luego aplica retroactivamente la regla a todas las transacciones sin categoría
-        que coincidan, para que el aprendizaje tenga efecto inmediato en el historial.
+        Luego aplica retroactivamente la regla a las transacciones que coincidan y que el usuario no haya
+        clasificado a mano, para que el aprendizaje tenga efecto inmediato en el historial.
         Retorna True si se insertó o actualizó.
+
+        Qué puede tocar el retro lo define `_SQL_RECLASIFICABLE`, el mismo predicado en el SELECT, en el UPDATE
+        y en el preview. Antes eran dos distintos: el SELECT traía `classified_by IS NULL` y el UPDATE filtraba
+        `!= 'manual'`, que en SQL es NULL para esas mismas filas y las descartaba todas.
         """
         import re as _re
 
@@ -8057,10 +8144,9 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             inserted = cursor.rowcount >= 1
 
             # ── aplicación retroactiva ────────────────────────────────────────
-            # Cargar txns sin categoría O auto-clasificadas por regla (no manual)
             cursor.execute(
                 "SELECT id, COALESCE(raw_description, description) FROM fin_transactions "
-                "WHERE classified_by IS NULL OR classified_by = 'rule'"
+                f"WHERE {self._SQL_RECLASIFICABLE}"
             )
             candidates = cursor.fetchall()
 
@@ -8087,7 +8173,7 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                 placeholders = ",".join(["%s"] * len(matched_ids))
                 cursor.execute(
                     f"UPDATE fin_transactions SET category_id=%s, classified_by='rule' "
-                    f"WHERE id IN ({placeholders}) AND classified_by != 'manual'",
+                    f"WHERE id IN ({placeholders}) AND {self._SQL_RECLASIFICABLE}",
                     [category_id] + matched_ids,
                 )
                 conn.commit()
@@ -8113,8 +8199,11 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
 
     def save_rule_count_retro(self, pattern: str, match_type: str) -> int:
         """
-        Cuenta cuántas transacciones sin categoría coincidirían con el patrón.
+        Cuenta cuántas transacciones coincidirían con el patrón y la regla podría tocar.
         Útil para mostrar un preview en el popup antes de confirmar.
+
+        Usa el mismo predicado que `save_rule()` a propósito: el preview tiene que contar exactamente las filas
+        que después se van a mover, ni una más.
         """
         import re as _re
 
@@ -8123,7 +8212,7 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT id, COALESCE(raw_description, description) FROM fin_transactions "
-                "WHERE classified_by IS NULL OR classified_by = 'rule'"
+                f"WHERE {self._SQL_RECLASIFICABLE}"
             )
             rows = cursor.fetchall()
             p = pattern.strip()

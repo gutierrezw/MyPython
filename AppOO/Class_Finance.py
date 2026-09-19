@@ -367,6 +367,68 @@ class _CoverageTable(tk.Frame):
             )
 
 
+class _CommitmentsTable(tk.Frame):
+    """
+    Cuotas de planes vigentes que todavía no llegaron en ningún resumen, en bloques por mes.
+    Cada mes abre con su total: ese es el número que hay que tener reservado para pagar el resumen completo.
+    Las filas de tarjeta se destacan — son las que el banco cuotifica solo si el resumen no se paga entero.
+    """
+
+    COLS = ("Mes", "Cuenta", "Concepto", "Cuota", "Monto", "USD")
+    WIDTHS = (70, 190, 250, 60, 120, 80)
+
+    def __init__(self, parent, bgcolor):
+        super().__init__(parent, bg=bgcolor)
+        self.totals: dict[str, float] = {}
+        self._build()
+
+    def _build(self):
+        vsb = ttk.Scrollbar(self, orient="vertical")
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.tree = ttk.Treeview(self, columns=self.COLS, show="headings", height=10, yscrollcommand=vsb.set)
+        vsb.config(command=self.tree.yview)
+
+        for col, w in zip(self.COLS, self.WIDTHS):
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=w, anchor=tk.E if col in ("Cuota", "Monto", "USD") else tk.W, stretch=False)
+
+        self.tree.tag_configure("total", foreground=_GOLD)
+        self.tree.tag_configure("credit", foreground=_WHITE)
+        self.tree.tag_configure("debit", foreground=_NEUTRAL)
+        self.tree.pack(fill=tk.BOTH, expand=True)
+
+    def load(self, rows: list[dict]):
+        """Carga las cuotas proyectadas; rows viene de FinanceScreen.get_installments_pending()."""
+        self.tree.delete(*self.tree.get_children())
+        self.totals = {}
+        for r in rows:
+            self.totals[r["period"]] = self.totals.get(r["period"], 0) + r.get("usdt", 0)
+
+        for period in sorted(self.totals):
+            grupo = [r for r in rows if r["period"] == period]
+            self.tree.insert(
+                "",
+                tk.END,
+                values=(period, f"{len(grupo)} cuotas", "TOTAL COMPROMETIDO", "", "", f"{self.totals[period]:,.0f}"),
+                tags=("total",),
+            )
+            for r in sorted(grupo, key=lambda x: -x.get("usdt", 0)):
+                self.tree.insert(
+                    "",
+                    tk.END,
+                    values=(
+                        "",
+                        r.get("account", ""),
+                        r.get("description", "")[:60],
+                        r.get("installment", ""),
+                        f"{r.get('amount', 0):,.0f} {r.get('currency', '')}",
+                        f"{r.get('usdt', 0):,.0f}",
+                    ),
+                    tags=("credit" if r.get("type") == "credit" else "debit",),
+                )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Widget: barra de gastos por categoría (clickeable para filtrar)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1247,8 +1309,10 @@ class FinancePanel(tk.Frame):
         hdr = tk.Frame(right, bg=self.bgcolor)
         hdr.pack(fill=tk.X)
 
-        # El panel de detalle tiene dos vistas: las transacciones del período y la cobertura de carga. La cobertura
-        # no es una categoría ni depende del período o de los chips, por eso no vive en el notebook de la izquierda.
+        # El panel de detalle tiene tres vistas: las transacciones del período, la cobertura de carga y lo
+        # comprometido hacia adelante. Ninguna de las dos últimas es una categoría ni depende del período o de los
+        # chips —la cobertura mira el estado de carga y el comprometido mira el futuro—, por eso no viven en el
+        # notebook de la izquierda.
         self._lbl_txn_section = _SectionLabel(hdr, "Últimas transacciones", cursor="hand2")
         self._lbl_txn_section.pack(side=tk.LEFT, pady=(0, 6))
         self._lbl_txn_section.bind("<Button-1>", lambda _e: self._show_transactions())
@@ -1256,6 +1320,10 @@ class FinancePanel(tk.Frame):
         self._lbl_cover_section = _SectionLabel(hdr, "Cobertura", cursor="hand2")
         self._lbl_cover_section.pack(side=tk.LEFT, padx=(6, 0), pady=(0, 6))
         self._lbl_cover_section.bind("<Button-1>", lambda _e: self._show_coverage())
+
+        self._lbl_commit_section = _SectionLabel(hdr, "Comprometido", cursor="hand2")
+        self._lbl_commit_section.pack(side=tk.LEFT, padx=(6, 0), pady=(0, 6))
+        self._lbl_commit_section.bind("<Button-1>", lambda _e: self._show_commitments())
 
         # botón limpiar filtro de categoría (visible solo cuando hay filtro activo)
         self._btn_clear_cat = tk.Button(
@@ -1281,8 +1349,9 @@ class FinancePanel(tk.Frame):
             on_date_edit=self._on_date_edit,
         )
         self._cover_table = _CoverageTable(right, self.bgcolor)
+        self._commit_table = _CommitmentsTable(right, self.bgcolor)
 
-        self._cover_view = False
+        self._detail = "txn"  # txn | cover | commit — qué vista ocupa el panel derecho
         self._cover_pending = 0
         self._show_transactions()
 
@@ -1403,33 +1472,63 @@ class FinancePanel(tk.Frame):
         self._btn_clear_cat.pack_forget()
         self._update_status()
 
+    def _mark_section(self, activa):
+        """Enciende la etiqueta de la vista activa y apaga las otras. Cobertura conserva su rojo si hay pendientes."""
+        for lbl in (self._lbl_txn_section, self._lbl_cover_section, self._lbl_commit_section):
+            if lbl is activa:
+                lbl.config(bg=_BLACK, fg=_WHITE)
+            elif lbl is self._lbl_cover_section:
+                lbl.config(bg="#2A2A3E", fg=_NEGATIVE if self._cover_pending else _NEUTRAL)
+            else:
+                lbl.config(bg="#2A2A3E", fg=_NEUTRAL)
+
     def _show_transactions(self):
         """Vuelve al detalle del período. El filtro de categoría se restaura si estaba puesto."""
-        self._cover_view = False
+        self._detail = "txn"
         self._cover_table.pack_forget()
+        self._commit_table.pack_forget()
         self._txn_table.pack(fill=tk.BOTH, expand=True)
-        self._lbl_txn_section.config(bg=_BLACK, fg=_WHITE)
-        self._lbl_cover_section.config(bg="#2A2A3E", fg=_NEGATIVE if self._cover_pending else _NEUTRAL)
+        self._mark_section(self._lbl_txn_section)
         if self._txn_table.category_filter:
             self._btn_clear_cat.pack(side=tk.LEFT, padx=(6, 0), pady=(0, 6))
         self._update_status()
 
     def _show_coverage(self):
         """La cobertura ocupa el panel de detalle: estado de carga por cuenta, sin filtro de categoría."""
-        self._cover_view = True
+        self._detail = "cover"
         self._txn_table.pack_forget()
+        self._commit_table.pack_forget()
         self._btn_clear_cat.pack_forget()
         self._cover_table.pack(fill=tk.BOTH, expand=True)
-        self._lbl_cover_section.config(bg=_BLACK, fg=_WHITE)
-        self._lbl_txn_section.config(bg="#2A2A3E", fg=_NEUTRAL)
+        self._mark_section(self._lbl_cover_section)
+        self._update_status()
+
+    def _show_commitments(self):
+        """Lo comprometido hacia adelante ocupa el panel: cuotas que todavía no llegaron, por mes."""
+        self._detail = "commit"
+        self._txn_table.pack_forget()
+        self._cover_table.pack_forget()
+        self._btn_clear_cat.pack_forget()
+        self._commit_table.pack(fill=tk.BOTH, expand=True)
+        self._mark_section(self._lbl_commit_section)
         self._update_status()
 
     def _update_status(self):
-        if self._cover_view:
+        if self._detail == "cover":
             total = len(self._cover_table.tree.get_children())
             pend = self._cover_pending
             texto = f"{total} cuentas — {pend} esperando extracto" if pend else f"{total} cuentas — todas al día"
             self._lbl_status.config(text=texto, fg=_NEGATIVE if pend else _POSITIVE)
+            return
+        if self._detail == "commit":
+            totals = self._commit_table.totals
+            if not totals:
+                self._lbl_status.config(text="sin cuotas pendientes", fg=_POSITIVE)
+                return
+            prox = min(totals)
+            self._lbl_status.config(
+                text=f"{prox}: {_fmt_usdt(totals[prox])} comprometidos — {len(totals)} meses por delante", fg=_GOLD
+            )
             return
         count = self._txn_table.visible_count
         df, dt = self._period()
@@ -1550,8 +1649,11 @@ class FinancePanel(tk.Frame):
             self._lbl_cover_section.config(
                 text=f"  Cobertura ({self._cover_pending})  " if self._cover_pending else "  Cobertura  "
             )
-            if not self._cover_view:
+            if self._detail != "cover":
                 self._lbl_cover_section.config(fg=_NEGATIVE if self._cover_pending else _NEUTRAL)
+
+            # lo comprometido tampoco depende del período: son las cuotas que caen de acá en adelante
+            self._commit_table.load(self._db.get_installments_pending(6, account_ids))
 
             txns = self._db.get_transactions(date_from, date_to, account_ids)
             self._txn_table.load(txns)
