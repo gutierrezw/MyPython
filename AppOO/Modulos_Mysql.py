@@ -6,6 +6,7 @@ from Modulos_python import (
     Image,
     ImageTk,
     io,
+    math,
     time,
     timedelta,
     hashlib,
@@ -3932,6 +3933,39 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         except (Exception, connect.Error) as e:
             print(f"[Mysql:: select_extracto()]: {e} {traceback.print_exc()}")
 
+    def get_interes_margen(self, meses: int = 12) -> dict:
+        """
+        Interés de margen pagado por mes, sumando todas las cuentas de inversión.
+
+        Sale de `extractos.imargen` —la línea "Interest / Debit" del extracto del broker—, que es lo que se pagó
+        de verdad y no una estimación sobre la tasa. Lo consume el costo de vida de Finanzas: mientras haya deuda
+        el interés es un gasto de todos los meses, así que empuja el número de libertad financiera hacia arriba
+        al mismo tiempo que baja el ahorro. Es el precio del crédito, medido donde el crédito se cobra.
+
+        No se devuelve el mes en curso: su extracto todavía no cerró y el parcial leería como un mes barato.
+
+        @param meses: cuántos meses hacia atrás contar, desde el mes anterior al actual.
+        @return: dict {"YYYY-MM": usd} con los meses que tuvieron interés; vacío si nunca se pagó.
+        """
+        conn = self._conectar(tabla="select.extracto")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT DATE_FORMAT(extracto, '%%Y-%%m'), SUM(COALESCE(imargen, 0))
+                     FROM extractos
+                    WHERE extracto >= DATE_SUB(DATE_FORMAT(CURDATE(), '%%Y-%%m-01'), INTERVAL %s MONTH)
+                      AND extracto <  DATE_FORMAT(CURDATE(), '%%Y-%%m-01')
+                    GROUP BY 1
+                   HAVING SUM(COALESCE(imargen, 0)) <> 0;""",
+                (meses,),
+            )
+            return {mes: abs(float(usd)) for mes, usd in cursor.fetchall()}
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: get_interes_margen()]: {e}")
+            return {}
+        finally:
+            conn.close()
+
     def insert_extracto(self, account=None, values=None):
         """
         @param account: id de cuenta de inversión
@@ -4266,7 +4300,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
     def get_totales_inversiones(self, vehiculo=None):
         """
         Obtiene los totales consolidados de todas las inversiones activas.
-        @return: dict con total_costo_base, total_mercado, total_ganancia_dia, total_unrealized_pnl
+        @return: dict con total_costo_base, total_mercado, total_ganancia_dia, total_unrealized_pnl, total_deuda
         """
         try:
             conn = self._conectar(tabla="select.inversion")
@@ -4276,7 +4310,8 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                         SUM(costobase) as total_costo_base,
                         SUM(mrkprice * position) as total_mercado,
                         SUM(dgyp) as total_ganancia_dia,
-                        SUM(unrealizedpnl) as total_unrealized_pnl
+                        SUM(unrealizedpnl) as total_unrealized_pnl,
+                        SUM(deuda) as total_deuda
                      FROM inversion
                      WHERE iactiva = 'Y'"""
 
@@ -4299,6 +4334,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                     "total_mercado": result[1] or 0.0,
                     "total_ganancia_dia": result[2] or 0.0,
                     "total_unrealized_pnl": result[3] or 0.0,
+                    "total_deuda": result[4] or 0.0,
                 }
             else:
                 return {
@@ -4306,6 +4342,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                     "total_mercado": 0.0,
                     "total_ganancia_dia": 0.0,
                     "total_unrealized_pnl": 0.0,
+                    "total_deuda": 0.0,
                 }
 
         except (Exception, EncodingWarning, connect.Error) as error:
@@ -4315,6 +4352,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 "total_mercado": 0.0,
                 "total_ganancia_dia": 0.0,
                 "total_unrealized_pnl": 0.0,
+                "total_deuda": 0.0,
             }
 
     def get_totales_otros_activos(self, vehiculo=None):
@@ -7517,6 +7555,13 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
     _FLOW_VENTANAS = (1, 3, 6, 12)
     # Tasa de retiro del número de libertad financiera: 4% anual, o sea 25 veces el gasto de un año.
     _FLOW_TASA_RETIRO = 0.04
+    # Rendimiento real —ya descontada la inflación— con el que se estiman los años que faltan. 5% es el piso
+    # habitual de una cartera diversificada a largo plazo; es un supuesto, no un dato de la cartera del usuario,
+    # y por eso el panel lo muestra escrito al lado del número de años.
+    _FREEDOM_RENDIMIENTO_REAL = 0.05
+    # Horizonte para sumar las cuotas de tarjeta que faltan: el plan más largo que emite un banco local es de 24
+    # cuotas, así que 120 meses alcanzan para que "pendiente" signifique todo lo pendiente y no una ventana.
+    _FREEDOM_HORIZONTE_CUOTAS = 120
 
     def __init__(self):
         self.display = False
@@ -7944,7 +7989,7 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         finally:
             conn.close()
 
-    def get_category_flow(self, account_ids: list[int] | None = None) -> dict:
+    def get_category_flow(self, account_ids: list[int] | None = None, interes_margen: dict | None = None) -> dict:
         """
         Flujo por categoría en las ventanas de _FLOW_VENTANAS, como promedio mensual en USD (signo de _SQL_NETO).
 
@@ -7953,6 +7998,9 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         tracked_since en enero, dividir el año por 12 inventa meses baratos que no existen (el borde de atrás del
         paso 1.4). La ventana de un mes es el último mes cerrado, sin promediar.
 
+        @param interes_margen: serie {"YYYY-MM": usd} de PlanInversion.get_interes_margen(). Llega por parámetro
+            porque vive en `extractos`, que es de la cartera: el panel coordina las dos clases igual que para el
+            patrimonio del progreso. Entra como una categoría más del costo de vida.
         Retorna {"ventanas": [{label, divisor}], "rows": [{tipo, clase, categoria, promedios}], "totales": {...}}.
         Las claves de "totales" traen una lista con un valor por ventana, en el orden de _FLOW_VENTANAS.
         """
@@ -7996,6 +8044,15 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             for tipo, clase, categoria, mes, usd in cursor.fetchall():
                 datos.setdefault((tipo or "", clase, categoria), {})[mes] = float(usd)
                 meses_con_dato.add(mes)
+
+            # El interés de margen no pasa por ninguna cuenta bancaria —el broker lo cobra contra el saldo—, así
+            # que no está en fin_transactions y se agrega como una fila más. No suma a meses_con_dato a propósito:
+            # los extractos empiezan antes que la carga de Finanzas y correr el divisor diluiría todo lo demás.
+            serie = {m: v for m, v in (interes_margen or {}).items() if m in meses_con_dato}
+            if serie:
+                fila = datos.setdefault(("expense", "fixed", "Intereses de margen"), {})
+                for mes, usd in serie.items():
+                    fila[mes] = fila.get(mes, 0.0) + usd
 
             ventanas = []
             for n in self._FLOW_VENTANAS:
@@ -8041,6 +8098,50 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             return {}
         finally:
             conn.close()
+
+    def get_freedom_progress(
+        self, numero: float, ahorro: float, patrimonio: float, deuda_inversion: float = 0.0,
+        account_ids: list[int] | None = None,
+    ) -> dict:
+        """
+        Cuánto del número de libertad financiera está cubierto hoy, y cuántos años faltan al ritmo de ahorro.
+
+        El objetivo lo calcula get_category_flow() desde el gasto; acá se mide el **avance**, que no sale de
+        fin_transactions sino del patrimonio: `patrimonio` y `deuda_inversion` son total_mercado y total_deuda de
+        PlanInversion.get_totales_inversiones() — el panel los pasa porque la tabla `inversion` es de otro dominio
+        y este módulo no tiene por qué consultarla.
+
+        Lo que descuenta, y por qué: la deuda de margen (comprado con plata prestada no es patrimonio) y las cuotas
+        de tarjeta que todavía no vencieron, que son consumo ya hecho esperando su resumen. Reutiliza
+        get_installments_pending() con un horizonte largo para que "pendiente" sea todo lo pendiente.
+
+        **El saldo del préstamo bancario no está en ninguna tabla `fin_*`** — solo se ven las cuotas ya cobradas —,
+        así que el progreso que devuelve es un TECHO: el avance real es menor. Se informa con `techo=True` en vez
+        de esconderlo, porque un porcentaje de avance optimista es peor que ninguno (paso 4.4 / 1.7).
+
+        Los años salen de la anualidad con capital inicial, no de dividir el faltante por el ahorro: el capital ya
+        invertido también rinde. FV = P(1+r)^n + PMT((1+r)^n - 1)/r, resuelta en n. El rendimiento es un supuesto
+        (_FREEDOM_RENDIMIENTO_REAL), no una medición de la cartera.
+        """
+        cuotas = sum(f["usdt"] for f in self.get_installments_pending(self._FREEDOM_HORIZONTE_CUOTAS, account_ids))
+        neto = patrimonio - abs(deuda_inversion) - cuotas
+        faltante = max(numero - neto, 0.0)
+        r = (1 + self._FREEDOM_RENDIMIENTO_REAL) ** (1 / 12) - 1
+        anios = 0.0
+        if faltante > 0 and ahorro > 0:
+            anios = math.log((numero * r + ahorro) / (neto * r + ahorro)) / math.log(1 + r) / 12
+        return {
+            "patrimonio": patrimonio,
+            "deuda_inversion": abs(deuda_inversion),
+            "cuotas_pendientes": cuotas,
+            "neto": neto,
+            "numero": numero,
+            "faltante": faltante,
+            "progreso_pct": neto / numero * 100 if numero else 0.0,
+            "anios": anios,
+            "rendimiento": self._FREEDOM_RENDIMIENTO_REAL,
+            "techo": True,
+        }
 
     def get_transactions(
         self, date_from: str, date_to: str, account_ids: list[int] | None = None, limit: int = 200

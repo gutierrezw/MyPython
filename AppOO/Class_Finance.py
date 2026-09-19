@@ -21,7 +21,7 @@ from Modulos_python import (
     FigureCanvasTkAgg,
     ticker,
 )
-from Modulos_Mysql import BDsystem, FinanceScreen
+from Modulos_Mysql import BDsystem, FinanceScreen, PlanInversion
 from Class_ApiBinnace import BinanceClient
 
 _logger = logging.getLogger("Finance")
@@ -460,11 +460,23 @@ class _FlowTable(tk.Frame):
         ("sin_clase", "Gasto sin clase — falta clasificar"),
         ("numero", "Número de libertad financiera"),
     )
+    # De arriba hacia abajo se lee como una resta: lo que hay, lo que se le descuenta, y contra qué se compara.
+    _PROGRESO = (
+        ("patrimonio", "Patrimonio a mercado", 1),
+        ("deuda_inversion", "(−) Deuda de margen", -1),
+        ("cuotas_pendientes", "(−) Cuotas de tarjeta pendientes", -1),
+        ("neto", "Patrimonio neto hoy", 1),
+        ("numero", "Número a cubrir (ventana 1Y)", 1),
+        ("faltante", "Falta", 1),
+    )
+    _BARRA = 26
 
     def __init__(self, parent, bgcolor):
         super().__init__(parent, bg=bgcolor)
         self.numero = 0.0
         self.tasa = 0.0
+        self.progreso = 0.0
+        self.anios = 0.0
         self._build()
 
     def _build(self):
@@ -486,13 +498,19 @@ class _FlowTable(tk.Frame):
         self.tree.tag_configure("resumen", foreground=_WHITE)
         self.tree.tag_configure("numero", foreground=_GOLD)
         self.tree.tag_configure("sucio", foreground=_NEGATIVE)
+        self.tree.tag_configure("resta", foreground=_NEUTRAL)
+        self.tree.tag_configure("barra", foreground=_POSITIVE)
+        self.tree.tag_configure("techo", foreground=_NEGATIVE)
+        self.tree.tag_configure("separador", foreground="#2A2A3E")
         self.tree.pack(fill=tk.BOTH, expand=True)
 
-    def load(self, data: dict):
-        """Carga el flujo; data viene de FinanceScreen.get_category_flow()."""
+    def load(self, data: dict, progreso: dict | None = None):
+        """Carga el flujo; data viene de FinanceScreen.get_category_flow() y progreso de get_freedom_progress()."""
         self.tree.delete(*self.tree.get_children())
         self.numero = 0.0
         self.tasa = 0.0
+        self.progreso = 0.0
+        self.anios = 0.0
         if not data:
             return
 
@@ -520,7 +538,7 @@ class _FlowTable(tk.Frame):
                     tags=(tipo,),
                 )
 
-        self.tree.insert("", tk.END, values=("",) * len(self.COLS))
+        self._separador()
         for clave, etiqueta in self._RESUMEN:
             vals = totales.get(clave, [])
             if clave == "tasa_ahorro":
@@ -534,8 +552,58 @@ class _FlowTable(tk.Frame):
                 "", tk.END, values=("RESUMEN" if clave == "ingreso" else "", "", etiqueta, *celdas), tags=(tag,)
             )
 
-        self.numero = totales.get("numero", [0])[0] if totales.get("numero") else 0.0
-        self.tasa = totales.get("tasa_ahorro", [0])[0] if totales.get("tasa_ahorro") else 0.0
+        # Última ventana -1Y-, la misma que alimenta el progreso. Con la del mes el número salta 150.000 USD por
+        # un gasto raro, y el status terminaba mostrando el número de una ventana y los años de otra.
+        self.numero = totales.get("numero", [0])[-1] if totales.get("numero") else 0.0
+        self.tasa = totales.get("tasa_ahorro", [0])[-1] if totales.get("tasa_ahorro") else 0.0
+        if progreso:
+            self._load_progreso(progreso, n)
+
+    def _load_progreso(self, prog: dict, n: int):
+        """
+        Cuánto del número está cubierto y cuántos años faltan. Los importes van en la última columna: no son un
+        promedio mensual como el resto de la tabla, son un saldo de hoy, y ponerlos bajo "1M" los haría leer mal.
+        """
+        self._separador()
+        self.progreso = prog.get("progreso_pct", 0.0)
+        self.anios = prog.get("anios", 0.0)
+        vacias = ("",) * (n - 1)
+
+        for i, (clave, etiqueta, signo) in enumerate(self._PROGRESO):
+            valor = prog.get(clave, 0.0) * signo
+            tag = "resta" if signo < 0 else "numero" if clave in ("numero", "faltante") else "resumen"
+            self.tree.insert(
+                "",
+                tk.END,
+                values=("PROGRESO" if i == 0 else "", "", etiqueta, *vacias, f"{valor:,.0f}"),
+                tags=(tag,),
+            )
+
+        llenos = max(0, min(self._BARRA, int(round(self.progreso / 100 * self._BARRA))))
+        self.tree.insert(
+            "",
+            tk.END,
+            values=("", "", "█" * llenos + "░" * (self._BARRA - llenos), *vacias, f"{self.progreso:.1f}%"),
+            tags=("barra",),
+        )
+        # El rendimiento es un supuesto, no una medición de la cartera: va escrito al lado del número de años.
+        self.tree.insert(
+            "",
+            tk.END,
+            values=("", "", f"Años al ritmo de ahorro ({prog.get('rendimiento', 0) * 100:.0f}% real)",
+                    *vacias, f"{self.anios:.1f}"),
+            tags=("resumen",),
+        )
+        if prog.get("techo"):
+            self.tree.insert(
+                "",
+                tk.END,
+                values=("", "", "TECHO — falta restar el saldo del préstamo (paso 1.6)", *vacias, ""),
+                tags=("techo",),
+            )
+
+    def _separador(self):
+        self.tree.insert("", tk.END, values=("", "", "─" * 38, *("",) * (len(self.COLS) - 3)), tags=("separador",))
 
     @staticmethod
     def _fmt(vals: list, n: int) -> list:
@@ -1377,6 +1445,8 @@ class FinancePanel(tk.Frame):
         super().__init__(master, bg=bg)
         self.bgcolor = bg
         self._db = FinanceScreen()
+        # El patrimonio vive en `inversion`, que es de otro dominio: el panel coordina las dos clases.
+        self._inv = PlanInversion()
         self._sel_month, self._sel_year = self._db.get_last_loaded_period()
 
         self._accounts: list[tuple] = []
@@ -1624,7 +1694,7 @@ class FinancePanel(tk.Frame):
         )
 
         self._lbl_status = tk.Label(hdr, text="", font=_FONT_SUB, bg=_BLACK, fg=_WHITE, padx=6, pady=2)
-        self._lbl_status.pack(side=tk.RIGHT)
+        self._lbl_status.pack(side=tk.RIGHT, padx=(12, 0))
 
         self._txn_table = _TxnTable(
             right,
@@ -1829,15 +1899,33 @@ class FinancePanel(tk.Frame):
             if not self._flow_table.numero:
                 self._lbl_status.config(text="sin costo de vida clasificado", fg=_NEGATIVE)
                 return
-            self._lbl_status.config(
-                text=f"Libertad financiera: {_fmt_usdt(self._flow_table.numero)} — ahorro "
-                f"{self._flow_table.tasa:.1f}% (último mes cerrado)",
-                fg=_GOLD,
-            )
+            # La barra, los años y la resta del patrimonio ya están en la tabla: acá va lo mínimo. El texto largo
+            # no entraba en la fila de las pestañas y se solapaba con ellas cuando el panel es angosto.
+            avance = ""
+            if self._flow_table.progreso:
+                avance = f" — {self._flow_table.progreso:.1f}% cubierto, {self._flow_table.anios:.1f} años (techo)"
+            self._lbl_status.config(text=f"Libertad: {_fmt_usdt(self._flow_table.numero)}{avance}", fg=_GOLD)
             return
         count = self._txn_table.visible_count
         df, dt = self._period()
         self._lbl_status.config(text=f"{count} registros — {df} → {dt}", fg=_WHITE)
+
+    def _freedom_progress(self, flow: dict, account_ids) -> dict | None:
+        """
+        Cruza el objetivo con el patrimonio. Ninguna de las dos clases puede resolverlo sola: el número sale de
+        `fin_transactions` (FinanceScreen) y el patrimonio de `inversion` (PlanInversion), que no comparten rama de
+        herencia. Toma la ventana más larga —1Y— porque un número armado sobre un solo mes hace saltar el avance y
+        los años con cada gasto raro.
+        """
+        totales = flow.get("totales", {}) if flow else {}
+        numero = (totales.get("numero") or [0])[-1]
+        ahorro = (totales.get("ahorro") or [0])[-1]
+        if not numero:
+            return None
+        tot = self._inv.get_totales_inversiones()
+        return self._db.get_freedom_progress(
+            numero, ahorro, tot.get("total_mercado") or 0.0, tot.get("total_deuda") or 0.0, account_ids
+        )
 
     # ── lógica edición de categoría ───────────────────────────────────────────
 
@@ -1971,7 +2059,8 @@ class FinancePanel(tk.Frame):
             self._commit_table.load(self._db.get_installments_pending(6, account_ids))
 
             # el flujo trae sus propias ventanas de meses cerrados: el período elegido no lo mueve, los chips sí
-            self._flow_table.load(self._db.get_category_flow(account_ids))
+            flow = self._db.get_category_flow(account_ids, self._inv.get_interes_margen())
+            self._flow_table.load(flow, self._freedom_progress(flow, account_ids))
 
             txns = self._db.get_transactions(date_from, date_to, account_ids)
             self._txn_table.load(txns)
