@@ -667,6 +667,9 @@ class AgentManager:
             # que arrastra la cadena hasta hoy. Caso ENB — una venta de 2020 sin registrar, invisible desde 2025.
             period_start = str(db.count_ib_trades(ib_account).get("date_min") or "")[:10]
             if not period_start:
+                # Sin fecha no hay reconcile: o la tabla esta vacia o el SELECT fallo. Salir mudo deja al
+                # agente pareciendo que corrio y no comparo nada.
+                self._log_infra.error(f"_ib_reconcile_check(): sin date_min en ib_flex_trades para {ib_account}")
                 return
             rec  = Class_IbReconcile(db)
             df   = rec.reconcile_from_db(bt_account, period_start)

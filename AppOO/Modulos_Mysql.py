@@ -7267,7 +7267,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             conn.commit()
             return cursor.rowcount
         except (Exception, connect.Error) as e:
-            print(f"[Mysql:: recalculate_stock_chain()]: {e}")
+            self.logger.error(f"recalculate_stock_chain(): {e}")
             return 0
         finally:
             if cursor:
@@ -7292,7 +7292,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             )
             return cursor.fetchone() is not None
         except (Exception, connect.Error) as e:
-            print(f"[Mysql:: exists_bt_trade()]: {e}")
+            self.logger.error(f"exists_bt_trade(): {e}")
             return False
         finally:
             if cursor:
@@ -7314,7 +7314,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             )
             return cursor.fetchone() is not None
         except (Exception, connect.Error) as e:
-            print(f"[Mysql:: exists_bt_trade_by_idtrans()]: {e}")
+            self.logger.error(f"exists_bt_trade_by_idtrans(): {e}")
             return False
         finally:
             if cursor:
@@ -7364,7 +7364,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             conn.commit()
             return True
         except (Exception, connect.Error) as e:
-            print(f"[Mysql:: raw_insert_bt_trade()]: {e}")
+            self.logger.error(f"raw_insert_bt_trade(): {e}")
             return False
         finally:
             if cursor:
@@ -7390,7 +7390,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             )
             return {row[0] for row in cursor.fetchall()}
         except (Exception, connect.Error) as e:
-            print(f"[Mysql:: get_bt_delisted_symbols()]: {e}")
+            self.logger.error(f"get_bt_delisted_symbols(): {e}")
             return set()
         finally:
             if cursor:
@@ -7414,7 +7414,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             row = cursor.fetchone()
             return float(row[0]) if row else None
         except (Exception, connect.Error) as e:
-            print(f"[Mysql:: get_bt_stock_before()]: {e}")
+            self.logger.error(f"get_bt_stock_before(): {e}")
             return None
         finally:
             if cursor:
@@ -7438,7 +7438,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             row = cursor.fetchone()
             return (int(row[0]), float(row[1])) if row else (None, None)
         except (Exception, connect.Error) as e:
-            print(f"[Mysql:: get_bt_latest_stock()]: {e}")
+            self.logger.error(f"get_bt_latest_stock(): {e}")
             return (None, None)
         finally:
             if cursor:
@@ -7468,7 +7468,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             cols = [c[0] for c in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
         except (Exception, connect.Error) as e:
-            print(f"[Mysql:: get_ib_trades()]: {e}")
+            self.logger.error(f"get_ib_trades(): {e}")
             return []
         finally:
             if cursor:
@@ -7497,7 +7497,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             cols = [c[0] for c in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
         except (Exception, connect.Error) as e:
-            print(f"[Mysql:: get_ib_trades_net()]: {e}")
+            self.logger.error(f"get_ib_trades_net(): {e}")
             return []
         finally:
             if cursor:
@@ -7519,7 +7519,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             row = cursor.fetchone()
             return {"total": row[0], "date_min": str(row[1] or ""), "date_max": str(row[2] or "")}
         except (Exception, connect.Error) as e:
-            print(f"[Mysql:: count_ib_trades()]: {e}")
+            self.logger.error(f"count_ib_trades(): {e}")
             return {"total": 0, "date_min": "", "date_max": ""}
         finally:
             if cursor:
@@ -7535,7 +7535,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             cursor.execute("SELECT COALESCE(MAX(id), 0) FROM booktrading WHERE cuenta = %s", (account,))
             return cursor.fetchone()[0]
         except Exception as e:
-            print(f"[Mysql:: get_max_booktrading_id()]: {e}")
+            self.logger.error(f"get_max_booktrading_id(): {e}")
             return 0
         finally:
             if cursor:
