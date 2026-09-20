@@ -5030,6 +5030,18 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         except (Exception, EncodingWarning, connect.Error) as error:
             print(f"[Mysql:: RepositorioOportunidadesBuySell_conectar(): {error}]")
 
+    def _next_sec(self, cursor, account, idivisa, symbol) -> int:
+        """
+        Siguiente sec de la serie (cuenta, divisa, simbolo).
+        MAX(sec)+1 sin filtrar activa: sec numera la serie completa, no la ronda abierta.
+        """
+        cursor.execute(
+            "SELECT COALESCE(MAX(sec),0)+1 FROM booktrading WHERE cuenta=%s AND divisa=%s AND simbolo=%s",
+            (account, idivisa, symbol),
+        )
+        row = cursor.fetchone()
+        return int(row[0]) if row else 1
+
     # consulta oportunidades por tipo, subtipo y estado
     def obtener_por_tipo(self, tipo="sell", subtipo=None, estado=None):
         sql = "SELECT * FROM oportunidadesbuysell WHERE tipo = %s"
@@ -5797,14 +5809,6 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         @param object: tipo de consulta para select_booktrading ('bottrader')
         """
 
-        def _last_secbottrader():
-            """Obtiene cantidad registros para el vehiculo"""
-            qry = """SELECT count(*) as sec FROM booktrading
-                        WHERE cuenta = %s AND divisa = %s AND simbolo = %s;"""
-            cursor.execute(qry, (account, idivisa, symbol))
-            sql = cursor.fetchone()
-            return sql[0]
-
         def _last_bottrader():
             """Obtiene último registro activo de compra para calcular basico"""
             qry = """SELECT a.* FROM (
@@ -5905,13 +5909,13 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             hashId = self.get_hash_booktrading(values=values, symbol=symbol)
 
             # Último registro para calcular basico y stock acumulado
-            nw_producto, ustock, usec, costo_avg = 0.0, 0.0, 0.0, 0.0
+            nw_producto, ustock, costo_avg = 0.0, 0.0, 0.0
+            usec = self._next_sec(cursor, account, idivisa, symbol)
             utrading, _ = _last_bottrader()
             if utrading:
                 last = utrading[0]
                 costo_avg = last["basico"]
                 ustock = last["stock"]
-                usec = _last_secbottrader()
 
             stock = ustock + values["cantidad"]
             position = 0.0
@@ -5948,7 +5952,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                     "gprealizadas": gpreal,
                     "updateStamp": datetime.now(),
                     "hash_id": hashId,
-                    "sec": int(usec) + 1,
+                    "sec": usec,
                 }
             )
 
@@ -6127,16 +6131,16 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
             # ubica último trader del symbol para obtener basico
             nw_producto, ubasico, ustock = 0.0, 0.0, 0.0
-            usec, uid, position = 0.0, 0.0, 0.0
+            uid, position = 0.0, 0.0
             costo_avg = 0.0
 
+            usec = self._next_sec(cursor, account, idivisa, symbol)
             utrading, ix = self.select_booktrading(accion="last", account=account, idivisa=idivisa, symbol=symbol)
             if utrading:
                 nw_producto = utrading[0]["basico"] * utrading[0]["stock"]
                 costo_avg = utrading[0]["basico"]
                 ubasico = utrading[0]["basico"]
                 ustock = utrading[0]["stock"]
-                usec = utrading[0]["sec"]
 
             # ubica costobase para mejorar el precio medio
             inversion = self.select_inversion(tipoin=categoria, ticket=symbol)
@@ -6198,7 +6202,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
             values.update({"updateStamp": datetime.now()})
             values.update({"hash_id": hashId})
-            values.update({"sec": int(usec) + 1})
+            values.update({"sec": usec})
 
             # prepara Query Insert
             qry = "INSERT INTO booktrading ("
@@ -7336,14 +7340,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         try:
             cursor = conn.cursor()
             codigo = "O" if cantidad > 0 else "C"
-            sec_next = 0
-            cursor.execute(
-                "SELECT COALESCE(MAX(sec),0)+1 FROM booktrading WHERE cuenta=%s AND simbolo=%s AND divisa=%s",
-                (account, symbol, divisa),
-            )
-            row = cursor.fetchone()
-            if row:
-                sec_next = int(row[0])
+            sec_next = self._next_sec(cursor, account, divisa, symbol)
 
             import hashlib as _hl
             import datetime as _dt
