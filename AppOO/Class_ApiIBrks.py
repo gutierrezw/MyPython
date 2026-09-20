@@ -101,8 +101,8 @@ class IB(IBClient):
         try:
             auth_response = self.is_authenticated()
             if auth_response and auth_response.get("authenticated"):
-                self.authenticated = True
-                return True
+                self.authenticated = self._set_server()
+                return self.authenticated
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.logger.warning(textwrap.dedent(f"""
                 ============================================================
@@ -258,67 +258,6 @@ class IB(IBClient):
 
     def stop_tickle(self):
         self._tickle_stop.set()
-
-    def create_session(self, set_server=True) -> bool:
-        """Creates a new session.
-
-        Creates a new session with Interactive Broker using the credentials
-        passed through when the Robot was initalized.
-
-        Usage:
-        ----
-            >>> ib_client = IBClient(
-                username='IB_PAPER_username',
-                password='IB_PAPER_PASSWORD',
-                account='IB_PAPER_account',
-            )
-            >>> server_response = ib_client.create_session()
-            >>> server_response
-                True
-
-        Returns:
-        ----
-        bool -- True if the session was created, False if wasn't created.
-        """
-
-        # first let's check if the server is running, if it's not then we can start up.
-        if self.server_process is None and not self._is_server_running:
-
-            # If it's None we need to connect first.
-            if set_server:
-                self.connect(start_server=True, check_user_input=True)
-            else:
-                self.connect(start_server=True, check_user_input=False)
-                return True
-
-            # then make sure the server is updated.
-            if self._set_server():
-                return True
-
-        # Try and authenticate.
-        auth_response = self.is_authenticated()
-
-        # Log the initial Info.
-        self.logger.info(textwrap.dedent(f"""
-           =================
-           Create Session:
-           =================
-           Auth Response: {auth_response}
-           """))
-
-        # Finally make sure we are authenticated.
-        # print('create_session:', auth_response)
-        if auth_response:
-            if "authenticated" in auth_response.keys() and auth_response["authenticated"] and self._set_server():
-                self.authenticated = True
-                return True, auth_response
-        else:
-            # In this case don't connect, but prompt the user to log in again.
-            self.connect(start_server=False)
-
-            if self._set_server():
-                self.authenticated = True
-                return True, auth_response
 
     def is_authenticated(self, check: bool = False) -> Dict:
         """Checks if session is authenticated.
