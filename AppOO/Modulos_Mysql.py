@@ -4892,13 +4892,14 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         Compara lotes activos en booktrading vs position en inversion para la cuenta.
         Retorna lista de dicts con delta != 0: {simbolo, lotes_book, ib_position, delta}
         Excluye: divisa ARS (FCI), codigo != 'O', delisted, inversion no Stock.
+        El lote disponible es cantidad - sell: una venta parcial descuenta en sell y deja la fila activa.
         """
         conn = cursor = None
         try:
             conn = self._conectar(tabla="select.booktrading.lotes_reconcile")
             cursor = conn.cursor()
             cursor.execute(
-                """SELECT simbolo, SUM(cantidad) AS lotes_book
+                """SELECT simbolo, SUM(cantidad - COALESCE(sell, 0)) AS lotes_book
                      FROM booktrading
                     WHERE cuenta = %s
                       AND activa = 'Y'
@@ -6012,8 +6013,14 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
                 u_cursor.execute(upd % (activa, sell, update, idcuenta, divisa, ticket, id_trans))
                 u_conn.commit()
+                if u_cursor.rowcount == 0:
+                    # El lote queda abierto y la cadena baja igual: el descuadre solo aparece días después
+                    self.logger.error(
+                        f"update_indicador_activa(): {ticket} idtrans={id_trans} no actualizo ninguna fila — "
+                        f"lote sin cerrar (activa={activa} sell={sell})"
+                    )
             except (Exception, EncodingWarning, connect.Error) as e:
-                print("[Mysql:: update_indicador_activa()]: {}".format(e))
+                self.logger.error(f"update_indicador_activa({ticket}): {e}")
 
         # aplica a las sell para obtener maxima's ganancias y marcas los códigos = 'O' como inactivo
         def maximiza_ganancias_corto_plazo(c_sell, update):
@@ -6143,7 +6150,9 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
             # Rechazar venta que generaría posición en corto para stocks/ETFs
             if stock < -0.001 and values["cantidad"] < 0 and values.get("categoria") in ("Stock", "ETF"):
-                print(
+                # Si el broker ejecutó la venta, rechazarla deja booktrading sin el trade: el hueco no se ve
+                # hasta que el reconcile contra IB lo encuentra. Va a ERROR para que quede en el log rotativo.
+                self.logger.error(
                     f"[insert_booktrading] SHORT RECHAZADO — {symbol}: "
                     f"stock_actual={ustock:.4f}  venta={values['cantidad']:.4f}  "
                     f"resultado={stock:.4f}. No se permite vender más de lo que se tiene."
@@ -7357,6 +7366,32 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         except (Exception, connect.Error) as e:
             print(f"[Mysql:: raw_insert_bt_trade()]: {e}")
             return False
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def get_bt_delisted_symbols(self, account: str) -> set:
+        """
+        Símbolos cuyas filas en booktrading están TODAS marcadas delisted=1 para la cuenta.
+        El reconcile los excluye: sus consultas filtran delisted = 0 y ib_flex_trades no tiene ese
+        filtro, así que un símbolo dado de baja arroja un diff igual a todo lo operado, para siempre.
+        """
+        conn = self._conectar(tabla="select.booktrading.delisted")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT simbolo FROM booktrading
+                   WHERE cuenta = %s
+                   GROUP BY simbolo
+                   HAVING MIN(delisted) = 1""",
+                (account,),
+            )
+            return {row[0] for row in cursor.fetchall()}
+        except (Exception, connect.Error) as e:
+            print(f"[Mysql:: get_bt_delisted_symbols()]: {e}")
+            return set()
         finally:
             if cursor:
                 cursor.close()

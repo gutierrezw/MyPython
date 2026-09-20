@@ -376,6 +376,10 @@ class Debugging:
         self.logger.update({"Mysql": logging.getLogger("Mysql")})
         self.logger["Mysql"].setLevel(logging.WARNING)
 
+        # manager logging booktrading (RepositorioOportunidadesBuySell) — cierre de lotes y short rechazado
+        self.logger.update({"RepositorioOportunidades": logging.getLogger("RepositorioOportunidades")})
+        self.logger["RepositorioOportunidades"].setLevel(logging.WARNING)
+
         # manager logging
         self.logger.update({"ClassAgenteIA": logging.getLogger("ClassAgenteIA")})
         self.logger["ClassAgenteIA"].setLevel(logging.WARNING)

@@ -212,11 +212,14 @@ class Class_IbReconcile:
     #    por lo que el IB net siempre difiere del booktrading post-split.
     # 2. Ticker renames: viejo y nuevo son el mismo activo, diffs se cancelan entre sí.
     # 3. Sin registro en booktrading: delisted, quiebras o crypto fuera de scope.
+    #    Los delisted no se listan a mano — get_bt_delisted_symbols() los agrega en cada corrida.
     CORPORATE_ACTION_SYMBOLS = {
         # splits — booktrading correcto via Agente_SplitsControl, IB Flex incompleto
         "WKHS", "WKHS.NEW", "CTRM", "CHPT", "TLRY", "SNDL",
         # ticker renames (viejo → nuevo)
         "MPW", "MPT", "SKLZ", "FIRY", "NEP", "XIFR", "GOLD", "B",
+        # spin-offs — las acciones entran sin trade de compra, el IB net solo trae la venta
+        "WBD",
         # delisted / quiebra / sin booktrading
         "GOEV", "GOEVQ", "CFRX", "SSUP", "BGFV", "SUP", "GHSI", "TORO",
         # crypto fuera de scope
@@ -240,7 +243,7 @@ class Class_IbReconcile:
         diferencia a la última fila, que es la que corrige la aprobación por Telegram.
         """
         if exclude is None:
-            exclude = self.CORPORATE_ACTION_SYMBOLS
+            exclude = self.CORPORATE_ACTION_SYMBOLS | self.db.get_bt_delisted_symbols(account)
         ib_account = self.db.get_sesion_ib_account(account) if hasattr(self.db, "get_sesion_ib_account") else "U4214563"
         net_rows = self.db.get_ib_trades_net(ib_account, period_start, period_end)
         if not net_rows:

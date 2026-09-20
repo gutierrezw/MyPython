@@ -629,7 +629,7 @@ class AgentManager:
         except Exception as e:
             self._log_infra.error(f"Agente_NtpCheck(): {e}")
 
-    @wait_rate(604800, persist=True, desc="IB Flex — descarga semanal + import a ib_flex_trades (7d)", nivel=1)
+    @wait_rate(604800, persist=True, desc="IB Flex — descarga semanal + import a ib_flex_trades", nivel=1)
     def Agente_IbFlex(self):
         try:
             result = self._ib_flex_sync()
@@ -663,7 +663,11 @@ class AgentManager:
     def _ib_reconcile_check(self, db, ib_account: str, bt_account: str):
         """Corre reconcile tras import y pushea diffs a DataHub.reconcile_pending para aprobación Telegram."""
         try:
-            period_start = (datetime.now().replace(year=datetime.now().year - 1)).strftime("%Y-01-01")
+            # Todo lo que haya en ib_flex_trades, no el año pasado: la ventana corta esconde el error viejo
+            # que arrastra la cadena hasta hoy. Caso ENB — una venta de 2020 sin registrar, invisible desde 2025.
+            period_start = str(db.count_ib_trades(ib_account).get("date_min") or "")[:10]
+            if not period_start:
+                return
             rec  = Class_IbReconcile(db)
             df   = rec.reconcile_from_db(bt_account, period_start)
             diffs = df[df["diff"].abs() > 0.001]
