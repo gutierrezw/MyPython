@@ -4698,11 +4698,57 @@ def process_pdf(pdf_path: str) -> bool:
 
 
 def scan_extractos() -> str:
-    """Escanea EXTRACTOS_DIR, procesa PDFs y los elimina.
-    - Reconocidos (importados o duplicado interno): se eliminan.
+    """Escanea EXTRACTOS_DIR, procesa PDFs y los archiva.
+    - Reconocidos (importados o duplicado interno): se mueven a procesados/.
     - No reconocidos o sin filas extraídas: se mueven a desconocidos/ para revisión.
     La validación de duplicados es interna vía SHA-256 en BD.
+    El PDF no se borra: es la única fuente de los saldos y de cualquier dato que el parser todavía no captura.
     """
+
+    def archivar(pdf_path: str, destino: str, nombre: str | None = None) -> None:
+        os.makedirs(destino, exist_ok=True)
+        base_name = nombre or os.path.basename(pdf_path)
+        dest_file = os.path.join(destino, base_name)
+        if os.path.exists(dest_file):
+            base, ext = os.path.splitext(base_name)
+            dest_file = os.path.join(destino, f"{base}_{int(time.time())}{ext}")
+        shutil.move(pdf_path, dest_file)
+
+    def nombre_estandar(pdf_path: str) -> str:
+        """Nombre del PDF en procesados/: cuenta (o banco si el PDF es multi-cuenta) + período del import.
+
+        Sale de lo que quedó en BD para ese file_hash, no del nombre con que lo bajó el banco.
+        Si no se puede resolver, conserva el nombre original antes que inventar uno.
+        """
+        try:
+            conn = connect(**BDsystem.DB_CONFIG)
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT a.short_name, b.name, DATE_FORMAT(i.period_to, '%%Y-%%m') "
+                    "FROM fin_statement_imports i "
+                    "JOIN fin_accounts a ON a.id = i.account_id "
+                    "JOIN fin_banks b ON b.id = a.bank_id "
+                    "WHERE i.file_hash = %s",
+                    (sha256_file(pdf_path),),
+                )
+                filas = cursor.fetchall()
+            conn.close()
+        except Exception as e:
+            _logger.warning(f"  Nombre estándar: no se pudo leer el import ({e}) — conserva el original")
+            return os.path.basename(pdf_path)
+        if not filas:
+            return os.path.basename(pdf_path)
+        cuentas = {f[0] for f in filas if f[0]}
+        periodos = {f[2] for f in filas if f[2]}
+        etiqueta = cuentas.pop() if len(cuentas) == 1 else (filas[0][1] or "extracto")
+        if len(periodos) == 1:
+            periodo = periodos.pop()
+        elif periodos:
+            periodo = f"{min(periodos)}_a_{max(periodos)}"
+        else:
+            periodo = "sin-periodo"
+        return f"{etiqueta.replace(' ', '-')}_{periodo}.pdf"
+
     if not os.path.isdir(EXTRACTOS_DIR):
         return f"Carpeta no encontrada: {EXTRACTOS_DIR}"
     pdfs = sorted(
@@ -4717,17 +4763,12 @@ def scan_extractos() -> str:
     for pdf_path in pdfs:
         ok = process_pdf(pdf_path)
         if ok:
-            os.remove(pdf_path)
+            archivar(pdf_path, PROCESADOS_DIR, nombre_estandar(pdf_path))
             ok_count += 1
         else:
-            os.makedirs(DESCONOCIDOS_DIR, exist_ok=True)
-            dest_file = os.path.join(DESCONOCIDOS_DIR, os.path.basename(pdf_path))
-            if os.path.exists(dest_file):
-                base, ext = os.path.splitext(os.path.basename(pdf_path))
-                dest_file = os.path.join(DESCONOCIDOS_DIR, f"{base}_{int(time.time())}{ext}")
-            shutil.move(pdf_path, dest_file)
+            archivar(pdf_path, DESCONOCIDOS_DIR)
             fail_count += 1
-    return f"Procesados: {ok_count} eliminados, {fail_count} a desconocidos de {len(pdfs)} PDFs"
+    return f"Procesados: {ok_count} archivados, {fail_count} a desconocidos de {len(pdfs)} PDFs"
 
 
 def _binance_api_desde(conn, section: str, hoy: date) -> date:
