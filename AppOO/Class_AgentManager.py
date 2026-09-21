@@ -654,7 +654,8 @@ class AgentManager:
         flex  = Class_IbFlex(token=token, query_id=query_id)
         result = flex.import_to_db(db, account_id)
         stats  = db.count_ib_trades(account_id)
-        msg = (f"inserted={result['inserted']} skipped={result['skipped']} "
+        msg = (f"inserted={result['inserted']} updated={result['updated']} skipped={result['skipped']} "
+               f"errors={result['errors']} "
                f"total_db={stats['total']} rango={stats['date_min']}→{stats['date_max']}")
         if result["inserted"] > 0:
             self._ib_reconcile_check(db, account_id, bt_account)

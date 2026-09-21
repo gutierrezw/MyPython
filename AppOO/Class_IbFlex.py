@@ -35,6 +35,7 @@ _XML_ATTR = {
     "fxRateToBase":     "fx_rate",
     "buySell":          "buy_sell",
     "transactionID":    "idtrans",
+    "ibExecID":         "exec_id",
     "transactionType":  "transaction_type",
     "brokerageOrderID": "order_id",
     "orderReference":   "order_reference",
@@ -229,6 +230,7 @@ class Class_IbFlex:
                 continue
             result.append({
                 "idtrans":          r.get("TransactionID", "").strip(),
+                "exec_id":          r.get("IBExecID", "").strip(),
                 "symbol":           r.get("Symbol", "").strip(),
                 "currency":         r.get("CurrencyPrimary", "").strip(),
                 "conid":            r.get("Conid", "").strip(),
@@ -258,18 +260,22 @@ class Class_IbFlex:
     def import_to_db(self, db, account_id: str, raw: str = None) -> dict:
         """
         Descarga (o usa raw ya descargado) e importa todos los trades a ib_flex_trades.
-        Usa INSERT IGNORE en transaction_id → idempotente (reejecutar es seguro).
+        Upsert sobre transaction_id → idempotente (reejecutar es seguro); una fila que ya existe
+        refresca exec_id. Era INSERT IGNORE, que descarta la fila entera: las 1806 ya importadas
+        nunca habrian recibido el exec_id sin borrar y recargar la tabla.
 
         db         : RepositorioOportunidadesBuySell
         account_id : ej. 'U4214563'
         raw        : contenido ya descargado/leído (opcional — evita segunda descarga)
-        Retorna dict con {total, inserted, skipped}.
+        Retorna dict con {total, inserted, updated, skipped, errors}. errors va aparte de skipped:
+        una fila que falla no es una fila sin cambios, y contarlas juntas hace que un import
+        roto se lea igual que uno correcto donde no habia nada nuevo.
         """
         if raw is None:
             raw = self.download_raw()
         rows = self._rows_for_db(raw)
 
-        total = inserted = skipped = 0
+        total = inserted = updated = skipped = errors = 0
         conn = db._conectar(tabla="insert.ib_flex_trades")
         cursor = None
         try:
@@ -278,13 +284,14 @@ class Class_IbFlex:
                 total += 1
                 try:
                     cursor.execute(
-                        """INSERT IGNORE INTO ib_flex_trades
+                        """INSERT INTO ib_flex_trades
                            (transaction_id, account_id, symbol, currency, conid, description,
                             trade_datetime, trade_date, quantity, price, trade_money, proceeds,
                             taxes, commission, close_price, cost_basis, mtm_pnl, realized_pnl,
                             capital_gains_pnl, fx_pnl, fx_rate, buy_sell, transaction_type,
-                            order_id, order_reference)
-                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                            order_id, order_reference, exec_id)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                           ON DUPLICATE KEY UPDATE exec_id = VALUES(exec_id)""",
                         (
                             _int(r.get("idtrans")),
                             account_id,
@@ -311,21 +318,26 @@ class Class_IbFlex:
                             r.get("transaction_type", "").strip() or None,
                             r.get("order_id", "").strip() or None,
                             r.get("order_reference", "").strip() or None,
+                            r.get("exec_id", "").strip() or None,
                         ),
                     )
-                    if cursor.rowcount:
+                    # rowcount del upsert: 1 = fila nueva, 2 = existente actualizada, 0 = sin cambios
+                    if cursor.rowcount == 1:
                         inserted += 1
+                    elif cursor.rowcount == 2:
+                        updated += 1
                     else:
                         skipped += 1
                 except Exception as e:
-                    skipped += 1
+                    errors += 1
                     _logger.error(f"[IbFlex import] fila {total} ({r.get('symbol')}) error: {e}")
             conn.commit()
         finally:
             if cursor:
                 cursor.close()
             conn.close()
-        return {"total": total, "inserted": inserted, "skipped": skipped}
+        return {"total": total, "inserted": inserted, "updated": updated,
+                "skipped": skipped, "errors": errors}
 
 
 # ------------------------------------------------------------------

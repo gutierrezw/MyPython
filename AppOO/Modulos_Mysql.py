@@ -7333,18 +7333,26 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.close()
             conn.close()
 
-    def exists_bt_trade_by_idtrans(self, account: str, symbol: str, divisa: str, idtrans: str) -> bool:
-        """True si existe un registro en booktrading con ese idtrans (match exacto — Flex format)."""
+    def exists_bt_trade_by_idtrans(self, account: str, idtrans: str) -> bool:
+        """
+        True si existe un registro en booktrading con ese idtrans (el execID de TWS).
+
+        No filtra por símbolo ni por divisa a propósito: el execID ya identifica la ejecución, así que
+        agregarlos no gana precisión y solo produce falsos negativos donde las dos fuentes difieren.
+        Medido 2026-09-21 sobre los 7 CSV Flex: cuenta+idtrans cruza 971 filas, sumando simbolo baja a
+        883 y sumando divisa a 877. Las 94 que se pierden son los renames (SKLZ 35, MPW 24, GOEV 15,
+        NEP 9, SUP 4) y VRLA, que cotiza en EUR y booktrading guarda en USD — justo los casos que
+        ensucian el reconcile.
+        """
         conn = self._conectar(tabla="select.booktrading.exists_idtrans")
         cursor = None
         try:
             cursor = conn.cursor()
             cursor.execute(
                 """SELECT 1 FROM booktrading
-                   WHERE cuenta = %s AND simbolo = %s AND divisa = %s
-                     AND idtrans = %s
+                   WHERE cuenta = %s AND idtrans = %s
                    LIMIT 1""",
-                (account, symbol, divisa, idtrans),
+                (account, idtrans),
             )
             return cursor.fetchone() is not None
         except (Exception, connect.Error) as e:

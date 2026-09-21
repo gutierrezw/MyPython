@@ -76,7 +76,9 @@ class Class_IbReconcile:
         """
         Parsea IB Flex Query CSV (formato plano con header en primera línea).
         DateTime: YYYYMMDD;HHmmss. Quantity negativa para SELL.
-        Incluye TransactionID → idtrans (match exacto con booktrading).
+        Incluye IBExecID → idtrans: es el execID de TWS, el único valor que cruza contra
+        booktrading.idtrans. TransactionID es la otra numeración de IB para el mismo trade y no
+        cruza con nada — medido 2026-09-21: 4 filas de 1813 contra 971 por execID.
         """
         _RENAME = {
             "CurrencyPrimary": "currency",
@@ -86,7 +88,7 @@ class Class_IbReconcile:
             "TradePrice": "price",
             "IBCommission": "commission",
             "FifoPnlRealized": "realized_pl",
-            "TransactionID": "idtrans",
+            "IBExecID": "idtrans",
         }
         df = pd.read_csv(path, encoding="utf-8-sig", dtype=str)
         df.rename(columns=_RENAME, inplace=True)
@@ -94,6 +96,8 @@ class Class_IbReconcile:
         df["price"] = pd.to_numeric(df["price"], errors="coerce")
         df["commission"] = pd.to_numeric(df.get("commission", 0), errors="coerce").fillna(0).abs()
         df["datetime"] = pd.to_datetime(df["datetime"], format="%Y%m%d;%H%M%S", errors="coerce")
+        if "idtrans" not in df.columns:
+            df["idtrans"] = None
         df["idtrans"] = df["idtrans"].astype(str).str.strip()
         df = df[df["quantity"].notna() & (df["quantity"] != 0)].copy()
         return df
@@ -111,6 +115,12 @@ class Class_IbReconcile:
             return pd.DataFrame()
         df = pd.DataFrame(rows)
         df.rename(columns={"account_id": "_ib_account"}, inplace=True)
+        # _XML_ATTR mapea transactionID→idtrans porque escribe ib_flex_trades; acá "idtrans" es lo que
+        # guarda booktrading, que es el execID — mismo motivo que en _parse_flex_csv
+        if "exec_id" in df.columns:
+            df["idtrans"] = df["exec_id"]
+        if "idtrans" not in df.columns:
+            df["idtrans"] = None
         df["quantity"]   = pd.to_numeric(df["quantity"],   errors="coerce")
         df["price"]      = pd.to_numeric(df["price"],      errors="coerce")
         df["commission"] = pd.to_numeric(df["commission"], errors="coerce").fillna(0).abs()
@@ -333,17 +343,24 @@ class Class_IbReconcile:
     def find_missing_trades(self, account: str, symbol: str, divisa: str, df_csv: pd.DataFrame) -> pd.DataFrame:
         """
         Devuelve trades del CSV que NO están en booktrading.
-        Si el CSV incluye idtrans (Flex format): match exacto por idtrans.
-        Si no (Activity Statement): match fuzzy por fecha/qty/precio.
+
+        El identificador que cruza es el execID de TWS, que booktrading.idtrans guarda solo desde el
+        2024-04-02 12:27 — antes la app inventaba un número de 9 dígitos. Medido 2026-09-21 sobre los
+        7 CSV Flex: cruzan 971 de 1813 filas (100% de 2026, 0% hasta marzo 2024).
+
+        Por eso el match es en cascada y no excluyente: primero el exacto por idtrans y, si falla, el
+        difuso por fecha/qty/precio. Una fila se declara faltante solo cuando fallan los dos. El if/else
+        anterior elegía un solo camino y, para un CSV Flex, daba casi todo por faltante — fix_symbols()
+        habría insertado el libro entero por segunda vez.
         """
         sym_trades = df_csv[df_csv["symbol"] == symbol].copy()
         missing = []
-        has_idtrans = "idtrans" in sym_trades.columns and sym_trades["idtrans"].notna().any()
         for _, row in sym_trades.iterrows():
             idtrans = str(row.get("idtrans", "") or "").strip()
-            if has_idtrans and idtrans and idtrans != "nan":
-                found = self.db.exists_bt_trade_by_idtrans(account, symbol, divisa, idtrans)
-            else:
+            found = False
+            if idtrans and idtrans not in ("nan", "None"):
+                found = self.db.exists_bt_trade_by_idtrans(account, idtrans)
+            if not found:
                 found = self.db.exists_bt_trade(account, symbol, divisa,
                                                 row["datetime"], row["quantity"], row["price"])
             if not found:

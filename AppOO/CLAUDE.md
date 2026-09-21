@@ -222,6 +222,7 @@ agregarle el `COMMENT`, y recién entonces ejecutar.
 | fin_accounts | `tracked_since` | Desde cuándo la cuenta cuenta en el histórico de Finanzas: antes de esa fecha un mes vacío no es hueco de carga. **Default 2026-01-01 = piso del módulo**, no la apertura de la cuenta (creada 2026-09-16) |
 | inversion | `conid` | Listado de IB (bolsa) donde **la cuenta** operó el ticker; se conserva tras la baja. **No es "el" conid del ticker**: el mismo ticker cotiza en varias bolsas (ENB en NYSE y TSE) |
 | inversion | `deuda` | Deuda de **Binance para esa posición** (`debit USDT`). Stock y FCI escriben 0, así que `SUM(deuda)` **no es la deuda de la cartera** |
+| ib_flex_trades | `exec_id` | execID de TWS — el **único** identificador que cruza contra `booktrading.idtrans`, y solo desde **2024-04-02** (creada 2026-09-21) |
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
 `lastPrice DESC` con `LIMIT 150`, así que repetía siempre los mismos 150 símbolos más caros y dejaba
@@ -400,6 +401,23 @@ Importa porque `SUM(deuda)` parece la deuda total y no lo es: el bloque PROGRESO
 cuando la deuda real era 6.900 (IB 6.462 + Binance 410), inflando el capital propio en ~6.500. La deuda consolidada
 se lee de `DataHub.manager_GyP[vehiculo]["Debit"]`, la fuente de la barra `Deuda Total`, que `kpi_snapshot` persiste
 cada 30s en `stock_debit` y `crypto_debit` para que el valor sobreviva a que el broker esté fuera de línea.
+
+**`ib_flex_trades.exec_id` — `transaction_id` y `exec_id` son dos numeraciones de IB para el mismo trade, y
+solo una cruza.** `booktrading.idtrans` guarda el execID de TWS (`0000febb.5f50b86f.01.01`); el Flex además
+trae su `TransactionID` (11 dígitos), que no deriva del otro. Medido 2026-09-21 sobre los 7 CSV: por
+`transaction_id` cruzan **4 filas de 1813**, por `exec_id` **971**.
+
+El corte es **2024-04-02 12:27**: antes de esa fecha la app inventaba un número de 9 dígitos, así que las
+754 filas de 2020-2023 no tienen contra qué cruzar y dependen del match difuso. Abril 2024 es el único mes
+mezclado.
+
+**El cruce no filtra por símbolo ni divisa** (`exists_bt_trade_by_idtrans`): el execID ya identifica la
+ejecución y agregarlos solo resta — cuenta+idtrans cruza 971, sumando símbolo 883, sumando divisa 877. Las 94
+que se pierden son los renames (SKLZ, MPW, GOEV, NEP, SUP) y VRLA, que cotiza en EUR y el libro guarda en USD.
+
+La tabla entera se convirtió a `utf8mb4_0900_ai_ci` en el mismo trabajo: estaba en `utf8mb4_unicode_ci` y
+**todo** JOIN contra booktrading moría con error 1267, no solo el de `exec_id`. Detalle en
+`10-Memoria/ref-ib-reconcile.md`.
 
 **`fin_categories` — el grupo lo decide `category_type`, la clase `expense_class`.** `category_type`
 (`expense` / `income` / `transfer` / `investment`) es lo que leen los KPIs de Finanzas (`_SQL_GRUPO`); las
