@@ -1954,18 +1954,23 @@ class FinancePanel(tk.Frame):
         principal — `DataHub.manager_GyP[vehiculo]["Debit"]`, que escriben el header de cada pestaña (IB) y
         Agente_LtvControl (Binance). Corregido el 2026-09-20 a pedido del usuario.
 
-        Si el websocket de Stock está caído el header no publicó nada y el margen vendría en 0, lo que infla el
-        avance: se cae al `kpi_snapshot` que DashMain ya persiste, igual que las barras. Para Binance no hay
-        snapshot — si el panel se abre antes del primer ciclo de LtvControl la deuda queda corta y el avance
-        optimista, consistente con el `techo=True` que el progreso ya declara.
+        Si la fuente viva viene en 0 se cae al `kpi_snapshot` que DashMain persiste cada 30s, igual que las
+        barras: sin eso el margen desaparece y el avance sale infladísimo. Las dos mitades usan criterios
+        distintos porque lo que significa un 0 es distinto. En Stock hay que preguntarle a `ws_stock_connected`
+        —con el websocket vivo un 0 es real, sin margen abierto—; en Crypto no hace falta bandera porque
+        Agente_LtvControl corta con `return` cuando la API no devuelve préstamos, así que nunca escribe 0.
         """
         # import diferido — watch_extractos importa este módulo y no debe cargar la cadena de brokers
         from Class_customer import DataHub
 
         stock = float(DataHub.manager_GyP.get("Stock", {}).get("Debit", 0) or 0.0)
         crypto = float(DataHub.manager_GyP.get("Crypto", {}).get("Debit", 0) or 0.0)
-        if not stock and not DataHub.ws_stock_connected:
-            stock = float(read_json_tmp("kpi_snapshot").get("stock_debit", 0) or 0.0)
+        if not stock or not crypto:
+            snap = read_json_tmp("kpi_snapshot")
+            if not stock and not DataHub.ws_stock_connected:
+                stock = float(snap.get("stock_debit", 0) or 0.0)
+            if not crypto:
+                crypto = float(snap.get("crypto_debit", 0) or 0.0)
         return stock + crypto
 
     # ── lógica edición de categoría ───────────────────────────────────────────

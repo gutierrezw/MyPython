@@ -173,6 +173,21 @@ long_query_time                 = 1
 log_queries_not_using_indexes   = ON
 ```
 
+### Tipos de columna — la convención es `float`
+
+Medido sobre `AppTest/hijo_estructura.sql`: **111 columnas `float`** contra 10 `decimal`. Toda columna
+numérica nueva va en `float` salvo motivo escrito; el resto de la tabla manda sobre cualquier criterio
+teórico de precisión.
+
+**Un `MODIFY COLUMN` copia el tipo de `SHOW CREATE TABLE`, nunca lo infiere.** MySQL no permite cambiar
+solo el comentario de una columna: `MODIFY` obliga a repetir la definición entera, así que un tipo
+adivinado **convierte los datos en silencio**. Caso real del 2026-09-21: para ponerle el `COMMENT` a
+`inversion.deuda` se emitió `DECIMAL(18,8) NOT NULL` sobre una columna que era `float` nullable →
+7 warnings 1265 (redondeo en la 8ª decimal de las 114 filas) y la columna con un tipo distinto al del
+resto de la tabla. El valor no se dañó de forma material, pero el `ALTER` de reversión no estaba
+planificado. La secuencia correcta es: `SHOW CREATE TABLE` primero, copiar la definición literal,
+agregarle el `COMMENT`, y recién entonces ejecutar.
+
 ### Índices críticos (creados o verificados 2026-03-30)
 | Tabla | Índice | Columnas | Motivo |
 |-------|--------|----------|--------|
@@ -206,6 +221,7 @@ log_queries_not_using_indexes   = ON
 | fin_transactions | `billing_date` | Cierre del resumen que cobra la fila. Los KPIs agrupan por `COALESCE(billing_date, date)`, nunca por `date` sola. **NULL = la fecha del movimiento ya es la del cobro** (creada 2026-09-16) |
 | fin_accounts | `tracked_since` | Desde cuándo la cuenta cuenta en el histórico de Finanzas: antes de esa fecha un mes vacío no es hueco de carga. **Default 2026-01-01 = piso del módulo**, no la apertura de la cuenta (creada 2026-09-16) |
 | inversion | `conid` | Listado de IB (bolsa) donde **la cuenta** operó el ticker; se conserva tras la baja. **No es "el" conid del ticker**: el mismo ticker cotiza en varias bolsas (ENB en NYSE y TSE) |
+| inversion | `deuda` | Deuda de **Binance para esa posición** (`debit USDT`). Stock y FCI escriben 0, así que `SUM(deuda)` **no es la deuda de la cartera** |
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
 `lastPrice DESC` con `LIMIT 150`, así que repetía siempre los mismos 150 símbolos más caros y dejaba
@@ -374,6 +390,16 @@ cuenta va primero, marcado "— ya operado" (`_conid_guardado()` en `Class_custo
 liste con ese ticker (MPW hoy es MPT). Por eso `select_inversion()` filtra por `account` cuando la recibe:
 sin cuenta devolvía la fila de cualquier cuenta. La orden (`place_OrderStock`) usa el mismo `conid` guardado
 antes de ir a buscar a IB.
+
+**`inversion.deuda` es el `debit USDT` de esa posición en Binance — no la deuda de la cartera** (2026-09-21). La
+escribe `update_inversion()` desde `keys["deuda"]`, y el único camino que le pone algo distinto de 0 es el de Crypto
+(`on_message_binance_websocket()` y el ciclo de posiciones, ambos en `DashMain.py`). El de Stock
+(`api_vehiculo_iteractive()`) escribe `0` y FCI también, así que **el margen de IB no figura en ninguna fila**.
+
+Importa porque `SUM(deuda)` parece la deuda total y no lo es: el bloque PROGRESO de Finanzas restaba esos 411 USD
+cuando la deuda real era 6.900 (IB 6.462 + Binance 410), inflando el capital propio en ~6.500. La deuda consolidada
+se lee de `DataHub.manager_GyP[vehiculo]["Debit"]`, la fuente de la barra `Deuda Total`, que `kpi_snapshot` persiste
+cada 30s en `stock_debit` y `crypto_debit` para que el valor sobreviva a que el broker esté fuera de línea.
 
 **`fin_categories` — el grupo lo decide `category_type`, la clase `expense_class`.** `category_type`
 (`expense` / `income` / `transfer` / `investment`) es lo que leen los KPIs de Finanzas (`_SQL_GRUPO`); las

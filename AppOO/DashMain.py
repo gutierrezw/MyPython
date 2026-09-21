@@ -6181,6 +6181,13 @@ class DashMain:
                     _kpi_cache["stock_debit"] = stock_debit
                     _kpi_cache["stock_debitmax"] = stock_debitmax
                     _kpi_dirty = True
+                # Crypto no necesita bandera de conexión: Agente_LtvControl corta con return si la API no
+                # devuelve préstamos, así que un 0 acá siempre es "todavía no midió", nunca "no debo nada"
+                if crypto_debit == 0:
+                    crypto_debit = _kpi_cache.get("crypto_debit", 0)
+                elif crypto_debit > 0:
+                    _kpi_cache["crypto_debit"] = crypto_debit
+                    _kpi_dirty = True
                 total_debit = stock_debit + crypto_debit
 
                 # Leverage: deuda total como % del capital (máx = deuda_max_pct de Restricciones de cartera)
