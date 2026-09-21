@@ -8062,7 +8062,7 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
 
         @param interes_margen: serie {"YYYY-MM": usd} de PlanInversion.get_interes_margen(). Llega por parámetro
             porque vive en `extractos`, que es de la cartera: el panel coordina las dos clases igual que para el
-            patrimonio del progreso. Entra como una categoría más del costo de vida.
+            capital del progreso. Entra como una categoría más del costo de vida.
         Retorna {"ventanas": [{label, divisor}], "rows": [{tipo, clase, categoria, promedios}], "totales": {...}}.
         Las claves de "totales" traen una lista con un valor por ventana, en el orden de _FLOW_VENTANAS.
         """
@@ -8162,38 +8162,53 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
             conn.close()
 
     def get_freedom_progress(
-        self, numero: float, ahorro: float, patrimonio: float, deuda_inversion: float = 0.0,
-        account_ids: list[int] | None = None,
+        self, numero: float, ahorro: float, capital_invertido: float, valor_mercado: float,
+        deuda_inversion: float = 0.0, account_ids: list[int] | None = None,
     ) -> dict:
         """
         Cuánto del número de libertad financiera está cubierto hoy, y cuántos años faltan al ritmo de ahorro.
 
         El objetivo lo calcula get_category_flow() desde el gasto; acá se mide el **avance**, que no sale de
-        fin_transactions sino del patrimonio: `patrimonio` y `deuda_inversion` son total_mercado y total_deuda de
-        PlanInversion.get_totales_inversiones() — el panel los pasa porque la tabla `inversion` es de otro dominio
-        y este módulo no tiene por qué consultarla.
+        fin_transactions sino de la cartera: `capital_invertido` y `valor_mercado` son total_costo_base y
+        total_mercado de PlanInversion.get_totales_inversiones() - el panel los pasa porque la tabla `inversion`
+        es de otro dominio y este módulo no tiene por qué consultarla.
 
-        Lo que descuenta, y por qué: la deuda de margen (comprado con plata prestada no es patrimonio) y las cuotas
-        de tarjeta que todavía no vencieron, que son consumo ya hecho esperando su resumen. Reutiliza
-        get_installments_pending() con un horizonte largo para que "pendiente" sea todo lo pendiente.
+        **La base del avance es el capital invertido, no el valor de mercado.** Decisión del usuario del
+        2026-09-20, que revierte el criterio con el que se cerró el paso 4.4: está en etapa de acumulación y no
+        piensa retirar, así que gestiona contra lo que controla -lo aportado-, igual que su plan de inversión
+        (`trazaplan.tinversion`). El costo de esa elección está medido: el 4% del número se retira del valor de
+        mercado, y el 2026-09-20 la cartera valía 0,73 de lo aportado (79.713 -> 57.847; Stock 0,71, Crypto 0,62,
+        BBVA.ARS 0,98, con `unrealizedpnl` cuadrando la brecha al centavo). Con esta base el avance da ~3 puntos
+        más y los años ~2 menos que a mercado. Por eso se devuelve `k_mercado` y el panel lo escribe al lado: un
+        solo valor, con la brecha a la vista.
 
-        **El saldo del préstamo bancario no está en ninguna tabla `fin_*`** — solo se ven las cuotas ya cobradas —,
-        así que el progreso que devuelve es un TECHO: el avance real es menor. Se informa con `techo=True` en vez
-        de esconderlo, porque un porcentaje de avance optimista es peor que ninguno (paso 4.4 / 1.7).
+        Lo que descuenta, y por qué: la deuda de inversión —margen de IB más préstamo flexible de Binance—
+        porque comprado con plata prestada no es capital propio y su costo base entra en `costobase` igual que el
+        resto; y las cuotas de tarjeta que todavía no vencieron, que son consumo ya hecho esperando su resumen.
+        Reutiliza get_installments_pending() con un horizonte largo para que "pendiente" sea todo lo pendiente.
+        La deuda la pasa el panel desde `DataHub` —la misma fuente que la barra `Deuda Total`— y no desde
+        `inversion.deuda`, que daba 411 contra los 6.900 reales (corregido el 2026-09-20).
 
-        Los años salen de la anualidad con capital inicial, no de dividir el faltante por el ahorro: el capital ya
-        invertido también rinde. FV = P(1+r)^n + PMT((1+r)^n - 1)/r, resuelta en n. El rendimiento es un supuesto
-        (_FREEDOM_RENDIMIENTO_REAL), no una medición de la cartera.
+        **El saldo del préstamo bancario no está en ninguna tabla `fin_*`** -solo se ven las cuotas ya cobradas-,
+        así que lo que devuelve es un TECHO por dos motivos a la vez: ese saldo sin restar y la base en aportes.
+        Se informa con `techo=True` en vez de esconderlo, porque un porcentaje de avance optimista es peor que
+        ninguno (paso 4.4 / 1.7).
+
+        Los años salen de la anualidad con capital inicial, no de dividir el faltante por el ahorro: el capital
+        ya invertido también rinde. FV = P(1+r)^n + PMT((1+r)^n - 1)/r, resuelta en n. El rendimiento es un
+        supuesto (_FREEDOM_RENDIMIENTO_REAL), no una medición de la cartera.
         """
         cuotas = sum(f["usdt"] for f in self.get_installments_pending(self._FREEDOM_HORIZONTE_CUOTAS, account_ids))
-        neto = patrimonio - abs(deuda_inversion) - cuotas
+        neto = capital_invertido - abs(deuda_inversion) - cuotas
         faltante = max(numero - neto, 0.0)
         r = (1 + self._FREEDOM_RENDIMIENTO_REAL) ** (1 / 12) - 1
         anios = 0.0
         if faltante > 0 and ahorro > 0:
             anios = math.log((numero * r + ahorro) / (neto * r + ahorro)) / math.log(1 + r) / 12
         return {
-            "patrimonio": patrimonio,
+            "capital_invertido": capital_invertido,
+            "valor_mercado": valor_mercado,
+            "k_mercado": valor_mercado / capital_invertido if capital_invertido else 0.0,
             "deuda_inversion": abs(deuda_inversion),
             "cuotas_pendientes": cuotas,
             "neto": neto,

@@ -21,6 +21,7 @@ from Modulos_python import (
     FigureCanvasTkAgg,
     ticker,
 )
+from Modulos_Utilitarios import read_json_tmp
 from Modulos_Mysql import BDsystem, FinanceScreen, PlanInversion
 from Class_ApiBinnace import BinanceClient
 
@@ -461,11 +462,13 @@ class _FlowTable(tk.Frame):
         ("numero", "Número de libertad financiera"),
     )
     # De arriba hacia abajo se lee como una resta: lo que hay, lo que se le descuenta, y contra qué se compara.
+    # Arranca en lo aportado porque el usuario está en acumulación y gestiona contra lo que controla; la brecha
+    # contra el mercado va abajo en la fila de k — ver Mysql::FinanceScreen.get_freedom_progress().
     _PROGRESO = (
-        ("patrimonio", "Patrimonio a mercado", 1),
-        ("deuda_inversion", "(−) Deuda de margen", -1),
+        ("capital_invertido", "Capital invertido", 1),
+        ("deuda_inversion", "(−) Deuda de inversión (margen IB + préstamo)", -1),
         ("cuotas_pendientes", "(−) Cuotas de tarjeta pendientes", -1),
-        ("neto", "Patrimonio neto hoy", 1),
+        ("neto", "Capital propio hoy", 1),
         ("numero", "Número a cubrir (ventana 1Y)", 1),
         ("faltante", "Falta", 1),
     )
@@ -586,6 +589,17 @@ class _FlowTable(tk.Frame):
             values=("", "", "█" * llenos + "░" * (self._BARRA - llenos), *vacias, f"{self.progreso:.1f}%"),
             tags=("barra",),
         )
+        # El avance se mide en lo aportado, así que lo que el mercado reconoce de eso va escrito al lado: es de
+        # donde saldría el 4% el día que se retire. En rojo mientras k < 1 — no es un detalle, son los 21.866 USD
+        # que la barra de arriba no descuenta.
+        k = prog.get("k_mercado", 0.0)
+        self.tree.insert(
+            "",
+            tk.END,
+            values=("", "", f"Valor a mercado — k {k:.2f} (el mercado reconoce {k * 100:.0f}% de lo aportado)",
+                    *vacias, f"{prog.get('valor_mercado', 0.0):,.0f}"),
+            tags=("techo" if k < 1 else "resumen",),
+        )
         # El rendimiento es un supuesto, no una medición de la cartera: va escrito al lado del número de años.
         self.tree.insert(
             "",
@@ -598,7 +612,8 @@ class _FlowTable(tk.Frame):
             self.tree.insert(
                 "",
                 tk.END,
-                values=("", "", "TECHO — falta restar el saldo del préstamo (paso 1.6)", *vacias, ""),
+                values=("", "", "TECHO — base en lo aportado y falta el saldo del préstamo (paso 1.6)",
+                        *vacias, ""),
                 tags=("techo",),
             )
 
@@ -1899,11 +1914,12 @@ class FinancePanel(tk.Frame):
             if not self._flow_table.numero:
                 self._lbl_status.config(text="sin costo de vida clasificado", fg=_NEGATIVE)
                 return
-            # La barra, los años y la resta del patrimonio ya están en la tabla: acá va lo mínimo. El texto largo
+            # La barra, los años y la resta del capital ya están en la tabla: acá va lo mínimo. El texto largo
             # no entraba en la fila de las pestañas y se solapaba con ellas cuando el panel es angosto.
             avance = ""
             if self._flow_table.progreso:
-                avance = f" — {self._flow_table.progreso:.1f}% cubierto, {self._flow_table.anios:.1f} años (techo)"
+                avance = (f" — {self._flow_table.progreso:.1f}% cubierto sobre lo aportado, "
+                          f"{self._flow_table.anios:.1f} años (techo)")
             self._lbl_status.config(text=f"Libertad: {_fmt_usdt(self._flow_table.numero)}{avance}", fg=_GOLD)
             return
         count = self._txn_table.visible_count
@@ -1912,10 +1928,11 @@ class FinancePanel(tk.Frame):
 
     def _freedom_progress(self, flow: dict, account_ids) -> dict | None:
         """
-        Cruza el objetivo con el patrimonio. Ninguna de las dos clases puede resolverlo sola: el número sale de
-        `fin_transactions` (FinanceScreen) y el patrimonio de `inversion` (PlanInversion), que no comparten rama de
+        Cruza el objetivo con la cartera. Ninguna de las dos clases puede resolverlo sola: el número sale de
+        `fin_transactions` (FinanceScreen) y la cartera de `inversion` (PlanInversion), que no comparten rama de
         herencia. Toma la ventana más larga —1Y— porque un número armado sobre un solo mes hace saltar el avance y
-        los años con cada gasto raro.
+        los años con cada gasto raro. Pasa el costo base y el valor de mercado: el avance se mide sobre el primero
+        y el segundo es el que da el k que el panel muestra al lado.
         """
         totales = flow.get("totales", {}) if flow else {}
         numero = (totales.get("numero") or [0])[-1]
@@ -1924,8 +1941,32 @@ class FinancePanel(tk.Frame):
             return None
         tot = self._inv.get_totales_inversiones()
         return self._db.get_freedom_progress(
-            numero, ahorro, tot.get("total_mercado") or 0.0, tot.get("total_deuda") or 0.0, account_ids
+            numero, ahorro, tot.get("total_costo_base") or 0.0, tot.get("total_mercado") or 0.0,
+            self._deuda_inversion(), account_ids,
         )
+
+    def _deuda_inversion(self) -> float:
+        """
+        Deuda que se le resta al capital propio: el margen de IB más el préstamo flexible de Binance.
+
+        No sale de `inversion.deuda`, que daba 411 contra los 6.900 reales: esa columna es por posición y no
+        refleja el saldo del broker. La fuente viva es la misma que alimenta la barra `Deuda Total` del panel
+        principal — `DataHub.manager_GyP[vehiculo]["Debit"]`, que escriben el header de cada pestaña (IB) y
+        Agente_LtvControl (Binance). Corregido el 2026-09-20 a pedido del usuario.
+
+        Si el websocket de Stock está caído el header no publicó nada y el margen vendría en 0, lo que infla el
+        avance: se cae al `kpi_snapshot` que DashMain ya persiste, igual que las barras. Para Binance no hay
+        snapshot — si el panel se abre antes del primer ciclo de LtvControl la deuda queda corta y el avance
+        optimista, consistente con el `techo=True` que el progreso ya declara.
+        """
+        # import diferido — watch_extractos importa este módulo y no debe cargar la cadena de brokers
+        from Class_customer import DataHub
+
+        stock = float(DataHub.manager_GyP.get("Stock", {}).get("Debit", 0) or 0.0)
+        crypto = float(DataHub.manager_GyP.get("Crypto", {}).get("Debit", 0) or 0.0)
+        if not stock and not DataHub.ws_stock_connected:
+            stock = float(read_json_tmp("kpi_snapshot").get("stock_debit", 0) or 0.0)
+        return stock + crypto
 
     # ── lógica edición de categoría ───────────────────────────────────────────
 
