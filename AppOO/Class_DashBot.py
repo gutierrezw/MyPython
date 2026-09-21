@@ -529,10 +529,15 @@ class ClassAgenteIA:
         for i, d in enumerate(diffs):
             signo = "+" if d["diff"] > 0 else ""
             lines.append(f"  {i+1}. {d['symbol']}: {d['bt_current']:.0f} → {d['expected']:.0f} ({signo}{d['diff']:.0f})")
-        lines.append("\n¿Aplicar ajustes de stock?")
+        lines.append("\nRequiere revisión manual — se corrige insertando el hecho que falta, no el stock.")
         texto = "\n".join(lines)
+        # Sin botón de aplicar a propósito (2026-09-20). El que había hacía UPDATE booktrading SET stock =
+        # expected sobre una sola fila: no insertaba el trade faltante, dejaba mal las filas intermedias y,
+        # como nadie llama recalculate_stock_chain en este camino, el parche persistía y el diff desaparecía
+        # del reconcile siguiente — el error quedaba tapado, no corregido. Así quedó INTC con stock 0 en 2024
+        # cuando la suma real es +13. El diff tiene que seguir apareciendo hasta que se corrija de verdad,
+        # como se hizo con ENB: raw_insert_bt_trade() del hecho faltante + recalculate_stock_chain().
         markup = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Aprobar todo", callback_data="reconcile_aprobar"),
             InlineKeyboardButton("❌ Ignorar", callback_data="reconcile_rechazar"),
         ]])
         try:
@@ -1985,32 +1990,6 @@ class Telegram:
                 BrowserFCI().reset_blocked()
                 await self._safe_remove_buttons(query)
                 await self._safe_edit(query, "🔓 Bloqueo FCI liberado. El agente reintentará en el próximo ciclo.")
-
-            elif accion == "reconcile_aprobar":
-                diffs = read_json_tmp("ib_reconcile_pending")
-                if not diffs:
-                    await self._safe_edit(query, "⚠️ No hay diffs pendientes (ya procesados o expirados).")
-                    return
-                write_json_tmp("ib_reconcile_pending", [])
-                db = RepositorioOportunidadesBuySell()
-                aplicados = []
-                for d in diffs:
-                    bt_id = d.get("bt_id")
-                    if bt_id is None:
-                        continue
-                    try:
-                        conn = db._conectar(tabla="reconcile_fix")
-                        cur  = conn.cursor()
-                        cur.execute("UPDATE booktrading SET stock = %s WHERE id = %s", (d["expected"], bt_id))
-                        conn.commit()
-                        cur.close()
-                        conn.close()
-                        aplicados.append(f"{d['symbol']}: {d['bt_current']:.0f} → {d['expected']:.0f}")
-                    except Exception as ex:
-                        self.logger.error(f"reconcile_aprobar {d['symbol']}: {ex}")
-                await self._safe_remove_buttons(query)
-                resumen = "\n".join(aplicados) if aplicados else "Sin cambios aplicados (bt_id nulo)."
-                await self._safe_edit(query, f"✅ Reconcile aplicado:\n{resumen}")
 
             elif accion == "reconcile_rechazar":
                 write_json_tmp("ib_reconcile_pending", [])

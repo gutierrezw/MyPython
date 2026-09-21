@@ -6078,6 +6078,13 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
         # Objetivo es dejar solo como activa la venta más reciente
         def update_codigo_sell(id_trader=None, update=None):
+            # MUERTA A PROPOSITO — no corregir el typo de la tercera condicion (idtrans == "Y" donde el
+            # gemelo _update_codigo_sell de insert_bottraderBook dice activa). Nunca se cumple: idtrans es
+            # char(25) y arriba ya se compara != id_trader. Despertarla marcaria activa='N' + sell negativo
+            # en 245 ventas historicas sin beneficio. Cerrar la fila anterior solo tiene sentido en el camino
+            # especulativo, donde una venta cierra la especulacion previa; aca rompe select_booktrading(
+            # accion="last"), que filtra activa='Y' para dar el stock de la cadena. Medido 2026-09-20:
+            # 0 discrepancias sobre 93 simbolos con la fila mas reciente inactiva.
             try:
                 book, iy = self.select_booktrading(accion="select*", account=account, idivisa=idivisa, symbol=symbol)
                 ebook = enumerate(book)
@@ -6136,14 +6143,30 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
             usec = self._next_sec(cursor, account, idivisa, symbol)
             utrading, ix = self.select_booktrading(accion="last", account=account, idivisa=idivisa, symbol=symbol)
+            retroactivo = False
             if utrading:
                 nw_producto = utrading[0]["basico"] * utrading[0]["stock"]
                 costo_avg = utrading[0]["basico"]
                 ubasico = utrading[0]["basico"]
                 ustock = utrading[0]["stock"]
+                # insert retroactivo: la fila que se toma como "anterior" es en realidad posterior, asi que el
+                # stock nace de sumar cantidad sobre un acumulado del futuro y la serie entera queda torcida.
+                # Caso POLUSDT: la carga masiva de Binance del 22/08 inserto un movimiento del 18/02 cuya
+                # "ultima fila" era de agosto, y la cadena quedo en -9 contra una suma real de +0.5999.
+                # Se detecta aca -donde la ultima fila ya esta a mano- y se repara recalculando la serie
+                # despues del commit. Arreglarlo en los scripts de carga masiva no alcanza: hoy son tres
+                # (run_binance_trades, run_binance_import, run_c2c_backfill) y el cuarto que aparezca vuelve
+                # a ensuciar el dato. recalculate_stock_chain existia desde el arreglo de ENB pero no lo
+                # llamaba ningun camino vivo.
+                try:
+                    retroactivo = values["fechahora"] < utrading[0]["fechahora"]
+                except TypeError:
+                    pass
 
             # ubica costobase para mejorar el precio medio
-            inversion = self.select_inversion(tipoin=categoria, ticket=symbol)
+            # con account: sin cuenta el SELECT no filtra useraccount y devuelve la fila de cualquiera,
+            # asi que el costo medio saldria de la cartera de otra cuenta apenas dos operen el mismo ticket
+            inversion = self.select_inversion(account=account, tipoin=categoria, ticket=symbol)
             if inversion:
                 position = inversion[0]["position"] if inversion else 0
                 costo_avg = (
@@ -6215,6 +6238,13 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             cursor.execute(qry, tuple(valuesins))
             conn.commit()
             cursor.close()
+
+            if retroactivo:
+                filas = self.recalculate_stock_chain(account, symbol, idivisa)
+                self.logger.warning(
+                    f"insert_booktrading({symbol}): movimiento {values['fechahora']} anterior a la ultima fila "
+                    f"— cadena de stock recalculada, {filas} filas"
+                )
 
             time.sleep(0.4)
             # update basico "otros_activos" e indicador "activa", cuando sea una venta (cantidad <0)
