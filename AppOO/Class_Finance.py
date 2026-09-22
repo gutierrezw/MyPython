@@ -2171,6 +2171,9 @@ MESES_ES = {
 }
 
 RE_IMPORTE_AR = re.compile(r"^\$?-?\d{1,3}(?:\.\d{3})*,\d{2}$")
+RE_SALDO_PREV = re.compile(r"SALDO\s+ANTERIOR")
+# el de cierre se publica con dos redacciones: "SALDO ACTUAL" en las tarjetas, "SALDO AL 28 DE ABRIL" en cuenta
+RE_SALDO_CURR = re.compile(r"SALDO\s+(?:ACTUAL|AL\s+\d{1,2}\s+DE\s+[A-Z])")
 RE_MES_CUOTA = re.compile(r"^([^\W\d_]+)(?:/(\d{2}))?$")
 RE_ANIO = re.compile(r"^\d{4}$")
 # cuota de un plan de financiación dentro de la descripción: 'VISA PLAN V 2-06 (TNA 79,00)'. La cuota no lleva cero
@@ -2345,6 +2348,33 @@ def parse_installments_due(lines: list[list[dict]], max_gap: float = 25.0) -> li
     return []
 
 
+def parse_balances(lines: list[list[dict]], x_max: float = 10000.0) -> tuple[Decimal | None, Decimal | None]:
+    """Saldo anterior y de cierre que publica el extracto. None cuando no lo publica — no es un descuadre.
+
+    De cada línea se toma el primer importe a la izquierda de x_max: el resumen de tarjeta trae la misma línea
+    en dos monedas y así queda afuera la columna en dólares. El anterior es la primera coincidencia (encabeza el
+    extracto) y el de cierre la última (lo cierra). Los guiones bajos se quitan porque el Visa los intercala
+    entre los dígitos del importe: '_$_7_7_._8_5_0_,_8_5_' es una sola palabra para pdfplumber.
+    """
+    prev = curr = None
+    for line in lines:
+        texto = " ".join(w["text"].replace("_", "") for w in line).upper()
+        es_prev = bool(RE_SALDO_PREV.search(texto))
+        es_curr = bool(RE_SALDO_CURR.search(texto))
+        if not (es_prev or es_curr):
+            continue
+        tokens = [w["text"].replace("_", "") for w in line if w["x0"] < x_max]
+        valores = [v for v in (parse_amount_ar(t.lstrip("$")) for t in tokens if RE_IMPORTE_AR.match(t))
+                   if v is not None]
+        if not valores:
+            continue
+        if es_prev and prev is None:
+            prev = valores[0]
+        if es_curr:
+            curr = valores[0]
+    return prev, curr
+
+
 def _save_card_cycle(cursor, account_id: int, import_id: int, cycle: dict | None) -> int:
     """Graba cierre, vencimiento y cuotas a vencer. Un ciclo ya cargado no se pisa. Devuelve las filas insertadas."""
     if not cycle:
@@ -2365,6 +2395,19 @@ def _save_card_cycle(cursor, account_id: int, import_id: int, cycle: dict | None
         )
     _logger.info(f"  Ciclo con cierre {cycle['closing']}: {len(cycle['installments'])} meses de cuotas a vencer")
     return 1 + len(cycle["installments"])
+
+
+def _fill_missing_balances(cursor, import_id: int, prev: Decimal | None, curr: Decimal | None) -> None:
+    """Completa el saldo de un import que ya existe. El COALESCE deja intacto lo que ya tenga valor: un
+    extracto que se vuelve a soltar rellena lo que falta y nunca borra lo cargado. Es la unica via para los
+    imports anteriores a estas columnas — uq_import frena el reproceso, asi que el saldo no entra por el alta."""
+    if prev is None and curr is None:
+        return
+    cursor.execute(
+        "UPDATE fin_statement_imports SET balance_prev=COALESCE(balance_prev,%s),"
+        "balance_curr=COALESCE(balance_curr,%s) WHERE id=%s",
+        (prev, curr, import_id),
+    )
 
 
 def _set_billing_dates(cursor, import_id: int, closing: date | None = None) -> int:
@@ -2481,6 +2524,8 @@ class BbvaArTarjeta:
         self.account_ref = account_ref.strip()
         self.dry_run = dry_run
         self.file_hash = sha256_file(pdf_path)
+        self._balance_prev: Decimal | None = None
+        self._balance_curr: Decimal | None = None
 
     def _parse_cuota(self, desc: str) -> tuple[int | None, int | None, str]:
         m = self.RE_CUOTA.search(desc)
@@ -2521,11 +2566,13 @@ class BbvaArTarjeta:
 
     def _extract_rows(self) -> list[dict]:
         rows = []
+        all_lines = []
         in_detail = False
         with pdfplumber.open(self.pdf_path) as pdf:
             for page in pdf.pages:
                 words = [w for w in page.extract_words(x_tolerance=3, y_tolerance=3) if w["x0"] < 570]
                 lines = self._words_to_lines(words)
+                all_lines.extend(lines)
                 for line in lines:
                     text = " ".join(w["text"] for w in line)
                     if "FECHA" in text and "DESCRIPCIÓN" in text:
@@ -2552,6 +2599,9 @@ class BbvaArTarjeta:
                             "dolares": " ".join(cols["dolares"]).strip(),
                         }
                     )
+        # el resumen trae las dos monedas en la misma linea: X_DOLARES_MIN deja afuera la columna en dolares,
+        # que no tiene donde ir — la tarjeta es una sola cuenta en fin_accounts
+        self._balance_prev, self._balance_curr = parse_balances(all_lines, x_max=self.X_DOLARES_MIN)
         return rows
 
     def _extract_cycle(self) -> dict | None:
@@ -2670,6 +2720,7 @@ class BbvaArTarjeta:
             _logger.warning("  PDF ya importado — omitido")
             # el ciclo sí se graba: los resúmenes cargados antes de existir fin_card_cycles se recuperan re-soltándolos
             _save_card_cycle(cursor, account_id, imported[0], cycle)
+            _fill_missing_balances(cursor, imported[0], self._balance_prev, self._balance_curr)
             _set_billing_dates(cursor, imported[0], cycle.get("closing") if cycle else None)
             conn.commit()
             cursor.close()
@@ -2696,9 +2747,11 @@ class BbvaArTarjeta:
         _set_billing_dates(cursor, import_id, cycle.get("closing") if cycle else None)
         cursor.execute(
             "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s,"
+            "balance_prev=%s,balance_curr=%s,"
             "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
             "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
-            (stats["rows_found"], stats["inserted"], stats["skipped"], import_id, import_id, import_id),
+            (stats["rows_found"], stats["inserted"], stats["skipped"], self._balance_prev, self._balance_curr,
+             import_id, import_id, import_id),
         )
         conn.commit()
         cursor.close()
@@ -2750,6 +2803,8 @@ class BbvaArCuenta:
         self.file_hash = sha256_file(pdf_path)
         self._end_year: int = datetime.now().year
         self._end_month: int = datetime.now().month
+        self._balance_prev: Decimal | None = None
+        self._balance_curr: Decimal | None = None
 
     def _infer_period(self, words: list[dict]):
         """Extrae año y mes de cierre del código interno BBVA o primer año encontrado."""
@@ -2810,6 +2865,7 @@ class BbvaArCuenta:
 
     def _extract_rows(self) -> list[dict]:
         rows = []
+        all_lines = []
         in_detail = False
         with pdfplumber.open(self.pdf_path) as pdf:
             all_words = []
@@ -2820,6 +2876,7 @@ class BbvaArCuenta:
             for page in pdf.pages:
                 words = [w for w in page.extract_words(x_tolerance=3, y_tolerance=3) if w["x0"] < 570]
                 lines = self._words_to_lines(words)
+                all_lines.extend(lines)
                 for line in lines:
                     line_text = " ".join(w["text"] for w in line)
                     upper = line_text.upper()
@@ -2848,6 +2905,7 @@ class BbvaArCuenta:
                             "credito": " ".join(cols["credito"]).strip(),
                         }
                     )
+        self._balance_prev, self._balance_curr = parse_balances(all_lines)
         return rows
 
     def _resolve_amount(self, r: dict) -> tuple[Decimal | None, str]:
@@ -2948,8 +3006,11 @@ class BbvaArCuenta:
             "SELECT id FROM fin_statement_imports WHERE file_hash=%s AND section=%s",
             (self.file_hash, self.SECTION_NAME),
         )
-        if cursor.fetchone():
+        imported = cursor.fetchone()
+        if imported:
             _logger.warning("  PDF ya importado — omitido")
+            _fill_missing_balances(cursor, imported[0], self._balance_prev, self._balance_curr)
+            conn.commit()
             cursor.close()
             return stats
         cursor.execute(
@@ -2972,9 +3033,11 @@ class BbvaArCuenta:
                 stats["errors"] += 1
         cursor.execute(
             "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s,"
+            "balance_prev=%s,balance_curr=%s,"
             "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
             "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
-            (stats["rows_found"], stats["inserted"], stats["skipped"], import_id, import_id, import_id),
+            (stats["rows_found"], stats["inserted"], stats["skipped"], self._balance_prev, self._balance_curr,
+             import_id, import_id, import_id),
         )
         conn.commit()
         cursor.close()
@@ -3441,6 +3504,10 @@ class SantanderAr:
         for section_key, section_name in self.SECTION_NAME_MAP.items():
             if section_key not in account_ids:
                 continue
+            # una seccion que el PDF no trae no genera import: la fila quedaria processed con los contadores
+            # en 0 y el periodo en NULL, y la tabla de imports deja de decir que se cargo
+            if not all_rows.get(section_key):
+                continue
             cursor.execute(
                 "SELECT id FROM fin_statement_imports WHERE file_hash=%s AND section=%s",
                 (self.file_hash, section_name),
@@ -3541,8 +3608,12 @@ class SantanderArTarjetaResumen:
             "SELECT id FROM fin_statement_imports WHERE file_hash=%s AND section=%s",
             (self.file_hash, self.SECTION_NAME),
         )
-        if cursor.fetchone():
+        imported = cursor.fetchone()
+        if imported:
             _logger.warning("  PDF ya importado — omitido")
+            balance_prev, balance_curr = self._extract_balances()
+            _fill_missing_balances(cursor, imported[0], balance_prev, balance_curr)
+            conn.commit()
             cursor.close()
             return stats
         cursor.execute(
@@ -3554,13 +3625,16 @@ class SantanderArTarjetaResumen:
         import_id = cursor.lastrowid
         stats["inserted"] = _save_card_cycle(cursor, account_id, import_id, cycle)
         stats["skipped"] = stats["rows_found"] - stats["inserted"]
+        balance_prev, balance_curr = self._extract_balances()
         cursor.execute(
             "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s,"
-            "period_from=%s,period_to=%s WHERE id=%s",
+            "balance_prev=%s,balance_curr=%s,period_from=%s,period_to=%s WHERE id=%s",
             (
                 stats["rows_found"],
                 stats["inserted"],
                 stats["skipped"],
+                balance_prev,
+                balance_curr,
                 cycle["prev_closing"],
                 cycle["closing"],
                 import_id,
@@ -3579,6 +3653,17 @@ class SantanderArTarjetaResumen:
         conn.commit()
         cursor.close()
         return stats
+
+    def _extract_balances(self) -> tuple[Decimal | None, Decimal | None]:
+        """El saldo anterior está en la hoja 1 y el de cierre en la última, en la línea que lleva TNA y TEM.
+        De las dos columnas de importe se guarda la de pesos (x < 500): la tarjeta es una sola cuenta en
+        fin_accounts, así que el saldo en dólares no tiene dónde ir."""
+        with pdfplumber.open(self.pdf_path) as pdf:
+            paginas = {0: pdf.pages[0], len(pdf.pages) - 1: pdf.pages[-1]}
+            lines = []
+            for _, page in sorted(paginas.items()):
+                lines.extend(self._words_to_lines(page.extract_words(x_tolerance=3, y_tolerance=3)))
+        return parse_balances(lines, x_max=500.0)
 
     def _extract_cycle(self) -> dict | None:
         with pdfplumber.open(self.pdf_path) as pdf:
@@ -3859,6 +3944,10 @@ class CitibankUs:
         filename = os.path.basename(self.pdf_path)
         for section_key, section_name in self.SECTION_NAME_MAP.items():
             if section_key not in account_ids:
+                continue
+            # una seccion que el PDF no trae no genera import: la fila quedaria processed con los contadores
+            # en 0 y el periodo en NULL, y la tabla de imports deja de decir que se cargo
+            if not all_rows.get(section_key):
                 continue
             cursor.execute(
                 "SELECT id FROM fin_statement_imports WHERE file_hash=%s AND section=%s",
