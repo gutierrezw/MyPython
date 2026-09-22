@@ -30,6 +30,7 @@ from Modulos_python import (
     ast,
     json,
     date,
+    ZoneInfo,
     logging,
     Future,
     textwrap,
@@ -598,11 +599,18 @@ class DataHub:
         }
 
     # calendario de mercado por vehículo
-    def mercado_abierto(vehiculo="Stock") -> bool:
-        """True si el vehículo opera hoy. Crypto/BotCrypto 24x7; el resto, solo días hábiles."""
+    def mercado_abierto(vehiculo="Stock", con_horario=False) -> bool:
+        """True si el vehículo opera hoy. Crypto/BotCrypto 24x7; el resto, solo días hábiles.
+
+        con_horario=True exige además que sea sesión regular (09:30-16:00 hora de NY). Se compara
+        en America/New_York, no en hora local, para que el horario de verano no corra la franja.
+        """
         if vehiculo in DataHub.MERCADO_24X7:
             return True
-        return datetime.now().weekday() < 5
+        if not con_horario:
+            return datetime.now().weekday() < 5
+        ahora_ny = datetime.now(ZoneInfo("America/New_York"))
+        return ahora_ny.weekday() < 5 and (9, 30) <= (ahora_ny.hour, ahora_ny.minute) < (16, 0)
 
     # write CSV: Oportunity sell
     def csv_OptionSales_write() -> None:

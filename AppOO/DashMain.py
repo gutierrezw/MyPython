@@ -2002,15 +2002,18 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 _log = logging.getLogger("IBroks_Client")
 
                 def _watchdog():
-                    # Cierra el WS si no llegan mensajes smd+ (precios) en 5 min — heartbeats no cuentan
+                    # Cierra el WS si no llegan mensajes smd+ (precios) en 5 min — heartbeats no cuentan.
+                    # Solo vigila con el mercado abierto: fuera de sesión no hay ticks y cerrar un socket
+                    # sano solo genera reconexiones inútiles (57 en la madrugada del 2026-09-22)
                     TIMEOUT = 300
                     while True:
                         time.sleep(60)
-                        if self.WsStock is None:
+                        if self.WsStock is None or not DataHub.mercado_abierto(con_horario=True):
                             continue
                         prev = self.WsStock.price_counter
                         time.sleep(TIMEOUT - 60)
-                        if self.WsStock is not None and self.WsStock.price_counter == prev:
+                        if (self.WsStock is not None and self.WsStock.price_counter == prev
+                                and DataHub.mercado_abierto(con_horario=True)):
                             _log.warning(
                                 f"websocket_stream(Stock): watchdog — sin precios smd+ {TIMEOUT}s "
                                 f"(price_counter={prev}), reconectando"
