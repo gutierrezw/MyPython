@@ -7258,6 +7258,7 @@ class MyWebsocket:
         self.procesos = DataHub.procesos
         self.limit = 10
         self.ws = None
+        self._hb_stop = threading.Event()
 
         def on_message(ws, message):
             self.my_message(message)
@@ -7270,6 +7271,10 @@ class MyWebsocket:
         def on_open(ws):
             _ws_logger.warning("WebSocket connection opened({})".format(self.vehiculo))
 
+            # sin ech+hb IB corta el streaming — arranca antes de suscribir, que duerme 6s
+            self._hb_stop.clear()
+            threading.Thread(target=_heartbeat, name=f"Ws{self.vehiculo}_Heartbeat", daemon=True).start()
+
             # recibe órdenes activas de stock
             subscribe_to_idsymbol()
             subscribe_get_order()
@@ -7279,9 +7284,23 @@ class MyWebsocket:
             pass
 
         def on_close(ws, close_status_code, close_msg):
+            # el loop de reconexion crea una instancia nueva: sin esto los threads se acumulan
+            self._hb_stop.set()
             _ws_logger.warning(
                 "WebSocket connection closed({}): code={} msg={}".format(self.vehiculo, close_status_code, close_msg)
             )
+
+        def _heartbeat():
+            # IB corta el market data si el cliente no manda ech+hb — ../IBGateway/doc/RealtimeSubscription.md:
+            # "It is advised to send a heartbeat at least once per minute". Sin esto el flujo smd+ moria a los
+            # 2700s exactos de suscribirse (2700, 2700, 2700, 2700, 2696, 2698 en seis ciclos del 2026-09-22),
+            # con el socket sano: el que veniamos viendo cada 10s es el heartbeat que manda el gateway, no este
+            while not self._hb_stop.wait(60):
+                try:
+                    self.ws.send("ech+hb")
+                except Exception as e:
+                    _ws_logger.error(f"heartbeat({self.vehiculo}): {e} — se detiene")
+                    return
 
         def subscribe_get_order():
             try:
