@@ -233,7 +233,7 @@ class DataHub:
     SessionYfinance = None
     QremoteOrder = {"Stock": OrderManagerSync(), "Crypto": OrderManagerSync()}
 
-    # vehiculos con rama propia en gains_capture_build_trama_sell()
+    # vehiculos con rama propia en build_trama_sell()
     gains_capture_vehiculos_trama = ("Stock", "Crypto")
     manager_events = {}
     manager_after = {}
@@ -1264,66 +1264,81 @@ class DataHub:
         costo = float(venta.get("costo lote", 0) or 0) * (qty / cantidad_clase) if cantidad_clase else 0.0
         return qty, costo
 
-    @staticmethod
-    def preservation_build_trama(vehiculo, account, symbol, conid, stop_price, max_price, qty, stop_limit_pct=0.01):
-        """Construye la trama de orden STOP según el vehículo (IB o Binance).
+    # tipo, subtipo y recomendado entran al md5 de generar_hash_id: son la identidad de la orden
+    # frente a oportunidadesbuysell, no una etiqueta. El tif difiere a proposito — un stop sobrevive
+    # el dia, una toma de ganancia no
+    _TRAMA_SELL = {
+        "PRESERV": {"recomendado": "PRESERVATION_STOP", "tipo": "STP", "subtipo": "LMT", "tif": "GTC"},
+        "GAINS": {"recomendado": "GAINS_CAPTURE", "tipo": "LMT", "subtipo": "SELL", "tif": "DAY"},
+    }
 
-        `stop_limit_pct` es la holgura entre el disparador y el limite. Un STP LMT vende al limite o
-        mejor, nunca peor: con los dos precios iguales la orden que se coloca al dispararse no se
-        llena si la caida sigue —el escenario que el stop existe para atajar— y encima queda viva en
-        el libro contando como cantidad comprometida. Sale de `parameters.preservation`, asi que
-        cada vehiculo lo afina por su volatilidad.
+    @staticmethod
+    def build_trama_sell(vehiculo, account, symbol, conid, qty, price, intent, stop_price=None):
+        """Trama de venta SELL para el broker del vehiculo. Con stop_price es stop-limit; sin el, limit.
+
+        El precio llega crudo y se cuantiza aca, una sola vez: quantiza_precio() no es idempotente
+        —cuantizar dos veces baja un tick— asi que el llamador no debe adelantarse.
+
+        Un vehiculo sin rama devuelve None y el agente corta antes de proponer u ordenar: no queda
+        simulando en silencio, que es lo que le paso a Preservation con Crypto (H6, 2026-08-21).
         """
+        cfg = DataHub._TRAMA_SELL.get(intent)
+        if not cfg:
+            return None
 
         hash_id = DataHub.RepositorioOportunidades.generar_hash_id(
-            account=account, symbol=symbol, option=vehiculo, tipo="STP", subtipo="LMT", recomendado="PRESERVATION_STOP"
+            account=account,
+            symbol=symbol,
+            option=vehiculo,
+            tipo=cfg["tipo"],
+            subtipo=cfg["subtipo"],
+            recomendado=cfg["recomendado"],
         )
         if vehiculo == "Stock":
-            limit_price = float(round(stop_price * (1 - stop_limit_pct), 2))
+            orden = {
+                "conid": int(conid),
+                "orderType": "STP LMT" if stop_price is not None else "LMT",
+                "price": float(DataHub.quantiza_precio("Stock", symbol, price)),
+                "side": "SELL",
+                "tif": cfg["tif"],
+                "quantity": float(qty),
+            }
+            if stop_price is not None:
+                orden["auxPrice"] = float(DataHub.quantiza_precio("Stock", symbol, stop_price))
             return {
                 "account": account,
                 "vehiculo": "Stock",
                 "symbol": symbol,
-                "pedido": {
-                    "orders": [
-                        {
-                            "conid": int(conid),
-                            "orderType": "STP LMT",
-                            "auxPrice": float(round(stop_price, 2)),
-                            "price": limit_price,
-                            "side": "SELL",
-                            "tif": "GTC",
-                            "quantity": float(qty),
-                        }
-                    ]
-                },
+                "pedido": {"orders": [orden]},
                 "hash_id_Op": hash_id,
-                "intent": "PRESERV",
+                "intent": intent,
             }
 
         if vehiculo == "Crypto":
-            stop_tick = float(DataHub.quantiza_precio("Crypto", symbol, stop_price))
-            # el tickSize puede ser grueso frente al precio y dejar la holgura dentro del mismo tick:
-            # ahi el limite volveria a quedar pegado al disparador sin que nada lo avise
-            limit_tick = float(DataHub.quantiza_precio("Crypto", symbol, stop_price * (1 - stop_limit_pct)))
-            if limit_tick >= stop_tick:
-                tick = DataHub.info.get(symbol, {}).get("lotSize", {}).get("tickSize") or 0.01
-                limit_tick = float(DataHub.quantiza_precio("Crypto", symbol, stop_tick - tick))
+            pedido = {
+                "symbol": symbol,
+                "side": "SELL",
+                "type": "STOP_LOSS_LIMIT" if stop_price is not None else "LIMIT",
+                "price": float(DataHub.quantiza_precio("Crypto", symbol, price)),
+                "quantity": float(DataHub.quantiza_qty("Crypto", symbol, qty)),
+                "timeInForce": "GTC",
+            }
+            if stop_price is not None:
+                stop_tick = float(DataHub.quantiza_precio("Crypto", symbol, stop_price))
+                # el tickSize puede ser grueso frente al precio y dejar la holgura dentro del mismo
+                # tick: ahi el limite volveria a quedar pegado al disparador sin que nada lo avise
+                if pedido["price"] >= stop_tick:
+                    tick = DataHub.info.get(symbol, {}).get("lotSize", {}).get("tickSize") or 0.01
+                    pedido["price"] = float(DataHub.quantiza_precio("Crypto", symbol, stop_tick - tick))
+                pedido["stopPrice"] = stop_tick
             return {
                 "account": account,
                 "vehiculo": "Crypto",
                 "symbol": symbol,
-                "pedido": {
-                    "symbol": symbol,
-                    "side": "SELL",
-                    "type": "STOP_LOSS_LIMIT",
-                    "price": limit_tick,
-                    "stopPrice": stop_tick,
-                    "quantity": float(DataHub.quantiza_qty("Crypto", symbol, qty)),
-                    "timeInForce": "GTC",
-                },
+                "pedido": pedido,
                 "hash_id_Op": hash_id,
             }
+        return None
 
     preservation_live_enabled = True  # True = live activo para símbolos en _preservation_live_symbols
 
@@ -1369,54 +1384,6 @@ class DataHub:
                 return first.get("clientOrderId") or first.get("id_order") or first.get("order_id") or first.get("id")
         except Exception:
             pass
-        return None
-
-    @staticmethod
-    def gains_capture_build_trama_sell(vehiculo, account, symbol, conid, lmt_price, qty):
-        """Construye trama de orden LMT SELL para escalonamiento parcial de ganancias.
-
-        Los vehiculos con rama implementada estan en gains_capture_vehiculos_trama: el resto
-        devuelve None y el agente corta antes de proponer u ordenar.
-        """
-        hash_id = DataHub.RepositorioOportunidades.generar_hash_id(
-            account=account, symbol=symbol, option=vehiculo, tipo="LMT", subtipo="SELL", recomendado="GAINS_CAPTURE"
-        )
-        if vehiculo == "Stock":
-            return {
-                "account": account,
-                "vehiculo": "Stock",
-                "symbol": symbol,
-                "pedido": {
-                    "orders": [
-                        {
-                            "conid": int(conid),
-                            "orderType": "LMT",
-                            "price": float(round(lmt_price, 2)),
-                            "side": "SELL",
-                            "tif": "DAY",
-                            "quantity": float(qty),
-                        }
-                    ]
-                },
-                "hash_id_Op": hash_id,
-                "intent": "GAINS",
-            }
-
-        if vehiculo == "Crypto":
-            return {
-                "account": account,
-                "vehiculo": "Crypto",
-                "symbol": symbol,
-                "pedido": {
-                    "symbol": symbol,
-                    "side": "SELL",
-                    "type": "LIMIT",
-                    "price": float(DataHub.quantiza_precio("Crypto", symbol, lmt_price)),
-                    "quantity": float(DataHub.quantiza_qty("Crypto", symbol, qty)),
-                    "timeInForce": "GTC",
-                },
-                "hash_id_Op": hash_id,
-            }
         return None
 
 
@@ -1485,6 +1452,10 @@ class MyOrders:
                         keys["quantity"] = float(keys["quantity"])
                     if _intent:
                         keys["orderRef"] = _intent
+                    # operar fuera de rueda es politica del sistema, no de quien armo la trama: la UI
+                    # ya lo mandaba en True y los dos agentes no lo mandaban. setdefault no pisa una
+                    # trama que lo fije a proposito
+                    keys.setdefault("outsideRTH", True)
                 orden = {"orders": [keys]}
 
                 self.logger.warning(

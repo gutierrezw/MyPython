@@ -551,7 +551,7 @@ class ClassAgenteIA:
         """Captura de ganancias por escalones en activos especulativos (categoriaActivo='N').
 
         Stock y Crypto emiten orden real: LMT SELL en IB, LIMIT SELL GTC en Binance. Un vehiculo
-        sin rama en gains_capture_build_trama_sell() queda logueado como candidato en observacion y
+        sin rama en build_trama_sell() queda logueado como candidato en observacion y
         no se propone - no queda simulando en silencio, que es lo que le paso a Preservation con
         Crypto (H6, 2026-08-21).
         """
@@ -1281,7 +1281,9 @@ class ClassAgenteIA:
                 "orden": {"qty": vender_qty, "lmt_price": lmt_price},
             }
 
-            trama = DataHub.gains_capture_build_trama_sell(vehiculo, account, symbol, conid, lmt_price, vender_qty)
+            trama = DataHub.build_trama_sell(
+                vehiculo, account, symbol, conid, vender_qty, price=lmt_price, intent="GAINS"
+            )
             if not trama:
                 _gc_logger.warning(
                     f"GainsCapture[{vehiculo}]({symbol}): sin trama para el vehiculo → sin orden "
@@ -2100,13 +2102,14 @@ class Telegram:
                 f"({_pos_ok:g}). No se manda la orden para no comprometer mas de lo que hay."
             )
 
-        trama = DataHub.gains_capture_build_trama_sell(
+        trama = DataHub.build_trama_sell(
             vehiculo,
             pendiente["account"],
             symbol,
             pendiente["conid"],
-            pendiente["lmt_price"],
             pendiente["qty"],
+            price=pendiente["lmt_price"],
+            intent="GAINS",
         )
         if not trama:
             return f"⚠️ {symbol}: sin trama para el vehiculo {vehiculo}."

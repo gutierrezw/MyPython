@@ -1269,8 +1269,11 @@ class AgentManager:
                     )
                     continue
 
-                trama = DataHub.preservation_build_trama(
-                    vehiculo, account, symbol, conid, stop_final, max_price, qty, stop_limit_pct
+                # el limite va crudo: build_trama_sell lo cuantiza y resuelve ahi el caso del tick
+                # grueso, que es donde se conoce la grilla del vehiculo
+                trama = DataHub.build_trama_sell(
+                    vehiculo, account, symbol, conid, qty,
+                    price=stop_final * (1 - stop_limit_pct), intent="PRESERV", stop_price=stop_final,
                 )
 
                 is_live = not self._preservation_dry_run
