@@ -581,7 +581,12 @@ class DatosVehivulo(TickerInfo, MyOrders):
             # el gateway contesta el ech+hb que manda _heartbeat() con un eco en texto plano, no JSON
             # (IBGateway/doc/RealtimeSubscription.md, seccion Echo: "Received: ech+hb"). No es un mensaje
             # de datos: no suma al contador del panel, y el watchdog mira price_counter, que solo ve smd+
-            if message == "ech+hb":
+            # IB manda los frames como binarios, asi que el eco llega en bytes y la comparacion contra
+            # el str nunca daba True — se normaliza antes y se descarta todo lo que no sea un objeto JSON
+            if isinstance(message, (bytes, bytearray)):
+                message = message.decode("utf-8", errors="replace")
+
+            if not message.startswith("{"):
                 return
 
             data = json.loads(message)
@@ -594,7 +599,12 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 if n_precio:
                     self.update_precio_DataHubInfo(symbol=symbol, conid=conid, precio=n_precio)
                     procesa_stock(d_precio=n_precio[symbol])
-                if self.WsStock is not None:
+
+                # los errores del gateway tambien llegan con topic "smd" y sin conidEx:
+                # {"error":"Missing iserver bridge","code":500,"topic":"smd"}, 41 de esos el 2026-09-23 04:50.
+                # Sin este guard contaban como precios y el watchdog veia flujo donde no habia — la red de
+                # seguridad se duerme justo en la falla que existe para cazar
+                if conid is not None and self.WsStock is not None:
                     self.WsStock.price_counter += 1
 
             elif data["topic"] == "sor":
