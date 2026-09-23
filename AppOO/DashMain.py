@@ -578,6 +578,12 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 return {}, None, None
 
         try:
+            # el gateway contesta el ech+hb que manda _heartbeat() con un eco en texto plano, no JSON
+            # (IBGateway/doc/RealtimeSubscription.md, seccion Echo: "Received: ech+hb"). No es un mensaje
+            # de datos: no suma al contador del panel, y el watchdog mira price_counter, que solo ve smd+
+            if message == "ech+hb":
+                return
+
             data = json.loads(message)
 
             # captura precios
