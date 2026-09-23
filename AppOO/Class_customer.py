@@ -254,7 +254,7 @@ class DataHub:
 
     @classmethod
     def add_alert(cls, msg: str, telegram: bool = True, tipo: str = None, markup=None, hash_id=None,
-                  dedup_key: str = None):
+                  dedup_key: str = None, registrar: bool = True):
         """Encola una alerta para Telegram. markup son botones inline, solo en memoria.
 
         Un markup no se persiste en incidencias: si la app cae antes del flush, la alerta se
@@ -265,14 +265,21 @@ class DataHub:
         Con `dedup_key`, mientras la incidencia siga pendiente la repeticion suma en `veces` y
         **no vuelve a salir por Telegram**: el estado ya esta reportado y reenviarlo no agrega
         nada. Un hecho unico (una orden, un repago) va sin clave.
+
+        Con `registrar=False` el mensaje sale por Telegram pero no deja fila en `incidencias`.
+        Es para reescribir en el chat un hecho **ya registrado** cuyo texto cambio —el refresco
+        de una propuesta de GainsCapture, que reemite el precio del momento— donde `dedup_key`
+        no sirve: agrupa bien en la tabla pero corta el envio, que es justamente lo que hay que
+        actualizar.
         """
         incidencia_id, veces = 0, 1
-        try:
-            incidencia_id, veces = BDsystem.insert_incidencia(msg, telegram, tipo, dedup_key)
-        except Exception:
-            pass
-        if veces > 1:
-            return
+        if registrar:
+            try:
+                incidencia_id, veces = BDsystem.insert_incidencia(msg, telegram, tipo, dedup_key)
+            except Exception:
+                pass
+            if veces > 1:
+                return
         if hash_id:
             # si habia un borrado encolado para este hash, lo cancela: el mensaje nuevo ya reemplaza
             # al viejo en el chat. Sin esto el flush de borrados se lleva puesto el recien enviado

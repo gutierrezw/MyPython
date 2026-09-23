@@ -86,7 +86,12 @@ from ConvergIA.Scanner_Sentimiento import scan_sentimiento
 from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
 
 
-GC_PENDIENTE_TTL = 1800  # segundos que una propuesta GainsCapture espera autorizacion antes de vencer
+# Cuanto vale una propuesta que el usuario no atendio, antes de re-evaluarla desde cero. NO es
+# cada cuanto se reemite: mientras la clase propuesta siga disponible el agente la refresca en
+# el lugar (ver el bloque `pendiente_autorizacion` de _gains_capture_run). Hasta el 2026-09-22
+# valia 1800, identico al `wait_rate(1800)` del agente, asi que toda propuesta vencia justo en
+# la vuelta siguiente y se recreaba entera: FIRY dio 18 propuestas en 8 horas y media.
+GC_PENDIENTE_TTL = 14400
 
 
 # Admistrador de Agentes IA
@@ -1131,10 +1136,99 @@ class ClassAgenteIA:
                 estado = "normal"
 
             if estado == "pendiente_autorizacion":
-                # el vencimiento ya lo resolvio _gains_capture_expirar_pendientes(): lo que sigue
-                # pendiente aca esta vigente y espera al usuario
-                _gc_logger.debug(f"GainsCapture({symbol}): pendiente_autorizacion → esperando")
-                continue
+                # Se refresca en el lugar, no se cancela y recrea. Cancelar+recrear reemitia la
+                # misma decision en cada vuelta —FIRY el 2026-09-22: 18 filas en incidencias entre
+                # 12:32 y 21:04, con el ROI clavado en 39.6% ($220) diez vueltas seguidas, de las
+                # 14:02 a las 18:34— y cada una pagaba una evaluacion de Claude, dejaba su fila
+                # pendiente y estrenaba pendiente_id, matando el boton del mensaje anterior.
+                #
+                # La decision no cambiaba; lo que envejece son sus numeros, y los dos salen de
+                # `last`: el limite y la cantidad del escenario (mas precio → mas lotes sobre
+                # min_roi → mas para vender).
+                _pend = state.get("pendiente") or {}
+                _esc = next((k for k in escenarios if k.strip() == _pend.get("escenario")), None)
+                # se recalcula todo el escenario, no solo el precio: la cantidad del escenario sale
+                # de los lotes que superan min_roi con el precio de ahora, asi que cuando el precio
+                # sube entran lotes nuevos y hay mas para vender. Congelar la qty mostraba menos de
+                # lo vendible y mandaba esa cantidad vieja al aprobar
+                _q = self._gains_capture_qty(
+                    vehiculo, account, symbol, escenarios[_esc], sym_data.get("position"),
+                    min_ganancia, _gc_logger,
+                ) if _esc else None
+                if not _q or _q["motivo"]:
+                    # o la clase dejo de calificar, o ya no hay cantidad vendible (todo comprometido,
+                    # o la ganancia no llega al minimo tras el recorte). Cambio la decision, no el
+                    # precio: vence y sigue al flujo normal, que la re-evalua con Claude desde cero
+                    _causa = (
+                        f"la clase {_pend.get('escenario')!r} ya no esta entre {escenarios_disponibles}"
+                        if not _q else f"sin cantidad vendible ({_q['motivo']})"
+                    )
+                    state = {**state, "estado": "normal", "pendiente": None}
+                    self.gains_capture_state[symbol] = state
+                    DataHub.del_alert(f"gc_{symbol}")
+                    write_json_tmp("gains_capture_state.json", self.gains_capture_state)
+                    _gc_logger.warning(f"GainsCapture({symbol}): {_causa} → propuesta vencida, se re-evalua")
+                    estado = "normal"
+                else:
+                    _sd = escenarios[_esc]
+                    _lmt = DataHub.quantiza_precio(vehiculo, symbol, last * 0.995)
+                    _det_pend = _pend.get("det") or {}
+                    _msg = self._gains_capture_msg(
+                        symbol,
+                        _sd["roi"],
+                        _q["ganancia"],
+                        _esc.strip(),
+                        _sd["lotes"],
+                        _q["qty"],
+                        DataHub.format_precio(vehiculo, symbol, _lmt),
+                        (_det_pend.get("claude") or {}).get("razon", ""),
+                        DataHub.info.get(symbol, {}).get("datos_tecnicos", {}),
+                    )
+                    if _msg == state.get("pendiente_msg"):
+                        # nada que mostrar distinto: reescribir el chat con el mismo texto solo
+                        # mueve el mensaje al pie y hace ruido
+                        _gc_logger.debug(f"GainsCapture({symbol}): pendiente sin cambios → esperando")
+                        continue
+                    # registrar=False: la incidencia de esta propuesta ya esta en la tabla, esto es
+                    # el mismo hecho con otros numeros. hash_id reescribe el mensaje del chat
+                    DataHub.add_alert(
+                        _msg,
+                        telegram=True,
+                        tipo="orden",
+                        markup=self._gains_capture_markup(symbol, state.get("pendiente_id")),
+                        hash_id=f"gc_{symbol}",
+                        registrar=False,
+                    )
+                    # qty y position se reescriben porque _gains_capture_aprobar() manda las del
+                    # pendiente tal cual y revalida el gate H5 contra ellas: si el mensaje dice una
+                    # cantidad y el estado guarda otra, el boton vende la vieja.
+                    # `pendiente_ts` NO se toca: el TTL mide cuanto lleva el usuario sin decidir, no
+                    # cuanto hace del ultimo refresco. Reiniciarlo vuelve inmortal a la propuesta,
+                    # que es justo lo contrario de lo que el TTL existe para acotar
+                    self.gains_capture_state[symbol] = {
+                        **state,
+                        "pendiente": {
+                            **_pend,
+                            "qty": _q["qty"],
+                            "position": _q["pos"],
+                            "lmt_price": _lmt,
+                            "det": {
+                                **_det_pend,
+                                "roi_escenario": _sd["roi"],
+                                "ganancia_escenario": _q["ganancia"],
+                                "lotes": _sd["lotes"],
+                                "orden": {"qty": _q["qty"], "lmt_price": _lmt},
+                            },
+                        },
+                        "pendiente_msg": _msg,
+                    }
+                    write_json_tmp("gains_capture_state.json", self.gains_capture_state)
+                    _gc_logger.warning(
+                        f"GainsCapture({symbol}): propuesta refrescada (clase {_esc.strip()}, "
+                        f"qty {_pend.get('qty')}→{_q['qty']}, "
+                        f"LMT ${DataHub.format_precio(vehiculo, symbol, _lmt)}) — sigue pendiente"
+                    )
+                    continue
 
             if estado == "escalon_pendiente":
                 _gc_logger.debug(f"GainsCapture({symbol}): escalon_pendiente → esperando fill")
@@ -1193,9 +1287,12 @@ class ClassAgenteIA:
             escenario_key = next((k for k in claves if k.strip() == _elegido), claves[0])
             sell_data = escenarios[escenario_key]
             roi_ref = sell_data["roi"]
-            ganancia_ref = sell_data["profit"]
-            vender_qty = DataHub.quantiza_qty(vehiculo, symbol, sell_data["cantidad sell"])
-            if vender_qty <= 0:
+            _q = self._gains_capture_qty(
+                vehiculo, account, symbol, sell_data, sym_data.get("position"), min_ganancia, _gc_logger
+            )
+            vender_qty, ganancia_ref, _pos = _q["qty"], _q["ganancia"], _q["pos"]
+            _comprometida, _disp = _q["comprometida"], _q["disponible"]
+            if _q["motivo"] == "qty_cero":
                 _gc_logger.warning(
                     f"GainsCapture({symbol}): Claude decidió vender (clase={escenario_key.strip()}) pero "
                     f"vender_qty=0 (lotes_validos={len(lotes_validos)}) → anulado por regla fija, sin orden"
@@ -1218,54 +1315,43 @@ class ClassAgenteIA:
                     _gc_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CANCELLED (vender_qty=0) → {_e}")
                 continue
 
-            # Tope duro contra la posición real del broker — los lotes salen de booktrading y
-            # pueden descuadrar (splits, dividendos en acciones): nunca pedir más de lo que hay.
-            # Al tope se le descuenta lo que ya está comprometido en ventas vivas (gate cruzado H5):
-            # Preservation puede tener un STOP sobre el mismo símbolo y entre los dos agentes se
-            # llegaba a comprometer más acciones de las que hay.
-            _pos = DataHub.quantiza_qty(vehiculo, symbol, sym_data.get("position") or 0)
-            _comprometida = DataHub.qty_comprometida_sell(account, vehiculo, symbol, logger=_gc_logger)
-            # la resta se cuantiza: `_comprometida` viene crudo de order_trader y en Crypto el
-            # remanente cae fuera del stepSize (Binance rechaza la orden). En Stock es un int().
-            _disp = DataHub.quantiza_qty(vehiculo, symbol, _pos - _comprometida)
-            if _pos > 0 and _disp <= 0:
+            if _q["motivo"] == "sin_disponible":
                 _gc_logger.warning(
                     f"GainsCapture({symbol}): position {_pos} ya comprometida en ventas vivas "
                     f"({_comprometida:g}) → sin orden"
                 )
                 continue
-            if 0 < _disp < vender_qty:
-                ganancia_ref *= _disp / vender_qty
+
+            if _q["recortada"]:
                 _gc_logger.warning(
-                    f"GainsCapture({symbol}): qty {vender_qty} > disponible {_disp} "
-                    f"(position {_pos} − comprometida {_comprometida:g}) → recortado a {_disp} "
+                    f"GainsCapture({symbol}): qty {_q['qty_escenario']} > disponible {_disp} "
+                    f"(position {_pos} − comprometida {_comprometida:g}) → recortado a {vender_qty} "
                     f"(ganancia prorrateada ${ganancia_ref:.0f})"
                 )
-                vender_qty = _disp
-                if ganancia_ref < min_ganancia:
-                    _gc_logger.warning(
-                        f"GainsCapture({symbol}): tras recorte ${ganancia_ref:.0f} < min_ganancia "
-                        f"${min_ganancia:.0f} → sin orden"
+            if _q["motivo"] == "ganancia_insuficiente":
+                _gc_logger.warning(
+                    f"GainsCapture({symbol}): tras recorte ${ganancia_ref:.0f} < min_ganancia "
+                    f"${min_ganancia:.0f} → sin orden"
+                )
+                try:
+                    self.RepositorioOportunidades.insert_symbol_decision_history(
+                        symbol=symbol,
+                        agente="GainsCapture",
+                        tag="CANCELLED",
+                        mensaje=f"qty recortada a disponible={_disp}, ganancia < min_ganancia",
+                        json_contexto={
+                            "escenario": escenario_key.strip(),
+                            "position": _pos,
+                            "comprometida": _comprometida,
+                            "disponible": _disp,
+                            "ganancia_prorrateada": round(float(ganancia_ref), 2),
+                            "min_ganancia": min_ganancia,
+                        },
+                        order_trader_id=None
                     )
-                    try:
-                        self.RepositorioOportunidades.insert_symbol_decision_history(
-                            symbol=symbol,
-                            agente="GainsCapture",
-                            tag="CANCELLED",
-                            mensaje=f"qty recortada a disponible={_disp}, ganancia < min_ganancia",
-                            json_contexto={
-                                "escenario": escenario_key.strip(),
-                                "position": _pos,
-                                "comprometida": _comprometida,
-                                "disponible": _disp,
-                                "ganancia_prorrateada": round(float(ganancia_ref), 2),
-                                "min_ganancia": min_ganancia,
-                            },
-                            order_trader_id=None
-                        )
-                    except Exception as _e:
-                        _gc_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CANCELLED (recorte) → {_e}")
-                    continue
+                except Exception as _e:
+                    _gc_logger.debug(f"[SYMBOL_HISTORY] {symbol}: error registrando CANCELLED (recorte) → {_e}")
+                continue
 
             lmt_price = DataHub.quantiza_precio(vehiculo, symbol, last * 0.995)
             lmt_txt = DataHub.format_precio(vehiculo, symbol, lmt_price)
@@ -1296,14 +1382,16 @@ class ClassAgenteIA:
             # ejecuta solo, así que silenciarlo en OBSERVACION solo haría perder oportunidades
             if gc_modo != "AUTONOMO":
                 razon = claude_result.get("razon", "")
-                _rsi_txt = self._rsi_texto(datos_tecnicos)
-                msg = (
-                    f"📈 *GainsCapture — {symbol}*\n"
-                    f"ROI: {roi_ref:.1%} | Ganancia: ${ganancia_ref:.0f}\n"
-                    f"Clase {escenario_key.strip()} ({sell_data['lotes']} lotes) | "
-                    f"Vender {vender_qty} LMT ${lmt_txt}\n"
-                    + (f"RSI d/w: {_rsi_txt}\n" if _rsi_txt else "")
-                    + f"{razon}"
+                msg = self._gains_capture_msg(
+                    symbol,
+                    roi_ref,
+                    ganancia_ref,
+                    escenario_key.strip(),
+                    sell_data["lotes"],
+                    vender_qty,
+                    lmt_txt,
+                    razon,
+                    datos_tecnicos,
                 )
                 # mismos botones que la propuesta IA. Los comandos /ok_SYMBOL y /no_SYMBOL siguen
                 # funcionando: sirven para mensajes viejos y si el callback falla.
@@ -1311,14 +1399,7 @@ class ClassAgenteIA:
                 # simbolo y sin el, tocar el boton de un mensaje de hace una hora ejecutaba la
                 # propuesta vigente — otra clase, otro precio
                 pendiente_id = int(datetime.now().timestamp())
-                markup = InlineKeyboardMarkup(
-                    [
-                        [
-                            InlineKeyboardButton("✅ Ejecutar", callback_data=f"gc_ok|{symbol}|{pendiente_id}"),
-                            InlineKeyboardButton("⏸ Diferir", callback_data=f"gc_no|{symbol}|{pendiente_id}"),
-                        ]
-                    ]
-                )
+                markup = self._gains_capture_markup(symbol, pendiente_id)
                 # via add_alert y no exec_modulo_async: _gains_capture_run corre DENTRO de la
                 # corrutina del agente, y ahi create_task() queda pendiente y se descarta cuando
                 # run_until_complete corta el loop — el mensaje no salia nunca. El flush si se
@@ -1330,6 +1411,7 @@ class ClassAgenteIA:
                     **state,
                     "estado": "pendiente_autorizacion",
                     "pendiente_id": pendiente_id,
+                    "pendiente_msg": msg,
                     "pendiente": {
                         "escenario": escenario_key.strip(),
                         "vehiculo": vehiculo,
@@ -2000,6 +2082,81 @@ class Telegram:
 
         except Exception as e:
             self.logger.error(f"handle_callback(): {e}\n{traceback.format_exc()}")
+
+    def _gains_capture_qty(self, vehiculo, account, symbol, sell_data, position, min_ganancia, _gc_logger):
+        """Cantidad vendible del escenario y su ganancia, tras el tope duro y el gate cruzado H5.
+
+        Devuelve {"qty", "ganancia", "qty_escenario", "pos", "comprometida", "disponible",
+        "recortada", "motivo"}. `motivo` es None cuando hay orden posible; si no, dice cual de los
+        tres cortes la anulo: "qty_cero", "sin_disponible" o "ganancia_insuficiente".
+
+        Vive aparte porque se corre dos veces por ciclo: al proponer y al refrescar una propuesta
+        pendiente. La cantidad del escenario NO es fija — sale de los lotes que superan `min_roi`
+        con el precio de ahora, asi que cuando el precio sube entran lotes nuevos y crece. Refrescar
+        el precio sin recalcularla mostraria una cantidad vieja, mas chica que la vendible.
+
+        `pos == 0` no corta: es el comportamiento previo y se conserva tal cual — sin posicion del
+        broker contra que topear, manda la cantidad del escenario.
+        """
+        qty = DataHub.quantiza_qty(vehiculo, symbol, sell_data["cantidad sell"])
+        res = {
+            "qty": qty, "ganancia": sell_data["profit"], "qty_escenario": qty,
+            "pos": 0, "comprometida": 0, "disponible": 0, "recortada": False, "motivo": None,
+        }
+        if qty <= 0:
+            res["motivo"] = "qty_cero"
+            return res
+
+        # Tope duro contra la posicion real del broker — los lotes salen de booktrading y pueden
+        # descuadrar (splits, dividendos en acciones): nunca pedir mas de lo que hay. Al tope se le
+        # descuenta lo ya comprometido en ventas vivas (gate cruzado H5): Preservation puede tener
+        # un STOP sobre el mismo simbolo y entre los dos agentes se llegaba a comprometer mas
+        # acciones de las que hay.
+        pos = DataHub.quantiza_qty(vehiculo, symbol, position or 0)
+        comprometida = DataHub.qty_comprometida_sell(account, vehiculo, symbol, logger=_gc_logger)
+        # la resta se cuantiza: `comprometida` viene crudo de order_trader y en Crypto el remanente
+        # cae fuera del stepSize (Binance rechaza la orden). En Stock es un int()
+        disp = DataHub.quantiza_qty(vehiculo, symbol, pos - comprometida)
+        res.update({"pos": pos, "comprometida": comprometida, "disponible": disp})
+        if pos > 0 and disp <= 0:
+            res.update({"qty": 0, "motivo": "sin_disponible"})
+            return res
+        if 0 < disp < qty:
+            res.update({"qty": disp, "ganancia": res["ganancia"] * disp / qty, "recortada": True})
+            if res["ganancia"] < min_ganancia:
+                res["motivo"] = "ganancia_insuficiente"
+        return res
+
+    def _gains_capture_markup(self, symbol, pendiente_id):
+        """Botones Ejecutar/Diferir de la propuesta. El pendiente_id viaja en el callback.
+
+        El refresco reusa el id vigente a proposito: el mensaje se reescribe en el chat y el boton
+        tiene que seguir apuntando a la misma propuesta. Uno nuevo por vuelta mataba el anterior.
+        """
+        return InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("✅ Ejecutar", callback_data=f"gc_ok|{symbol}|{pendiente_id}"),
+                    InlineKeyboardButton("⏸ Diferir", callback_data=f"gc_no|{symbol}|{pendiente_id}"),
+                ]
+            ]
+        )
+
+    def _gains_capture_msg(self, symbol, roi, ganancia, escenario, lotes, qty, lmt_txt, razon, datos_tecnicos):
+        """Texto de la propuesta. Unico para la propuesta y para su refresco.
+
+        El verde del encabezado es el mismo criterio que la ventana de ordenes, donde una SELL
+        ejecutada va con tag `green` (DashMain.py). Telegram no pinta el fondo de un mensaje, asi
+        que el color solo puede venir del emoji.
+        """
+        rsi_txt = self._rsi_texto(datos_tecnicos)
+        return (
+            f"🟩 *GainsCapture — {symbol}*\n"
+            f"ROI: {roi:.1%} | Ganancia: ${ganancia:.0f}\n"
+            f"Clase {escenario} ({lotes} lotes) | Vender {qty} LMT ${lmt_txt}\n"
+            + (f"RSI d/w: {rsi_txt}\n" if rsi_txt else "")
+            + f"{razon}"
+        )
 
     def _rsi_texto(self, datos_tecnicos):
         """Devuelve '💚 80.4 / 71.2' con el RSI diario/semanal, o None si no hay dato.

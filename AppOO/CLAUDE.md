@@ -355,6 +355,12 @@ Mientras la fila sigue pendiente, la repetición suma en `veces` y **no se reenv
 El único punto de entrada es `DataHub.add_alert()` → `BDsystem.insert_incidencia()`, que devuelve
 `(id, veces)`. Un hecho único —una orden, un repago— va sin clave y nunca se agrupa.
 
+**`add_alert(registrar=False)` manda el mensaje y no deja fila** (2026-09-22). Es para reescribir en
+el chat un hecho **ya registrado** cuyo texto cambió — el refresco de una propuesta de GainsCapture,
+que reemite el precio del momento. `dedup_key` no sirve para eso: agrupa bien en la tabla pero corta
+el envío cuando `veces > 1`, que es justamente lo que hay que actualizar. Consecuencia a tener
+presente al contar filas: un mensaje del chat puede no tener incidencia propia.
+
 **`inversion.divisa` / `inversion.factor_cambio` — son el recibo, no el pendiente.** La tabla
 `inversion` guarda **siempre USD**, para todos los vehículos. Los KPI del panel (Total dGyP, Total
 Inversión, UnP&L, Deuda) suman entre vehículos sin mirar la moneda, así que un vehículo que
