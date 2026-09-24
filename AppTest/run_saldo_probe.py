@@ -8,6 +8,10 @@ Que saldo publica cada extracto, y con que coordenada. Solo lee PDFs: no toca la
 Para cada PDF imprime el adaptador detectado, las lineas que mencionan SALDO con la coordenada X de cada importe, y
 lo que devolveria parse_balances() con el x_max que usa ese adaptador. Sirve para calibrar una clase nueva y para
 confirmar, antes de soltar un PDF en extractos\\, que el saldo va a entrar.
+
+El PDF unificado de Santander va por otro camino: ahi el saldo no lo saca parse_balances() sino _saldo_linea()
+dentro del state machine, atado a la seccion abierta, asi que se corre _extract_all() y se muestra el saldo que
+quedaria por seccion.
 """
 
 import json
@@ -30,7 +34,7 @@ if not os.path.isabs(_tmp):
 os.environ.setdefault("APPOO_TMP", _tmp)
 
 from Modulos_python import pdfplumber
-from Class_Finance import DESCONOCIDOS_DIR, EXTRACTOS_DIR, detect_adapter, parse_balances
+from Class_Finance import DESCONOCIDOS_DIR, EXTRACTOS_DIR, SantanderAr, detect_adapter, parse_balances
 
 # x_max con el que cada adaptador llama a parse_balances(). None = todavia no captura saldo.
 X_MAX_POR_SECCION = {
@@ -57,15 +61,33 @@ def words_to_lines(words, y_tol=3.0):
     return lines
 
 
+def probe_santander_unificado(ruta):
+    """El unificado de Santander no pasa por parse_balances(): el saldo sale de _saldo_linea() dentro del state
+    machine, atado a la seccion que estaba abierta. _extract_all() solo lee el PDF — no toca la BD."""
+    adapter = SantanderAr(pdf_path=ruta)
+    movs = adapter._extract_all()
+    print("    saldo por seccion — lo que load() grabaria en fin_statement_imports:")
+    for clave, ref in adapter.ACCOUNT_REF_MAP.items():
+        prev, curr = adapter._balances[clave]
+        nota = "" if clave in ("cuenta_ars", "cuenta_usd") else "   NULL a proposito (el saldo lo da el resumen)"
+        print("      %-22s %-16s movs:%-4d prev=%-14s curr=%-14s%s" % (
+            adapter.SECTION_NAME_MAP[clave], ref, len(movs[clave]), prev, curr, nota))
+    faltan = [adapter.SECTION_NAME_MAP[k] for k in ("cuenta_ars", "cuenta_usd") if adapter._balances[k][1] is None]
+    if faltan:
+        print("    NOTA: sin saldo de cierre en %s — el PDF no publica 'Saldo total' o la linea no cae en la seccion"
+              % ", ".join(faltan))
+
+
 def probe(ruta):
     det = detect_adapter(ruta)
     seccion = det[0] if det else None
     x_max = X_MAX_POR_SECCION.get(seccion)
+    detalle_x = ("por seccion en el state machine" if seccion == "santander"
+                 else x_max if x_max else "no captura saldo todavia")
     print("")
     print("=== %s" % os.path.basename(ruta))
     print("    adaptador: %s   cuenta: %s   x_max: %s" % (
-        seccion or "NO DETECTADO", (det[1] if det else "-") or "multi-seccion",
-        x_max if x_max else "no captura saldo todavia"))
+        seccion or "NO DETECTADO", (det[1] if det else "-") or "multi-seccion", detalle_x))
     with pdfplumber.open(ruta) as pdf:
         hojas = [words_to_lines(p.extract_words(x_tolerance=3, y_tolerance=3)) for p in pdf.pages]
     print("    hojas: %d" % len(hojas))
@@ -79,6 +101,9 @@ def probe(ruta):
             importes = ["%s@x%d" % (w["text"].replace("_", ""), int(w["x0"]))
                         for w in linea if RE_IMPORTE.match(w["text"].replace("_", ""))]
             print("    p%-2d %-58s | %s" % (n, texto[:58], "  ".join(importes) or "(sin importe)"))
+    if seccion == "santander":
+        probe_santander_unificado(ruta)
+        return
     prev, curr = parse_balances(todas, x_max=x_max or 10000.0)
     print("    -> balance_prev=%s  balance_curr=%s" % (prev, curr))
     if len(hojas) > 2 and parse_balances(hojas[0] + hojas[-1], x_max=x_max or 10000.0) != (prev, curr):
