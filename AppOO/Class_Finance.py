@@ -3096,6 +3096,7 @@ class SantanderAr:
         self.dry_run = dry_run
         self.file_hash = sha256_file(pdf_path)
         self._year: int = datetime.now().year
+        self._balances: dict[str, list[Decimal | None]] = {k: [None, None] for k in self.ACCOUNT_REF_MAP}
 
     def _words_to_lines(self, words: list[dict], y_tol: float = 4.0) -> list[list[dict]]:
         if not words:
@@ -3130,6 +3131,21 @@ class SantanderAr:
         if value is None:
             return None
         return -value if negative else value
+
+    def _saldo_linea(self, line: list[dict]) -> Decimal | None:
+        """Saldo que cierra una linea 'Saldo Inicial' o 'Saldo total': el ultimo importe de la linea, con el
+        signo del '-$' que lo precede — el descubierto en pesos se publica negativo y el simbolo va pegado al
+        guion, asi que el signo no viaja en el token del importe."""
+        tokens = [w["text"] for w in line]
+        for i in range(len(tokens) - 1, -1, -1):
+            if not RE_IMPORTE_AR.match(tokens[i]):
+                continue
+            value = parse_amount_ar(tokens[i].lstrip("$"))
+            if value is None:
+                return None
+            negativo = tokens[i].startswith("-") or (i > 0 and tokens[i - 1].startswith("-"))
+            return -abs(value) if negativo else value
+        return None
 
     def _classify_cuenta(self, w: dict) -> str:
         x = w["x0"]
@@ -3182,6 +3198,7 @@ class SantanderAr:
 
     def _extract_all(self) -> dict[str, list[dict]]:
         result: dict[str, list[dict]] = {k: [] for k in self.ACCOUNT_REF_MAP}
+        self._balances = {k: [None, None] for k in self.ACCOUNT_REF_MAP}
         state = "none"
         prev_state = "none"
         product_ctx = "none"
@@ -3225,6 +3242,8 @@ class SantanderAr:
                     if state in ("cuenta_ars", "cuenta_usd") and (
                         "SALDO TOTAL" in upper or "DETALLE IMPOSITIVO" in upper
                     ):
+                        if "SALDO TOTAL" in upper:
+                            self._balances[state][1] = self._saldo_linea(line)
                         state = "none"
                         continue
                     if product_ctx in ("visa", "amex") and "PAGO ANTERIOR" in upper:
@@ -3265,6 +3284,10 @@ class SantanderAr:
                     if state != prev_state:
                         last_fecha_str = ""
                         prev_state = state
+
+                    # no lleva continue: la linea tambien fija la fecha que arrastran los movimientos sin fecha
+                    if state in ("cuenta_ars", "cuenta_usd") and "SALDO INICIAL" in upper:
+                        self._balances[state][0] = self._saldo_linea(line)
 
                     if state == "cuenta_ars":
                         last_fecha_str = self._process_cuenta_line(line, result["cuenta_ars"], last_fecha_str)
@@ -3512,8 +3535,11 @@ class SantanderAr:
                 "SELECT id FROM fin_statement_imports WHERE file_hash=%s AND section=%s",
                 (self.file_hash, section_name),
             )
-            if cursor.fetchone():
+            ya_importado = cursor.fetchone()
+            if ya_importado:
                 _logger.warning(f"  [{section_key}] Ya importado — omitido")
+                _fill_missing_balances(cursor, ya_importado[0], *self._balances[section_key])
+                conn.commit()
                 import_ids[section_key] = -1
                 continue
             cursor.execute(
@@ -3550,9 +3576,10 @@ class SantanderAr:
                     stats["errors"] += 1
             cursor.execute(
                 "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,"
+                "balance_prev=%s,balance_curr=%s,"
                 "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
                 "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
-                (len(rows), inserted_sec, import_id, import_id, import_id),
+                (len(rows), inserted_sec, *self._balances[section_key], import_id, import_id, import_id),
             )
             conn.commit()
             _logger.info(f"  [{section_key}] {len(rows)} filas → {inserted_sec} insertadas")
@@ -3663,7 +3690,25 @@ class SantanderArTarjetaResumen:
             lines = []
             for _, page in sorted(paginas.items()):
                 lines.extend(self._words_to_lines(page.extract_words(x_tolerance=3, y_tolerance=3)))
-        return parse_balances(lines, x_max=500.0)
+            prev, curr = parse_balances(lines, x_max=500.0)
+            if curr is None:
+                curr = self._total_a_pagar(pdf)
+        return prev, curr
+
+    def _total_a_pagar(self, pdf) -> Decimal | None:
+        """Cierre de los resumenes que ya no publican 'Saldo actual'. Se busca en todo el PDF porque la linea
+        cae en una hoja del medio, y solo el cierre: 'Saldo anterior' tambien titula el saldo de la cuenta que
+        paga el resumen — esa linea esta en el medio y entraria como saldo de la tarjeta."""
+        for page in pdf.pages:
+            for line in self._words_to_lines(page.extract_words(x_tolerance=3, y_tolerance=3)):
+                tokens = [w["text"].replace("_", "") for w in line if w["x0"] < 500.0]
+                if "TOTAL A PAGAR" not in " ".join(tokens).upper():
+                    continue
+                valores = [v for v in (parse_amount_ar(t.lstrip("$")) for t in tokens if RE_IMPORTE_AR.match(t))
+                           if v is not None]
+                if valores:
+                    return valores[0]
+        return None
 
     def _extract_cycle(self) -> dict | None:
         with pdfplumber.open(self.pdf_path) as pdf:
