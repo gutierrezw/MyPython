@@ -2410,6 +2410,49 @@ def _fill_missing_balances(cursor, import_id: int, prev: Decimal | None, curr: D
     )
 
 
+def _periodo_de_pdf(txns: list[dict]) -> tuple[date | None, date | None]:
+    """Periodo del extracto medido sobre lo que trae el PDF, no sobre lo que entro en la BD. Un PDF que se
+    vuelve a soltar da el mismo par: el contenido es el mismo. Tomarlo de fin_transactions lo dejaba en NULL
+    cuando uq_tx frenaba todos los movimientos, y una fila sin periodo no se distingue del import original."""
+    fechas = [t["date"] for t in txns if t.get("date")]
+    if not fechas:
+        return None, None
+    return min(fechas), max(fechas)
+
+
+def _cerrar_import(cursor, import_id: int, account_id: int, periodo: tuple, row_count: int, inserted: int,
+                   skipped: int | None = None, prev: Decimal | None = None,
+                   curr: Decimal | None = None) -> int:
+    """Sella el import y devuelve el id que queda vivo. Si el PDF no aporto ningun movimiento y ya existe un
+    import de la misma cuenta y el mismo periodo, el saldo va a ese y la fila nueva se borra: es el mismo
+    extracto entrando de nuevo con otro hash o bajo otra section, no un extracto distinto.
+
+    uq_import (file_hash, section) no alcanza para frenarlo — el mismo archivo bajo dos secciones pasa el
+    indice dos veces. Medido el 2026-09-24: 94 de 212 imports sin periodo, casi todos con 0 movimientos; el
+    caso testigo es el extracto de enero de BBVA, partido entre el import 78 (movimientos, sin saldo) y el
+    391 (saldo, sin movimientos ni periodo)."""
+    period_from, period_to = periodo
+    if not inserted and period_from and period_to:
+        cursor.execute(
+            "SELECT id FROM fin_statement_imports WHERE account_id=%s AND period_from=%s AND period_to=%s "
+            "AND id<>%s ORDER BY id LIMIT 1",
+            (account_id, period_from, period_to, import_id),
+        )
+        previo = cursor.fetchone()
+        if previo:
+            _fill_missing_balances(cursor, previo[0], prev, curr)
+            cursor.execute("DELETE FROM fin_statement_imports WHERE id=%s", (import_id,))
+            _logger.warning(f"  Extracto ya cargado en el import {previo[0]} - saldo completado, sin fila nueva")
+            return previo[0]
+    cursor.execute(
+        "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,"
+        "skipped_count=COALESCE(%s,skipped_count),balance_prev=COALESCE(%s,balance_prev),"
+        "balance_curr=COALESCE(%s,balance_curr),period_from=%s,period_to=%s WHERE id=%s",
+        (row_count, inserted, skipped, prev, curr, period_from, period_to, import_id),
+    )
+    return import_id
+
+
 def _set_billing_dates(cursor, import_id: int, closing: date | None = None) -> int:
     """Sella en las cuotas de este resumen el cierre que las cobra: la cuota se paga en el resumen donde aparece,
     no en el mes de la compra, así que sin esto un plan entero cae en un solo mes. Sin ciclo parseado busca el cierre
@@ -2743,16 +2786,10 @@ class BbvaArTarjeta:
             except Error as e:
                 _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
                 stats["errors"] += 1
+        import_id = _cerrar_import(cursor, import_id, account_id, _periodo_de_pdf(txns), stats["rows_found"],
+                                   stats["inserted"], stats["skipped"], self._balance_prev, self._balance_curr)
         _save_card_cycle(cursor, account_id, import_id, cycle)
         _set_billing_dates(cursor, import_id, cycle.get("closing") if cycle else None)
-        cursor.execute(
-            "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s,"
-            "balance_prev=%s,balance_curr=%s,"
-            "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
-            "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
-            (stats["rows_found"], stats["inserted"], stats["skipped"], self._balance_prev, self._balance_curr,
-             import_id, import_id, import_id),
-        )
         conn.commit()
         cursor.close()
         return stats
@@ -3031,14 +3068,8 @@ class BbvaArCuenta:
             except Error as e:
                 _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
                 stats["errors"] += 1
-        cursor.execute(
-            "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,skipped_count=%s,"
-            "balance_prev=%s,balance_curr=%s,"
-            "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
-            "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
-            (stats["rows_found"], stats["inserted"], stats["skipped"], self._balance_prev, self._balance_curr,
-             import_id, import_id, import_id),
-        )
+        _cerrar_import(cursor, import_id, account_id, _periodo_de_pdf(txns), stats["rows_found"],
+                       stats["inserted"], stats["skipped"], self._balance_prev, self._balance_curr)
         conn.commit()
         cursor.close()
         return stats
@@ -3574,12 +3605,9 @@ class SantanderAr:
                 except Error as e:
                     _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
                     stats["errors"] += 1
-            cursor.execute(
-                "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,"
-                "balance_prev=%s,balance_curr=%s,"
-                "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
-                "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
-                (len(rows), inserted_sec, *self._balances[section_key], import_id, import_id, import_id),
+            import_ids[section_key] = _cerrar_import(
+                cursor, import_id, account_ids[section_key], _periodo_de_pdf(txns), len(rows), inserted_sec,
+                prev=self._balances[section_key][0], curr=self._balances[section_key][1],
             )
             conn.commit()
             _logger.info(f"  [{section_key}] {len(rows)} filas → {inserted_sec} insertadas")
@@ -4034,11 +4062,8 @@ class CitibankUs:
                 except Error as e:
                     _logger.error(f"  Error: {e} — {txn.get('raw_description','')[:60]}")
                     stats["errors"] += 1
-            cursor.execute(
-                "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,"
-                "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
-                "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
-                (len(rows), inserted_sec, import_id, import_id, import_id),
+            import_ids[section_key] = _cerrar_import(
+                cursor, import_id, account_ids[section_key], _periodo_de_pdf(txns), len(rows), inserted_sec,
             )
             conn.commit()
             _logger.info(f"  [{section_key}] {len(rows)} filas → {inserted_sec} insertadas")
@@ -4247,12 +4272,8 @@ class BdvVes:
             except Exception as e:
                 _logger.error(f"  {type(self).__name__} insert error: {e}")
                 stats["errors"] += 1
-        cursor.execute(
-            "UPDATE fin_statement_imports SET status='processed',row_count=%s,processed_count=%s,"
-            "period_from=(SELECT MIN(date) FROM fin_transactions WHERE import_id=%s),"
-            "period_to=(SELECT MAX(date) FROM fin_transactions WHERE import_id=%s) WHERE id=%s",
-            (stats["rows_found"], stats["inserted"], import_id, import_id, import_id),
-        )
+        _cerrar_import(cursor, import_id, account_id, _periodo_de_pdf(txns), stats["rows_found"],
+                       stats["inserted"])
         conn.commit()
         cursor.close()
         return stats
