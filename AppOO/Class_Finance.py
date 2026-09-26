@@ -2397,24 +2397,40 @@ def _save_card_cycle(cursor, account_id: int, import_id: int, cycle: dict | None
     return 1 + len(cycle["installments"])
 
 
-def _fill_missing_balances(cursor, import_id: int, prev: Decimal | None, curr: Decimal | None) -> None:
-    """Completa el saldo de un import que ya existe. El COALESCE deja intacto lo que ya tenga valor: un
-    extracto que se vuelve a soltar rellena lo que falta y nunca borra lo cargado. Es la unica via para los
-    imports anteriores a estas columnas — uq_import frena el reproceso, asi que el saldo no entra por el alta."""
-    if prev is None and curr is None:
+def _fill_missing_balances(cursor, import_id: int, prev: Decimal | None, curr: Decimal | None,
+                           periodo: tuple | None = None) -> None:
+    """Completa el saldo y el periodo de un import que ya existe. El COALESCE deja intacto lo que ya tenga
+    valor: un extracto que se vuelve a soltar rellena lo que falta y nunca borra lo cargado. Es la unica via
+    para los imports anteriores a estas columnas — uq_import frena el reproceso, asi que no entran por el alta.
+
+    El periodo va por el mismo camino y por el mismo motivo. Desde que la fila lleva saldo, una fila sin
+    periodo es inservible: el paso 5 necesita el saldo mas reciente por cuenta y sin fecha no se ordena.
+    Medido el 2026-09-26: de las 94 filas sin periodo, 3 ya tienen saldo y 93 no tienen con quien fusionarse,
+    asi que re-soltar el PDF es el unico camino que las fecha."""
+    period_from, period_to = periodo if periodo else (None, None)
+    if prev is None and curr is None and period_from is None:
         return
     cursor.execute(
         "UPDATE fin_statement_imports SET balance_prev=COALESCE(balance_prev,%s),"
-        "balance_curr=COALESCE(balance_curr,%s) WHERE id=%s",
-        (prev, curr, import_id),
+        "balance_curr=COALESCE(balance_curr,%s),period_from=COALESCE(period_from,%s),"
+        "period_to=COALESCE(period_to,%s) WHERE id=%s",
+        (prev, curr, period_from, period_to, import_id),
     )
 
 
-def _periodo_de_pdf(txns: list[dict]) -> tuple[date | None, date | None]:
+def _periodo_de_pdf(txns: list[dict], parse=None) -> tuple[date | None, date | None]:
     """Periodo del extracto medido sobre lo que trae el PDF, no sobre lo que entro en la BD. Un PDF que se
     vuelve a soltar da el mismo par: el contenido es el mismo. Tomarlo de fin_transactions lo dejaba en NULL
-    cuando uq_tx frenaba todos los movimientos, y una fila sin periodo no se distingue del import original."""
-    fechas = [t["date"] for t in txns if t.get("date")]
+    cuando uq_tx frenaba todos los movimientos, y una fila sin periodo no se distingue del import original.
+
+    `parse` es para las filas crudas del adaptador, que en algunos casos traen la fecha como texto y la
+    parsean recien en _build_transactions. La rama <<ya importado>> no puede llamar a ese metodo: clasifica,
+    y apply_rules suma hit_count por movimientos que no se van a insertar."""
+    if parse:
+        fechas = [parse(t["fecha_str"]) for t in txns if t.get("fecha_str")]
+        fechas = [f for f in fechas if f]
+    else:
+        fechas = [t["date"] for t in txns if t.get("date")]
     if not fechas:
         return None, None
     return min(fechas), max(fechas)
@@ -2763,7 +2779,8 @@ class BbvaArTarjeta:
             _logger.warning("  PDF ya importado — omitido")
             # el ciclo sí se graba: los resúmenes cargados antes de existir fin_card_cycles se recuperan re-soltándolos
             _save_card_cycle(cursor, account_id, imported[0], cycle)
-            _fill_missing_balances(cursor, imported[0], self._balance_prev, self._balance_curr)
+            _fill_missing_balances(cursor, imported[0], self._balance_prev, self._balance_curr,
+                                   _periodo_de_pdf(raw_rows))
             _set_billing_dates(cursor, imported[0], cycle.get("closing") if cycle else None)
             conn.commit()
             cursor.close()
@@ -3046,7 +3063,8 @@ class BbvaArCuenta:
         imported = cursor.fetchone()
         if imported:
             _logger.warning("  PDF ya importado — omitido")
-            _fill_missing_balances(cursor, imported[0], self._balance_prev, self._balance_curr)
+            _fill_missing_balances(cursor, imported[0], self._balance_prev, self._balance_curr,
+                                   _periodo_de_pdf(raw_rows, self._parse_date))
             conn.commit()
             cursor.close()
             return stats
@@ -3569,7 +3587,8 @@ class SantanderAr:
             ya_importado = cursor.fetchone()
             if ya_importado:
                 _logger.warning(f"  [{section_key}] Ya importado — omitido")
-                _fill_missing_balances(cursor, ya_importado[0], *self._balances[section_key])
+                _fill_missing_balances(cursor, ya_importado[0], *self._balances[section_key],
+                                       periodo=_periodo_de_pdf(all_rows[section_key]))
                 conn.commit()
                 import_ids[section_key] = -1
                 continue
@@ -3667,7 +3686,8 @@ class SantanderArTarjetaResumen:
         if imported:
             _logger.warning("  PDF ya importado — omitido")
             balance_prev, balance_curr = self._extract_balances()
-            _fill_missing_balances(cursor, imported[0], balance_prev, balance_curr)
+            _fill_missing_balances(cursor, imported[0], balance_prev, balance_curr,
+                                   (cycle["prev_closing"], cycle["closing"]))
             conn.commit()
             cursor.close()
             return stats
@@ -4026,8 +4046,12 @@ class CitibankUs:
                 "SELECT id FROM fin_statement_imports WHERE file_hash=%s AND section=%s",
                 (self.file_hash, section_name),
             )
-            if cursor.fetchone():
+            ya_importado = cursor.fetchone()
+            if ya_importado:
                 _logger.warning(f"  [{section_key}] Ya importado — omitido")
+                _fill_missing_balances(cursor, ya_importado[0], None, None,
+                                       _periodo_de_pdf(all_rows[section_key]))
+                conn.commit()
                 import_ids[section_key] = -1
                 continue
             cursor.execute(
@@ -4248,8 +4272,11 @@ class BdvVes:
             "SELECT id FROM fin_statement_imports WHERE file_hash = %s AND section = %s",
             (file_hash, self.SECTION_NAME),
         )
-        if cursor.fetchone():
+        ya_importado = cursor.fetchone()
+        if ya_importado:
             _logger.info("  Archivo ya importado (hash duplicado) — omitido")
+            _fill_missing_balances(cursor, ya_importado[0], None, None, _periodo_de_pdf(raw_rows))
+            conn.commit()
             cursor.close()
             return stats
         cursor.execute(
