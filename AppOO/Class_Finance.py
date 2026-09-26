@@ -1694,6 +1694,10 @@ class FinancePanel(tk.Frame):
         self._lbl_flow_section.pack(side=tk.LEFT, padx=(6, 0), pady=(0, 6))
         self._lbl_flow_section.bind("<Button-1>", lambda _e: self._show_flow())
 
+        self._lbl_nocat_section = _SectionLabel(hdr, "Sin clasificar", cursor="hand2")
+        self._lbl_nocat_section.pack(side=tk.LEFT, padx=(6, 0), pady=(0, 6))
+        self._lbl_nocat_section.bind("<Button-1>", lambda _e: self._show_sin_clasificar())
+
         # botón limpiar filtro de categoría (visible solo cuando hay filtro activo)
         self._btn_clear_cat = tk.Button(
             hdr,
@@ -1720,9 +1724,19 @@ class FinancePanel(tk.Frame):
         self._cover_table = _CoverageTable(right, self.bgcolor)
         self._commit_table = _CommitmentsTable(right, self.bgcolor)
         self._flow_table = _FlowTable(right, self.bgcolor)
+        # Misma grilla que el detalle del período, con los mismos callbacks de edición: lo único
+        # distinto es de dónde salen las filas. Tener su propio widget evita recargar la otra vista en
+        # cada ida y vuelta entre las dos.
+        self._nocat_table = _TxnTable(
+            right,
+            self.bgcolor,
+            on_category_edit=self._on_category_edit,
+            on_date_edit=self._on_date_edit,
+        )
 
-        self._detail = "txn"  # txn | cover | commit | flow — qué vista ocupa el panel derecho
+        self._detail = "txn"  # txn | cover | commit | flow | sincat — qué vista ocupa el panel derecho
         self._cover_pending = 0
+        self._nocat_pending = 0
         self._show_transactions()
 
     def _build_chips(self):
@@ -1844,18 +1858,22 @@ class FinancePanel(tk.Frame):
 
     def _pack_solo(self, tabla):
         """Deja en el panel derecho una sola de las vistas de detalle."""
-        for t in (self._txn_table, self._cover_table, self._commit_table, self._flow_table):
+        for t in (self._txn_table, self._cover_table, self._commit_table, self._flow_table, self._nocat_table):
             if t is not tabla:
                 t.pack_forget()
         tabla.pack(fill=tk.BOTH, expand=True)
 
     def _mark_section(self, activa):
-        """Enciende la etiqueta de la vista activa y apaga las otras. Cobertura conserva su rojo si hay pendientes."""
-        for lbl in (self._lbl_txn_section, self._lbl_cover_section, self._lbl_commit_section, self._lbl_flow_section):
+        """Enciende la etiqueta de la vista activa y apaga las otras. Cobertura y Sin clasificar conservan
+        su rojo si tienen pendientes: son las dos que avisan de trabajo por hacer."""
+        for lbl in (self._lbl_txn_section, self._lbl_cover_section, self._lbl_commit_section,
+                    self._lbl_flow_section, self._lbl_nocat_section):
             if lbl is activa:
                 lbl.config(bg=_BLACK, fg=_WHITE)
             elif lbl is self._lbl_cover_section:
                 lbl.config(bg="#2A2A3E", fg=_NEGATIVE if self._cover_pending else _NEUTRAL)
+            elif lbl is self._lbl_nocat_section:
+                lbl.config(bg="#2A2A3E", fg=_NEGATIVE if self._nocat_pending else _NEUTRAL)
             else:
                 lbl.config(bg="#2A2A3E", fg=_NEUTRAL)
 
@@ -1893,7 +1911,22 @@ class FinancePanel(tk.Frame):
         self._mark_section(self._lbl_flow_section)
         self._update_status()
 
+    def _show_sin_clasificar(self):
+        """Las filas sin categoría, de cualquier mes. Es la única vista que ignora el período
+        elegido: el panel muestra un mes por vez, así que una fila vieja sin clasificar no se ve desde
+        ningún otro lado y no había forma de corregirla sin acertar el mes."""
+        self._detail = "sincat"
+        self._btn_clear_cat.pack_forget()
+        self._pack_solo(self._nocat_table)
+        self._mark_section(self._lbl_nocat_section)
+        self._update_status()
+
     def _update_status(self):
+        if self._detail == "sincat":
+            count = self._nocat_table.visible_count
+            texto = f"{count} sin clasificar — de cualquier mes" if count else "todo clasificado"
+            self._lbl_status.config(text=texto, fg=_NEGATIVE if count else _POSITIVE)
+            return
         if self._detail == "cover":
             total = len(self._cover_table.tree.get_children())
             pend = self._cover_pending
@@ -2004,8 +2037,12 @@ class FinancePanel(tk.Frame):
         """
         ok = self._db.update_txn_category(txn_id, cat_id)
         if ok and iid:
-            self._txn_table.update_row_category(iid, cat_name)
-            self._update_status()
+            if self._detail == "sincat":
+                # La fila deja de estar sin clasificar: dejarla a la vista miente sobre lo que falta.
+                self.refresh()
+            else:
+                self._txn_table.update_row_category(iid, cat_name)
+                self._update_status()
 
         if pattern and match_type and cat_id is not None:
             saved = self._db.save_rule(pattern, match_type, cat_id, incluir_manual=incluir_manual)
@@ -2027,10 +2064,16 @@ class FinancePanel(tk.Frame):
         """Persiste el cambio de fecha en la BD y actualiza la fila visible."""
         ok = self._db.update_txn_date(txn_id, new_date)
         if ok and iid:
-            self._txn_table.update_row_date(iid, new_date)
+            self._tabla_detalle().update_row_date(iid, new_date)
             self._update_status()
 
     # ── helpers privados ──────────────────────────────────────────────────────
+
+    def _tabla_detalle(self) -> _TxnTable:
+        """La grilla de movimientos que está a la vista. Las dos comparten los callbacks de edición,
+        así que sin esto una corrección hecha desde Sin clasificar iría a buscar la fila a la
+        grilla equivocada."""
+        return self._nocat_table if self._detail == "sincat" else self._txn_table
 
     def _period(self) -> tuple[str, str]:
         y = self._sel_year
@@ -2110,6 +2153,18 @@ class FinancePanel(tk.Frame):
 
             txns = self._db.get_transactions(date_from, date_to, account_ids)
             self._txn_table.load(txns)
+
+            # lo sin clasificar tampoco depende del período: una fila vieja sin categoría hay que
+            # verla igual, y con el panel mes a mes no se veía desde ningún lado
+            sin_cat = self._db.get_transactions(date_from, date_to, account_ids, sin_categoria=True)
+            self._nocat_table.load(sin_cat)
+            self._nocat_pending = len(sin_cat)
+            self._lbl_nocat_section.config(
+                text=f"  Sin clasificar ({self._nocat_pending})  " if self._nocat_pending
+                else "  Sin clasificar  "
+            )
+            if self._detail != "sincat":
+                self._lbl_nocat_section.config(fg=_NEGATIVE if self._nocat_pending else _NEUTRAL)
             self._update_status()
 
         except Exception as e:

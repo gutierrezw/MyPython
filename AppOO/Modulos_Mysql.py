@@ -8229,14 +8229,23 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
         }
 
     def get_transactions(
-        self, date_from: str, date_to: str, account_ids: list[int] | None = None, limit: int = 200
+        self, date_from: str, date_to: str, account_ids: list[int] | None = None, limit: int = 200,
+        sin_categoria: bool = False,
     ) -> list[dict]:
         """
         Retorna últimas transacciones del período.
         Resultado: [{"date", "type", "amount", "currency", "description", "category", "account"}, ...]
+
+        `sin_categoria` cambia el criterio: trae lo que no tiene categoría de cualquier mes e ignora el
+        período. El panel muestra un mes por vez, así que una fila sin clasificar de un mes viejo no
+        se ve desde ningún lado y no hay forma de corregirla sin adivinar el mes — medido el
+        2026-09-26: 3 filas repartidas en 2025-12, 2026-05 y 2026-07, las tres invisibles.
         """
         clause, extra = self._ids_clause(account_ids)
-        params = [date_from, date_to] + extra + [limit]
+        if sin_categoria:
+            filtro, params = "t.category_id IS NULL", extra + [limit]
+        else:
+            filtro, params = f"{self._SQL_FECHA} BETWEEN %s AND %s", [date_from, date_to] + extra + [limit]
 
         conn = self._conectar("fin_transactions.select")
         try:
@@ -8254,7 +8263,7 @@ class FinanceScreen(BDsystem):  # ----------------------------------------------
                    LEFT JOIN fin_categories c ON c.id = t.category_id
                    LEFT JOIN fin_accounts   a ON a.id = t.account_id
                    LEFT JOIN fin_banks      b ON b.id = a.bank_id
-                   WHERE {self._SQL_FECHA} BETWEEN %s AND %s {clause}
+                   WHERE {filtro} {clause}
                    ORDER BY {self._SQL_FECHA} DESC
                    LIMIT %s""",
                 params,
