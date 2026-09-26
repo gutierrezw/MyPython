@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TradingView — App Panel
 // @namespace    http://tampermonkey.net/
-// @version      2.7
+// @version      2.8
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -986,6 +986,9 @@
                         method: "GET",
                         url: `${BASE}/position?symbol=${sym}`,
                         onload: (r2) => {
+                            // 429 del rate limit (o 5xx) no significa "sin posicion": el cuerpo parsea como
+                            // JSON pero no trae .posicion, y apagar el panel por eso borra datos validos
+                            if (r2.status !== 200) return;
                             try {
                                 const data = JSON.parse(r2.responseText);
                                 if (data && data.posicion && Object.keys(data.posicion).length) {
@@ -1051,7 +1054,9 @@
     }
 
     crearPanel();
-    setInterval(poll, 3000);
+    // poll gasta 4 peticiones por ciclo (ping+current+position+price) contra un limite de 120/min en el
+    // server-api: a 3s daba 112/min y cualquier consumidor extra disparaba 429. A 5s baja a 80/min.
+    setInterval(poll, 5000);
     setInterval(pollPrice, 2000);
     setInterval(fetchSymbols, 30000);
     setInterval(vigilarLayout, 5000);
