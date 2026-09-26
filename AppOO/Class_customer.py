@@ -4388,6 +4388,8 @@ class WidgetVehiculo(TickerInfo):
 
         # ordenes del activo — pendientes (de cualquier dia) + las que se ejecutaron hoy.
         # La consulta sale de order_trader, que unifica IB y Binance: el panel no distingue broker.
+        # Las canceladas quedan fuera: no comprometen acciones ni dicen nada del activo, y sumaban
+        # fila en la tabla mas linea punteada en el grafico. IB escribe "Cancelled", Binance "CANCELED".
         ordenes = []
         try:
             _rows, _ix = self.RepositorioOportunidades.select_order_trader_today(
@@ -4395,6 +4397,8 @@ class WidgetVehiculo(TickerInfo):
             )
             for _r in _rows or []:
                 _o = dict(zip(_ix, _r))
+                if (_o.get("status") or "").upper() in ("CANCELED", "CANCELLED"):
+                    continue
                 _stamp = _o.get("stampPlace")
                 _qty = float(_o.get("quantity") or 0)
                 _price = float(_o.get("price") or 0)
