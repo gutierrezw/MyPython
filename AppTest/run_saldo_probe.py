@@ -12,6 +12,11 @@ confirmar, antes de soltar un PDF en extractos\\, que el saldo va a entrar.
 El PDF unificado de Santander va por otro camino: ahi el saldo no lo saca parse_balances() sino _saldo_linea()
 dentro del state machine, atado a la seccion abierta, asi que se corre _extract_all() y se muestra el saldo que
 quedaria por seccion.
+
+Los dos adaptadores de Santander se miden por su propio camino. El unificado saca el saldo de _saldo_linea()
+dentro del state machine, atado a la seccion abierta. El resumen de tarjeta mira solo la hoja 1 y la ultima, y
+si ahi no hay 'Saldo actual' cae a _total_a_pagar(), que recorre el PDF entero: medido con parse_balances() a
+secas daba curr=None en los 6 resumenes y hacia creer que la clase no captura el cierre.
 """
 
 import json
@@ -34,14 +39,15 @@ if not os.path.isabs(_tmp):
 os.environ.setdefault("APPOO_TMP", _tmp)
 
 from Modulos_python import pdfplumber
-from Class_Finance import DESCONOCIDOS_DIR, EXTRACTOS_DIR, SantanderAr, detect_adapter, parse_balances
+from Class_Finance import (DESCONOCIDOS_DIR, EXTRACTOS_DIR, SantanderAr, SantanderArTarjetaResumen,
+                           detect_adapter, parse_balances)
 
 # x_max con el que cada adaptador llama a parse_balances(). None = todavia no captura saldo.
 X_MAX_POR_SECCION = {
     "bbva_cuenta": 10000.0,
     "bbva_ahorro": 10000.0,
     "bbva_tc": 530.0,
-    "santander_tc_resumen": 500.0,
+    "santander_tc_resumen": 500.0,  # solo la mitad: si no hay "Saldo actual" el cierre sale de _total_a_pagar()
 }
 RE_IMPORTE = re.compile(r"^\$?-?\d{1,3}(?:\.\d{3})*,\d{2}$")
 
@@ -78,11 +84,29 @@ def probe_santander_unificado(ruta):
               % ", ".join(faltan))
 
 
+def probe_santander_tc(ruta, account_ref):
+    """El resumen de tarjeta tampoco se mide con parse_balances() sobre todas las hojas: el adaptador mira
+    la hoja 1 y la ultima, y si ahi no hay 'Saldo actual' cae a _total_a_pagar(). _extract_balances() solo lee
+    el PDF — no toca la BD."""
+    adapter = SantanderArTarjetaResumen(pdf_path=ruta, account_ref=account_ref)
+    prev, curr = adapter._extract_balances()
+    print("    -> balance_prev=%s  balance_curr=%s   (hoja 1 + ultima, x<500; fallback TOTAL A PAGAR)"
+          % (prev, curr))
+    if curr is None:
+        print("    NOTA: sin cierre — no publica 'Saldo actual' ni 'Total a pagar' en pesos")
+    if prev is None:
+        # el PDF suele traerlo, pero en una hoja del medio: _extract_balances() no la mira a proposito
+        # (ver _total_a_pagar), asi que 'no lo publica' seria falso — lo que falta es de donde leerlo
+        print("    NOTA: sin saldo anterior — si arriba hay un 'Saldo anterior' esta en una hoja que el")
+        print("          adaptador no lee: solo mira la hoja 1 y la ultima")
+
+
 def probe(ruta):
     det = detect_adapter(ruta)
     seccion = det[0] if det else None
     x_max = X_MAX_POR_SECCION.get(seccion)
     detalle_x = ("por seccion en el state machine" if seccion == "santander"
+                 else "%s + fallback TOTAL A PAGAR" % x_max if seccion == "santander_tc_resumen"
                  else x_max if x_max else "no captura saldo todavia")
     print("")
     print("=== %s" % os.path.basename(ruta))
@@ -103,6 +127,9 @@ def probe(ruta):
             print("    p%-2d %-58s | %s" % (n, texto[:58], "  ".join(importes) or "(sin importe)"))
     if seccion == "santander":
         probe_santander_unificado(ruta)
+        return
+    if seccion == "santander_tc_resumen":
+        probe_santander_tc(ruta, det[1])
         return
     prev, curr = parse_balances(todas, x_max=x_max or 10000.0)
     print("    -> balance_prev=%s  balance_curr=%s" % (prev, curr))
