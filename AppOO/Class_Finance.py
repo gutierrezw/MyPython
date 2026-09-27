@@ -3866,6 +3866,8 @@ class CitibankUs:
 
     RE_DATE = re.compile(r"^\d{2}/\d{2}$")
     RE_STMT_PERIOD = re.compile(r"(\w+)\s+\d+\s*-\s*(\w+)\s+\d+,\s*(20\d{2})", re.IGNORECASE)
+    RE_SALDO_US = re.compile(r"(BEGINNING|ENDING)\s+BALANCE")
+    RE_IMPORTE_US = re.compile(r"^-?\$?-?[\d,]*\d\.\d{2}$")
 
     MESES_EN = {
         "jan": 1,
@@ -3890,6 +3892,8 @@ class CitibankUs:
         self.file_hash = sha256_file(pdf_path)
         self._end_year: int = datetime.now().year
         self._end_month: int = datetime.now().month
+        # [prev, curr] por sección: el extracto publica un saldo por cuenta y son dos imports distintos
+        self._balances: dict[str, list[Decimal | None]] = {"checking": [None, None], "savings": [None, None]}
 
     def _infer_period(self, text: str):
         """Extrae año y mes de cierre del statement period. Ej: 'Dec 15 - Jan 12, 2026' → end_month=1, end_year=2026."""
@@ -3938,6 +3942,17 @@ class CitibankUs:
             return "added"
         return "balance"
 
+    def _saldo_linea(self, line: list[dict]) -> Decimal | None:
+        """El importe de una línea 'Beginning/Ending Balance'. El número de cuenta viaja en la misma
+        línea — '9135153751 Beginning Balance: $231.80' — y no lleva decimales, así que la regex del
+        importe lo deja afuera sin depender de la columna: el saldo no respeta el layout de los
+        movimientos."""
+        for w in reversed(line):
+            t = w["text"].strip()
+            if self.RE_IMPORTE_US.match(t):
+                return parse_amount_us(t.replace("$", ""))
+        return None
+
     def _extract_all(self) -> dict[str, list[dict]]:
         result = {"checking": [], "savings": []}
         state = "none"
@@ -3972,6 +3987,14 @@ class CitibankUs:
                         if pending_row:
                             result[state].append(pending_row)
                             pending_row = None
+                        m = self.RE_SALDO_US.search(upper)
+                        if m:
+                            # el par abre la sección, así que la primera aparición es la buena: la
+                            # sección sigue abierta durante las hojas de letra chica y nada garantiza
+                            # que ahí no se vuelva a nombrar un saldo
+                            i = 0 if m.group(1) == "BEGINNING" else 1
+                            if self._balances[state][i] is None:
+                                self._balances[state][i] = self._saldo_linea(line)
                         continue
                     if "ALL TRANSACTION TIMES" in upper or "APY AND INTEREST" in upper:
                         pending_row = None
@@ -4104,8 +4127,8 @@ class CitibankUs:
             ya_importado = cursor.fetchone()
             if ya_importado:
                 _logger.warning(f"  [{section_key}] Ya importado — omitido")
-                _fill_missing_balances(cursor, ya_importado[0], None, None,
-                                       _periodo_de_pdf(all_rows[section_key]))
+                _fill_missing_balances(cursor, ya_importado[0], *self._balances[section_key],
+                                       periodo=_periodo_de_pdf(all_rows[section_key]))
                 conn.commit()
                 import_ids[section_key] = -1
                 continue
@@ -4143,6 +4166,7 @@ class CitibankUs:
                     stats["errors"] += 1
             import_ids[section_key] = _cerrar_import(
                 cursor, import_id, account_ids[section_key], _periodo_de_pdf(txns), len(rows), inserted_sec,
+                prev=self._balances[section_key][0], curr=self._balances[section_key][1],
             )
             conn.commit()
             _logger.info(f"  [{section_key}] {len(rows)} filas → {inserted_sec} insertadas")
