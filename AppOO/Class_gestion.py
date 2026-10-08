@@ -304,7 +304,7 @@ class GestionInversion(tk.Frame):
     # mantiene actualizada información de extractos
     def widgets_extractos(self):
         # Guard: verificar que self.year esté definido
-        if not hasattr(self, 'year') or self.year is None:
+        if not hasattr(self, "year") or self.year is None:
             print("widgets_extractos(): self.year no está definido. Abortando.")
             return
 
@@ -330,7 +330,11 @@ class GestionInversion(tk.Frame):
                                 nav_cierre = fila["navcierre"]
                                 costo_base = fila["costobase"]
                                 ilog = False
-                            marge_neto = (fila["beneficios"] / fila["ingresos"]) if fila["ingresos"] is not None and fila["ingresos"] > 0 else 0.0
+                            marge_neto = (
+                                (fila["beneficios"] / fila["ingresos"])
+                                if fila["ingresos"] is not None and fila["ingresos"] > 0
+                                else 0.0
+                            )
                             self.extract.insert(
                                 parent,
                                 tk.END,
@@ -351,7 +355,7 @@ class GestionInversion(tk.Frame):
                                     "{:10.2f}".format(fila["beneficios"] or 0),
                                     "{:10.1%}".format(marge_neto),
                                 ),
-                        )
+                            )
                     except (AttributeError, TypeError):
                         continue
                 return costo_base, nav_cierre
@@ -809,7 +813,7 @@ class GestionInversion(tk.Frame):
                 self.mpl[i + 1][0].config(text="{:>10}".format(key["vision"] or ""))
                 self.mpl[i + 1][1].config(text=s_deseada.rjust(14))
                 self.mpl[i + 1][2].config(text=s_actual.rjust(14))
-                deseada += (key["deseada"] or 0)
+                deseada += key["deseada"] or 0
                 actual += _val_actual
                 if i == 0:
                     _objetivo = _objetivo_actual if _meta_activa else (key["objetivo"] or 0)
@@ -973,8 +977,7 @@ class GestionInversion(tk.Frame):
             dlg.destroy()
 
         def _seccion(parent, titulo, color, row):
-            ui_section_bar(parent, titulo, bg=color, row=row, columnspan=2, font=("Segoe UI", 9, "bold"),
-                            pady=(8, 2))
+            ui_section_bar(parent, titulo, bg=color, row=row, columnspan=2, font=("Segoe UI", 9, "bold"), pady=(8, 2))
 
         def _make_list(parent, grid_row, items, cols):
             return self._make_editable_list(parent, grid_row, items, cols, max_filas=MAX_FILAS)
@@ -1116,10 +1119,12 @@ class GestionInversion(tk.Frame):
             rsg = ["Riesgos", "Solución Potencial"]
             win1.grid_columnconfigure(0, minsize=250, weight=0)
             win1.grid_columnconfigure(1, minsize=350, weight=1)
-            ui_section_bar(win1, rsg[0], bg="#c0392b", row=0, column=0, columnspan=1, font=("Segoe UI", 10, "bold"),
-                            pady=0)
-            ui_section_bar(win1, rsg[1], bg="#1565c0", row=0, column=1, columnspan=1, font=("Segoe UI", 10, "bold"),
-                            pady=0)
+            ui_section_bar(
+                win1, rsg[0], bg="#c0392b", row=0, column=0, columnspan=1, font=("Segoe UI", 10, "bold"), pady=0
+            )
+            ui_section_bar(
+                win1, rsg[1], bg="#1565c0", row=0, column=1, columnspan=1, font=("Segoe UI", 10, "bold"), pady=0
+            )
 
             # Configurar el Treeview para usar los scrollbars
             columns = []
@@ -1347,7 +1352,10 @@ class GestionInversion(tk.Frame):
             lambda rows: -rows["gprealizadas"] if rows["gprealizadas"] is not None and rows["gprealizadas"] < 0 else 0,
             axis=1,
         )
-        datos["crecimiento"] = datos.apply(lambda rows: rows["gprealizadas"] if rows["gprealizadas"] is not None and rows["gprealizadas"] > 0 else 0, axis=1)
+        datos["crecimiento"] = datos.apply(
+            lambda rows: rows["gprealizadas"] if rows["gprealizadas"] is not None and rows["gprealizadas"] > 0 else 0,
+            axis=1,
+        )
         datos["costos"] = datos["perdidas"] + datos["tarifacomision"]
         datos["beneficios"] = datos["crecimiento"] - datos["costos"]
         datos["comisiones"] = datos["tarifacomision"]
@@ -1483,7 +1491,10 @@ class GestionInversion(tk.Frame):
             lambda rows: -rows["gprealizadas"] if rows["gprealizadas"] is not None and rows["gprealizadas"] < 0 else 0,
             axis=1,
         )
-        datos["crecimiento"] = datos.apply(lambda rows: rows["gprealizadas"] if rows["gprealizadas"] is not None and rows["gprealizadas"] > 0 else 0, axis=1)
+        datos["crecimiento"] = datos.apply(
+            lambda rows: rows["gprealizadas"] if rows["gprealizadas"] is not None and rows["gprealizadas"] > 0 else 0,
+            axis=1,
+        )
         datos["costos"] = datos["perdidas"] + datos["tarifacomision"]
         datos["beneficios"] = datos["crecimiento"] - datos["costos"]
         datos["comisiones"] = datos["tarifacomision"]
@@ -1529,151 +1540,184 @@ class GestionInversion(tk.Frame):
             }
             anterior = row.navcierre
 
-        # inserta último mes calculado
-        self.PlaInversion.insert_extracto(account=account, values=values)
+        # inserta último mes calculado, si hay datos en resumen (dataframe)
+        if not resumen.empty:
+            self.PlaInversion.insert_extracto(account=account, values=values)
 
     # construye extracto de FCI en ARS
     def construir_extracto_fci(self, account=None, vehiculo=None, desde=None, hasta=None, insert=True):
 
-        book, ix = self.RepositorioOportunidades.select_booktrading(accion="cartera", account=account, idivisa="ARS")
+        try:
+            book, ix = self.RepositorioOportunidades.select_booktrading(
+                accion="cartera", account=account, idivisa="ARS"
+            )
 
-        # Obtener desempeño del vehículo FCI
-        performa, iy = self.Perfoma.select_performa_inversion(account=account, vehiculo=vehiculo, accion="all")
+            # Obtener desempeño del vehículo FCI
+            performa, iy = self.Perfoma.select_performa_inversion(account=account, vehiculo=vehiculo, accion="all")
 
-        # dataframe(): para obtener ingresos, costos y comisiones ------------------------------------------------------------
-        datos = pd.DataFrame(book, columns=ix)
-        datos = datos.drop(
-            columns=[
-                "id",
-                "sec",
-                "split",
-                "updateStamp",
-                "categoria",
-                "idtrans",
-                "divisa",
-                "cuenta",
-                "sell",
-                "activa",
-                "simbolo",
-                "preciocierre",
-                "preciotrans",
-                "mtmgp",
-                "stock",
-            ]
-        )
+            # dataframe(): para obtener ingresos, costos y comisiones ------------------------------------------------------------
+            datos = pd.DataFrame(book, columns=ix)
+            datos = datos.drop(
+                columns=[
+                    "id",
+                    "sec",
+                    "split",
+                    "updateStamp",
+                    "categoria",
+                    "idtrans",
+                    "divisa",
+                    "cuenta",
+                    "sell",
+                    "activa",
+                    "simbolo",
+                    "preciocierre",
+                    "preciotrans",
+                    "mtmgp",
+                    "stock",
+                ]
+            )
 
-        # Dataframe() with datos de costo base y value -----------------------------------------------------------------------
-        idatos = pd.DataFrame(performa, columns=iy)
-        idatos = idatos.drop(
-            columns=[
-                "id",
-                "idcuenta",
-                "vehiculo",
-                "referencia",
-                "p_referencia",
-                "p_vehiculo",
-                "timestamp",
-            ]
-        )
+            # Dataframe() with datos de costo base y value -----------------------------------------------------------------------
+            idatos = pd.DataFrame(performa, columns=iy)
+            idatos = idatos.drop(
+                columns=[
+                    "id",
+                    "idcuenta",
+                    "vehiculo",
+                    "referencia",
+                    "p_referencia",
+                    "p_vehiculo",
+                    "timestamp",
+                ]
+            )
 
-        idatos["dividendos"] = idatos["dividends"]
-        idatos["navcierre"] = idatos["value"]
-        idatos["costobase"] = idatos["costo_base"]
-        idatos["Date"] = pd.to_datetime(idatos["fechaclose"])
+            idatos["dividendos"] = idatos["dividends"]
+            idatos["navcierre"] = idatos["value"]
+            idatos["costobase"] = idatos["costo_base"]
+            idatos["Date"] = pd.to_datetime(idatos["fechaclose"])
 
-        idatos.set_index("Date", inplace=True)
-        idatos = idatos.drop(columns=["fechaclose", "dividends", "value", "costo_base"])
+            idatos.set_index("Date", inplace=True)
+            idatos = idatos.drop(columns=["fechaclose", "dividends", "value", "costo_base"])
 
-        # Ultimo registro disponible por mes (ultimo dia de mercado, no necesariamente fin de mes calendario)
-        idatos.index = pd.to_datetime(idatos.index)
-        m_idatos = idatos.groupby(idatos.index.to_period("M")).last()
+            # Ultimo registro disponible por mes (ultimo dia de mercado, no necesariamente fin de mes calendario)
+            idatos.index = pd.to_datetime(idatos.index)
+            m_idatos = idatos.groupby(idatos.index.to_period("M")).last()
 
-        # cambia formato de index para aparear con los beneficios
-        m_idatos.index = m_idatos.index.strftime("%Y-%m")
+            # cambia formato de index para aparear con los beneficios
+            m_idatos.index = m_idatos.index.strftime("%Y-%m")
 
-        # identificar en columnas compras y ventas ---------------------------------------------------------------------
-        datos["depositos"] = datos.apply(
-            lambda rows: (rows["producto"] / rows["factor_cambio"] if rows["codigo"] == "O" and rows["factor_cambio"] is not None and rows["factor_cambio"] != 0 else 0),
-            axis=1,
-        )
-        datos["retiros"] = datos.apply(
-            lambda rows: (abs(rows["basico"] * rows["cantidad"]) / rows["factor_cambio"] if rows["codigo"] == "C" and rows["factor_cambio"] is not None and rows["factor_cambio"] != 0 else 0),
-            axis=1,
-        )
-        datos["perdidas"] = datos.apply(
-            lambda rows: (-rows["gprealizadas"] / rows["factor_cambio"] if rows["gprealizadas"] is not None and rows["factor_cambio"] is not None and rows["factor_cambio"] != 0 and rows["gprealizadas"] < 0 else 0),
-            axis=1,
-        )
-        datos["crecimiento"] = datos.apply(
-            lambda rows: (rows["gprealizadas"] / rows["factor_cambio"] if rows["gprealizadas"] is not None and rows["factor_cambio"] is not None and rows["gprealizadas"] >= 0 else 0),
-            axis=1,
-        )
+            # identificar en columnas compras y ventas ---------------------------------------------------------------------
+            datos["depositos"] = datos.apply(
+                lambda rows: (
+                    rows["producto"] / rows["factor_cambio"]
+                    if rows["codigo"] == "O" and rows["factor_cambio"] is not None and rows["factor_cambio"] != 0
+                    else 0
+                ),
+                axis=1,
+            )
+            datos["retiros"] = datos.apply(
+                lambda rows: (
+                    abs(rows["basico"] * rows["cantidad"]) / rows["factor_cambio"]
+                    if rows["codigo"] == "C" and rows["factor_cambio"] is not None and rows["factor_cambio"] != 0
+                    else 0
+                ),
+                axis=1,
+            )
+            datos["perdidas"] = datos.apply(
+                lambda rows: (
+                    -rows["gprealizadas"] / rows["factor_cambio"]
+                    if rows["gprealizadas"] is not None
+                    and rows["factor_cambio"] is not None
+                    and rows["factor_cambio"] != 0
+                    and rows["gprealizadas"] < 0
+                    else 0
+                ),
+                axis=1,
+            )
+            datos["crecimiento"] = datos.apply(
+                lambda rows: (
+                    rows["gprealizadas"] / rows["factor_cambio"]
+                    if rows["gprealizadas"] is not None
+                    and rows["factor_cambio"] is not None
+                    and rows["gprealizadas"] >= 0
+                    else 0
+                ),
+                axis=1,
+            )
 
-        datos["gprealizadas"] = datos.apply(
-            lambda rows: (rows["gprealizadas"] / rows["factor_cambio"] if rows["gprealizadas"] is not None and rows["factor_cambio"] is not None and rows["gprealizadas"] >= 0 else 0),
-            axis=1,
-        )
+            datos["gprealizadas"] = datos.apply(
+                lambda rows: (
+                    rows["gprealizadas"] / rows["factor_cambio"]
+                    if rows["gprealizadas"] is not None
+                    and rows["factor_cambio"] is not None
+                    and rows["gprealizadas"] >= 0
+                    else 0
+                ),
+                axis=1,
+            )
 
-        datos["costos"] = datos["perdidas"] + datos["tarifacomision"]
-        datos["costo_base"] = datos["depositos"] - datos["retiros"]
-        datos["beneficios"] = datos["crecimiento"] - datos["costos"]
-        datos["comisiones"] = datos["tarifacomision"]
+            datos["costos"] = datos["perdidas"] + datos["tarifacomision"]
+            datos["costo_base"] = datos["depositos"] - datos["retiros"]
+            datos["beneficios"] = datos["crecimiento"] - datos["costos"]
+            datos["comisiones"] = datos["tarifacomision"]
 
-        datos["idevengo"] = 0.0
-        datos["imargen"] = 0.0
-        datos["Date"] = pd.to_datetime(datos["fechahora"])
-        datos["tax"] = 0.0
-        datos["fee"] = 0.0
+            datos["idevengo"] = 0.0
+            datos["imargen"] = 0.0
+            datos["Date"] = pd.to_datetime(datos["fechahora"])
+            datos["tax"] = 0.0
+            datos["fee"] = 0.0
 
-        # agrupa por meses y suma los valores, cambia formato index para aparear y obtener costo_base mensual
-        datos = datos.drop(columns=["fechahora", "producto", "tarifacomision", "basico", "cantidad"])
-        datos.set_index("Date", inplace=True)
-        datos.index = pd.to_datetime(datos.index)
+            # agrupa por meses y suma los valores, cambia formato index para aparear y obtener costo_base mensual
+            datos = datos.drop(columns=["fechahora", "producto", "tarifacomision", "basico", "cantidad"])
+            datos.set_index("Date", inplace=True)
+            datos.index = pd.to_datetime(datos.index)
 
-        datos.index = datos.index.strftime("%Y-%m")
-        m_datos = datos.groupby(datos.index).sum()
+            datos.index = datos.index.strftime("%Y-%m")
+            m_datos = datos.groupby(datos.index).sum()
 
-        resumen = pd.merge(m_datos, m_idatos, on="Date", how="left")
+            resumen = pd.merge(m_datos, m_idatos, on="Date", how="left")
 
-        # resumen = resumen.bfill()
-        resumen = resumen.infer_objects(copy=False).fillna(0)
-        resumen.index = pd.to_datetime(resumen.index)
+            # resumen = resumen.bfill()
+            resumen = resumen.infer_objects(copy=False).fillna(0)
+            resumen.index = pd.to_datetime(resumen.index)
 
-        # deja como fin de mes las fechas Dataframe
-        resumen.index = resumen.index + pd.offsets.MonthEnd(0)
-        resumen.fillna(0, inplace=True)
+            # deja como fin de mes las fechas Dataframe
+            resumen.index = resumen.index + pd.offsets.MonthEnd(0)
+            resumen.fillna(0, inplace=True)
 
-        anterior = 0.0
-        resultado = []
-        for row in resumen.itertuples():
-            values = {
-                "extracto": row.Index.date(),
-                "idcuenta": account,
-                "depositos": row.depositos,
-                "retiros": row.retiros,
-                "crecimiento": row.crecimiento,
-                "dividendos": row.dividendos,
-                "perdidas": row.perdidas,
-                "fee": row.fee,
-                "comisiones": row.comisiones,
-                "tax": row.tax,
-                "navcierre": row.navcierre,
-                "cierreanterior": anterior,
-                "costobase": row.costobase,
-                "idevengo": row.idevengo,
-                "imargen": row.imargen,
-            }
+            anterior = 0.0
+            resultado = []
+            for row in resumen.itertuples():
+                values = {
+                    "extracto": row.Index.date(),
+                    "idcuenta": account,
+                    "depositos": row.depositos,
+                    "retiros": row.retiros,
+                    "crecimiento": row.crecimiento,
+                    "dividendos": row.dividendos,
+                    "perdidas": row.perdidas,
+                    "fee": row.fee,
+                    "comisiones": row.comisiones,
+                    "tax": row.tax,
+                    "navcierre": row.navcierre,
+                    "cierreanterior": anterior,
+                    "costobase": row.costobase,
+                    "idevengo": row.idevengo,
+                    "imargen": row.imargen,
+                }
 
-            anterior = values["navcierre"]
-            resultado.append(values)
+                anterior = values["navcierre"]
+                resultado.append(values)
 
-            # evalua si trabaja ne opción insert para agregar el mes en curso
-            if insert and (hasta == row.Index.date().strftime("%Y-%m-%d")):
-                # solo inserta si performa tiene dato real para ese mes (navcierre > 0)
-                if values["navcierre"] is not None and values["navcierre"] > 0:
-                    self.PlaInversion.insert_extracto(account=account, values=values)
+                # evalua si trabaja ne opción insert para agregar el mes en curso
+                if insert and (hasta == row.Index.date().strftime("%Y-%m-%d")):
+                    # solo inserta si performa tiene dato real para ese mes (navcierre > 0)
+                    if values["navcierre"] is not None and values["navcierre"] > 0:
+                        self.PlaInversion.insert_extracto(account=account, values=values)
 
-        return resultado
+            return resultado
+        except Exception as e:
+            print(f"construir_extracto_fci() {e}")
 
     def update_plan(self, account=None, _condicion=None):
         """
@@ -1891,14 +1935,10 @@ class GestionInversion(tk.Frame):
                 for i in range(1, pasos_nuevos + 1):
                     nuevo_meta = meta_max_actual + i
                     distancia_target = pasos_nuevos - i
-                    vision = meta_capital / (2 ** distancia_target)
+                    vision = meta_capital / (2**distancia_target)
                     extracto = datetime(año_actual + i, mes, dia).date()
                     self.PlaInversion.insert_trazaplan(
-                        idcuenta=idcuenta,
-                        meta=nuevo_meta,
-                        vision=vision,
-                        extracto=extracto,
-                        status="proyectado"
+                        idcuenta=idcuenta, meta=nuevo_meta, vision=vision, extracto=extracto, status="proyectado"
                     )
             elif pasos_nuevos < 0:
                 nuevo_meta_max = meta_max_actual + pasos_nuevos
@@ -1953,8 +1993,11 @@ class GestionInversion(tk.Frame):
                 # Misión IA y Restricciones de cartera son un único plan para toda la cuenta —
                 # se replican a Crypto/BotCrypto, no quedan hardcodeadas a Stock
                 _restricciones_keys = (
-                    "leverage_max", "deuda_max_pct", "risk_real_max",
-                    "concentracion_sector_max", "concentracion_region_max",
+                    "leverage_max",
+                    "deuda_max_pct",
+                    "risk_real_max",
+                    "concentracion_sector_max",
+                    "concentracion_region_max",
                 )
                 self._sync_plan_restricciones(
                     plan_data=agente_ia["plan"],
@@ -2029,15 +2072,24 @@ class GestionInversion(tk.Frame):
             obj.pack(fill=tk.X, pady=(0, 1))
             obj.columnconfigure(1, weight=1)
 
-            ui_section_bar(obj, "Objetivo del Plan", bg=self.colors["session"]["neutral"], row=0, columnspan=2,
-                            pady=(4, 2))
+            ui_section_bar(
+                obj, "Objetivo del Plan", bg=self.colors["session"]["neutral"], row=0, columnspan=2, pady=(4, 2)
+            )
 
             objetivo_entries = []
             _obj_row = 1
             for pr in plan_rows:
-                tk.Label(obj, text=pr.get("vision", ""), width=14, anchor="w", **{
-                    "bg": self.bgcolor, "fg": "white", "font": ("Segoe UI", 9),
-                }).grid(row=_obj_row, column=0, padx=(20, 5), pady=3, sticky="w")
+                tk.Label(
+                    obj,
+                    text=pr.get("vision", ""),
+                    width=14,
+                    anchor="w",
+                    **{
+                        "bg": self.bgcolor,
+                        "fg": "white",
+                        "font": ("Segoe UI", 9),
+                    },
+                ).grid(row=_obj_row, column=0, padx=(20, 5), pady=3, sticky="w")
                 e = tk.Entry(obj, bg=self.bgcolor, fg="white", insertbackground="white", font=("Segoe UI", 9))
                 e.insert(0, pr.get("proyecto", "") or "")
                 e.grid(row=_obj_row, column=1, padx=(5, 20), pady=3, sticky="ew")
@@ -2046,7 +2098,7 @@ class GestionInversion(tk.Frame):
 
             tk.Label(
                 obj,
-                text="Tip: usa {ingreso_pasivo} para que tome el valor de \"Ingreso pasivo mín.\" (Misión IA).",
+                text='Tip: usa {ingreso_pasivo} para que tome el valor de "Ingreso pasivo mín." (Misión IA).',
                 bg=self.bgcolor,
                 fg="#b0bec5",
                 font=("Segoe UI", 8, "italic"),
@@ -2059,8 +2111,9 @@ class GestionInversion(tk.Frame):
             top.columnconfigure(1, weight=1)
 
             # sección Visión Deseada
-            ui_section_bar(top, "Visión Deseada", bg=self.colors["session"]["neutral"], row=0, columnspan=2,
-                            pady=(4, 2))
+            ui_section_bar(
+                top, "Visión Deseada", bg=self.colors["session"]["neutral"], row=0, columnspan=2, pady=(4, 2)
+            )
 
             _lbl = {"bg": self.bgcolor, "fg": "white", "font": ("Segoe UI", 9)}
 
@@ -2126,8 +2179,9 @@ class GestionInversion(tk.Frame):
             rst.pack(fill=tk.X, pady=(0, 1), expand=False)
             rst.columnconfigure(3, weight=1)
 
-            ui_section_bar(rst, "Restricciones de cartera", bg=self.colors["session"]["neutral"], row=0,
-                            columnspan=4, pady=(4, 2))
+            ui_section_bar(
+                rst, "Restricciones de cartera", bg=self.colors["session"]["neutral"], row=0, columnspan=4, pady=(4, 2)
+            )
 
             _rst_lbl = {"bg": self.bgcolor, "fg": "white", "font": ("Segoe UI", 9)}
             _rst_ent = {"width": 8, "bg": self.bgcolor, "fg": "white", "insertbackground": "white"}
@@ -2309,12 +2363,12 @@ class GestionInversion(tk.Frame):
                     desde=f_desde,
                     hasta=f_hasta,
                 )
-
+                return True
             except Exception as e:
-                print("insert_new_extracto(): {}".format(e))
+                print(f"insert_new_extracto(): {e}")
+                return False
 
-            # Proceso mensuales y fin de año fiscal
-
+        # Proceso mensuales y fin de año fiscal
         def procesa_extractos():
             try:
                 # asegura tomar datos de sesion principal
@@ -2324,15 +2378,18 @@ class GestionInversion(tk.Frame):
                 if a_extracto[0]["extracto"] == self.d_extract["extracto"].date():
 
                     # inserta extracto Stock y Crypto ---------------------
-                    insert_new_extracto()
+                    carga_completa = insert_new_extracto()
 
-                    # actualiza tabla de plan cuando cierra el año fiscal ---------------------------------------------
-                    if self.d_extract["extracto"].month == sesion["fiscalYear"].month:
-                        self.update_plan(account=sesion["idcuenta"], _condicion="Cumplido")
+                    if carga_completa:
+                        # actualiza tabla de plan cuando cierra el año fiscal ---------------------------------------------
+                        if self.d_extract["extracto"].month == sesion["fiscalYear"].month:
+                            self.update_plan(account=sesion["idcuenta"], _condicion="Cumplido")
+                        else:
+                            self.update_plan(account=sesion["idcuenta"], _condicion=None)
+
+                        MyMessageBox(self.root).showwarning("Add", "Cargados exitosamente los Extracto")
                     else:
-                        self.update_plan(account=sesion["idcuenta"], _condicion=None)
-
-                    MyMessageBox(self.root).showwarning("Add", "Cargados exitosamente los Extracto")
+                        MyMessageBox(self.root).showwarning("Add", "Falla en la Carga de los Extracto")
 
                 else:
                     idcuenta = a_extracto[0]["idcuenta"]
