@@ -38,6 +38,7 @@ from Modulos_python import (
     urllib,
     webbrowser,
     datetime,
+    date,
 )
 import pathlib
 from Modulos_Mysql import BDsystem, RepositorioOportunidadesBuySell
@@ -438,7 +439,15 @@ class BinanceSpot(Spot):
         return r.json()
 
     @handle_binance_exceptions
-    def get_my_trades(self, ticket: str, limit: int, startTime: int, endTime: int):
+    def get_my_trades(self, ticket: str, limit: int, startTime: int = None, endTime: int = None,
+                      fromId: int = None):
+        """Trades del par. Con `fromId` pagina por id; si no, acota por ventana de fechas.
+
+        Los dos modos son excluyentes en la API: `my_trades` ignora startTime/endTime cuando recibe
+        fromId. La ventana de fechas no admite mas de 24h de rango, la paginacion por id no tiene limite.
+        """
+        if fromId is not None:
+            return self.my_trades(ticket, limit=limit, fromId=fromId)
         return self.my_trades(ticket, limit=limit, startTime=startTime, endTime=endTime)
 
     @handle_binance_exceptions
@@ -738,23 +747,30 @@ class BinanceClient:
         """Descarga trades de Binance e inserta los nuevos en booktrading.
 
         Args:
-            account:  cuenta de inversión (ej: "B0000001")
+            account:  cuenta de inversion (ej: "B0000001")
             symbols:  lista de pares (ej: ["BTCUSDT", "ETHUSDT"])
-            desde:    date desde donde descargar. Si es None usa la última fecha
-                      en booktrading para esta cuenta, o 90 días atrás.
+            desde:    date desde donde insertar. None arranca en el ultimo tradeId conocido de cada par;
+                      con fecha recorre el historico completo del par y filtra al insertar.
 
         Returns:
             {"insertados": int, "simbolos": list[str]}
-        """
-        from datetime import date, datetime, timedelta
 
+        Pagina por `fromId`, no por ventanas de fecha. `my_trades` acota el rango a 24h cuando recibe
+        startTime/endTime, asi que el recorrido anterior necesitaba una llamada por jornada y arrancaba en
+        la ultima fecha del libro de la cuenta entera: un trade mas nuevo de cualquier par movia el punto
+        de partida de todos los demas y los dias anteriores no se volvian a pedir nunca.
+
+        Medido el 2026-10-10 sobre los 12 pares en cartera: 55 trades que nunca entraron al libro. Los de
+        2026 caen todos en horario de madrugada — se ejecutaron con la app abajo, cuando el websocket que
+        puebla booktrading en vivo no estaba escuchando, y nada los rescataba despues porque este metodo
+        solo corria a mano.
+
+        Los tradeId son monotonos crecientes por par, asi que arrancar en el ultimo conocido no puede
+        saltear un trade nuevo. Para rescatar un hueco viejo hay que pasar `desde`, que recorre todo.
+        """
         repo = RepositorioOportunidadesBuySell()
 
-        if desde is None:
-            last, _ = repo.select_booktrading(accion="last", account=account, idivisa="USD")
-            desde = last[0]["fechahora"].date() if last else date.today() - timedelta(days=90)
-
-        hoy = date.today()
+        corte = desde if isinstance(desde, date) else None
         insertados = 0
         simbolos_con_trades = []
 
@@ -766,21 +782,19 @@ class BinanceClient:
             self.logger.warning(f"sync_trades: ticker_price BNBUSDT — {e}")
 
         for symbol in symbols:
-            cursor_fecha = desde
-            while cursor_fecha <= hoy:
-                sfecha = cursor_fecha
-                efecha = cursor_fecha + timedelta(days=1)
-                stime = int(datetime.combine(sfecha, datetime.min.time()).timestamp() * 1000)
-                etime = int(datetime.combine(efecha, datetime.min.time()).timestamp() * 1000)
-
+            from_id = 0 if corte else repo.get_bt_last_idtrans(account, symbol) + 1
+            while True:
                 try:
-                    trades = self.spot.get_my_trades(symbol, limit=100, startTime=stime, endTime=etime)
+                    trades = self.spot.get_my_trades(symbol, limit=1000, fromId=from_id) or []
                 except Exception as e:
-                    self.logger.warning(f"sync_trades {symbol} {sfecha}: {e}")
-                    trades = []
+                    self.logger.warning(f"sync_trades {symbol} fromId={from_id}: {e}")
+                    break
 
                 for t in trades:
                     try:
+                        fechahora = datetime.fromtimestamp(t.get("time", 0) / 1000)
+                        if corte and fechahora.date() < corte:
+                            continue
                         qty = float(t.get("qty", 0))
                         qty = qty if t["isBuyer"] else -qty
                         price = float(t.get("price", 0))
@@ -797,7 +811,7 @@ class BinanceClient:
                                 symbol, t.get("commission", 0), t.get("commissionAsset"), price, price_bnb
                             ),
                             "mtmgp": 0.0,
-                            "fechahora": datetime.fromtimestamp(t.get("time", 0) / 1000),
+                            "fechahora": fechahora,
                             "indicadores": "{}",
                         }
                         ya_existe = repo.get_hash_booktrading(accion="valida", values=registro, symbol=symbol)
@@ -809,7 +823,9 @@ class BinanceClient:
                     except Exception as e:
                         self.logger.error(f"sync_trades registro {symbol} id={t.get('id')}: {e}")
 
-                cursor_fecha = efecha
+                if len(trades) < 1000:
+                    break
+                from_id = max(int(t["id"]) for t in trades) + 1
                 time.sleep(0.3)
 
         return {"insertados": insertados, "simbolos": simbolos_con_trades}

@@ -408,6 +408,14 @@ class AgentManager:
         except Exception as e:
             self._log_crypto.error(f"Agente_LtvControl(): {e}")
 
+    @wait_rate(21600, persist=True, desc="Binance trades → booktrading, rescate incremental (6h)", nivel=1)
+    def Agente_BinanceTrades(self):
+        try:
+            result = ServiciosCrypto().sync_trades_cartera()
+            self._log_crypto.warning(f"BinanceTrades: {result}")
+        except Exception as e:
+            self._log_crypto.error(f"Agente_BinanceTrades(): {e}")
+
     @wait_rate(21600)
     def Agente_CryptoBeta(self):
         try:
@@ -1549,6 +1557,7 @@ class AgentManager:
             ("Agente_RoiVentas", self.Agente_RoiVentas, 3600),
             ("Agente_ExtractosWatcher", self.Agente_ExtractosWatcher, 60),
             ("Agente_BinanceApiSync", self.Agente_BinanceApiSync, 3600),
+            ("Agente_BinanceTrades", self.Agente_BinanceTrades, 3600),
             ("Agente_ManagerPreservation", self.Agente_ManagerPreservation, 1),
         ]
         for name, target, sleep in _threads:

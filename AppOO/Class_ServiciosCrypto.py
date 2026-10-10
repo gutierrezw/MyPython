@@ -9,6 +9,8 @@ import json
 import logging
 import time
 
+from Modulos_Mysql import PlanInversion
+
 
 class ServiciosCrypto:
     """Servicios auxiliares Crypto: Simple Earn ↔ Spot."""
@@ -16,7 +18,8 @@ class ServiciosCrypto:
     def __init__(self):
         from Class_ApiBinnace import BinanceClient  # import diferido — evita ciclo con Modulos_python chain
 
-        self._spot = BinanceClient(vehiculo="Crypto").spot
+        self._client = BinanceClient(vehiculo="Crypto")
+        self._spot = self._client.spot
         self._logger = logging.getLogger("BinanceClient")
 
     def earn_spot_balances(self):
@@ -286,6 +289,31 @@ class ServiciosCrypto:
                 }
             )
         return analisis
+
+    def sync_trades_cartera(self, desde=None) -> dict:
+        """Inserta en booktrading los trades de Binance que falten para la cartera de la cuenta.
+
+        Rescata lo que el websocket no vio: booktrading se puebla en vivo desde `w_trade`, asi que un
+        trade ejecutado con la app apagada no entra por ningun camino. Medido el 2026-10-10 sobre los 12
+        pares en cartera: 55 trades que nunca entraron al libro, y los de 2026 todos en horario de
+        madrugada. El avg del panel sale de ahi, asi que el faltante desplaza el costo medio.
+
+        `sync_trades` arranca en el ultimo tradeId conocido de cada par, de modo que la corrida es
+        incremental y no depende de cuando fue la anterior.
+        """
+        account = self._client.sesion.get("idcuenta", "")
+        if not account:
+            return {"insertados": 0, "simbolos": [], "detalle": "sin cuenta en sesion"}
+
+        cartera = PlanInversion().select_inversion(account=account, tipoin="Crypto", ticket="update") or []
+        symbols = sorted({
+            t if t.endswith("USDT") else f"{t}USDT"
+            for t in (r.get("ticket") for r in cartera if r.get("iactiva") == "Y") if t
+        })
+        if not symbols:
+            return {"insertados": 0, "simbolos": [], "detalle": f"sin pares activos para {account}"}
+
+        return self._client.sync_trades(account=account, symbols=symbols, desde=desde)
 
     def _reparte_cuotas(self, monto, prestamos, exceso):
         """Reparte monto entre prestamos proporcional al exceso, descartando cuotas bajo el minimo.

@@ -6202,11 +6202,18 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
             # cuando es venta en corto
             elif values["cantidad"] < 0:
-                basico = costo_avg
                 codigo = "C"
 
                 # rutina para marcar como iactiva='N'
                 importe = maximiza_ganancias_corto_plazo(values["cantidad"], values["fechahora"])
+
+                # el costo de los lotes consumidos sale de `importe`: copiar costo_avg deja el promedio
+                # congelado en el valor previo a la venta y el error se acumula, porque la proxima compra
+                # arranca de nw_producto = basico * stock. El divisor es la posicion del broker, no el
+                # stock del libro — es la que despues multiplica avgcost para mostrar costobase.
+                # Sin posicion confiable se conserva el comportamiento anterior.
+                resto = position + values["cantidad"]
+                basico = (position * costo_avg - importe) / resto if resto > 0 else costo_avg
 
                 gpreal = values["producto"] - (importe + values["tarifacomision"])
                 mtmgp = gpreal / abs(values["cantidad"])
@@ -7358,6 +7365,37 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         except (Exception, connect.Error) as e:
             self.logger.error(f"exists_bt_trade_by_idtrans(): {e}")
             return False
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def get_bt_last_idtrans(self, account: str, symbol: str) -> int:
+        """
+        Mayor idtrans numerico en booktrading para esa cuenta y simbolo, o 0 si no hay ninguno.
+
+        Es el punto de arranque de la paginacion de `sync_trades`: los tradeId de Binance son monotonos
+        crecientes por par, asi que pedir desde el ultimo conocido no puede saltearse un trade nuevo,
+        aunque la app haya estado apagada cuando se ejecuto.
+
+        Filtra los no numericos a proposito: las filas viejas de ADA traen sufijos (`5x`, `488458471y`)
+        de cargas manuales, y el execID de IB no es un entero. Un CAST sin filtro los lleva a 0 y
+        devolveria un arranque falso.
+        """
+        conn = self._conectar(tabla="select.booktrading.last_idtrans")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT MAX(CAST(idtrans AS UNSIGNED)) FROM booktrading
+                   WHERE cuenta = %s AND simbolo = %s AND idtrans REGEXP '^[0-9]+$'""",
+                (account, symbol),
+            )
+            row = cursor.fetchone()
+            return int(row[0]) if row and row[0] else 0
+        except (Exception, connect.Error) as e:
+            self.logger.error(f"get_bt_last_idtrans(): {e}")
+            return 0
         finally:
             if cursor:
                 cursor.close()
