@@ -223,6 +223,7 @@ agregarle el `COMMENT`, y recién entonces ejecutar.
 | inversion | `conid` | Listado de IB (bolsa) donde **la cuenta** operó el ticker; se conserva tras la baja. **No es "el" conid del ticker**: el mismo ticker cotiza en varias bolsas (ENB en NYSE y TSE) |
 | inversion | `deuda` | Deuda de **Binance para esa posición** (`debit USDT`). Stock y FCI escriben 0, así que `SUM(deuda)` **no es la deuda de la cartera** |
 | ib_flex_trades | `exec_id` | execID de TWS — el **único** identificador que cruza contra `booktrading.idtrans`, y solo desde **2024-04-02** (creada 2026-09-21) |
+| booktrading | `basico` | Costo medio de la posición **después** de ese hecho. El divisor es `inversion.position` (la del broker), no el `stock` del libro — es la que luego multiplica `avgcost` para mostrar `costobase`. Solo lo consume Crypto manual; Stock lee el costo de IB |
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
 `lastPrice DESC` con `LIMIT 150`, así que repetía siempre los mismos 150 símbolos más caros y dejaba
@@ -444,6 +445,13 @@ vuelve a insertar con la fecha vieja. La sella `_set_billing_dates()` (`Class_Fi
 Todo consumidor nuevo de `fin_transactions` que agrupe por período debe usar `FinanceScreen._SQL_FECHA`; la excepción
 deliberada es `get_coverage()`, que mide cuándo se cargó movimiento real. Motivo completo y medición en
 `20-Proyecto/spec-finanzas.md` § "Fase 1 — registro de lo hecho", paso 1.5.
+
+**`booktrading.basico` — una venta cambia el costo medio, y hasta el 2026-10-10 lo copiaba.** La rama de
+venta de `insert_booktrading` hacía `basico = costo_avg`, el promedio **previo** a la venta, mientras el
+costo de los lotes consumidos (`importe`, de `maximiza_ganancias_corto_plazo`) solo alimentaba
+`gprealizadas`. El error es acumulativo: la compra siguiente arranca de `basico * stock`. Hoy sale de
+`(position * costo_avg - importe) / resto`. No afecta a Stock. Detalle y medición en
+`10-Memoria/ref-booktrading-dos-caminos.md`.
 
 ### Script de monitoreo
 `SchemasSQL/mysql_index_analyzer.py` — analiza schema, índices sin uso, full scans y configuración InnoDB.
