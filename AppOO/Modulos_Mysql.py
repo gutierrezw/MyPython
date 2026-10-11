@@ -6248,9 +6248,14 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
             if retroactivo:
                 filas = self.recalculate_stock_chain(account, symbol, idivisa)
+                # el costo medio tambien queda torcido: las filas posteriores lo calcularon contra la
+                # cadena vieja y es el de la ultima el que se sella en otros_activos.avgcost
+                fcosto, basico_final = self.recalculate_cost_chain(account, symbol, idivisa)
+                if fcosto:
+                    basico = basico_final
                 self.logger.warning(
                     f"insert_booktrading({symbol}): movimiento {values['fechahora']} anterior a la ultima fila "
-                    f"— cadena de stock recalculada, {filas} filas"
+                    f"— cadena recalculada, {filas} filas de stock y {fcosto} de costo (basico={basico:.6f})"
                 )
 
             time.sleep(0.4)
@@ -7310,6 +7315,80 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         except (Exception, connect.Error) as e:
             self.logger.error(f"recalculate_stock_chain(): {e}")
             return 0
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def recalculate_cost_chain(self, account: str, symbol: str, divisa: str) -> tuple:
+        """
+        Recalcula el campo basico (costo medio) de TODOS los registros del simbolo, en orden
+        (fechahora, sec). Retorna (filas_actualizadas, basico_final).
+
+        `recalculate_stock_chain` solo reescribe `stock`, asi que una insercion retroactiva dejaba el
+        costo medio de las filas posteriores calculado contra la cadena vieja — y es ese costo el que
+        `insert_booktrading` sella en `otros_activos.avgcost`, la fuente del costo base del panel de
+        Crypto. Este metodo cierra ese tramo.
+
+        El replay acumula costo total, no promedia promedios:
+          - compra: costo_total += preciotrans * cantidad + tarifacomision
+          - venta:  costo_total -= importe
+
+        `importe` es el costo de los lotes que la venta consumio, y no se recalcula: se despeja de
+        `gprealizadas`, que la fila ya trae escrito desde el dia de la venta
+        (`gpreal = producto - (importe + tarifacomision)`). Recalcularlo seria peor — el reparto lo
+        decide `maximiza_ganancias_corto_plazo` por ROI contra los lotes vivos **de ese momento**, y
+        esos lotes hoy estan marcados; el dato guardado es el unico testigo del reparto real.
+        Una venta sin `gprealizadas` cae al promedio movil, que es lo mejor disponible sin ese testigo.
+
+        Diferencia declarada contra el camino en vivo: ahi el divisor es `inversion.position` (la del
+        broker), aca el stock acumulado del libro. Coinciden salvo por los hechos que el libro no
+        registra — rewards de staking, airdrops —, que entran a la posicion sin costo y bajan el
+        promedio real por debajo del que reconstruye este metodo.
+        """
+        conn = self._conectar(tabla="update.booktrading.recalc_cost")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT id, cantidad, preciotrans, producto, tarifacomision, gprealizadas
+                   FROM booktrading
+                   WHERE cuenta = %s AND simbolo = %s AND divisa = %s
+                   ORDER BY fechahora, sec""",
+                (account, symbol, divisa),
+            )
+            filas = cursor.fetchall()
+
+            costo_total, stock, basico, updates = 0.0, 0.0, 0.0, []
+            for fid, cantidad, precio, producto, comision, gpreal in filas:
+                cantidad = float(cantidad or 0)
+                comision = float(comision or 0)
+                if cantidad > 0:
+                    costo_total += float(precio or 0) * cantidad + comision
+                elif cantidad < 0:
+                    if gpreal is None:
+                        importe = basico * abs(cantidad)
+                    else:
+                        importe = float(producto or 0) - comision - float(gpreal)
+                    costo_total -= importe
+
+                stock += cantidad
+                basico = costo_total / stock if stock > 0.0001 else 0.0
+                if stock <= 0.0001:
+                    costo_total = 0.0
+                updates.append((basico, datetime.now(), fid))
+
+            if not updates:
+                return 0, 0.0
+
+            cursor.executemany(
+                "UPDATE booktrading SET basico = %s, updateStamp = %s WHERE id = %s", updates
+            )
+            conn.commit()
+            return cursor.rowcount, basico
+        except (Exception, connect.Error) as e:
+            self.logger.error(f"recalculate_cost_chain(): {e}")
+            return 0, 0.0
         finally:
             if cursor:
                 cursor.close()
