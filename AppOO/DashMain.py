@@ -1942,20 +1942,22 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 nonlocal iteraStream
 
                 def _watchdog():
-                    # Cierra el WS si el counter no avanzó en 5 minutos — fuerza re-suscripción
+                    # Cierra el WS si no llegan mensajes en 5 minutos — fuerza re-suscripción
                     TIMEOUT = 300
                     while True:
                         time.sleep(60)
                         if self.WStreams is None:
                             continue
-                        prev = self.WStreams.counter
+                        prev = self.WStreams.msg_count
                         time.sleep(TIMEOUT - 60)
-                        if self.WStreams is not None and self.WStreams.counter == prev:
+                        if self.WStreams is not None and self.WStreams.msg_count == prev:
                             self.logger.warning("websocket_stream(Crypto): watchdog — sin datos 5 min, reconectando")
                             try:
                                 self.WStreams.stop()
                             except Exception:
                                 pass
+                            finally:
+                                self.WStreams._sleep_event.set()
 
                 threading.Thread(target=_watchdog, name="WsCrypto_Watchdog", daemon=True).start()
 

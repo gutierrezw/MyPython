@@ -857,9 +857,11 @@ class BinanceStreamClient(SpotWebsocketStreamClient):
         self.assets = assets
         self.symbols = None
         self.counter = 0
+        self.msg_count = 0
         self.running = False
         self.logger = logging.getLogger("BinanceClient")
         self.thread_name = f"BinanceStream({env})"
+        self._mensaje_callback = mensaje_callback
         self._on_close_callback = on_close_callback
         self._sleep_event = threading.Event()
 
@@ -868,7 +870,7 @@ class BinanceStreamClient(SpotWebsocketStreamClient):
         self.logger.info(f"BinanceStreamClient init env={env} ws_stream={ws_url}")
         super().__init__(
             stream_url=ws_url,
-            on_message=mensaje_callback,
+            on_message=self.on_message,
             on_error=self.on_error,
             on_close=self.on_close,
             on_open=self.on_open,
@@ -879,6 +881,11 @@ class BinanceStreamClient(SpotWebsocketStreamClient):
         sm = super()._initialize_socket(*args, **kwargs)
         sm.daemon = True
         return sm
+
+    def on_message(self, socket, message):
+        self.msg_count += 1
+        if self._mensaje_callback:
+            self._mensaje_callback(socket, message)
 
     def on_open(self, reason):
         self.running = True
@@ -894,6 +901,8 @@ class BinanceStreamClient(SpotWebsocketStreamClient):
             self._on_close_callback(reason)
 
     def on_error(self, code, error):
+        self.running = False
+        self._sleep_event.set()  # corte abrupto dispara on_error, no on_close
         self.logger.error(f"BinanceStreamClient error ({self.env}): {code} - {error}")
 
     def SUBSCRIBE(self):
