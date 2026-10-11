@@ -6246,6 +6246,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             conn.commit()
             cursor.close()
 
+            sellado = False
             if retroactivo:
                 filas = self.recalculate_stock_chain(account, symbol, idivisa)
                 # el costo medio tambien queda torcido: las filas posteriores lo calcularon contra la
@@ -6253,6 +6254,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 fcosto, basico_final = self.recalculate_cost_chain(account, symbol, idivisa)
                 if fcosto:
                     basico = basico_final
+                    sellado = True
                 self.logger.warning(
                     f"insert_booktrading({symbol}): movimiento {values['fechahora']} anterior a la ultima fila "
                     f"— cadena recalculada, {filas} filas de stock y {fcosto} de costo (basico={basico:.6f})"
@@ -6260,10 +6262,13 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
             time.sleep(0.4)
             # update basico "otros_activos" e indicador "activa", cuando sea una venta (cantidad <0)
-            cvalues = {}
-            cvalues.update({"avgcost": basico})
-            cvalues.update({"fecupdate": values["fechahora"]})
-            self.update_otros_activos(account=account, values=cvalues, symbol=symbol)
+            # el recalculo retroactivo ya sello otros_activos con la fecha de la ultima fila de la cadena;
+            # repetirlo aca la retrocederia a la del movimiento insertado, que es justamente una vieja
+            if not sellado:
+                cvalues = {}
+                cvalues.update({"avgcost": basico})
+                cvalues.update({"fecupdate": values["fechahora"]})
+                self.update_otros_activos(account=account, values=cvalues, symbol=symbol)
         except (Exception, EncodingWarning, connect.Error) as error:
             print(f"[Mysql:: insert_booktrading()]: {error}")
 
@@ -7345,13 +7350,18 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         broker), aca el stock acumulado del libro. Coinciden salvo por los hechos que el libro no
         registra — rewards de staking, airdrops —, que entran a la posicion sin costo y bajan el
         promedio real por debajo del que reconstruye este metodo.
+
+        Cierra sellando `otros_activos.avgcost` con el costo final: es de ahi que el panel de Crypto lee
+        el costo base, asi que reescribir solo el libro deja la cadena corregida y la pantalla con el
+        valor viejo. La fecha es la de la ultima fila de la cadena — la posicion que ese costo describe —,
+        no la del momento del recalculo.
         """
         conn = self._conectar(tabla="update.booktrading.recalc_cost")
         cursor = None
         try:
             cursor = conn.cursor()
             cursor.execute(
-                """SELECT id, cantidad, preciotrans, producto, tarifacomision, gprealizadas
+                """SELECT id, cantidad, preciotrans, producto, tarifacomision, gprealizadas, fechahora
                    FROM booktrading
                    WHERE cuenta = %s AND simbolo = %s AND divisa = %s
                    ORDER BY fechahora, sec""",
@@ -7360,7 +7370,8 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             filas = cursor.fetchall()
 
             costo_total, stock, basico, updates = 0.0, 0.0, 0.0, []
-            for fid, cantidad, precio, producto, comision, gpreal in filas:
+            ultima_fecha = None
+            for fid, cantidad, precio, producto, comision, gpreal, fechahora in filas:
                 cantidad = float(cantidad or 0)
                 comision = float(comision or 0)
                 if cantidad > 0:
@@ -7376,6 +7387,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 basico = costo_total / stock if stock > 0.0001 else 0.0
                 if stock <= 0.0001:
                     costo_total = 0.0
+                ultima_fecha = fechahora
                 updates.append((basico, datetime.now(), fid))
 
             if not updates:
@@ -7385,7 +7397,13 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 "UPDATE booktrading SET basico = %s, updateStamp = %s WHERE id = %s", updates
             )
             conn.commit()
-            return cursor.rowcount, basico
+            filas_bt = cursor.rowcount
+            cursor.close()
+            cursor = None
+            self.update_otros_activos(
+                account=account, values={"avgcost": basico, "fecupdate": ultima_fecha}, symbol=symbol
+            )
+            return filas_bt, basico
         except (Exception, connect.Error) as e:
             self.logger.error(f"recalculate_cost_chain(): {e}")
             return 0, 0.0
@@ -7419,7 +7437,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.close()
             conn.close()
 
-    def exists_bt_trade_by_idtrans(self, account: str, idtrans: str) -> bool:
+    def exists_bt_trade_by_idtrans(self, account: str, idtrans: str, symbol: str = None) -> bool:
         """
         True si existe un registro en booktrading con ese idtrans (el execID de TWS).
 
@@ -7429,17 +7447,21 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         883 y sumando divisa a 877. Las 94 que se pierden son los renames (SKLZ 35, MPW 24, GOEV 15,
         NEP 9, SUP 4) y VRLA, que cotiza en EUR y booktrading guarda en USD — justo los casos que
         ensucian el reconcile.
+
+        `symbol` es para Binance, donde el tradeId se numera **por par** y no es unico en la cuenta: sin
+        el filtro el tradeId de un par puede chocar con el de otro y descartar un trade real. El execID
+        de IB es global y va sin symbol.
         """
         conn = self._conectar(tabla="select.booktrading.exists_idtrans")
         cursor = None
         try:
             cursor = conn.cursor()
-            cursor.execute(
-                """SELECT 1 FROM booktrading
-                   WHERE cuenta = %s AND idtrans = %s
-                   LIMIT 1""",
-                (account, idtrans),
-            )
+            qry = "SELECT 1 FROM booktrading WHERE cuenta = %s AND idtrans = %s"
+            params = [account, idtrans]
+            if symbol:
+                qry += " AND simbolo = %s"
+                params.append(symbol)
+            cursor.execute(f"{qry} LIMIT 1", tuple(params))
             return cursor.fetchone() is not None
         except (Exception, connect.Error) as e:
             self.logger.error(f"exists_bt_trade_by_idtrans(): {e}")

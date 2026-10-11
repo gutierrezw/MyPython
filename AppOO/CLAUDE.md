@@ -422,6 +422,10 @@ mezclado.
 ejecución y agregarlos solo resta — cuenta+idtrans cruza 971, sumando símbolo 883, sumando divisa 877. Las 94
 que se pierden son los renames (SKLZ, MPW, GOEV, NEP, SUP) y VRLA, que cotiza en EUR y el libro guarda en USD.
 
+**Matizado el 2026-10-10 — el metodo acepta `symbol` opcional.** Binance numera el tradeId **por par**, no por
+cuenta: sin el filtro el tradeId de un par puede chocar con el de otro y descartar un trade real. La medicion de
+arriba sigue valiendo para IB, que lo llama sin `symbol` porque su execID es global.
+
 La tabla entera se convirtió a `utf8mb4_0900_ai_ci` en el mismo trabajo: estaba en `utf8mb4_unicode_ci` y
 **todo** JOIN contra booktrading moría con error 1267, no solo el de `exec_id`. Detalle en
 `10-Memoria/ref-ib-reconcile.md`.
@@ -452,6 +456,20 @@ costo de los lotes consumidos (`importe`, de `maximiza_ganancias_corto_plazo`) s
 `gprealizadas`. El error es acumulativo: la compra siguiente arranca de `basico * stock`. Hoy sale de
 `(position * costo_avg - importe) / resto`. No afecta a Stock. Detalle y medición en
 `10-Memoria/ref-booktrading-dos-caminos.md`.
+
+Dos tramos mas del mismo hecho, cerrados el 2026-10-10:
+
+- **`recalculate_cost_chain` sella `otros_activos.avgcost`.** El panel de Crypto lee el costo base de ahi, asi
+  que reescribir solo el libro deja la cadena corregida y la pantalla con el valor viejo. Sella la fecha de la
+  **ultima fila de la cadena**, no la del recalculo — la posicion que ese costo describe. Por eso el
+  `update_otros_activos` del final de `insert_booktrading` ya no se repite cuando el camino retroactivo sello:
+  la retrocederia a la del movimiento insertado, que es justamente una vieja.
+- **`sync_trades` valida la existencia por `idtrans`, no por hash.** `get_hash_booktrading` incluye `fechahora`,
+  que sale de `datetime.fromtimestamp()` — hora local del equipo —, asi que una fila escrita bajo otro huso
+  genera otro hash para el mismo trade y la deduplicacion no la reconoce nunca. Medido: un `desde=2026-01-01`
+  reinserto los 188 trades de 2026 de los 12 pares con la fechahora corrida una hora exacta; de esos 188,
+  **174 ya existian por (cuenta, simbolo, idtrans) y 14 eran reales**. `DashMain.py:801` (websocket) sigue
+  validando por hash — mismo riesgo, no tocado porque es el camino en vivo.
 
 ### Script de monitoreo
 `SchemasSQL/mysql_index_analyzer.py` — analiza schema, índices sin uso, full scans y configuración InnoDB.

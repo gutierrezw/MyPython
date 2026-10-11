@@ -767,6 +767,13 @@ class BinanceClient:
 
         Los tradeId son monotonos crecientes por par, asi que arrancar en el ultimo conocido no puede
         saltear un trade nuevo. Para rescatar un hueco viejo hay que pasar `desde`, que recorre todo.
+
+        La existencia se valida por `idtrans`, no por el hash de `get_hash_booktrading`. El hash incluye
+        `fechahora`, que sale de `datetime.fromtimestamp()` — hora local del equipo —, asi que una fila
+        escrita bajo otro huso genera un hash distinto para el mismo trade y la deduplicacion no la
+        reconoce nunca. Medido el 2026-10-10: un `desde=2026-01-01` reinserto los 188 trades de 2026 de
+        los 12 pares, duplicados con el mismo tradeId y la fechahora corrida una hora exacta. El tradeId
+        es el identificador del broker y no depende de la zona del equipo.
         """
         repo = RepositorioOportunidadesBuySell()
 
@@ -814,7 +821,7 @@ class BinanceClient:
                             "fechahora": fechahora,
                             "indicadores": "{}",
                         }
-                        ya_existe = repo.get_hash_booktrading(accion="valida", values=registro, symbol=symbol)
+                        ya_existe = repo.exists_bt_trade_by_idtrans(account, registro["idtrans"], symbol=symbol)
                         if not ya_existe:
                             repo.insert_booktrading(values=registro, symbol=symbol)
                             insertados += 1
