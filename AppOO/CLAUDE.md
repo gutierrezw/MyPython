@@ -399,6 +399,14 @@ liste con ese ticker (MPW hoy es MPT). Por eso `select_inversion()` filtra por `
 sin cuenta devolvía la fila de cualquier cuenta. La orden (`place_OrderStock`) usa el mismo `conid` guardado
 antes de ir a buscar a IB.
 
+**Matizado el 2026-10-14 — en FCI `conid` es el `codCAFCI`.** Las 16 filas `BBVA.ARS` lo traen poblado y 15
+coinciden con `otros_activos.idcrypto`; no hay bolsa ni listado de por medio. Importa porque el padrón CNV
+**renombra fondos manteniendo el código**: cafci 816 fue `FBA Renta Fija Plus - Clase A` hasta el 2026-06-08
+y `FBA Renta Fija Pesos Plus I - Clase A` desde el 2026-06-09. El nombre es inestable por diseño del padrón,
+el código es la identidad. `booktrading` no tiene columna equivalente — ahí el fondo se identifica por
+`simbolo`, el nombre que manda el banco, así que un rename parte la cadena de costo en dos símbolos y nada
+lo detecta. Detalle en `10-Memoria/state-bbva-ars.md`.
+
 **`inversion.deuda` es el `debit USDT` de esa posición en Binance — no la deuda de la cartera** (2026-09-21). La
 escribe `update_inversion()` desde `keys["deuda"]`, y el único camino que le pone algo distinto de 0 es el de Crypto
 (`on_message_binance_websocket()` y el ciclo de posiciones, ambos en `DashMain.py`). El de Stock

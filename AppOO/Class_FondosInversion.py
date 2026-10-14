@@ -601,6 +601,21 @@ class ArsFondosInversion(tk.Frame):
         threading.Thread(target=_run, daemon=True).start()
 
     # define position en moneda base USD
+    def _resolver_fondo_fci(self, cuenta=None, nombre=None):
+        activo, found = self.RepositorioOportunidades.select_otros_activos(account=cuenta, symbol=nombre)
+        if found and activo[0].get("cuenta") != cuenta:
+            found = False
+        if not found:
+            _logger.error(f"_resolver_fondo_fci({cuenta}): fondo desconocido '{nombre}' - movimiento sin procesar")
+            DataHub.add_alert(
+                msg=f"⚠️ FCI {cuenta}: fondo desconocido '{nombre}'. Movimiento sin procesar. Puede ser "
+                    f"un fondo nuevo o un cambio de nombre del padron CNV - resolver en otros_activos.",
+                tipo="FCI",
+                dedup_key=f"fci_fondo_desconocido:{cuenta}:{nombre}",
+            )
+            return [], False
+        return activo, True
+
     def struct_positions_fci(self, account=None, ticket=None, last=None):
         try:
             p = {}
@@ -826,24 +841,9 @@ class ArsFondosInversion(tk.Frame):
                             continue
                         if self.string_float(s=rows.get("Precio", 0)) <= 0:
                             continue
-                        activo, found = self.RepositorioOportunidades.select_otros_activos(
-                            account=self.account_bbva, symbol=rows["Descripción de Especie"]
+                        activo, found = self._resolver_fondo_fci(
+                            cuenta=self.account_bbva, nombre=rows["Descripción de Especie"]
                         )
-                        if not found:
-                            precio = self.string_float(s=rows["Precio"])
-                            fecha_mv = datetime.strptime(rows["Fecha"], "%d/%m/%Y").date()
-                            cafci, cafci_found = self.ClassCNV.select_CNV_by_precio(precio=precio, fecha=fecha_mv)
-                            if cafci_found:
-                                activo, found = self.RepositorioOportunidades.insert_otros_activos(
-                                    symbol=rows["Descripción de Especie"],
-                                    cuenta=self.account_bbva,
-                                    avgcost_override=precio if precio > 0 else 1,
-                                    base_asset="ARS",
-                                    idcrypto_override=cafci,
-                                    descripcion=rows["Descripción de Especie"],
-                                )
-                                if found:
-                                    self.backfill_historico_cnv(cafci)
                         if found:
                             cantidad = self.string_float(s=rows["Cantidad (VN)"]) * (1 if codigo == "O" else -1)
                             fecha = datetime.strptime(rows["Fecha"], "%d/%m/%Y")
@@ -928,26 +928,7 @@ class ArsFondosInversion(tk.Frame):
                         else:
                             continue
 
-                        activo, found = self.RepositorioOportunidades.select_otros_activos(
-                            account=self.account_sant, symbol=rows["Fondo"]
-                        )
-                        if not found:
-                            _fl = rows["Fecha_liquidación"]
-                            fecha_mv = (_fl.date() if hasattr(_fl, "date") else datetime.strptime(str(_fl), "%d/%m/%Y").date())
-                            cafci, cafci_found = self.ClassCNV.select_CNV_by_precio(
-                                precio=ValorCuotaParte, fecha=fecha_mv
-                            )
-                            if cafci_found:
-                                activo, found = self.RepositorioOportunidades.insert_otros_activos(
-                                    symbol=rows["Fondo"],
-                                    cuenta=self.account_sant,
-                                    avgcost_override=ValorCuotaParte,
-                                    base_asset="ARS",
-                                    idcrypto_override=cafci,
-                                    descripcion=rows["Fondo"],
-                                )
-                                if found:
-                                    self.backfill_historico_cnv(cafci)
+                        activo, found = self._resolver_fondo_fci(cuenta=self.account_sant, nombre=rows["Fondo"])
 
                         if found:
                             cantidad = CuotaParte * (1 if codigo == "O" else -1)
