@@ -114,6 +114,7 @@ from matplotlib.dates import (
     MonthLocator,
 )
 from finvizfinance.group.performance import Performance
+from finvizfinance.util import headers as finviz_headers
 
 import anthropic
 import feedparser
@@ -123,3 +124,8 @@ from sklearn.exceptions import UndefinedMetricWarning
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.metrics import classification_report, f1_score, roc_auc_score
+
+
+# finvizfinance arma el User-Agent con una continuacion de linea y deja 12 espacios dentro del header;
+# Cloudflare lo clasifica como bot y devuelve 403 en todo finviz.com
+finviz_headers["User-Agent"] = " ".join(finviz_headers["User-Agent"].split())
