@@ -3762,7 +3762,7 @@ class DashMain:
             try:
                 # limpiar widgets previos (excepto Cancel)
                 for w in windows.winfo_children():
-                    if isinstance(w, tk.Button):
+                    if isinstance(w, (tk.Button, ttk.Button)):
                         continue
                     w.destroy()
 
