@@ -4592,13 +4592,16 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         sql_query += " ORDER BY fecha ASC"  # Es buena práctica ordenar por fecha
 
         # 3. Conexión y ejecución (Bloque robusto try...except)
+        conn = None
         try:
-            # Intentar establecer la conexión
-            db_uri = f"mysql+pymysql://{BDsystem.DB_CONFIG.get("user")}:{BDsystem.DB_CONFIG.get("password")}"
-            db_uri += f"@{BDsystem.DB_CONFIG.get("host")}/{BDsystem.DB_CONFIG.get("database")}"
+            conn = self._conectar(tabla="select.diaria_cnv.yf")
+            cursor = conn.cursor()
+            cursor.execute(sql_query)
+            rows = cursor.fetchall()
+            cols = [desc[0] for desc in cursor.description]
+            cursor.close()
 
-            # Usar pd.read_sql_query para ejecutar el query y obtener el DataFrame directamente
-            df = pd.read_sql_query(sql_query, db_uri)
+            df = pd.DataFrame.from_records(rows, columns=cols, coerce_float=True)
 
             # 4. Formatear la salida (como un resultado de yfinance)
             if not df.empty:
@@ -4610,6 +4613,10 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
         except (Exception, EncodingWarning, connect.Error) as e:
             print(f"get_yf_CNV(): {e}")
             return pd.DataFrame()  # Devolver DataFrame vacío en caso de error
+
+        finally:
+            if conn:
+                conn.close()
 
     def insert_otros_activos(
         self,
