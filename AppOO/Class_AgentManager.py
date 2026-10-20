@@ -338,6 +338,12 @@ class AgentManager:
                             self._log_performa.critical(
                                 f"PerformaValidator {veh}: {sym} CUARENTENA — purgado 3+ veces en 6h, ratio={ratio:.2f}x"
                             )
+                        elif a.get("hueco"):
+                            self._log_performa.warning(
+                                f"PerformaValidator {veh}: {sym} {fecha} HUECO — sin fila con posición abierta, "
+                                f"purgado para regenerar"
+                            )
+                            CacheHut.add_bypass(sym)
                         else:
                             self._log_performa.warning(
                                 f"PerformaValidator {veh}: {sym} {fecha} ratio={ratio:.2f}x purgado — bypass cache"

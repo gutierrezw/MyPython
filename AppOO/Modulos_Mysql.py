@@ -1121,6 +1121,10 @@ class IPerformance(BDsystem):  # -----------------------------------------------
         ratio < low_threshold → precio corrupto a la baja (ej: BIL $1.32 en vez de $91)
         ratio > extreme_threshold → anomalía extrema (ej: Crypto con 100x+ salto) — CRÍTICO
 
+        Detecta además huecos: símbolo con posición abierta que no tiene fila ese día. LAG no los
+        ve (una fila ausente no produce ratio) y el día agrega un portafolio más chico, dejando
+        performa_inversion subestimada. Entran a la misma purga quirúrgica para que se regeneren.
+
         Para Crypto: extreme_threshold=100 por defecto (detecta 100x+). Para Stock: usa threshold normal.
 
         Purga quirúrgica: solo elimina los registros del símbolo afectado (no todos los símbolos
@@ -1196,7 +1200,51 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             )
             anomalias_cb = cursor.fetchall()
 
-            if not anomalias_value and not anomalias_cb:
+            # ── 2b. Huecos: simbolo con posicion abierta que no tiene fila ese dia ──
+            # LAG no los ve: una fila ausente no produce ratio, asi que el dia agrega un
+            # portafolio mas chico y performa_inversion queda subestimada en silencio.
+            # Filtros: la fecha debe tener al menos la mitad de los simbolos del maximo de la
+            # ventana (descarta un feriado local con una sola fila), el simbolo debe operar en
+            # la divisa del vehiculo (factor_cambio = 1 — otra bolsa tiene su propio calendario)
+            # y debe tener stock abierto en booktrading a esa fecha.
+            cursor.execute(
+                """
+                SELECT g.dte, g.sym
+                FROM (
+                    SELECT c.Date AS dte, s.symbol AS sym
+                    FROM (SELECT Date, COUNT(DISTINCT symbol) AS n FROM diaria_performance
+                          WHERE account = %s AND Date >= DATE_SUB(CURDATE(), INTERVAL 10 DAY)
+                          GROUP BY Date) c
+                    CROSS JOIN (SELECT DISTINCT symbol FROM diaria_performance
+                                WHERE account = %s
+                                  AND Date >= DATE_SUB(CURDATE(), INTERVAL 10 DAY)) s
+                    WHERE c.n >= (SELECT MAX(t.n) * 0.5 FROM (
+                                      SELECT COUNT(DISTINCT symbol) AS n FROM diaria_performance
+                                      WHERE account = %s
+                                        AND Date >= DATE_SUB(CURDATE(), INTERVAL 10 DAY)
+                                      GROUP BY Date) t)
+                ) g
+                LEFT JOIN diaria_performance d
+                       ON d.account = %s AND d.symbol = g.sym AND d.Date = g.dte
+                WHERE d.symbol IS NULL
+                  AND EXISTS (SELECT 1 FROM diaria_performance a
+                              WHERE a.account = %s AND a.symbol = g.sym AND a.Date < g.dte)
+                  AND EXISTS (SELECT 1 FROM diaria_performance b
+                              WHERE b.account = %s AND b.symbol = g.sym AND b.Date > g.dte)
+                  AND COALESCE((SELECT a2.factor_cambio FROM diaria_performance a2
+                                WHERE a2.account = %s AND a2.symbol = g.sym AND a2.Date < g.dte
+                                ORDER BY a2.Date DESC LIMIT 1), 1) = 1
+                  AND COALESCE((SELECT bt.stock FROM booktrading bt
+                                WHERE bt.cuenta = %s AND bt.simbolo = g.sym
+                                  AND DATE(bt.fechahora) <= g.dte
+                                ORDER BY bt.fechahora DESC LIMIT 1), 0) > 0
+                ORDER BY g.dte ASC, g.sym ASC
+                """,
+                (account,) * 8,
+            )
+            anomalias_huecos = cursor.fetchall()
+
+            if not anomalias_value and not anomalias_cb and not anomalias_huecos:
                 cursor.close()
                 conn.close()
                 return {"anomalias": [], "purgados": False}
@@ -1208,6 +1256,11 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             anomalias += [
                 {"fecha": r[0], "symbol": r[1], "costo_base": float(r[2]), "costo_base_ayer": float(r[3]), "ratio": float(r[4]), "extrema": False}
                 for r in anomalias_cb
+            ]
+
+            anomalias += [
+                {"fecha": r[0], "symbol": r[1], "hueco": True, "ratio": 0.0, "extrema": False}
+                for r in anomalias_huecos
             ]
 
             # Agregar anomalías extremas (Crypto > 100x)

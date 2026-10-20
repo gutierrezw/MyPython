@@ -412,6 +412,12 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                         eof_book, read = next(ebook, (None, None))
                     continue
 
+                # ventana colapsada: el ultimo movimiento del simbolo cae en el dia a cerrar o
+                # despues, y yfinance trata 'hasta' como exclusivo — devuelve vacio, el simbolo no
+                # aporta fila y la diaria del dia queda incompleta
+                if f_desde >= sym_hasta:
+                    sym_hasta = f_desde + timedelta(days=1)
+
                 # cuando Stock hace Ticker para bajar los dividends
                 if categoria == "Stock":
                     yf_ticket = convierte_ticket_stock(bkey, divisa)
@@ -434,6 +440,18 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                     while eof_book is not None and read[ix.index("simbolo")] == bkey:
                         last_read = read
                         eof_book, read = next(ebook, (None, None))
+
+                    # sin datos y con posicion abierta: ese dia queda sin fila y la diaria
+                    # incompleta — Agente_PerformaValidator lo detecta como hueco y lo repara
+                    try:
+                        if float(last_read[ix.index("stock")]) > 0:
+                            _log_diaria_performa.warning(
+                                f"detalle_book({vehiculo}): {bkey} sin datos yfinance "
+                                f"({f_desde} -> {sym_hasta}) — la diaria queda sin esa fila"
+                            )
+                    except Exception:
+                        pass
+
                     # delisted con fecha_deliste pero sin datos yfinance → registrar pérdida total
                     if sym_hasta != f_hasta:
                         try:
