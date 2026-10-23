@@ -1381,9 +1381,15 @@ class system_status(tk.Frame):
                         if DataHub.WsClient:
                             DataHub.WsClient.stop()
                     elif api_name == "Interactive Brokers":
+                        # create_session() revalida la sesion REST y no toca el stream. El 2026-10-23 el boton
+                        # reporto "cuenta U4214563 verificada OK" con los precios congelados desde las 08:18 y
+                        # cero smd+ nuevos en el gateway: las suscripciones solo se rearman en on_open, asi que
+                        # hay que cerrar el socket — igual que las ramas de Binance, que llaman stop()
                         ib = DataHub.clients.get("Stock")
                         if ib:
                             ib.create_session()
+                        if DataHub.WsStock is not None:
+                            DataHub.WsStock.ws.close()
                     self.system.after(1500, refresh_api_list)
                 except Exception as e:
                     print(f"[_force_reconnect({api_name})]: {e}")

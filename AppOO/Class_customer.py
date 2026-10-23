@@ -7273,16 +7273,30 @@ class MyWebsocket:
             )
 
         def _heartbeat():
-            # IB corta el market data si el cliente no manda ech+hb — ../IBGateway/doc/RealtimeSubscription.md:
-            # "It is advised to send a heartbeat at least once per minute". Sin esto el flujo smd+ moria a los
-            # 2700s exactos de suscribirse (2700, 2700, 2700, 2700, 2696, 2698 en seis ciclos del 2026-09-22),
-            # con el socket sano: el que veniamos viendo cada 10s es el heartbeat que manda el gateway, no este
+            # IB corta la conexion websocket si el cliente no manda ech+hb — ../IBGateway/doc/RealtimeSubscription.md,
+            # seccion Echo: "To maintain an active websocket connection ... at least once per minute". El que
+            # veniamos viendo cada 10s es el heartbeat que manda el gateway, no este.
+            #
+            # El ech+hb se agrego el 2026-09-22 para curar la muerte del flujo smd+ a los 2700s exactos de
+            # suscribirse (2700, 2700, 2700, 2700, 2696, 2698 en seis ciclos). No la cura: el 2026-10-23 el flujo
+            # murio igual a los 2694s con el heartbeat puntual —116 envios cada 60s sin faltar uno, medido en
+            # gw.2026-10-23.log— y el socket sano, REST en 200 y la sesion autenticada. La doc solo promete
+            # mantener viva la CONEXION; de las suscripciones no dice nada. Por eso se re-suscribe antes del
+            # corte: la misma doc documenta que reenviar smd+conid actua sobre la peticion existente. 2400s
+            # deja 300s de margen sobre lo medido
+            RESUB = 2400
+            desde_resub = 0
             while not self._hb_stop.wait(60):
                 try:
                     self.ws.send("ech+hb")
                 except Exception as e:
                     _ws_logger.error(f"heartbeat({self.vehiculo}): {e} — se detiene")
                     return
+
+                desde_resub += 60
+                if desde_resub >= RESUB:
+                    desde_resub = 0
+                    subscribe_to_idsymbol()
 
         def subscribe_get_order():
             try:
