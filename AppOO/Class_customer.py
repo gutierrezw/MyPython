@@ -3896,7 +3896,7 @@ class WidgetVehiculo(TickerInfo):
         for i, (key, value) in enumerate(self.resumen.items()):
             if i == 0:  # escribe dGyP
                 t_dgyp = f"dGyP: {mask_numero(value, ancho=6, base=0)}"
-                self.panel_label.append(ttk.Label(wi00, text=t_dgyp, style=gbg, font=("Courier", 24, "bold")))
+                self.panel_label.append(ttk.Label(wi00, text=t_dgyp, style=gbg, font=("Courier", 18, "bold")))
 
             if i > 0:
                 self.panel_label.append(ttk.Label(wi01, text=key, style="C.TLabel", font=("Courier", 9)))
@@ -3913,20 +3913,20 @@ class WidgetVehiculo(TickerInfo):
         self.panel_label[0].grid(column=0, row=0)
         self.panel_label[1].grid(column=0, row=0)
         self.panel_label[2].grid(column=1, row=0)
-        self.panel_label[3].grid(column=2, row=0)
+        self.panel_label[3].grid(column=2, row=0, padx=(16, 0))
         self.panel_label[4].grid(column=3, row=0)
-        self.panel_label[5].grid(column=4, row=0)
+        self.panel_label[5].grid(column=4, row=0, padx=(16, 0))
         self.panel_label[6].grid(column=5, row=0)
-        self.panel_label[7].grid(column=6, row=0)
+        self.panel_label[7].grid(column=6, row=0, padx=(16, 0))
         self.panel_label[8].grid(column=7, row=0)
 
         self.panel_label[9].grid(column=0, row=1)
         self.panel_label[10].grid(column=1, row=1)
-        self.panel_label[11].grid(column=2, row=1)
+        self.panel_label[11].grid(column=2, row=1, padx=(16, 0))
         self.panel_label[12].grid(column=3, row=1)
-        self.panel_label[13].grid(column=4, row=1)
+        self.panel_label[13].grid(column=4, row=1, padx=(16, 0))
         self.panel_label[14].grid(column=5, row=1)
-        self.panel_label[15].grid(column=6, row=1)
+        self.panel_label[15].grid(column=6, row=1, padx=(16, 0))
         self.panel_label[16].grid(column=7, row=1)
 
         # define lienzos para imagen de widget
@@ -4565,7 +4565,7 @@ class WidgetVehiculo(TickerInfo):
                 for i, (key, value) in enumerate(self.resumen.items()):
                     if i == 0:
                         t_dgyp = f"dGyP: {mask_numero(value, ancho=6, base=0)}"
-                        self.panel_label[i].config(text=t_dgyp, style=gbg, font=("Courier", 24, "bold"))
+                        self.panel_label[i].config(text=t_dgyp, style=gbg, font=("Courier", 18, "bold"))
 
                     if i > 0:
                         # el mask es solo el texto: `value` sigue siendo el dato que se relee y se suma

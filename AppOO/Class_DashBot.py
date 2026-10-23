@@ -2412,7 +2412,7 @@ class Telegram:
             if hash_id is not None:
                 await self._delete_message_hash(message)
         except Exception as e:
-            print(f"_save_message(): {e}")
+            self.logger.warning(f"_save_message(): {e}")
 
     # Scrach message
     async def clear_bot_chat(self, CHAT_ID):
@@ -2447,7 +2447,7 @@ class Telegram:
                     json.dump(data, f)
                     f.write("\n")
         except (FileNotFoundError, Exception) as e:
-            print(f"clear_bot_chat(): {e}")
+            self.logger.warning(f"clear_bot_chat(): {e}")
 
 
 # Main ChatBot
