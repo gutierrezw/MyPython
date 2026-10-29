@@ -2049,6 +2049,20 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     _gw_last_alert_ts = 0
                     while True:
 
+                        # Sin sesion autenticada el gateway acepta el socket y lo cierra a los ~6s: el 2026-10-23
+                        # fueron 102 ciclos open/close en una hora, ninguno con suscripcion. Reintentar a ciegas
+                        # no recupera nada — la sesion la rearma _tickle_loop, que es quien decide si se puede
+                        # reautenticar y quien avisa. El estado se le pregunta al gateway, no al flag de la
+                        # instancia: DataHub.clients["Stock"] es otro IB() que el del tickle (MyOrders.__init__
+                        # crea el suyo), asi que su .authenticated nunca se actualiza y quedaba en False de
+                        # fabrica — a las 12:00 del 23-10 bloqueo el socket de forma permanente
+                        ib_stock = DataHub.clients.get("Stock")
+                        if iteraStream > 1 and ib_stock is not None:
+                            if not (ib_stock.is_authenticated() or {}).get("authenticated", False):
+                                _log.warning("websocket_stream(Stock): sesion sin autenticar — no se abre el socket")
+                                time.sleep(60)
+                                continue
+
                         if iteraStream > 1:
                             _log.error(f"websocket_stream(Stock): reconectando (iter={iteraStream})")
 

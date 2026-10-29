@@ -180,6 +180,7 @@ class IB(IBClient):
         counter = 1
         was_disconnected = False
         reconnect_interval = 30
+        ciclos_sin_auth = 0
 
         while True:
             try:
@@ -212,11 +213,35 @@ class IB(IBClient):
                         else:
                             logging.warning("⚠️ IB auth OK pero create_session falló, reintentando...")
                     self.authenticated = True
+                    ciclos_sin_auth = 0
                 else:
                     if not was_disconnected:
                         logging.warning(f"⚠️ IB sesión perdida — esperando re-autenticación del Gateway")
                     was_disconnected = True
                     self.authenticated = False
+
+                    # El 2026-10-23 la sesion se perdio a media rueda y este loop solo esperaba: 102 reconexiones
+                    # del websocket y 76 min sin precios. reauthenticate() sirve unicamente con el SSO vivo —lo
+                    # dice su propia doc, "as long as there is a valid SSO session"—, asi que validate() decide
+                    # cual de los dos modos de falla es: con SSO vivo la sesion de brokerage se rearma sola y el
+                    # proximo tickle con auth=True dispara el create_session() de arriba; sin SSO hace falta el
+                    # login web con 2FA y no hay nada que reintentar, solo avisar. Se evalua cada 10 ciclos
+                    # (5 min) para no golpear el gateway cada 30s
+                    if ciclos_sin_auth % 10 == 0:
+                        if self.validate():
+                            self.logger.warning("IB sesion perdida — SSO vivo, reautenticando brokerage")
+                            self.reauthenticate()
+                        else:
+                            self.logger.error(
+                                f"IB sesion perdida — SSO caido, requiere login web: {self.login_gateway_path}"
+                            )
+                            if datahub:
+                                datahub.add_alert(
+                                    f"🔴 Sesion IB caida — el SSO expiro y no se recupera solo. "
+                                    f"Entra a {self.login_gateway_path} para re-autenticar.",
+                                    telegram=True, tipo="infra", dedup_key="ib_sso_expired",
+                                )
+                    ciclos_sin_auth += 1
                     time.sleep(reconnect_interval)
                     continue
             except Exception as e:
