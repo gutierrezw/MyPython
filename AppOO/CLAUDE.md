@@ -223,7 +223,7 @@ agregarle el `COMMENT`, y recién entonces ejecutar.
 | inversion | `conid` | Listado de IB (bolsa) donde **la cuenta** operó el ticker; se conserva tras la baja. **No es "el" conid del ticker**: el mismo ticker cotiza en varias bolsas (ENB en NYSE y TSE) |
 | inversion | `deuda` | Deuda de **Binance para esa posición** (`debit USDT`). Stock y FCI escriben 0, así que `SUM(deuda)` **no es la deuda de la cartera** |
 | ib_flex_trades | `exec_id` | execID de TWS — el **único** identificador que cruza contra `booktrading.idtrans`, y solo desde **2024-04-02** (creada 2026-09-21) |
-| booktrading | `basico` | Costo medio de la posición **después** de ese hecho. El divisor es `inversion.position` (la del broker), no el `stock` del libro — es la que luego multiplica `avgcost` para mostrar `costobase`. Solo lo consume Crypto manual; Stock lee el costo de IB |
+| booktrading | `basico` | Costo medio de la posición **después** de ese hecho, calculado **solo con datos del libro**: el divisor es su propio `stock` y el total del que se descuenta es `basico * stock` de la fila anterior. El costo del broker no entra (corregido 2026-10-29). Solo lo consume Crypto manual; Stock lee el costo de IB |
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
 `lastPrice DESC` con `LIMIT 150`, así que repetía siempre los mismos 150 símbolos más caros y dejaba
@@ -461,9 +461,28 @@ deliberada es `get_coverage()`, que mide cuándo se cargó movimiento real. Moti
 **`booktrading.basico` — una venta cambia el costo medio, y hasta el 2026-10-10 lo copiaba.** La rama de
 venta de `insert_booktrading` hacía `basico = costo_avg`, el promedio **previo** a la venta, mientras el
 costo de los lotes consumidos (`importe`, de `maximiza_ganancias_corto_plazo`) solo alimentaba
-`gprealizadas`. El error es acumulativo: la compra siguiente arranca de `basico * stock`. Hoy sale de
-`(position * costo_avg - importe) / resto`. No afecta a Stock. Detalle y medición en
+`gprealizadas`. El error es acumulativo: la compra siguiente arranca de `basico * stock`. Detalle y medición en
 `10-Memoria/ref-booktrading-dos-caminos.md`.
+
+**Rectificado el 2026-10-29 — el divisor del broker se revirtió, y sí afectaba a Stock.** El arreglo del 10-10
+dejó `(position * costo_avg - importe) / resto` y se documentó acá que el divisor era la posición del broker a
+propósito y que no afectaba a Stock. Las dos cosas quedaron mal: `position * costo_avg` es literalmente
+`costobase * factor_cambio`, el total de IB, mientras `importe` lo calcula el libro consumiendo **sus lotes más
+baratos**, así que el resto no cerraba contra la suma de los lotes abiertos. Medido en FIRY (Stock): el `basico`
+corría **37,57 USD por debajo** de sus propios 23 lotes y una venta de 45 unidades lo subió a 18,7038, por
+encima del lote vivo más caro. Hoy es `(nw_producto - importe) / resto` con `resto = ustock + cantidad` — el
+libro descuenta del libro. Lo que **sí** se conserva del 10-10 es descontar `importe` en vez de copiar el
+promedio previo. El bloque `select_inversion` del método se eliminó: sin esa fórmula no tenía consumidor.
+
+**La deduplicación de `insert_booktrading` pasó a `idtrans`** en el mismo trabajo. El hash no frena los
+duplicados reales: FIRY entró dos veces con el execID `00010193.680a8fca.01.01` (97 contra 96 del broker) y las
+dos filas traen el **mismo `hash_id`** `91ca7cc397feb1216ccf070a3028c8d4` — igual que ADAUSDT con el tradeId
+`488521576` (ids 970 y 984). Con el hash repetido en BD, el camino que las insertó no lo validó o no pasó por
+`insert_booktrading`; queda **sin determinar**. Y donde sí pasa, el hash es inestable: incluye `fechahora`, así
+que el mismo trade reenviado con la hora corrida genera otro hash (174 de 188 trades de Binance el 10-10). El
+guard se limita a `("Stock", "ETF", "Crypto")` y **va con `symbol`**: ARS y VES reúsan el número de 20 dígitos
+del banco (15 y 1 grupos repetidos con fecha, cantidad y precio distintos) y Crypto trae `idtrans` correlativos
+`1..21` de cargas manuales repetidos entre pares.
 
 Dos tramos mas del mismo hecho, cerrados el 2026-10-10:
 

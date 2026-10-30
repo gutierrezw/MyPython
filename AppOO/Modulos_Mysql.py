@@ -6193,20 +6193,38 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             if found_hash:
                 return
 
+            # el chequeo por hash no frena los duplicados reales: FIRY entro dos veces con el execID
+            # 00010193.680a8fca.01.01 -secs 34 y 35, 97 contra 96 del broker- y las dos filas traen el
+            # MISMO hash_id 91ca7cc397feb1216ccf070a3028c8d4; igual ADAUSDT con el tradeId 488521576
+            # (ids 970 y 984). Con el hash repetido en BD, el camino que las inserto no lo valido o no
+            # paso por aca -sin determinar-. Y donde si pasa, el hash es inestable: incluye fechahora,
+            # cantidad y preciotrans, asi que el mismo trade reenviado con la hora corrida genera otro
+            # hash -174 de 188 trades de Binance el 10-10-. El idtrans si identifica
+            # la ejecucion, pero solo donde el broker lo garantiza unico: ARS y VES reusan el numero de 20
+            # digitos del banco -15 y 1 grupos repetidos con fecha, cantidad y precio distintos- y ahi el
+            # chequeo descartaria movimientos reales. Va con symbol porque el tradeId de Binance se numera
+            # por par: los correlativos 1..21 de las cargas manuales viejas se repiten entre ADA, DOT, VET
+            # y ZIL. Se loguea porque llegar aca significa que el hash no lo reconocio: el trade cambio
+            # de fecha, cantidad o precio, o el hash de la fila vieja nunca se valido.
+            if categoria in ("Stock", "ETF", "Crypto"):
+                if self.exists_bt_trade_by_idtrans(account, idtrans, symbol=symbol):
+                    self.logger.warning(
+                        f"[insert_booktrading] DUPLICADO por idtrans — {symbol}: idtrans={idtrans} "
+                        f"ya existe en {account}, no se inserta"
+                    )
+                    return
+
             # procede con insert del trader
             hashId = self.get_hash_booktrading(values=values, symbol=symbol)
 
             # ubica último trader del symbol para obtener basico
             nw_producto, ubasico, ustock = 0.0, 0.0, 0.0
-            uid, position = 0.0, 0.0
-            costo_avg = 0.0
 
             usec = self._next_sec(cursor, account, idivisa, symbol)
             utrading, ix = self.select_booktrading(accion="last", account=account, idivisa=idivisa, symbol=symbol)
             retroactivo = False
             if utrading:
                 nw_producto = utrading[0]["basico"] * utrading[0]["stock"]
-                costo_avg = utrading[0]["basico"]
                 ubasico = utrading[0]["basico"]
                 ustock = utrading[0]["stock"]
                 # insert retroactivo: la fila que se toma como "anterior" es en realidad posterior, asi que el
@@ -6222,16 +6240,6 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                     retroactivo = values["fechahora"] < utrading[0]["fechahora"]
                 except TypeError:
                     pass
-
-            # ubica costobase para mejorar el precio medio
-            # con account: sin cuenta el SELECT no filtra useraccount y devuelve la fila de cualquiera,
-            # asi que el costo medio saldria de la cartera de otra cuenta apenas dos operen el mismo ticket
-            inversion = self.select_inversion(account=account, tipoin=categoria, ticket=symbol)
-            if inversion:
-                position = inversion[0]["position"] if inversion else 0
-                costo_avg = (
-                    inversion[0]["costobase"] * inversion[0]["factor_cambio"] / position if position > 0 else ubasico
-                )
 
             stock = ustock + values["cantidad"]
 
@@ -6267,13 +6275,18 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 # rutina para marcar como iactiva='N'
                 importe = maximiza_ganancias_corto_plazo(values["cantidad"], values["fechahora"])
 
-                # el costo de los lotes consumidos sale de `importe`: copiar costo_avg deja el promedio
-                # congelado en el valor previo a la venta y el error se acumula, porque la proxima compra
-                # arranca de nw_producto = basico * stock. El divisor es la posicion del broker, no el
-                # stock del libro — es la que despues multiplica avgcost para mostrar costobase.
-                # Sin posicion confiable se conserva el comportamiento anterior.
-                resto = position + values["cantidad"]
-                basico = (position * costo_avg - importe) / resto if resto > 0 else costo_avg
+                # el costo de los lotes consumidos sale de `importe`: copiar el promedio previo lo deja
+                # congelado y el error se acumula, porque la proxima compra arranca de nw_producto.
+                # Revierte el divisor del 10-10, que era `position` -la del broker- para que avgcost por la
+                # posicion reconstruyera costobase. El numerador `position * costo_avg` es `costobase *
+                # factor_cambio`, o sea el total del broker, mientras `importe` lo calcula el libro
+                # consumiendo sus lotes mas baratos: se le descontaba a un total ajeno un costo de otra
+                # serie y el resto no cerraba contra la suma de los lotes abiertos. Medido en FIRY el
+                # 29-10: arrancaba de 1500,77 (IB) con el libro en 1557,04, y una venta de 45 unidades
+                # subio el basico a 18,7038 — por encima del lote vivo mas caro. Hoy el libro descuenta
+                # del libro: numerador, divisor e `importe` de la misma fuente.
+                resto = ustock + values["cantidad"]
+                basico = (nw_producto - importe) / resto if resto > 0 else ubasico
 
                 gpreal = values["producto"] - (importe + values["tarifacomision"])
                 mtmgp = gpreal / abs(values["cantidad"])
