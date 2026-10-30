@@ -6199,13 +6199,13 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             # (ids 970 y 984). Con el hash repetido en BD, el camino que las inserto no lo valido o no
             # paso por aca -sin determinar-. Y donde si pasa, el hash es inestable: incluye fechahora,
             # cantidad y preciotrans, asi que el mismo trade reenviado con la hora corrida genera otro
-            # hash -174 de 188 trades de Binance el 10-10-. El idtrans si identifica
-            # la ejecucion, pero solo donde el broker lo garantiza unico: ARS y VES reusan el numero de 20
-            # digitos del banco -15 y 1 grupos repetidos con fecha, cantidad y precio distintos- y ahi el
-            # chequeo descartaria movimientos reales. Va con symbol porque el tradeId de Binance se numera
-            # por par: los correlativos 1..21 de las cargas manuales viejas se repiten entre ADA, DOT, VET
-            # y ZIL. Se loguea porque llegar aca significa que el hash no lo reconocio: el trade cambio
-            # de fecha, cantidad o precio, o el hash de la fila vieja nunca se valido.
+            # hash -174 de 188 trades de Binance el 10-10-. El idtrans si identifica la ejecucion, pero
+            # solo donde el broker lo garantiza unico: ARS y VES reusan el numero de 20 digitos del banco
+            # -15 y 1 grupos repetidos con fecha, cantidad y precio distintos- y ahi el chequeo descartaria
+            # movimientos reales. Va con symbol porque el tradeId de Binance se numera por par: los
+            # correlativos 1..21 de las cargas manuales viejas se repiten entre ADA, DOT, VET y ZIL. Se
+            # loguea porque llegar aca significa que el hash no lo reconocio: el trade cambio de fecha,
+            # cantidad o precio, o el hash de la fila vieja nunca se valido.
             if categoria in ("Stock", "ETF", "Crypto"):
                 if self.exists_bt_trade_by_idtrans(account, idtrans, symbol=symbol):
                     self.logger.warning(
@@ -7419,10 +7419,11 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         esos lotes hoy estan marcados; el dato guardado es el unico testigo del reparto real.
         Una venta sin `gprealizadas` cae al promedio movil, que es lo mejor disponible sin ese testigo.
 
-        Diferencia declarada contra el camino en vivo: ahi el divisor es `inversion.position` (la del
-        broker), aca el stock acumulado del libro. Coinciden salvo por los hechos que el libro no
-        registra — rewards de staking, airdrops —, que entran a la posicion sin costo y bajan el
-        promedio real por debajo del que reconstruye este metodo.
+        Mismo criterio que el camino en vivo desde el 2026-10-29: los dos dividen por el stock del libro
+        y descuentan `importe`. Antes el vivo dividia el total del broker (`position * costo_avg`), asi
+        que este replay y la cadena en vivo daban distinto para el mismo simbolo. Lo que ninguno de los
+        dos ve son los hechos que el libro no registra — rewards de staking, airdrops —, que entran a la
+        posicion sin costo y bajan el promedio real por debajo del reconstruido.
 
         Cierra sellando `otros_activos.avgcost` con el costo final: es de ahi que el panel de Crypto lee
         el costo base, asi que reescribir solo el libro deja la cadena corregida y la pantalla con el
