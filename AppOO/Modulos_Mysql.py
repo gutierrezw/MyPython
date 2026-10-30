@@ -5909,6 +5909,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
                     if (cant + ya_sell + c_sell) <= 0:
                         ya_sell += cant
+                        a_sell += cant
                         activa = "N"
                         value += cant * prec
                     elif (cant + ya_sell + c_sell) > 0:
@@ -6103,6 +6104,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                     # recalcula la cantidad que es vendida para los casos que toma más de un lote
                     if (cant + ya_sell + c_sell) <= 0:
                         ya_sell += cant
+                        a_sell += cant
                         activa = "N"
 
                         # se acumula el importe total del lote
