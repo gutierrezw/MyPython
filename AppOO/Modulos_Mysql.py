@@ -7488,6 +7488,90 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.close()
             conn.close()
 
+    def recalculate_lots_chain(self, account: str, symbol: str, divisa: str) -> tuple:
+        """
+        Re-imputa `sell` y `activa` de TODOS los lotes del simbolo reproduciendo el reparto de las ventas
+        en orden (fechahora, sec). Retorna (filas_actualizadas, lotes_vivos, sin_imputar).
+
+        El reparto solo corre dentro de `insert_booktrading` cuando entra una venta, asi que una cadena
+        escrita antes de que ese camino existiera —o una venta que no lo atraveso— deja lotes marcados
+        vivos que ya se consumieron. `recalculate_stock_chain` reescribe `stock` y
+        `recalculate_cost_chain` reescribe `basico`; ninguno toca la imputacion. Caso testigo SNDL: el
+        neto de la cadena da 410,0 exacto contra IB, pero el `sell` repartido sumaba 320 contra 330,2
+        vendidas — 10,2 unidades vendidas sin imputar, y 70,2 marcadas vivas en el tramo 2020-2021, donde
+        de siete ventas solo una fila quedo cerrada.
+
+        Mismo criterio que el camino en vivo: consume el lote de menor `preciotrans` primero, con el
+        desempate `fechahora DESC, sec DESC` del `SELECT` que lee `maximiza_ganancias_corto_plazo`. El
+        recorrido cronologico es lo que mantiene valido el reparto — una venta solo puede consumir lotes
+        que existian ese dia —, y por eso no alcanza con ordenar la cadena por precio de una sola vez.
+
+        Una venta que no alcanza a imputarse deja remanente en `sin_imputar` y se loguea a ERROR: es el
+        sintoma de una compra que el libro no registra, y silenciarla reparte de menos sin que se note.
+        El umbral es el cero tecnico (0,0001), no el cero exacto: en Stock los restos de 1e-6 son
+        redondeo de split y perseguirlos cerraria lotes vivos legitimos.
+        """
+        conn = self._conectar(tabla="update.booktrading.recalc_lots")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT id, sec, fechahora, codigo, cantidad, preciotrans
+                   FROM booktrading
+                   WHERE cuenta = %s AND simbolo = %s AND divisa = %s AND delisted = 0
+                   ORDER BY fechahora, sec""",
+                (account, symbol, divisa),
+            )
+            filas = cursor.fetchall()
+
+            lotes, sin_imputar = [], 0.0
+            for fid, sec, fechahora, codigo, cantidad, precio in filas:
+                cantidad = float(cantidad or 0)
+                if cantidad > 0:
+                    if codigo == "O":
+                        lotes.append({"id": fid, "sec": sec, "fecha": fechahora, "sell": 0.0,
+                                      "precio": float(precio or 0), "cantidad": cantidad})
+                    continue
+
+                pendiente = abs(cantidad)
+                for lote in sorted(lotes, key=lambda x: (x["precio"], -x["fecha"].timestamp(), -x["sec"])):
+                    if pendiente <= 0.0001:
+                        break
+                    vivo = lote["cantidad"] - lote["sell"]
+                    if vivo <= 0.0001:
+                        continue
+                    toma = vivo if vivo <= pendiente else pendiente
+                    lote["sell"] += toma
+                    pendiente -= toma
+
+                if pendiente > 0.0001:
+                    sin_imputar += pendiente
+                    self.logger.error(
+                        f"recalculate_lots_chain(): {symbol} venta sec={sec} sin lotes para "
+                        f"{pendiente:.6f} unidades"
+                    )
+
+            if not lotes:
+                return 0, 0.0, sin_imputar
+
+            update = datetime.now()
+            updates = [("N" if (x["cantidad"] - x["sell"]) <= 0.0001 else "Y", x["sell"], update, x["id"])
+                       for x in lotes]
+            cursor.executemany(
+                "UPDATE booktrading SET activa = %s, sell = %s, updateStamp = %s WHERE id = %s", updates
+            )
+            conn.commit()
+            vivos = sum(x["cantidad"] - x["sell"] for x in lotes)
+            return cursor.rowcount, vivos, sin_imputar
+        except (Exception, connect.Error) as e:
+            self.logger.error(f"recalculate_lots_chain(): {e}")
+            return 0, 0.0, 0.0
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
     def exists_bt_trade(self, account: str, symbol: str, divisa: str,
                         fechahora, cantidad: float, precio: float) -> bool:
         """True si existe un registro en booktrading que coincida en fecha/qty/precio."""
