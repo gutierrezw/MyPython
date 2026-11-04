@@ -5029,7 +5029,23 @@ class WidgetVehiculo(TickerInfo):
             print("[update_widget_treeview()]: {}".format(e))
 
     def update_panelVehiculo(self, orden=None):
+        def ajusta_filas_treeview():
+            # la fila del treeview es un contenedor posicional: `on_sort_treeview` la reescribe por indice,
+            # no por ticket. Si sobran filas, las del final conservan el eco de la pasada anterior; si
+            # faltan, la position sin fila se descarta. Se iguala la cantidad antes de ordenar, y nunca
+            # con positions vacio: eso es un fallo transitorio de la fuente, no una cartera sin activos
+            if not self.positions:
+                return
+
+            for tree in self.m_tree:
+                hijos = tree.get_children()
+                for child in hijos[len(self.positions):]:
+                    tree.delete(child)
+                for _ in range(len(self.positions) - len(hijos)):
+                    tree.insert(parent="", index=tk.END, text="", values=(" ",), tags=("even",))
+
         try:
+            ajusta_filas_treeview()
             positions = self.on_sort_treeview(orden=orden)
             total = self.header_total_positions(self.positions)
             for position in positions:
@@ -6394,10 +6410,12 @@ class WidgetVehiculo(TickerInfo):
             ax.tick_params(axis="x", colors=self.cchart["texto"])
             ax.tick_params(axis="y", colors=self.cchart["texto"])
 
-            # Ajustar los límites del eje Y si es necesario para dar más espacio
+            # Ajustar los límites del eje Y si es necesario para dar más espacio.
+            # La barra nace en 0, asi que el eje tiene que incluirlo: con todos los activos del
+            # mismo signo el min/max puro deja el 0 fuera del rango y las barras se recortan enteras
             ax.set_ylim(
-                df_combinado["Rendimiento_Pct"].min() * 1.2,
-                df_combinado["Rendimiento_Pct"].max() * 1.2,
+                min(df_combinado["Rendimiento_Pct"].min(), 0) * 1.2,
+                max(df_combinado["Rendimiento_Pct"].max(), 0) * 1.2,
             )
             # self.graph[1][1].tight_layout()
 
