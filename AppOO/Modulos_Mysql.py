@@ -3663,6 +3663,10 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
     clase para manejar operaciones: select, insert y update sobre tabla Plan, TrazaPlan y VariablesPlan.
     """
 
+    # Desfase de lotes que se considera real: por debajo es redondeo de split (GHSI 0,0003) o lotes
+    # fraccionarios legitimos (WKHS suma 20,000009 contra 20 de IB con 33 lotes de un split 1:12)
+    _TOL_LOTES = 0.01
+
     def __init__(self):
         self.display = False
 
@@ -4967,7 +4971,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
     def check_lotes_vs_position(self, account: str) -> list:
         """
         Compara lotes activos en booktrading vs position en inversion para la cuenta.
-        Retorna lista de dicts con delta != 0: {simbolo, lotes_book, ib_position, delta}
+        Retorna lista de dicts con delta != 0: {simbolo, lotes_book, ib_position, delta, divisa, divisas}
         Excluye: divisa ARS (FCI), codigo != 'O', delisted, inversion no Stock.
         El lote disponible es cantidad - sell: una venta parcial descuenta en sell y deja la fila activa.
         """
@@ -4976,7 +4980,8 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             conn = self._conectar(tabla="select.booktrading.lotes_reconcile")
             cursor = conn.cursor()
             cursor.execute(
-                """SELECT simbolo, SUM(cantidad - COALESCE(sell, 0)) AS lotes_book
+                """SELECT simbolo, SUM(cantidad - COALESCE(sell, 0)) AS lotes_book,
+                          MAX(divisa) AS divisa, COUNT(DISTINCT divisa) AS divisas
                      FROM booktrading
                     WHERE cuenta = %s
                       AND activa = 'Y'
@@ -4987,7 +4992,7 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 (account,),
             )
             cols = [c[0] for c in cursor.description]
-            book_map = {r["simbolo"]: float(r["lotes_book"]) for r in (dict(zip(cols, row)) for row in cursor.fetchall())}
+            book_map = {r["simbolo"]: r for r in (dict(zip(cols, row)) for row in cursor.fetchall())}
 
             cursor.execute(
                 """SELECT ticket, COALESCE(position, 0) AS position
@@ -5001,11 +5006,14 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
             all_symbols = set(book_map) | set(inv_map)
             deltas = []
             for sym in sorted(all_symbols):
-                lotes_book = book_map.get(sym, 0.0)
+                fila_book = book_map.get(sym) or {}
+                lotes_book = float(fila_book.get("lotes_book") or 0)
                 ib_position = inv_map.get(sym, 0.0)
                 delta = round(lotes_book - ib_position, 6)
-                if abs(delta) >= 0.01:
-                    deltas.append({"simbolo": sym, "lotes_book": lotes_book, "ib_position": ib_position, "delta": delta})
+                if abs(delta) >= self._TOL_LOTES:
+                    deltas.append({"simbolo": sym, "lotes_book": lotes_book, "ib_position": ib_position,
+                                   "delta": delta, "divisa": fila_book.get("divisa") or "USD",
+                                   "divisas": int(fila_book.get("divisas") or 1)})
             return deltas
         except (Exception, connect.Error) as e:
             print(f"[Mysql:: check_lotes_vs_position()]: {e}")
@@ -7505,10 +7513,15 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.close()
             conn.close()
 
-    def recalculate_lots_chain(self, account: str, symbol: str, divisa: str) -> tuple:
+    def recalculate_lots_chain(self, account: str, symbol: str, divisa: str, dry_run: bool = False) -> tuple:
         """
         Re-imputa `sell` y `activa` de TODOS los lotes del simbolo reproduciendo el reparto de las ventas
-        en orden (fechahora, sec). Retorna (filas_actualizadas, lotes_vivos, sin_imputar).
+        en orden (fechahora, sec). Retorna (filas_a_corregir, lotes_vivos, sin_imputar).
+
+        `dry_run=True` simula y no escribe: devuelve lo mismo que la corrida real, asi que el que llama
+        puede medir contra el broker antes de tocar la cadena. Es el modo que usa `reconcile_lotes`.
+        Las filas que ya tienen el `sell` y el `activa` correctos no entran en el UPDATE — el conteo que
+        se devuelve es el de las que cambian, no el de los lotes del simbolo.
 
         El reparto solo corre dentro de `insert_booktrading` cuando entra una venta, asi que una cadena
         escrita antes de que ese camino existiera —o una venta que no lo atraveso— deja lotes marcados
@@ -7533,7 +7546,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         try:
             cursor = conn.cursor()
             cursor.execute(
-                """SELECT id, sec, fechahora, codigo, cantidad, preciotrans
+                """SELECT id, sec, fechahora, codigo, cantidad, preciotrans, COALESCE(sell, 0), activa
                    FROM booktrading
                    WHERE cuenta = %s AND simbolo = %s AND divisa = %s AND delisted = 0
                    ORDER BY fechahora, sec""",
@@ -7542,12 +7555,13 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
             filas = cursor.fetchall()
 
             lotes, sin_imputar = [], 0.0
-            for fid, sec, fechahora, codigo, cantidad, precio in filas:
+            for fid, sec, fechahora, codigo, cantidad, precio, sell_bd, activa_bd in filas:
                 cantidad = float(cantidad or 0)
                 if cantidad > 0:
                     if codigo == "O":
                         lotes.append({"id": fid, "sec": sec, "fecha": fechahora, "sell": 0.0,
-                                      "precio": float(precio or 0), "cantidad": cantidad})
+                                      "precio": float(precio or 0), "cantidad": cantidad,
+                                      "sell_bd": float(sell_bd or 0), "activa_bd": activa_bd})
                     continue
 
                 pendiente = abs(cantidad)
@@ -7572,14 +7586,20 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 return 0, 0.0, sin_imputar
 
             update = datetime.now()
-            updates = [("N" if (x["cantidad"] - x["sell"]) <= 0.0001 else "Y", x["sell"], update, x["id"])
-                       for x in lotes]
-            cursor.executemany(
-                "UPDATE booktrading SET activa = %s, sell = %s, updateStamp = %s WHERE id = %s", updates
-            )
-            conn.commit()
+            updates = []
+            for x in lotes:
+                activa = "N" if (x["cantidad"] - x["sell"]) <= 0.0001 else "Y"
+                if abs(x["sell"] - x["sell_bd"]) <= 0.000001 and activa == x["activa_bd"]:
+                    continue
+                updates.append((activa, x["sell"], update, x["id"]))
+
             vivos = sum(x["cantidad"] - x["sell"] for x in lotes)
-            return cursor.rowcount, vivos, sin_imputar
+            if updates and not dry_run:
+                cursor.executemany(
+                    "UPDATE booktrading SET activa = %s, sell = %s, updateStamp = %s WHERE id = %s", updates
+                )
+                conn.commit()
+            return len(updates), vivos, sin_imputar
         except (Exception, connect.Error) as e:
             self.logger.error(f"recalculate_lots_chain(): {e}")
             return 0, 0.0, 0.0
@@ -7588,6 +7608,51 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.close()
             if conn:
                 conn.close()
+
+    def reconcile_lotes(self, account: str, aplicar: bool = True) -> list:
+        """
+        Reconcilia los lotes del libro contra la position del broker y corrige los que el recalculo cierra.
+        Retorna una fila por desfase: {simbolo, divisa, divisas, lotes_book, ib_position, delta, filas,
+        vivos, delta_post, sin_imputar, corregido, motivo}.
+
+        El criterio para escribir es el propio detector: se aplica solo si re-imputar la cadena deja el
+        desfase por debajo del umbral de `check_lotes_vs_position()` y no quedan unidades sin imputar. Un
+        desfase que el recalculo no cierra no es de imputacion sino de datos —una compra o una venta que
+        el libro no registra— y ahi reescribir `sell` reparte de menos sin dejar rastro: se reporta y no
+        se toca. Por eso el metodo no define umbral propio: el que decide corregir es el mismo que detecta.
+
+        `aplicar=False` deja todo en DRY-RUN con la traza del antes/despues y sin escribir — el UPDATE
+        mueve la imputacion de la que cuelga el costo medio de los lotes vivos.
+        """
+        resultado = []
+        for dif in self.check_lotes_vs_position(account=account):
+            fila = dict(dif, filas=0, vivos=None, delta_post=None, sin_imputar=0.0, corregido=False, motivo="")
+            if dif["divisas"] > 1:
+                fila["motivo"] = f"el simbolo tiene lotes en {dif['divisas']} divisas"
+                resultado.append(fila)
+                continue
+
+            filas, vivos, sin_imputar = self.recalculate_lots_chain(
+                account=account, symbol=dif["simbolo"], divisa=dif["divisa"], dry_run=True
+            )
+            delta_post = round(vivos - dif["ib_position"], 6)
+            fila.update(filas=filas, vivos=vivos, delta_post=delta_post, sin_imputar=sin_imputar)
+
+            if sin_imputar > 0.0001:
+                fila["motivo"] = f"{sin_imputar:.6f} unidades vendidas sin lote de origen"
+            elif abs(delta_post) >= self._TOL_LOTES:
+                fila["motivo"] = f"el recalculo deja delta {delta_post:+.6f}"
+            elif not filas:
+                fila["motivo"] = "la imputacion ya es la correcta"
+            elif not aplicar:
+                fila["motivo"] = "DRY-RUN"
+            else:
+                filas, _, _ = self.recalculate_lots_chain(
+                    account=account, symbol=dif["simbolo"], divisa=dif["divisa"]
+                )
+                fila.update(filas=filas, corregido=filas > 0)
+            resultado.append(fila)
+        return resultado
 
     def exists_bt_trade(self, account: str, symbol: str, divisa: str,
                         fechahora, cantidad: float, precio: float) -> bool:

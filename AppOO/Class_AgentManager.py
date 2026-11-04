@@ -726,7 +726,7 @@ class AgentManager:
         try:
             sesion = BDsystem.get_sesion_by_vehiculo("Stock")
             ib_account = sesion.get("idcuentaIB") or sesion.get("idcuenta")
-            deltas = self.PlanInversion.check_lotes_vs_position(account=self.account)
+            deltas = self.RepositorioOportunidades.reconcile_lotes(account=self.account)
             if not deltas:
                 self._log_infra.warning("Agente_LotesReconcile: OK — sin diferencias lotes vs IB")
                 return
@@ -735,23 +735,39 @@ class AgentManager:
                 r["symbol"]: float(r["ib_net"])
                 for r in self.RepositorioOportunidades.get_ib_trades_net(ib_account, date_from)
             }
-            lineas = []
+            lineas, corregidos = [], []
             for d in deltas:
                 sym = d["simbolo"]
                 flex_net = ib_net.get(sym)
                 diag = f"Flex 90d={flex_net:+.2f}" if flex_net is not None else "sin datos Flex"
+                estado = f"CORREGIDO {d['filas']} filas" if d["corregido"] else d["motivo"]
                 self._log_infra.warning(
                     f"Agente_LotesReconcile: {sym} Δ={d['delta']:+.2f} "
-                    f"book={d['lotes_book']:.2f} IB={d['ib_position']:.2f} [{diag}]"
+                    f"book={d['lotes_book']:.2f} IB={d['ib_position']:.2f} [{diag}] {estado}"
                 )
-                lineas.append(f"{sym}: book={d['lotes_book']:.2f} IB={d['ib_position']:.2f} Δ={d['delta']:+.2f} [{diag}]")
-            DataHub.add_alert(
-                "⚠️ Reconcile Lotes: {} dif\n{}".format(
-                    len(deltas),
-                    "\n".join(f"  • {l}" for l in lineas),
-                ),
-                telegram=True, tipo="datos", dedup_key="reconcile_lotes",
-            )
+                if d["corregido"]:
+                    corregidos.append(f"{sym}: Δ={d['delta']:+.2f} → 0 re-imputando {d['filas']} filas")
+                    continue
+                lineas.append(
+                    f"{sym}: book={d['lotes_book']:.2f} IB={d['ib_position']:.2f} Δ={d['delta']:+.2f} "
+                    f"[{diag}] — {d['motivo']}"
+                )
+            if corregidos:
+                DataHub.add_alert(
+                    "🔧 Reconcile Lotes: {} corregidos\n{}".format(
+                        len(corregidos),
+                        "\n".join(f"  • {l}" for l in corregidos),
+                    ),
+                    telegram=True, tipo="datos",
+                )
+            if lineas:
+                DataHub.add_alert(
+                    "⚠️ Reconcile Lotes: {} dif\n{}".format(
+                        len(lineas),
+                        "\n".join(f"  • {l}" for l in lineas),
+                    ),
+                    telegram=True, tipo="datos", dedup_key="reconcile_lotes",
+                )
         except Exception as e:
             self._log_infra.error(f"Agente_LotesReconcile(): {e}")
 
