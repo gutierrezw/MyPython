@@ -60,6 +60,9 @@ Orden acordado (después de las 4 fijas: Symbol, Name, Status, Cart):
 
 ## Nomenclatura homologada (Screener ↔ Consenso)
 
+- El concepto sigue siendo **Consenso**; la etiqueta visible es **"Señal"** (Telegram, Screener, popups y
+  panel de decisión). Donde convive con el voto institucional —ventana de cartera— son **`Inst Señal`**
+  (voto institucional) y **`App Señal`** (los 7 votos), para que no se lean como lo mismo
 - `fh_count` → siempre **"13F Inst"** — única fuente de conteo institucional
 - `inst_funds` → NO mostrar en UI (datos Yahoo inconsistentes)
 - Ambas pantallas deben usar los mismos nombres de columna para los mismos conceptos

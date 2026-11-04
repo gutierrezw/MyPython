@@ -3029,7 +3029,7 @@ class DashMain:
                 f"    {_fmt(claude.get('razon'))}",
                 f"",
                 f"  Contexto:",
-                f"    Consenso:   {_fmt(decision.get('consenso_tag'))}",
+                f"    Señal:      {_fmt(decision.get('consenso_tag'))}",
                 f"    Inst Score: {_fmt(decision.get('inst_score'))}",
                 f"    13F Buy%:   {_fmt(decision.get('fh_buy_ratio'), pct=True)}",
                 f"    RSI diario: {_fmt(decision.get('rsi_d'))}",
@@ -3864,7 +3864,7 @@ class DashMain:
                 analisis.update({
                     "─" * 12: "",
                     "Inst Score": inst_score,
-                    "Consenso": consenso_lbl,
+                    "Señal": consenso_lbl,
                 })
 
                 _bg = self.colors.get("cgcolor", "#000000")
@@ -3882,7 +3882,7 @@ class DashMain:
                         ).pack(side=tk.LEFT)
                         tk.Label(
                             row_frm, text=value, bg=_bg,
-                            fg="#00cc88" if key == "Consenso" else "white",
+                            fg="#00cc88" if key == "Señal" else "white",
                             font=("Arial", 8), anchor="w",
                         ).pack(side=tk.LEFT)
 

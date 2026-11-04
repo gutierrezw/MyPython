@@ -165,11 +165,24 @@ class ClassAgenteIA:
         self._gc_run_log = {}
         self._gc_skip_log = {}
 
+        # Filtro de Señal del menu Telegram — claves elegidas por el usuario; vacio = todas
+        self.filtro_senal = set(read_json_tmp("telegram_filtro_senal.json").get("tags") or [])
+
         # Inicializar AgentManager — registra todos sus agentes @wait_rate en AGENTES_SCHEDULE
         self.agent_manager = AgentManager(account=self.account, vehiculo=self.vehiculo)
 
     _BUY_TAGS = {"UNANIME", "CONSENSO", "TENDENCIA"}
     _SELL_TAGS = {"ALERTA", "SALIDA"}
+    # Orden y etiqueta de cada clave en el teclado del filtro de Telegram — "SD" es el simbolo sin señal
+    _SENAL_MENU = (
+        ("UNANIME", "★ UNÁNIME"),
+        ("CONSENSO", "▲ CONSENSO"),
+        ("TENDENCIA", "↗ TENDENCIA"),
+        ("NEUTRO", "→ NEUTRO"),
+        ("ALERTA", "↘ ALERTA"),
+        ("SALIDA", "▼ SALIDA"),
+        ("SD", "— sin señal"),
+    )
     # cada cuanto una corrida repetida vuelve a escribir aunque no haya cambiado nada — es el latido
     # que separa "sin novedad" de "el agente dejo de correr"
     _LATIDO_SEG = 4 * 3600
@@ -185,9 +198,37 @@ class ClassAgenteIA:
         except (ValueError, IndexError):
             return None, None
 
+    def _consenso_clave(self, tag):
+        """Clave del tag, sin el simbolo que lo precede ni acentos.
+
+        `market.consenso_tag` guarda la etiqueta ya formateada —"▲ CONSENSO"— porque es lo que devuelve
+        `senal_consenso()`, y 3 filas viejas la traen pelada. Comparar el texto crudo contra un set de
+        claves no coincide nunca, asi que todo gate normaliza antes de comparar. Sin tag —y con el
+        "— S/D" que devuelve `senal_consenso()` sin votos— devuelve "", que es lo que los gates leen
+        como "este simbolo no tiene señal" y dejan pasar.
+        """
+        if not tag:
+            return ""
+        clave = str(tag).strip().split()[-1].upper()
+        if clave == "S/D":
+            return ""
+        for acento, llano in (("Á", "A"), ("É", "E"), ("Í", "I"), ("Ó", "O"), ("Ú", "U")):
+            clave = clave.replace(acento, llano)
+        return clave
+
     def _consenso_tag(self, symbol):
         tag, _ = self._consenso_info(symbol)
-        return tag
+        return self._consenso_clave(tag)
+
+    def _filtro_senal_ok(self, symbol):
+        """Si el usuario eligio señales en el menu de Telegram, el simbolo tiene que traer una de ellas.
+
+        Conjunto vacio = sin filtrar, que es el arranque y lo que deja el boton "Todas". El simbolo sin
+        señal cuenta como "SD": queda fuera salvo que se lo elija, porque son 1315 de los 1361 de market.
+        """
+        if not self.filtro_senal:
+            return True
+        return (self._consenso_tag(symbol) or "SD") in self.filtro_senal
 
     # Controla si el mensaje debe enviarse a Telegram según reglas:
     def Agente_message_Manager_sell(self, row):
@@ -1674,6 +1715,32 @@ class Telegram:
             self._agregar_mensaje(f"👤 Telegram: {update.message.text}")
             # ... tu lógica de respuesta aquí ...
 
+    def _texto_filtro_senal(self):
+        if not self.filtro_senal:
+            return "🎯 Señal: todas — tocá las que quieras recibir"
+        activas = ", ".join(lbl for clave, lbl in self._SENAL_MENU if clave in self.filtro_senal)
+        return f"🎯 Señal: {activas}"
+
+    def _teclado_senal(self):
+        """Teclado de toggles — Telegram no tiene multi-seleccion, se repinta el mismo mensaje."""
+        filas, pareja = [], []
+        for clave, lbl in self._SENAL_MENU:
+            marca = "✅" if clave in self.filtro_senal else "⬜"
+            pareja.append(InlineKeyboardButton(f"{marca} {lbl}", callback_data=f"senal_tog|{clave}"))
+            if len(pareja) == 2:
+                filas.append(pareja)
+                pareja = []
+        if pareja:
+            filas.append(pareja)
+        filas.append(
+            [
+                InlineKeyboardButton("🔄 Todas", callback_data="senal_todas"),
+                InlineKeyboardButton("📨 Ver ahora", callback_data="senal_ver"),
+                InlineKeyboardButton("☰ Menú", callback_data="menu_volver"),
+            ]
+        )
+        return InlineKeyboardMarkup(filas)
+
     # Método para enviar menú principal
     async def handle_menu(self, update=None, context=None):
         CHAT_ID = [update.effective_chat.id] if update else self.userAuth
@@ -1682,6 +1749,7 @@ class Telegram:
 
         n_alertas = len(DataHub.system_alerts)
         lbl_alertas = f"🚨 Alertas ({n_alertas})" if n_alertas else "🔕 Alertas"
+        lbl_senal = f"🎯 Señal ({len(self.filtro_senal)})" if self.filtro_senal else "🎯 Señal"
         botones = [
             [
                 InlineKeyboardButton("⬇️⬆️ Top(10)", callback_data="menu_top"),
@@ -1695,6 +1763,7 @@ class Telegram:
             ],
             [
                 InlineKeyboardButton(lbl_alertas, callback_data="alertas"),
+                InlineKeyboardButton(lbl_senal, callback_data="menu_senal"),
             ],
         ]
         menu_markup = InlineKeyboardMarkup(botones)
@@ -2046,6 +2115,30 @@ class Telegram:
                 else:
                     texto = "\n\n".join(alertas)
                     await self._safe_edit(query, f"🚨 *{len(alertas)} Alertas*\n\n{texto}", parse_mode="Markdown")
+
+            elif accion == "menu_senal":
+                await self._safe_edit(query, self._texto_filtro_senal(), reply_markup=self._teclado_senal())
+
+            elif accion == "senal_tog":
+                clave = args[0]
+                self.filtro_senal.symmetric_difference_update({clave})
+                write_json_tmp("telegram_filtro_senal.json", {"tags": sorted(self.filtro_senal)})
+                await self._safe_edit(query, self._texto_filtro_senal(), reply_markup=self._teclado_senal())
+
+            elif accion == "senal_todas":
+                self.filtro_senal.clear()
+                write_json_tmp("telegram_filtro_senal.json", {"tags": []})
+                await self._safe_edit(query, self._texto_filtro_senal(), reply_markup=self._teclado_senal())
+
+            elif accion == "senal_ver":
+                # Cambiar el filtro no reenvia nada por si solo: el envio pasivo exige que
+                # MostrarOpcionMenu_enTelegram este en Buy o Sell, y arranca en "menu". Este boton
+                # repite lo que hace /menu para que el filtro recien elegido se vea sin salir de aqui
+                await self._safe_edit(query, f"{self._texto_filtro_senal()} — 📨 reenviando las vigentes…")
+                await self._flush_oportunidades_menu()
+
+            elif accion == "menu_volver":
+                await self.handle_menu(update, context)
 
             elif accion == "ia_ejecutar":
                 trace_id = int(args[0])
@@ -2761,7 +2854,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 lineas += [
                     "📊 CONTEXTO MERCADO",
                     f"  Sector: {sector}   País: {country}",
-                    f"  Consenso: {consenso_tag}" + (f" ({consenso_suma} votos)" if consenso_suma else ""),
+                    f"  Señal: {consenso_tag}" + (f" ({consenso_suma} votos)" if consenso_suma else ""),
                     f"  Inst Score: {_fmt(inst_score)}   13F Inst: {fh_count or '—'}   Inst %: {_fmt(inst_pct)}%",
                     "",
                 ]
@@ -3350,6 +3443,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             mensaje += f"{'Prec. posVenta'   :<18} {row['PosAvgCost']:>12.4f}\n"
             mensaje += f"{'Pos. posVenta'    :<18} {row['PosPosition']:>12.4f}\n"
             mensaje += f"{'CostoB posVenta'  :<18} {row['PosCostobase']:>12.2f}\n"
+            mensaje += f"{'Objetivo'         :<18} {row.get('Objetivo', 0):>12.4f}\n"
             mensaje += f"{'Valoracion'       :<18} {""}\n"
 
             if modo == "ia" and confianza is not None:
@@ -3359,7 +3453,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             tag, suma = self._consenso_info(symbol)
             if tag:
                 mensaje += f"{'-' * 37}\n"
-                mensaje += f"{'Consenso'         :<18} {tag} ({suma:+d})\n"
+                mensaje += f"{'Señal'            :<18} {tag} ({suma:+d})\n"
 
             _raw_tec = row.get("Datostecnicos") or row.get("datos_tecnicos")
             if _raw_tec:
@@ -3520,10 +3614,14 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             if insert:
                 # Verifica que este TRUE mostrar las ventas
                 menu_ok = self.MostrarOpcionMenu_enTelegram == "Sell"
-                self._marca_capa(
-                    row, "5_gate_menu", menu_ok, None if menu_ok else f"menu en {self.MostrarOpcionMenu_enTelegram}"
-                )
-                if menu_ok:
+                senal_ok = self._filtro_senal_ok(row.get("Symbol", ""))
+                _motivo = None
+                if not menu_ok:
+                    _motivo = f"menu en {self.MostrarOpcionMenu_enTelegram}"
+                elif not senal_ok:
+                    _motivo = f"filtro de señal {sorted(self.filtro_senal)}"
+                self._marca_capa(row, "5_gate_menu", menu_ok and senal_ok, _motivo)
+                if menu_ok and senal_ok:
                     await self.opportunity_handler_message_sell(hash_id=hash_id, row=row, origen=origen)
 
                 # capas 5 a 7 se resuelven despues del insert — se anotan sobre la fila ya escrita
@@ -3728,7 +3826,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             tag, suma = self._consenso_info(symbol)
             if tag:
                 mensaje += f"{'-' * 37}\n"
-                mensaje += f"{'Consenso':<12} {tag} ({suma:+d})\n"
+                mensaje += f"{'Señal'            :<18} {tag} ({suma:+d})\n"
 
             if row.get("rsi_alerta"):
                 mensaje += f"{'-' * 37}\n"
@@ -3824,7 +3922,9 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             # Si insert es True, significa que se insertó correctamente
             if insert:
                 # En modo etiquetado: siempre enviar (bypassea el filtro de menú Telegram)
-                if self.MostrarOpcionMenu_enTelegram == "Buy" or self.modo_etiquetado_buy:
+                # El filtro de Señal manda igual: es preferencia del usuario, no un gate de calidad
+                _menu_ok = self.MostrarOpcionMenu_enTelegram == "Buy" or self.modo_etiquetado_buy
+                if _menu_ok and self._filtro_senal_ok(row.get("Symbol", "")):
                     await self.opportunity_handler_message_buy(hash_id=hash_id, row=row, origen=origen)
         except Exception as e:
             self.logger.error(f"oportunity_handler_buy(): {e}")

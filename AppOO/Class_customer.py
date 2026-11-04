@@ -362,6 +362,7 @@ class DataHub:
         "PosAvgCost",
         "PosPosition",
         "PosCostobase",
+        "Objetivo",
         "Datostecnicos",
         "Recomendado",
         "Comentarios",
@@ -683,6 +684,7 @@ class DataHub:
                                     venta["pos avgCost"],
                                     venta["pos position"],
                                     venta["pos costobase"],
+                                    item.get("objetivo", 0),
                                     datos_tec,
                                     0,  # Recomendado
                                     "SinNota",  # Comentarios
@@ -812,6 +814,7 @@ class DataHub:
                                 "disponible": value["sell"]["disponible"],
                                 "divisa": value["sell"]["divisa"],
                                 "factor": value["sell"]["factor"],
+                                "objetivo": value["sell"].get("objetivo", 0),
                                 "list_gain": value["sell"].get("list_gain", []),
                                 "datos_tecnicos": datos_tecnicos,
                             }
@@ -3715,6 +3718,7 @@ class TickerInfo(MyOrders):
                             "disponible": disponible,
                             "divisa": position["divisa"],
                             "factor": position["factor_cambio"],
+                            "objetivo": position.get("objetivo", 0),
                             "account": account or self.account,
                             "list_gain": l_gain,
                         }

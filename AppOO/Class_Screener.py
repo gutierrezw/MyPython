@@ -777,7 +777,7 @@ class Screener(tk.Frame):
 
             ttk.Button(
                 btn_frame,
-                text="Consenso",
+                text="Señal",
                 width=10,
                 command=self._show_institucionales_cartera,
             ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
@@ -1138,7 +1138,7 @@ class Screener(tk.Frame):
         # Divisor con guiones — ancho fijo
         tk.Label(info_frm, text="-" * 28, bg=cgcolor, fg="#555555", font=("Courier", 7, "bold")).pack(anchor="w", fill="x", padx=4, pady=2)
         _info_row("Inst Score", inst_score_lbl)
-        _info_row("Consenso", consenso_lbl, color="#00cc88")
+        _info_row("Señal", consenso_lbl, color="#00cc88")
 
         tk.Button(
             info_frm, text="Cancel", bg="#444444", fg="white", font=("Arial", 8),
@@ -1799,7 +1799,7 @@ class Screener(tk.Frame):
         win = tk.Toplevel(self)
         self._exp_win = win
         win.protocol("WM_DELETE_WINDOW", lambda: (win.destroy(), setattr(self, "_exp_win", None)))
-        win.title(f"Consenso — {symbol}")
+        win.title(f"Señal — {symbol}")
         win.configure(bg="#0d1117")
         win.resizable(True, False)
 
@@ -1808,7 +1808,7 @@ class Screener(tk.Frame):
         hdr.pack(fill=tk.X, padx=14, pady=(10, 2))
         tk.Label(
             hdr,
-            text=f"Desglose Consenso — {symbol}",
+            text=f"Desglose Señal — {symbol}",
             bg="#0d1117",
             fg="cyan",
             font=("Arial", 11, "bold"),
@@ -2097,13 +2097,13 @@ class Screener(tk.Frame):
             "WM_DELETE_WINDOW",
             lambda: (win.destroy(), setattr(self, "_inst_win", None)),
         )
-        win.title("Señales de Consenso — En Cartera")
+        win.title("Señales — En Cartera")
         win.configure(bg="black")
         win.geometry(f"1200x530+{650}+{400}")
 
         hdr = tk.Label(
             win,
-            text=f"Señales de Consenso — Cartera ({len(filas)} activos)",
+            text=f"Señales — Cartera ({len(filas)} activos)",
             bg="black",
             fg="cyan",
             font=("Arial", 11, "bold"),
@@ -2132,7 +2132,7 @@ class Screener(tk.Frame):
             ("Analistas", 140, "w"),
             ("IA Signal", 90, "center"),
             ("Sent", 45, "center"),
-            ("Consenso", 160, "w"),
+            ("App Señal", 160, "w"),
             ("Website", 200, "w"),
         )
         all_cols = tuple(d[0] for d in _COL_DEFS)
