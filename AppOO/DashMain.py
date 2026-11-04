@@ -395,12 +395,15 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     last = d_precio["last"]
                     change = d_precio["change"]
                     xopen = d_precio["open"]
-                    stock = d_precio["stock"]
-                    costo = d_precio["costobase"]
 
-                    # ver si puedo tomar esta información del message
-                    stock = self.assets[conid]["position"] if stock == 0.0 else stock
-                    costo = self.assets[conid]["costobase"] if costo == 0.0 else costo
+                    # la cantidad y el costo son datos de portfolio, no de precio: self.assets los refresca
+                    # api_vehiculo_iteractive cada 60s, mientras el campo 76/7292 del smd+ es el snapshot de la
+                    # suscripcion y solo se renueva al re-suscribir (RESUB=2400 en MyWebsocket). conid_inicio
+                    # conserva el ultimo valor recibido, asi que una compra quedaba invisible hasta 40 min.
+                    # Sin fallback al mensaje: una position en 0 no viene en el portfolio de IB, y si viniera,
+                    # caer al snapshot seria volver al dato viejo
+                    stock = self.assets[conid]["position"]
+                    costo = self.assets[conid]["costobase"]
                     amount = self.assets[conid]["amount_div"]
                     objetivo = self.assets[conid]["objetivo"]
                     unrealizedpnl = self.assets[conid]["unrealizedpnl"]
