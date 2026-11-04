@@ -607,7 +607,7 @@ class AgentManager:
             f"Desde: {data.get('timestamp', '?')}\n"
             f"FCI desactualizado."
         )
-        DataHub.add_alert(alerta, telegram=True, tipo="infra", dedup_key="fci_blocked")
+        DataHub.add_alert(alerta, telegram=True, tipo="infra", dedup_key="fci_blocked", renotify=3600)
 
     @wait_rate(3600, persist=True, desc="BrowserFCI descarga FCI BBVA+Santander (L-V 8:30)", nivel=2)
     def Agente_BrowserFCI(self, forced=False):

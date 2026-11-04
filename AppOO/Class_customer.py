@@ -254,7 +254,7 @@ class DataHub:
 
     @classmethod
     def add_alert(cls, msg: str, telegram: bool = True, tipo: str = None, markup=None, hash_id=None,
-                  dedup_key: str = None, registrar: bool = True):
+                  dedup_key: str = None, registrar: bool = True, renotify: int = 0):
         """Encola una alerta para Telegram. markup son botones inline, solo en memoria.
 
         Un markup no se persiste en incidencias: si la app cae antes del flush, la alerta se
@@ -266,19 +266,25 @@ class DataHub:
         **no vuelve a salir por Telegram**: el estado ya esta reportado y reenviarlo no agrega
         nada. Un hecho unico (una orden, un repago) va sin clave.
 
+        Con `renotify` (segundos) la repeticion vuelve a salir por Telegram si el ultimo envio real
+        fue hace mas de ese plazo — sigue siendo una sola fila, pero el aviso no queda mudo hasta
+        que alguien la marque leida. Es para los estados de infraestructura que van y vuelven.
+
         Con `registrar=False` el mensaje sale por Telegram pero no deja fila en `incidencias`.
         Es para reescribir en el chat un hecho **ya registrado** cuyo texto cambio —el refresco
         de una propuesta de GainsCapture, que reemite el precio del momento— donde `dedup_key`
         no sirve: agrupa bien en la tabla pero corta el envio, que es justamente lo que hay que
         actualizar.
         """
-        incidencia_id, veces = 0, 1
+        incidencia_id, notificar = 0, True
         if registrar:
             try:
-                incidencia_id, veces = BDsystem.insert_incidencia(msg, telegram, tipo, dedup_key)
+                incidencia_id, _, notificar = BDsystem.insert_incidencia(
+                    msg, telegram, tipo, dedup_key, renotify
+                )
             except Exception:
                 pass
-            if veces > 1:
+            if not notificar:
                 return
         if hash_id:
             # si habia un borrado encolado para este hash, lo cancela: el mensaje nuevo ya reemplaza

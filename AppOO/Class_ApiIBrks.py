@@ -240,6 +240,7 @@ class IB(IBClient):
                                     f"🔴 Sesion IB caida — el SSO expiro y no se recupera solo. "
                                     f"Entra a {self.login_gateway_path} para re-autenticar.",
                                     telegram=True, tipo="infra", dedup_key="ib_sso_expired",
+                                    renotify=3600,
                                 )
                     ciclos_sin_auth += 1
                     time.sleep(reconnect_interval)

@@ -1406,7 +1406,12 @@ class ClassAgenteIA:
                 # awaitea desde el hilo. Ademas add_alert deja registro en incidencias
                 # hash_id: la propuesta nueva del simbolo borra del chat a la anterior, asi no
                 # quedan mensajes vencidos con botones que ya no ejecutan
-                DataHub.add_alert(msg, telegram=True, tipo="orden", markup=markup, hash_id=f"gc_{symbol}")
+                # dedup_key: una propuesta que vence y se re-evalua es el MISMO hecho, no uno nuevo —
+                # FIRY abrio 41 filas entre el 22-09 y el 3-11 por reabrirse ~1 vez por dia. Con
+                # renotify el aviso sigue saliendo por Telegram, que es lo que antes obligaba a
+                # emitirla sin clave: el usuario tiene que poder autorizarla
+                DataHub.add_alert(msg, telegram=True, tipo="orden", markup=markup, hash_id=f"gc_{symbol}",
+                                  dedup_key=f"gc_{symbol}", renotify=3600)
                 self.gains_capture_state[symbol] = {
                     **state,
                     "estado": "pendiente_autorizacion",

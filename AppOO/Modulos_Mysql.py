@@ -687,8 +687,9 @@ class BDsystem:  # -------------------------------------------------------------
             return False
 
     @staticmethod
-    def insert_incidencia(msg: str, telegram: bool = True, tipo: str = None, dedup_key: str = None) -> tuple:
-        """Registra una incidencia. Devuelve (id, veces) — veces>1 es una repeticion, no un hecho nuevo.
+    def insert_incidencia(msg: str, telegram: bool = True, tipo: str = None, dedup_key: str = None,
+                          renotify: int = 0) -> tuple:
+        """Registra una incidencia. Devuelve (id, veces, notificar) — veces>1 es repeticion, no un hecho nuevo.
 
         `dedup_key` existe porque la mayoria de las alertas describen un estado que persiste, no un
         evento: "IB Gateway caido" se emitio 1238 veces y tapo las otras 556 incidencias del panel.
@@ -698,6 +699,19 @@ class BDsystem:  # -------------------------------------------------------------
         Solo agrupa contra una fila **pendiente**: marcarla leida cierra el grupo, y la proxima
         aparicion abre fila nueva y vuelve a notificar por Telegram. Es lo que hace que "leida"
         signifique "ya me hice cargo" y no "no me lo muestres mas".
+
+        `renotify` (segundos) separa notificar de agrupar: la repeticion sigue sumando en `veces`
+        pero vuelve a salir por Telegram si el ultimo envio real fue hace mas de ese plazo. Existe
+        porque para un hecho que va y vuelve "ya te avise" no es la pregunta — `ib_sso_expired`
+        quedo pendiente desde el 2026-10-23 y acumulo 862 caidas con un solo aviso. Reiniciar la
+        app no reabre el canal: el reenvio del arranque busca `enviado_tg=0` y esa fila ya estaba
+        en 1. `notificado` NULL cuenta como silencio infinito — ante la duda avisa, nunca de menos.
+
+        El silencio lo mide `TIMESTAMPDIFF` **dentro de MySQL**, no restando `datetime.now()`: el
+        servicio cachea la zona con la que arranco y corria en UTC-4 (Venezuela) mientras Windows ya
+        estaba en UTC-3, asi que mezclar relojes regalaba 3600s exactos y con `renotify=3600` habria
+        renotificado siempre. El desfase se cerro el 2026-11-04 con `SET PERSIST time_zone='-03:00'`,
+        pero la regla queda: el que sella la fecha y el que la mide tienen que ser el mismo reloj.
         """
         conn = cursor = None
         try:
@@ -705,8 +719,8 @@ class BDsystem:  # -------------------------------------------------------------
             cursor = conn.cursor()
             if dedup_key:
                 cursor.execute(
-                    "SELECT id, veces FROM incidencias WHERE dedup_key=%s AND leida=0 "
-                    "ORDER BY id DESC LIMIT 1",
+                    "SELECT id, veces, TIMESTAMPDIFF(SECOND, notificado, NOW()) FROM incidencias "
+                    "WHERE dedup_key=%s AND leida=0 ORDER BY id DESC LIMIT 1",
                     (dedup_key,),
                 )
                 ultima = cursor.fetchone()
@@ -718,17 +732,18 @@ class BDsystem:  # -------------------------------------------------------------
                         (msg, ultima[0]),
                     )
                     conn.commit()
-                    return ultima[0], ultima[1] + 1
+                    notificar = bool(renotify) and (ultima[2] is None or ultima[2] > renotify)
+                    return ultima[0], ultima[1] + 1, notificar
             cursor.execute(
                 "INSERT INTO incidencias (msg, telegram, tipo, dedup_key, primera_vez) "
                 "VALUES (%s, %s, %s, %s, NOW())",
                 (msg, int(telegram), tipo, dedup_key),
             )
             conn.commit()
-            return cursor.lastrowid, 1
+            return cursor.lastrowid, 1, True
         except (Exception, connect.Error) as e:
             _logger.error(f"[Mysql::insert_incidencia()]: {e}")
-            return 0, 1
+            return 0, 1, True
         finally:
             if cursor:
                 cursor.close()
@@ -741,7 +756,9 @@ class BDsystem:  # -------------------------------------------------------------
         try:
             conn = BDsystem.connect_dbase("update.incidencias.sent")
             cursor = conn.cursor()
-            cursor.execute("UPDATE incidencias SET enviado_tg=1 WHERE id=%s", (incidencia_id,))
+            cursor.execute(
+                "UPDATE incidencias SET enviado_tg=1, notificado=NOW() WHERE id=%s", (incidencia_id,)
+            )
             conn.commit()
         except (Exception, connect.Error) as e:
             _logger.error(f"[Mysql::mark_incidencia_sent()]: {e}")

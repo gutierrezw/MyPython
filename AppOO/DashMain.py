@@ -2045,8 +2045,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                 try:
                     url = f"wss://localhost:{DataHub.ib_gateway_port}/v1/api/ws"
-                    _gw_down_alerted = False
-                    _gw_last_alert_ts = 0
                     while True:
 
                         # Sin sesion autenticada el gateway acepta el socket y lo cierra a los ~6s: el 2026-10-23
@@ -2082,7 +2080,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         DataHub.WsStock = self.WsStock
                         DataHub.ws_stock_iter = iteraStream
                         DataHub.update_self_procesos(proces="thread", tarea=task, itera=iteraStream)
-                        _gw_down_alerted = False
                         DataHub.ws_stock_connected = True
                         if hasattr(self, "win0") and hasattr(self, "nb"):
                             self.root.after(0, lambda: self.nb.tab(self.win0, style="TNotebook.Tab"))
@@ -2093,16 +2090,13 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         _log.error(
                             f"websocket_stream(Stock): websocket_loop() terminó (iter={iteraStream}), esperando 30s antes de reconectar"
                         )
-                        if not _gw_down_alerted:
-                            import time as _time
-                            _now = _time.time()
-                            if _now - _gw_last_alert_ts > 1800:
-                                DataHub.add_alert(
-                                    "⚠️ IB Gateway caído — reconectando en 30s",
-                                    telegram=True, tipo="infra", dedup_key="ib_gateway_down",
-                                )
-                                _gw_last_alert_ts = _now
-                            _gw_down_alerted = True
+                        # el plazo entre avisos lo lleva `renotify` contra `incidencias.notificado`:
+                        # el throttle que vivia aca se perdia en cada reinicio y, ya con renotify,
+                        # solo podia comerse media hora de aviso
+                        DataHub.add_alert(
+                            "⚠️ IB Gateway caído — reconectando en 30s",
+                            telegram=True, tipo="infra", dedup_key="ib_gateway_down", renotify=3600,
+                        )
                         time.sleep(30)
 
                 except Exception as e:

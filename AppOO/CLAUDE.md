@@ -217,6 +217,7 @@ agregarle el `COMMENT`, y recién entonces ejecutar.
 | trazaplan | `costobase` | **Columna muerta** — se inserta en 0 y nada la actualiza. El costo base real es `tinversion` |
 | symbol_decision_history | `dedup_key` | Parte estable de la decisión. **NULL = evento único, nunca se agrupa** (creada 2026-08-31) |
 | incidencias | `dedup_key` / `veces` / `primera_vez` | Mismo mecanismo que `symbol_decision_history`, aplicado a las alertas. **`leida` es el borde del grupo** (creadas 2026-09-06) |
+| incidencias | `notificado` | Último envío real a Telegram — el reloj de `renotify`, **independiente de la agrupación**: la fila sigue siendo una. **NULL = silencio infinito → notifica** (creada 2026-11-04) |
 | fin_categories | `expense_class` | Clase del gasto: `fixed` + `variable` = costo de vida base del número de libertad financiera, `extraordinary` se promedia aparte. **NULL si la categoría no es gasto** (creada 2026-09-13) |
 | fin_transactions | `billing_date` | Cierre del resumen que cobra la fila. Los KPIs agrupan por `COALESCE(billing_date, date)`, nunca por `date` sola. **NULL = la fecha del movimiento ya es la del cobro** (creada 2026-09-16) |
 | fin_accounts | `tracked_since` | Desde cuándo la cuenta cuenta en el histórico de Finanzas: antes de esa fecha un mes vacío no es hueco de carga. **Default 2026-01-01 = piso del módulo**, no la apertura de la cuenta (creada 2026-09-16) |
@@ -352,16 +353,40 @@ el texto y habrían generado 30+ grupos para un solo hecho—, así que el mensa
 fila leída cierra la corrida: la próxima aparición abre fila nueva y **vuelve a notificar por
 Telegram**. Es lo que hace que "leída" signifique *ya me hice cargo* y no *no me lo muestres más*.
 Mientras la fila sigue pendiente, la repetición suma en `veces` y **no se reenvía a Telegram** —
-`add_alert()` corta antes de encolar; el estado ya está reportado.
+`add_alert()` corta antes de encolar; el estado ya está reportado. **Matizado el 2026-11-04:** eso
+vale mientras el emisor no pase `renotify`, que sigue siendo el default; con `renotify` el aviso
+vuelve a salir pasado el plazo y sin abrir fila nueva (ver abajo).
 
 El único punto de entrada es `DataHub.add_alert()` → `BDsystem.insert_incidencia()`, que devuelve
-`(id, veces)`. Un hecho único —una orden, un repago— va sin clave y nunca se agrupa.
+`(id, veces, notificar)`. Un hecho único —una orden, un repago— va sin clave y nunca se agrupa.
 
 **`add_alert(registrar=False)` manda el mensaje y no deja fila** (2026-09-22). Es para reescribir en
 el chat un hecho **ya registrado** cuyo texto cambió — el refresco de una propuesta de GainsCapture,
 que reemite el precio del momento. `dedup_key` no sirve para eso: agrupa bien en la tabla pero corta
 el envío cuando `veces > 1`, que es justamente lo que hay que actualizar. Consecuencia a tener
 presente al contar filas: un mensaje del chat puede no tener incidencia propia.
+
+**`renotify` separa notificar de agrupar** (2026-11-04). El agrupamiento arregló el panel y dejó muda
+la alerta: `ib_sso_expired` quedó pendiente desde el 2026-10-23 y acumuló **862 caídas con un solo
+aviso**; `ib_gateway_down` 516 desde el 08-09; `fci_blocked` 1195 desde el 24-07. Reiniciar la app no
+reabre el canal — el reenvío del arranque busca `enviado_tg=0` y esas filas ya estaban en 1 —, así
+que el silencio sobrevivía a todo menos a marcarlas leídas a mano. Para un estado que va y vuelve
+*"ya te avisé"* no es la pregunta; la pregunta es *"¿hace cuánto?"*.
+
+Con `renotify=<segundos>` la repetición sigue siendo **una sola fila** y sigue sumando en `veces`,
+pero vuelve a salir por Telegram si el último envío real fue hace más de ese plazo. El plazo se mide
+contra `notificado`, que vive en la BD: a diferencia del throttle en memoria que tenía `DashMain.py`
+—eliminado en el mismo commit— **sobrevive al reinicio**. `notificado IS NULL` cuenta como silencio
+infinito y notifica: ante la duda se avisa de más, nunca de menos. Lo mide `TIMESTAMPDIFF` **dentro
+de MySQL**, no restando `datetime.now()` — el servicio corría en UTC−4 (Venezuela) con Windows ya en
+UTC−3, así que mezclar relojes regalaba 3600 s exactos y `renotify=3600` habría renotificado siempre.
+El desfase se cerró el mismo día (`SET PERSIST time_zone='-03:00'`, desvío 3600,9 s → 0,4 s), pero la
+regla queda: **el que sella la fecha y el que la mide tienen que ser el mismo reloj.**
+
+**Y habilitó `dedup_key` donde antes no se podía poner.** La propuesta de GainsCapture se emitía sin
+clave a propósito: agrupar cortaba el envío y el usuario tiene que poder autorizarla. Con `renotify`
+esa objeción desaparece — FIRY había abierto **41 filas** entre el 22-09 y el 03-11 por re-evaluarse
+~1 vez por día, todas el mismo hecho.
 
 **`inversion.divisa` / `inversion.factor_cambio` — son el recibo, no el pendiente.** La tabla
 `inversion` guarda **siempre USD**, para todos los vehículos. Los KPI del panel (Total dGyP, Total
