@@ -34,6 +34,9 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
 
+_RX_FECHA_DATOS = re.compile(r"al\s+(\d{1,2}\s+[A-Za-z]+\.?\s+\d{4})", re.IGNORECASE)
+
+
 def parse_fecha(fecha_str, display_log=False):
     """Convierte '11 dic. 2025' a datetime"""
     meses = {
@@ -95,10 +98,21 @@ def obtener_documentos():
 
                     try:
                         fecha_dt = parse_fecha(fecha_str)
+                        # la fecha de los datos va en la descripcion ("... al 16 sep. 2026") y no es la de
+                        # publicacion: CNV publica con atraso (medido: hasta 366 dias) y una misma fecha de
+                        # publicacion trae dos planillas, de dos dias de datos distintos
+                        fecha_datos = fecha_dt
+                        match_datos = _RX_FECHA_DATOS.search(descripcion)
+                        if match_datos:
+                            try:
+                                fecha_datos = parse_fecha(match_datos.group(1))
+                            except Exception:
+                                fecha_datos = fecha_dt
                         documentos.append(
                             {
                                 "fecha": fecha_str,
                                 "fecha_dt": fecha_dt,
+                                "fecha_datos": fecha_datos,
                                 "uuid": uuid,
                                 "id": id_doc,
                                 "descripcion": descripcion,
@@ -281,28 +295,24 @@ def descargar_cnv_hoy(fecha_str):
             "archivo": None,
         }
 
-    # Filtrar documentos con fecha >= fecha_objetivo (inmediata superior o igual)
-    docs_validos = [d for d in documentos if d["fecha_dt"] >= fecha_objetivo]
+    # Filtrar por la fecha de los DATOS, no la de publicacion: filtrando por publicacion se tomaba la fecha
+    # inmediata superior y se bajaba cualquiera de sus dos planillas, asi que al pedir el dia N podia llegar
+    # la del dia N-1 — el dia pedido quedaba sin cargar y el Excel reinsertaba uno ya cargado
+    docs_validos = [d for d in documentos if d["fecha_datos"] >= fecha_objetivo]
 
     if not docs_validos:
         return {
             "success": False,
-            "error": f'No hay documentos posteriores o iguales a {fecha_objetivo.strftime("%d/%m/%Y")}',
+            "error": f'No hay planillas con datos al {fecha_objetivo.strftime("%d/%m/%Y")} o posteriores',
             "archivo": None,
         }
 
-    # Ordenar por fecha ascendente para obtener la inmediata superior
-    docs_validos.sort(key=lambda x: x["fecha_dt"])
+    # la fecha exacta si existe; si no (feriado o dia sin planilla), la inmediata superior para no trabar el avance
+    fecha_elegida = min(d["fecha_datos"] for d in docs_validos)
+    docs_a_descargar = [d for d in docs_validos if d["fecha_datos"] == fecha_elegida]
 
-    # Tomar la fecha inmediata superior (primera en la lista ordenada)
-    fecha_inmediata_superior = docs_validos[0]["fecha_dt"]
-
-    # Obtener todos los documentos de esa fecha
-    docs_a_descargar = [d for d in docs_validos if d["fecha_dt"] == fecha_inmediata_superior]
-
-    # Si hay múltiples documentos, tomar el más reciente (último en aparecer en la lista)
-    # La lista viene ordenada cronológicamente, el último es el más reciente
-    docs_a_descargar.reverse()  # Invertir para intentar descargar el más reciente primero
+    # Varias planillas para la misma fecha de datos: la publicada mas tarde es la revisada
+    docs_a_descargar.sort(key=lambda x: (x["fecha_dt"], x["id"]), reverse=True)
 
     # Descargar (solo el primero exitoso, que será el más reciente)
     exitosas = 0
@@ -326,6 +336,7 @@ def descargar_cnv_hoy(fecha_str):
         "success": exitosas > 0,
         "archivo": archivo_path,
         "nombre": nombre_archivo,
+        "fecha_datos": fecha_elegida.strftime("%Y-%m-%d"),
         "exitosas": exitosas,
         "fallidas": fallidas,
         "total": len(docs_a_descargar),

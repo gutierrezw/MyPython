@@ -1505,14 +1505,53 @@ class DiariaCNV(BDsystem):  # --------------------------------------------------
             cursor.close()
             conn.close()
 
-    def insert_CNV(self, values=None, symbol=None):
+    def get_fechas_incompletas(self, account=None, dias=3):
+        """
+        @param account: cuenta FCI dueña del universo de fondos a exigir (inversion.useraccount)
+        @param dias: ventana hacia atras, en dias calendario
+        @return: lista de fechas 'YYYY-MM-DD' habiles donde falta algun codCAFCI activo de la cuenta."""
+
+        try:
+            conn = self._conectar(tabla="select.diaria_CNV.incompletas")
+            cursor = conn.cursor()
+            qry = """SELECT DISTINCT conid FROM inversion
+                      WHERE useraccount='%s' AND iactiva='Y' AND conid IS NOT NULL;"""
+            cursor.execute(qry % account)
+            universo = {str(row[0]) for row in cursor.fetchall() if str(row[0]).isdigit()}
+
+            if not universo:
+                return []
+
+            desde = (datetime.now() - timedelta(days=dias)).date()
+            qry = """SELECT fecha, COUNT(DISTINCT codCAFCI) FROM diaria_CNV
+                      WHERE fecha >= '%s' AND fecha < CURDATE() AND codCAFCI IN (%s) GROUP BY fecha;"""
+            cursor.execute(qry % (desde, ",".join(sorted(universo))))
+            cobertura = {row[0]: row[1] for row in cursor.fetchall()}
+            cursor.close()
+            conn.close()
+
+            incompletas, fecha = [], desde
+            while fecha < datetime.now().date():
+                if fecha.weekday() < 5 and cobertura.get(fecha, 0) < len(universo):
+                    incompletas.append(fecha.strftime("%Y-%m-%d"))
+                fecha += timedelta(days=1)
+            return incompletas
+        except (Exception, EncodingWarning, connect.Error) as error:
+            print("[Mysql:: get_fechas_incompletas(): {}]".format(error))
+            return []
+
+    def insert_CNV(self, values=None, symbol=None, upsert=False):
         """
         @param values:  lista de valores de campos a insertar
         @param symbol: ticket a consultar en diaria_CNV
+        @param upsert: si la fila ya existe la reescribe — la planilla de CNV manda sobre una fila parcial
         @return: agrega fila  en diaria_CNV."""
         try:
             conn = self._conectar(tabla="insert.diaria_CNV")
             x, y, found = self.select_CNV(symbol=symbol, fecha=values["fecha"])
+            if found and upsert:
+                self.update(values=values, symbol=symbol)
+
             if not found:
                 cursor = conn.cursor()
                 valuesins, qry = [], "INSERT INTO diaria_CNV ("
@@ -1539,7 +1578,7 @@ class DiariaCNV(BDsystem):  # --------------------------------------------------
             cursor = conn.cursor()
             valuesins, qry = [], "UPDATE diaria_CNV SET "
 
-            x, y, found = self.select(symbol=symbol, fecha=values["fecha"])
+            x, y, found = self.select_CNV(symbol=symbol, fecha=values["fecha"])
             if found:
                 for keys, vals in values.items():
                     if keys != "codCAFCI":

@@ -18,11 +18,21 @@ from Modulos_python import (
 _logger = logging.getLogger("FondosInversion")
 from Modulos_Mysql import RepositorioOportunidadesBuySell, DiariaCNV, FinanceScreen, IPerformance
 from Class_customer import WidgetVehiculo, TickerInfo, DataHub
-from Modulos_Utilitarios import delete_file, buscar_ticker, define_FileCache, is_numeric, posicion_a_usd
+from Modulos_Utilitarios import (
+    delete_file,
+    buscar_ticker,
+    define_FileCache,
+    is_numeric,
+    posicion_a_usd,
+    read_json_tmp,
+    write_json_tmp,
+)
 from Modulos_Comunes import diaria_book_performance, proceso_update_performance
 from download_cnv_selenium import descargar_cnv_hoy
 
 _SUPERFONDO_CAFCI = frozenset({689, 1346, 1325, 1565, 5334})
+
+_CNV_HUECOS_FILE = "cnv_huecos.json"
 
 _CNV_NAMES_LIST = [
     "fondo",
@@ -113,7 +123,7 @@ def sync_cnv_superfondos(df) -> int:
             if cafci not in _SUPERFONDO_CAFCI or not keys.V_actual or keys.Fecha == 0:
                 continue
             values, symbol = _parse_cnv_row_fn(keys)
-            cnv_db.insert_CNV(values=values, symbol=symbol)
+            cnv_db.insert_CNV(values=values, symbol=symbol, upsert=True)
             insertados += 1
         except Exception:
             continue
@@ -463,7 +473,7 @@ class ArsFondosInversion(tk.Frame):
                             values.update({"codSociedadDep": keys.Código_SocDep})
                             values.update({"monedaFondo": keys.Código_Moneda})
 
-                            self.ClassCNV.insert_CNV(values=values, symbol=symbol)
+                            self.ClassCNV.insert_CNV(values=values, symbol=symbol, upsert=True)
                         except ValueError:
                             continue
 
@@ -563,17 +573,19 @@ class ArsFondosInversion(tk.Frame):
                 ]
                 desde = (datetime.now() - timedelta(days=meses * 30)).date()
                 docs = obtener_documentos()
-                docs = [d for d in docs if d["fecha_dt"].date() >= desde]
-                docs.sort(key=lambda x: x["fecha_dt"])
+                docs = [d for d in docs if d["fecha_datos"].date() >= desde]
+                docs.sort(key=lambda x: x["fecha_datos"])
 
                 insertados = 0
                 for doc in docs:
-                    fecha_doc = doc["fecha_dt"].date()
+                    # diaria_cnv.fecha es la fecha de los datos, no la de publicacion: comparar contra fecha_dt
+                    # hacia que el chequeo "ya existe" mirara un dia distinto del que se iba a descargar
+                    fecha_doc = doc["fecha_datos"].date()
                     existente = self.ClassCNV.last_insert_CNV(symbol=codCAFCI, date=str(fecha_doc))
                     if existente != "0001-01-01":
                         continue
 
-                    fecha_str = doc["fecha_dt"].strftime("%d-%m-%Y")
+                    fecha_str = doc["fecha_datos"].strftime("%d-%m-%Y")
                     from download_cnv_selenium import descargar_cnv_hoy  # import diferido
 
                     resultado = descargar_cnv_hoy(fecha_str)
@@ -587,7 +599,7 @@ class ArsFondosInversion(tk.Frame):
                         if not fila.empty:
                             keys = next(fila.itertuples())
                             values, symbol = self._parse_cnv_row(keys)
-                            self.ClassCNV.insert_CNV(values=values, symbol=symbol)
+                            self.ClassCNV.insert_CNV(values=values, symbol=symbol, upsert=True)
                             insertados += 1
                     except Exception as e:
                         _logger.error(f"backfill_historico_cnv parse {fecha_str}: {e}")
@@ -1120,8 +1132,43 @@ class ArsFondosInversion(tk.Frame):
             # descarga planilla diaria CNV
             if prox_process.date() < datetime.now().date():
                 descargar_cnv_hoy(fecha_str=prox_process.strftime("%Y-%m-%d"))
+                return
+
+            # last_insert_CNV es el MAX de toda la tabla, asi que un fondo con fecha adelantada tapa los dias
+            # que quedaron sin cargar para los fondos de la cuenta: el hueco se busca por cobertura
+            self._rellena_huecos_CNV()
         except Exception as e:
             _logger.error(f"downdload_CNV_diaria(): {e}")
+
+    def _rellena_huecos_CNV(self, dias=3, max_intentos=2):
+        """Descarga la planilla de la fecha mas antigua con cobertura incompleta — una por ciclo.
+        chequea_new_loadFile() la carga en el mismo ciclo, por el camino de la descarga diaria.
+        @param dias: ventana hacia atras que se revisa
+        @param max_intentos: tope por fecha — el contador vive en tmp/ y sobrevive reinicios."""
+
+        intentos = read_json_tmp(_CNV_HUECOS_FILE)
+        for account in self.account_fci:
+            if not account:
+                continue
+
+            for fecha in self.ClassCNV.get_fechas_incompletas(account=account, dias=dias):
+                if intentos.get(fecha, 0) >= max_intentos:
+                    continue
+
+                resultado = descargar_cnv_hoy(fecha_str=fecha)
+
+                # si CNV devuelve otra fecha de datos, ese dia no tiene planilla (feriado): no se reintenta
+                if resultado.get("fecha_datos") != fecha:
+                    intentos[fecha] = max_intentos
+                else:
+                    intentos[fecha] = intentos.get(fecha, 0) + 1
+
+                write_json_tmp(_CNV_HUECOS_FILE, intentos)
+                _logger.warning(
+                    f"_rellena_huecos_CNV({account}): {fecha} intento {intentos[fecha]} → "
+                    f"{resultado.get('nombre') or resultado.get('error')}"
+                )
+                return
 
     # vericica cada 90 segundos si hay nueva interfaz para cargar
     def run_loads(self):
