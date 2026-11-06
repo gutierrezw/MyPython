@@ -549,6 +549,8 @@ class ModeloOportunidadesBuy:
     Enfocado en identificar activos con precio deprimido usando RSI, EMAs y otros indicadores.
     """
 
+    COLS_CONSENSO = ("consenso_suma", "inst_score", "fh_buy_ratio")
+
     def __init__(self):
         self.modelo = None
         self.metrics = None
@@ -607,10 +609,10 @@ class ModeloOportunidadesBuy:
 
         return pd.DataFrame(registros)
 
-    def enriquecer_con_sentimiento(self, df, features: dict):
-        """Agrega columnas de sentimiento al df a partir de {symbol: {sentiment_score, ...}}.
+    def enriquecer_con_features(self, df, features: dict, columnas: tuple):
+        """Agrega columnas al df a partir de {symbol: {columna: valor}}.
         Símbolos sin datos en features quedan en 0."""
-        for col in ("sentiment_score", "sentiment_3d_avg", "sentiment_7d_avg", "sentiment_patron"):
+        for col in columnas:
             df[col] = df["symbol"].map(lambda s, c=col: features.get(s, {}).get(c, 0.0))
         return df
 
@@ -705,10 +707,9 @@ class ModeloOportunidadesBuy:
             "ganancia_inversion",
             "dividend_yield",
             "score",
-            "sentiment_score",
-            "sentiment_3d_avg",
-            "sentiment_7d_avg",
-            "sentiment_patron",
+            "consenso_suma",
+            "inst_score",
+            "fh_buy_ratio",
         ]
 
         other_features = [
@@ -949,7 +950,9 @@ class ModeloOportunidadesBuy:
                 self.logger.warning("predecir_oportunidades(): df aplanado vacio")
                 return None
 
-            df_plano = self.enriquecer_con_sentimiento(df_plano, MarketScreen().load_sentiment_features(account))
+            df_plano = self.enriquecer_con_features(
+                df_plano, MarketScreen().load_consenso_features(account), self.COLS_CONSENSO
+            )
 
             resultado = self.predecir_modelo(df_plano)
             if resultado is None or resultado.empty:

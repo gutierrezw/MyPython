@@ -621,6 +621,8 @@ Si el commit toca el código de la izquierda, revisar el doc de la derecha antes
 | `DataHub` (class vars, config, `gains_config`) | `20-Proyecto/ref-datahub.md` |
 | `Class_Screener`, consenso, votos | `20-Proyecto/ref-consenso.md` + tabla de columnas en este archivo |
 | `Class_tradingBot`, `Class_BotCryptoUI` | `20-Proyecto/spec-botcrypto.md` |
+| `Class_IA_modelos`, `scalar_features`, etiquetado IA | `20-Proyecto/ref-modelos-ia.md` |
+| `ConvergIA/Scanner_Sentimiento`, `Interprete_Sentimiento`, `ThemeMapper` | `20-Proyecto/design-sentimiento.md` |
 | Agentes nuevos / `AGENTES_SCHEDULE` | sección "Patrón para agregar un nuevo agente" en este archivo |
 | `add_alert`, `insert_incidencia`, tab Alertas | sección "Columnas con semántica propia" en este archivo |
 | `FinanceScreen`, `Class_Finance`, tablas `fin_*` | `20-Proyecto/spec-finanzas.md` (§0: objetivos, etapas, regla de KPIs, mapa de categorías) |

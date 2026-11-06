@@ -3209,6 +3209,62 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+    def load_consenso_features(self, account: str) -> dict:
+        """Retorna {symbol: {consenso_suma, inst_score, fh_buy_ratio}} del universo de market.
+        Sin filtro de encartera: las oportunidades de compra incluyen símbolos fuera de cartera.
+        Fallback 0 cuando sin datos."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT symbol, consenso_suma, inst_score, fh_buy_ratio "
+                "FROM market "
+                "WHERE account = %s AND consenso_suma IS NOT NULL",
+                (account,),
+            )
+            result = {}
+            for row in cursor.fetchall():
+                sym, suma, inst, buy_ratio = row
+                result[sym] = {
+                    "consenso_suma": float(suma) if suma is not None else 0.0,
+                    "inst_score": round(float(inst), 4) if inst is not None else 0.0,
+                    "fh_buy_ratio": round(float(buy_ratio), 4) if buy_ratio is not None else 0.0,
+                }
+            return result
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_consenso_features]: {error}")
+            return {}
+        finally:
+            cursor.close()
+            conn.close()
+
+    def load_target_prices(self, account: str) -> dict:
+        """Retorna {symbol: {objetivo, origen}} — fuente única del precio objetivo.
+        Cascada targetMean -> targetHigh -> targetLow -> fiftyTwoWeekHigh; origen distingue
+        el objetivo de analistas del máximo de 52 semanas, que no es una proyección."""
+        cascada = (
+            "COALESCE(NULLIF(targetMeanPrice, 0), NULLIF(targetHighPrice, 0), "
+            "NULLIF(targetLowPrice, 0), NULLIF(fiftyTwoWeekHigh, 0))"
+        )
+        analistas = (
+            "COALESCE(NULLIF(targetMeanPrice, 0), NULLIF(targetHighPrice, 0), NULLIF(targetLowPrice, 0))"
+        )
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                f"SELECT symbol, {cascada}, CASE WHEN {analistas} IS NOT NULL THEN 'analistas' ELSE '52w' END "
+                f"FROM market WHERE account = %s AND {cascada} IS NOT NULL",
+                (account,),
+            )
+            return {row[0]: {"objetivo": float(row[1]), "origen": row[2]} for row in cursor.fetchall()}
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_target_prices]: {error}")
+            return {}
+        finally:
+            cursor.close()
+            conn.close()
+
     def cleanup_sentiment(self, months: int = 6) -> int:
         """Elimina lecturas de market_sentiment y analysis más antiguas de N meses."""
         conn = self._conectar(tabla="update.market")

@@ -3752,8 +3752,8 @@ class system_status(tk.Frame):
                         ))
                         return
 
-                    sent_features = MarketScreen().load_sentiment_features(chatbot.account)
-                    df = modelo.enriquecer_con_sentimiento(df, sent_features)
+                    cons_features = MarketScreen().load_consenso_features(chatbot.account)
+                    df = modelo.enriquecer_con_features(df, cons_features, modelo.COLS_CONSENSO)
                     modelo.entrenar_modelo(df)
                     modelo.save_modelo(modelo.modelo_name)
 
