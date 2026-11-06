@@ -113,7 +113,7 @@ from Modulos_python import (
     traceback,
 )
 from Class_FondosInversion import ArsFondosInversion
-from Class_Screener import Screener
+from Class_Screener import Screener, _ETF_TYPES
 from Class_DashBot import AsistenteChatbot
 from Class_IA_modelos import ModeloOportunidadesSell
 from Class_SystemStatus import system_status
@@ -1480,6 +1480,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
             try:
                 # acumular en local para evitar race condition con schedule_operativo
                 x_activos, x_positions = [], []
+                p_targets = self.Market.load_target_prices(account=self.account)
                 _dbg_tickets = {pos["ticket"] for pos in self.positions}
                 for key in p_cartera:
 
@@ -1507,14 +1508,21 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
                     x_open = yf_activo.get("open", 0) * factor
 
-                    # fija precio objetivo
-                    objetivo = yf_activo.get("targetMeanPrice", 0)
-                    if objetivo == 0:
-                        objetivo = yf_activo.get("targetHighPrice", 0)
-                    if objetivo == 0:
-                        objetivo = yf_activo.get("targetLowPrice", 0)
-                    if objetivo == 0:
+                    # precio objetivo: ETF/trust -> maximo de 52 semanas (no tienen objetivo de analistas
+                    # y audit_portfolio los borra de market). Resto -> fuente unica market, Yahoo de respaldo
+                    # sin el criterio por nombre del Screener: 'trust' marca REITs con analistas (DLR, MPT)
+                    if (yf_activo.get("quoteType") or "").upper() in _ETF_TYPES:
                         objetivo = yf_activo.get("fiftyTwoWeekHigh", 0)
+                    else:
+                        objetivo = p_targets.get(symbol, {}).get("objetivo", 0)
+                        if objetivo == 0:
+                            objetivo = yf_activo.get("targetMeanPrice", 0)
+                        if objetivo == 0:
+                            objetivo = yf_activo.get("targetHighPrice", 0)
+                        if objetivo == 0:
+                            objetivo = yf_activo.get("targetLowPrice", 0)
+                        if objetivo == 0:
+                            objetivo = yf_activo.get("fiftyTwoWeekHigh", 0)
 
                     # sector: yfinance es fuente de verdad; si no trae dato, preservar el de BD
                     sector = yf_activo.get("sector", "")

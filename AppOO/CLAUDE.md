@@ -73,6 +73,37 @@ Orden acordado (después de las 4 fijas: Symbol, Name, Status, Cart):
 
 `13F Inst` usa `fh_count` (pipeline EDGAR propio).
 
+## Precio objetivo — fuente única (2026-11-06)
+
+El número que el panel muestra en la columna **Objetivo** y las columnas `Tgt Mean / Tgt High / Tgt Low`
+del Screener salen **de la misma tabla**: `market`. Antes eran dos descargas independientes del mismo
+dato de Yahoo — el Screener persistía en `market`, el panel llamaba `ts_yfinance_symbol` y aplicaba su
+propia cascada en memoria. Medido sobre las 41 posiciones activas: 31 idénticos, 6 con diferencia bajo
+el 1% (momentos de descarga distintos, no fórmulas distintas) y 4 que solo tenía el panel.
+
+`MarketScreen.load_target_prices(account)` (`Modulos_Mysql.py`) devuelve `{symbol: {objetivo, origen}}`
+con la cascada `targetMeanPrice → targetHighPrice → targetLowPrice → fiftyTwoWeekHigh`.
+`api_vehiculo_iteractive` la carga **una vez por ciclo**, antes del lazo de posiciones.
+
+**No hizo falta columna nueva.** `market` ya tiene `fiftyTwoWeekHigh`, así que la cascada completa
+resuelve dentro de la tabla y el origen es derivable: si el valor salió de `targetMean/High/Low` es
+`analistas`; si cayó al máximo de 52 semanas es `52w`. Medido: 345 de 1320 símbolos del universo y
+3 de la cartera (CTRM, NNDM, PHYS) muestran un 52w, que es historia, no proyección.
+
+**ETF: siempre el máximo de 52 semanas, y siempre de Yahoo.** No es una excepción cosmética —
+`audit_portfolio` **borra los ETF de `market`** por diseño (la posición vive en `inversion`/`booktrading`),
+así que para un ETF no hay fila que leer. Por eso la regla vive en el panel, el único punto donde el
+`quoteType` está en memoria. Caso testigo: TLT, cuya ausencia de `market` parecía un hueco de datos.
+
+**El criterio es `quoteType in _ETF_TYPES`, no el criterio por nombre del Screener.**
+`_ETF_NAME_KEYWORDS` incluye `"trust"`, que sobre la cartera marca **DLR** (Digital Realty Trust) y
+**MPT** (Medical Properties Trust): son REITs con cobertura real de analistas. El desvío sería material
+— MPT 3,67 → 6,47 y DLR 224,22 → 208,14. PHYS llega al 52w igual por otra vía: Yahoo lo reporta
+`EQUITY` y no trae objetivo de analistas, así que la cascada cae sola.
+
+`inversion.objetivo` queda como **espejo histórico, no como fuente** — lo escribe el panel con el valor
+ya resuelto.
+
 ## Autonomía del usuario
 
 - **Nunca ejecutar scripts ni procesos largos en background sin que el usuario lo pida.**
@@ -625,6 +656,7 @@ Si el commit toca el código de la izquierda, revisar el doc de la derecha antes
 | `ConvergIA/Scanner_Sentimiento`, `Interprete_Sentimiento`, `ThemeMapper` | `20-Proyecto/design-sentimiento.md` |
 | Agentes nuevos / `AGENTES_SCHEDULE` | sección "Patrón para agregar un nuevo agente" en este archivo |
 | `add_alert`, `insert_incidencia`, tab Alertas | sección "Columnas con semántica propia" en este archivo |
+| `load_target_prices`, `api_vehiculo_iteractive`, columna Objetivo | sección "Precio objetivo — fuente única" en este archivo |
 | `FinanceScreen`, `Class_Finance`, tablas `fin_*` | `20-Proyecto/spec-finanzas.md` (§0: objetivos, etapas, regla de KPIs, mapa de categorías) |
 | Cualquier hallazgo de la revisión Opus (H1–H10) | `30-Gestion/resultado-revision-opus-preservation-gainscapture.md` + `30-Gestion/BACKLOG.md` |
 
