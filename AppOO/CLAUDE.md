@@ -104,6 +104,44 @@ así que para un ETF no hay fila que leer. Por eso la regla vive en el panel, el
 `inversion.objetivo` queda como **espejo histórico, no como fuente** — lo escribe el panel con el valor
 ya resuelto.
 
+### Crypto — el objetivo era el 52w del día del alta, congelado
+
+Lo de arriba es Stock. En Crypto el objetivo vive en `otros_activos.objetivo` y **la fuente nunca
+estuvo mal: estaba congelada.** `insert_otros_activos` lo escribe con el `fiftyTwoWeekHigh` de Yahoo
+dentro de la rama `if not found` — o sea **una sola vez, en el alta del par** — y ningún camino lo
+vuelve a tocar: el único `UPDATE` de la columna en `Modulos_Mysql.py` es ese insert, y las cuatro
+llamadas a `update_otros_activos` nunca pasan `objetivo`.
+
+Medido el 2026-11-06 sobre los 12 pares activos: todos traían el máximo vigente el día del alta.
+Los dados de alta en 2021 llevaban el pico de ese ciclo —**ADA 3,00 contra un precio de 0,186; DOT
+53,00 contra 0,917**— que ningún escenario alcanza, así que el `gypp` del panel (`position *
+objetivo - costobase`) era una proyección muerta. Lo que cierra el diagnóstico es el caso inverso:
+**FIL (3,88334) e ICP (9,74224) en B0000002 coinciden al decimal con el Yahoo de hoy** — son altas
+recientes.
+
+**`fecupdate` no fecha el objetivo.** La mueve el costo: `recalculate_cost_chain` la sella con la
+fecha de la última fila de la cadena. ADA tiene `fecupdate` 2026-06-05 con un objetivo de 2021.
+
+**La fuente son las klines de Binance, no Yahoo.** No es preferencia: `POL-USD` y `MATIC-USD`
+devuelven `None` en Yahoo (`quoteType` NONE) y el ticker real es **`POL28321-USD`**, que no se
+deriva del par. Binance lo resuelve nativo — `POLUSDT` tiene su propia historia post-rename, así que
+tampoco arrastra el objetivo de MATIC. Y son las klines **que el panel ya descarga**:
+`ServiciosCrypto.sync_objetivo_cartera()` llama `get_yfinance(ticket, vehiculo="Crypto")` sin
+`desde`/`hasta`, exactamente como `ts_yfinance_symbol`, así que comparte la entrada de `CacheHut` y
+la corrida **no agrega descargas**. Pasar un `desde` propio perdería la caché.
+
+**Se persiste, no se calcula en el panel.** `DashMain.py:250` es el websocket de Crypto: relee
+`otros_activos` en cada tick. Un valor que viviera solo en memoria quedaría pisado por el viejo en
+el mensaje siguiente y el objetivo oscilaría. Lo refresca `Agente_ObjetivoCrypto` (24h).
+
+**Punto de atención — la ventana se vacía en noviembre.** Los 12 máximos caen entre el 2025-11-06 y
+el 2025-11-12: el pico del ciclo está justo en el borde de la ventana. Medido cuánto baja el
+objetivo **solo por el paso del tiempo**, sin que el mercado se mueva: a 30 días FIL −57%, ICP −51%,
+DOT −32%; a 90 días FIL −67%, ICP −58%, ADA −48%, DOT −50%. Esto invierte la pregunta de la ventana:
+**una ventana más corta no endurece el objetivo, lo ablanda** — en tendencia bajista el 52w rodante
+persigue al precio hacia abajo. Se eligen 52 semanas igual, por el mismo criterio que el ETF, y se
+deja anotado el escalón para que los objetivos más bajos de diciembre no se lean como un defecto.
+
 ## Autonomía del usuario
 
 - **Nunca ejecutar scripts ni procesos largos en background sin que el usuario lo pida.**
@@ -657,6 +695,7 @@ Si el commit toca el código de la izquierda, revisar el doc de la derecha antes
 | Agentes nuevos / `AGENTES_SCHEDULE` | sección "Patrón para agregar un nuevo agente" en este archivo |
 | `add_alert`, `insert_incidencia`, tab Alertas | sección "Columnas con semántica propia" en este archivo |
 | `load_target_prices`, `api_vehiculo_iteractive`, columna Objetivo | sección "Precio objetivo — fuente única" en este archivo |
+| `sync_objetivo_cartera`, `Agente_ObjetivoCrypto`, `otros_activos.objetivo` | sección "Precio objetivo — fuente única" § Crypto, en este archivo |
 | `FinanceScreen`, `Class_Finance`, tablas `fin_*` | `20-Proyecto/spec-finanzas.md` (§0: objetivos, etapas, regla de KPIs, mapa de categorías) |
 | Cualquier hallazgo de la revisión Opus (H1–H10) | `30-Gestion/resultado-revision-opus-preservation-gainscapture.md` + `30-Gestion/BACKLOG.md` |
 

@@ -422,6 +422,14 @@ class AgentManager:
         except Exception as e:
             self._log_crypto.error(f"Agente_BinanceTrades(): {e}")
 
+    @wait_rate(86400, persist=True, desc="Objetivo Crypto = maximo 52 semanas de klines Binance (24h)", nivel=1)
+    def Agente_ObjetivoCrypto(self):
+        try:
+            result = ServiciosCrypto().sync_objetivo_cartera()
+            self._log_crypto.warning(f"ObjetivoCrypto: {result}")
+        except Exception as e:
+            self._log_crypto.error(f"Agente_ObjetivoCrypto(): {e}")
+
     @wait_rate(21600)
     def Agente_CryptoBeta(self):
         try:
@@ -1580,6 +1588,7 @@ class AgentManager:
             ("Agente_ExtractosWatcher", self.Agente_ExtractosWatcher, 60),
             ("Agente_BinanceApiSync", self.Agente_BinanceApiSync, 3600),
             ("Agente_BinanceTrades", self.Agente_BinanceTrades, 3600),
+            ("Agente_ObjetivoCrypto", self.Agente_ObjetivoCrypto, 3600),
             ("Agente_ManagerPreservation", self.Agente_ManagerPreservation, 1),
         ]
         for name, target, sleep in _threads:

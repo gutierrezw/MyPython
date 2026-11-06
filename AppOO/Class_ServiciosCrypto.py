@@ -9,7 +9,9 @@ import json
 import logging
 import time
 
+from Class_DataFrame import get_yfinance
 from Modulos_Mysql import PlanInversion
+from Modulos_python import timedelta
 
 
 class ServiciosCrypto:
@@ -301,19 +303,66 @@ class ServiciosCrypto:
         `sync_trades` arranca en el ultimo tradeId conocido de cada par, de modo que la corrida es
         incremental y no depende de cuando fue la anterior.
         """
+        account, symbols = self._pares_activos()
+        if not symbols:
+            return {"insertados": 0, "simbolos": [], "detalle": f"sin pares activos para {account}"}
+
+        return self._client.sync_trades(account=account, symbols=symbols, desde=desde)
+
+    def sync_objetivo_cartera(self) -> dict:
+        """Refresca otros_activos.objetivo con el maximo de 52 semanas de las klines de Binance.
+
+        `insert_otros_activos` escribe el objetivo una sola vez, en el alta del par, con el
+        fiftyTwoWeekHigh que Yahoo servia ese dia, y ningun camino lo vuelve a tocar. Medido el
+        2026-11-06 sobre los 12 pares activos: todos los objetivos eran el maximo vigente el dia del
+        alta — ADA 3 y DOT 53 contra precios de 0,186 y 0,917, picos del ciclo 2021 que ningun
+        escenario alcanza. Lo que confirma que la fuente nunca estuvo mal es que FIL e ICP, de alta
+        reciente, coincidian al decimal con Yahoo de hoy: el valor no era erroneo, estaba congelado.
+
+        Las klines son las de la misma llamada que hace el panel de Crypto
+        (`get_yfinance(vehiculo="Crypto")`, sin desde/hasta), asi que la corrida comparte su cache y
+        no agrega descargas. Binance resuelve POL de forma nativa: en Yahoo `POL-USD` devuelve None y
+        el ticker real es `POL28321-USD`, que no se deriva del par.
+
+        Se persiste en vez de calcularse en el panel porque el websocket de Crypto relee
+        `otros_activos` en cada tick (`DashMain.py:250`): un valor que viviera solo en memoria
+        quedaria pisado por el viejo en el mensaje siguiente.
+        """
+        account, symbols = self._pares_activos()
+        if not symbols:
+            return {"revisados": 0, "actualizados": 0, "sin_datos": [], "detalle": f"sin pares activos para {account}"}
+
+        resultado = {"revisados": len(symbols), "actualizados": 0, "sin_datos": []}
+        for symbol in symbols:
+            datos = get_yfinance(ticket=symbol, vehiculo="Crypto")
+            klines = datos[1] if datos else None
+            if klines is None or klines.empty or "High" not in klines.columns:
+                resultado["sin_datos"].append(symbol)
+                continue
+
+            ventana = klines.index.max() - timedelta(weeks=52)
+            maximo = float(klines.loc[klines.index >= ventana, "High"].max())
+            if not maximo > 0:
+                resultado["sin_datos"].append(symbol)
+                continue
+
+            PlanInversion().update_otros_activos(account=account, values={"objetivo": maximo}, symbol=symbol)
+            resultado["actualizados"] += 1
+
+        return resultado
+
+    def _pares_activos(self):
+        """Devuelve (cuenta de la sesion, pares USDT activos de la cartera Crypto)."""
         account = self._client.sesion.get("idcuenta", "")
         if not account:
-            return {"insertados": 0, "simbolos": [], "detalle": "sin cuenta en sesion"}
+            return "", []
 
         cartera = PlanInversion().select_inversion(account=account, tipoin="Crypto", ticket="update") or []
         symbols = sorted({
             t if t.endswith("USDT") else f"{t}USDT"
             for t in (r.get("ticket") for r in cartera if r.get("iactiva") == "Y") if t
         })
-        if not symbols:
-            return {"insertados": 0, "simbolos": [], "detalle": f"sin pares activos para {account}"}
-
-        return self._client.sync_trades(account=account, symbols=symbols, desde=desde)
+        return account, symbols
 
     def _reparte_cuotas(self, monto, prestamos, exceso):
         """Reparte monto entre prestamos proporcional al exceso, descartando cuotas bajo el minimo.
