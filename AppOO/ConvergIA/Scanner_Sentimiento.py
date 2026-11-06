@@ -12,7 +12,7 @@ def _fetch_headlines(symbols: list) -> dict:
     result = {}
     for sym in symbols:
         try:
-            news = yf.Ticker(sym).news or []
+            news = yf.Search(sym, news_count=_MAX_HEADLINES).news or []
             titles = []
             for item in news[:_MAX_HEADLINES]:
                 content = item.get("content") or item
@@ -79,7 +79,8 @@ def scan_sentimiento(account: str, api_key: str = None, fuente: str = "yahoo") -
         records = [(sym, fecha_hora, val, len(headlines_map.get(sym, [])), fuente) for sym, val in sentiment.items()]
         market.bulk_save_sentiment(records)
 
-    _logger.warning(
+    nivel = _logger.error if symbols and not headlines_map else _logger.warning
+    nivel(
         f"scan_sentimiento: {len(symbols)} símbolos, {len(headlines_map)} con noticias, "
         f"{len(sentiment)} clasificados"
     )

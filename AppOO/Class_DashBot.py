@@ -628,6 +628,11 @@ class ClassAgenteIA:
             ses = BDsystem.get_sesion_by_vehiculo("ClaudeAPIP")
             api_key = ses["userapi"].decode("utf-8") if ses else ""
             result = scan_sentimiento(account=self.account, api_key=api_key)
+            if result["symbols"] and not result["with_news"]:
+                DataHub.add_alert(
+                    f"⚠️ Sentimiento sin fuente — {result['symbols']} símbolos, 0 con noticias",
+                    telegram=True, tipo="infra", dedup_key="sentimiento_sin_fuente", renotify=86400,
+                )
             self.logger.warning(
                 f"Agente_Sentimiento [iter={self.counter}]: "
                 f"simbolos={result['symbols']} noticias={result['with_news']} clasificados={result['classified']}"
