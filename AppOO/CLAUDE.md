@@ -318,6 +318,24 @@ duplicado no se notaba porque algo lo mantenía sincronizado.
 Hoy `insert()` recibe `account` y `dividends_en_market_stock` lo pasa en el insert y en el update.
 Se conserva la fila **con `cusip`** — sin cusip la posición 13F se descarta al cargar.
 
+**El segundo camino quedó cerrado el 2026-11-07, y no con "update primero, insert si no actualizó":
+`update()` tenía la misma confusión.** Devolvía `False` tanto si la fila no existía como si la BD
+falló, así que mover la decisión sin separar los dos casos solo movía el defecto de método. Hoy
+`update()` devuelve **`True` / `False` / `None` en error** y `update_tabla_market` corta en `None`
+sin insertar nada.
+
+La existencia la decide el **rowcount del UPDATE**, no un `SELECT` previo: `update()` siempre escribe
+`timestamp` con `datetime.now()`, así que **rowcount ≥ 1 cuando la fila existe** → rowcount 0 solo
+puede ser "no existe". El `select()` desapareció del camino, que ahora hace **una consulta menos por
+símbolo**.
+
+Devolver `None` es seguro porque de los 8 llamadores de `update()` **solo `Class_InstitucionalScore.py:141`
+lee el retorno** (`if ok: updated += 1`), y `None` es falsy exactamente como el viejo `False`. El
+contrato `[], []` de `select()` **se dejó intacto a propósito**: tiene 11 llamadores y hacerlo `raise`
+o devolver `None, None` los rompe a todos. Lo que sí cambió es que los tres `except` de `MarketScreen`
+pasaron de `print()` a `_logger.error`, así que un fallo de BD deja rastro en el log rotativo
+(el logger `Mysql` está en ERROR, que es justo el nivel que llega).
+
 **`funds` tenía 188.823 filas basura: el `INSERT IGNORE` no tenía nada que ignorar** (2026-11-07).
 `bulk_insert_edgar_funds` reinserta el padrón EDGAR completo en cada corrida de `sync_edgar_funds`
 —mensual— y la tabla no tenía clave única, así que acumuló **22 copias de cada uno de los 8.992

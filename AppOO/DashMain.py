@@ -1865,11 +1865,15 @@ class DatosVehivulo(TickerInfo, MyOrders):
     def dividends_en_market_stock(self, activos):
         def update_tabla_market(x_symbol, campo, value):
             try:
-                found, iy = self.Market.select(account=self.account, symbol=x_symbol)
-                if not found:
+                # La existencia la decide el rowcount del UPDATE, no un SELECT previo: select()
+                # devuelve [] tanto si no hay fila como si fallo la consulta, y esa lectura
+                # insertaba un duplicado (caso FIRY, 2026-11-07). update() siempre escribe
+                # timestamp, asi que rowcount 0 solo puede ser "no existe"; None es error de BD.
+                ok = self.Market.update(upd=campo, val=value, symbol=x_symbol, account=self.account)
+                if ok is None:
+                    return
+                if not ok:
                     self.Market.insert(upd=campo, val=value, symbol=x_symbol, account=self.account)
-                else:
-                    self.Market.update(upd=campo, val=value, symbol=x_symbol, account=self.account)
             except Exception as error:
                 self.logger.error("update_tabla_market({}): {}".format(x_symbol, error))
 

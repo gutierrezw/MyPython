@@ -1998,7 +1998,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             ix = [columna[0] for columna in cursor.description]
             return sql, ix
         except (Exception, EncodingWarning, connect.Error) as error:
-            print("[Mysql:: select_market]: {}".format(error))
+            _logger.error("select(): {}".format(error))
             return [], []
 
     def select_all(self, account):
@@ -2081,7 +2081,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.execute(qry, valuesins)  # Parametrización segura
             conn.commit()
         except (Exception, EncodingWarning, connect.Error) as error:
-            print("[Mysql::insert_market()]: {}".format(error))
+            _logger.error("insert(): {}".format(error))
 
     def sync_market_to_inversion(self, account: str) -> int:
         """Propaga market.sector y market.categoriaActivo → inversion, para los Stock en cartera.
@@ -2114,7 +2114,9 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         @param val:     list() de valores que acompañan a upd
         @param symbol:  symbol que se actualiza en market
         @param account: filtra por account si se provee
-        @return:  True si se afectó al menos una fila, False en caso contrario
+        @return:  True si se afectó al menos una fila, False si la fila no existe, None si
+                  falló la BD. None no es False: un error leído como "no existe" produce un
+                  insert duplicado (caso FIRY, 2026-11-07)
         """
         try:
             conn = self._conectar(tabla="update.market")
@@ -2140,8 +2142,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             conn.commit()
             return cursor.rowcount > 0
         except (Exception, EncodingWarning, connect.Error) as error:
-            print("[Mysql::update()]: {}".format(error))
-            return False
+            _logger.error("update(): {}".format(error))
+            return None
 
     def load_symbols(self, account):
         conn = self._conectar(tabla="select.market")
