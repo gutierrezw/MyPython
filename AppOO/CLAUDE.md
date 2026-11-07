@@ -95,11 +95,24 @@ resuelve dentro de la tabla y el origen es derivable: si el valor salió de `tar
 así que para un ETF no hay fila que leer. Por eso la regla vive en el panel, el único punto donde el
 `quoteType` está en memoria. Caso testigo: TLT, cuya ausencia de `market` parecía un hueco de datos.
 
-**El criterio es `quoteType in _ETF_TYPES`, no el criterio por nombre del Screener.**
-`_ETF_NAME_KEYWORDS` incluye `"trust"`, que sobre la cartera marca **DLR** (Digital Realty Trust) y
-**MPT** (Medical Properties Trust): son REITs con cobertura real de analistas. El desvío sería material
-— MPT 3,67 → 6,47 y DLR 224,22 → 208,14. PHYS llega al 52w igual por otra vía: Yahoo lo reporta
-`EQUITY` y no trae objetivo de analistas, así que la cascada cae sola.
+**El criterio es `quoteType in _ETF_TYPES` más la lista `_ETF_SYMBOLS`, nunca el nombre**
+(cerrado 2026-11-07). Las dos listas viven en `Class_Screener.py` y las comparten el panel, el
+Screener y `audit_portfolio` — un solo lugar donde decidir si algo es fondo.
+
+`_ETF_NAME_KEYWORDS` **se eliminó**: incluía `"trust"` y `"fund"`, que sobre `market` marcan **125
+filas** — entre ellas los REITs **DLR** (Digital Realty Trust) y **MPT** (Medical Properties Trust),
+con cobertura real de analistas, y 7 bancos operativos (NTRS, TRMK, TRST, WASH, WTFC, CTBI, HTB). El
+desvío de objetivo sería material: MPT 3,67 → 6,47 y DLR 224,22 → 208,14. El criterio estaba vivo
+desde el 2026-05-30 (`1e88496`) y `audit_portfolio` **borraba las tres filas de `market`** en cada
+corrida mensual, con su `cusip` y su `fh_count`; el panel las reinsertaba en el ciclo siguiente como
+`categoriaActivo='N'` y el pipeline del Screener volvía a poblarlas. Un lazo que churneaba el dato
+sin que nada lo reportara.
+
+`_ETF_SYMBOLS = {"PHYS"}` es el override por símbolo para lo que Yahoo tipa mal: reporta PHYS
+(Sprott Physical Gold Trust) como `EQUITY`, así que ni `_ETF_TYPES` lo atrapaba ni la cascada lo
+sacaba del Screener — figuraba con `fh_count` 764 y entraba al Consenso como si fuera una acción.
+El override cierra los tres caminos a la vez: `audit_portfolio` lo borra de `market`,
+`dividends_en_market_stock` ya no lo reinserta, y el panel le da el 52w directo.
 
 `inversion.objetivo` queda como **espejo histórico, no como fuente** — lo escribe el panel con el valor
 ya resuelto.
@@ -271,18 +284,64 @@ agregarle el `COMMENT`, y recién entonces ejecutar.
 | fund_holdings | idx_report_date | report_date | Filtro por fecha solo |
 | market | idx_symbol | symbol | Tabla sin índices secundarios |
 | market | idx_cusip | cusip | JOIN frecuente con fund_holdings |
+| market | uq_market_account_symbol | account, symbol (**UNIQUE**) | Nada impedía dos filas del mismo símbolo — caso FIRY, 2026-11-07. Reemplaza al `idx_market_account_symbol` no único |
 | funds | idx_cik | cik | Tabla sin índices secundarios |
+| funds | uq_funds_cik | cik (**UNIQUE**) | `bulk_insert_edgar_funds` emitía `INSERT IGNORE` sin nada que ignorar — 22 copias de cada fondo, 2026-11-07 |
 | diaria_cnv | idx_fecha_cod | fecha, codCAFCI | Filtro compuesto |
 | performa_inversion | idx_idcuenta_vehiculo | idcuenta, vehiculo | Filtro compuesto |
 | order_trader | idx_account_symbol | account, symbol | Filtro compuesto |
+
+**`market` admitía dos filas del mismo símbolo, y la duplicada quedaba invisible** (2026-11-07).
+Medido: FIRY era el único caso sobre 1.360 filas — ids 1466 y 1807, idénticas salvo `cusip`,
+`sharesOutstanding`, `floatShares` y `lastDividendValue`, que solo traía la vieja.
+
+**La columna `account` es original de la tabla; lo que faltaba era pasarla.** `insert()` arma la lista
+de columnas desde `upd`, así que un llamador que no la incluya produce una fila con `account` NULL
+aunque la columna exista desde el día uno. No es un agujero nuevo: en el snapshot más viejo del repo
+(`68c45a6`, 2025-10-26) el insert de `dividends_en_market_stock` ya iba sin `account`. Una fila sin
+cuenta es invisible para `load_symbols(account)` y `select(account=...)`, así que la fase 1 del
+Screener la inserta de nuevo.
+
+**Hay un segundo camino y no se puede decidir cuál disparó.** `select()` devuelve `[], []` cuando
+falla, y `update_tabla_market` lee eso como "no existe" → inserta: un error transitorio de BD durante
+el `select` genera la fila duplicada sin dejar rastro. El orden de los ids favorece este segundo
+camino — la fila **vieja** (1466) es la que tiene `cusip` y `floatShares`, que los escriben caminos
+filtrados por `account`; si la huérfana hubiera nacido primero, esos datos habrían caído en la nueva.
+
+Nada lo impedía en ningún caso: el índice `(account, symbol)` existía pero **no era único**. Eso es
+lo que cubre las dos vías.
+
+Y quedaba invisible porque `update()` **sin `account` arma `WHERE symbol=%s`**, que pisa las dos
+filas: por eso las dos traían el mismo `timestamp` al microsegundo y el mismo `inst_score`. El
+duplicado no se notaba porque algo lo mantenía sincronizado.
+
+Hoy `insert()` recibe `account` y `dividends_en_market_stock` lo pasa en el insert y en el update.
+Se conserva la fila **con `cusip`** — sin cusip la posición 13F se descarta al cargar.
+
+**`funds` tenía 188.823 filas basura: el `INSERT IGNORE` no tenía nada que ignorar** (2026-11-07).
+`bulk_insert_edgar_funds` reinserta el padrón EDGAR completo en cada corrida de `sync_edgar_funds`
+—mensual— y la tabla no tenía clave única, así que acumuló **22 copias de cada uno de los 8.992
+fondos**: 197.815 filas, un solo nombre por cik (reinserción pura, no renames).
+
+No corrompía nada. `get_fund_id_by_cik` hace `SELECT id FROM funds WHERE cik = %s` + `fetchone()` sin
+`ORDER BY`, y en la práctica devolvía siempre el `id` más bajo: los 7.887 `fund_id` que usa
+`fund_holdings` eran **todos** el `MIN(id)` de su cik, así que el borrado quedó sin huérfanos.
+Saneado a 8.992 filas y cerrado con `uq_funds_cik`, que es el arreglo de código — el `INSERT IGNORE`
+ya estaba bien escrito, le faltaba contra qué colisionar.
+
+**`sys_objeto` ids 8 y 9 eran el mismo blob de icono** (60.797 bytes, `usamodulo='globales.py'`).
+Borrado el 9. Inocuo, se registra para no volver a investigarlo.
 
 ### Columnas con semántica propia
 
 | Tabla | Columna | Qué significa |
 |-------|---------|---------------|
 | market | `timestamp` | Última modificación de la fila **por cualquier motivo** (precio incluido). No sirve para saber cuándo se recalculó algo puntual |
-| market | `inst_update` | Última actualización del pipeline 13F |
+| market | `inst_update` | Última corrida de `sync_13f_scores` que escribió la fila. **Columna muerta hasta el 2026-11-07** — existía en la BD y ningún código la tocaba. Solo se sella cuando hay dato real; los `skipped` quedan en NULL |
+| market | `inst_ownership_pct` | % del float en manos institucionales, **de Yahoo** (`heldPercentInstitutions`). Dueño único: `sync_institutional`. Puede pasar de 1 por desfase float/holdings — la UI lo acota a 100% |
+| market | `inst_score` | Score institucional compuesto. Dueño único: `sync_13f_scores`. **No tiene techo** — el término `log(fh_count)` solo ya vale 1,68 con 4.482 fondos |
 | market | `categoria_update` | Última vez que se recalculó `categoriaActivo` (creada 2026-08-25) |
+| fund_filings | `processed` | `0` en cola, `1` cargado en `fund_holdings`, **`2` no cargable — no reintentar**: el XML no está en disco o el fondo no está registrado. Sin el 2 el filing se recorre en cada corrida sin avanzar nunca, porque `sync_fund_filings` solo reintenta la accession más reciente de cada fondo. Medido 2026-11-06: **4.152 filings atascados** así (creada la semántica 2026-11-07) |
 | order_trader | `sync_broker` | Si podemos creerle a la fila — **independiente de `status`** (creada 2026-08-29) |
 | symbol_decision_history | `veces` / `primera_vez` | Repeticiones consecutivas colapsadas en la fila y arranque de esa corrida — `timestamp` es la última (creadas 2026-08-31) |
 | diaria_performance | `Dividends` | Dividendo devengado en **fecha ex**, no cobrado. No cuadra contra el extracto IB del mismo mes |
@@ -298,6 +357,28 @@ agregarle el `COMMENT`, y recién entonces ejecutar.
 | ib_flex_trades | `exec_id` | execID de TWS — el **único** identificador que cruza contra `booktrading.idtrans`, y solo desde **2024-04-02** (creada 2026-09-21) |
 | booktrading | `basico` | Costo medio de la posición **después** de ese hecho, calculado **solo con datos del libro**: el divisor es su propio `stock` y el total del que se descuenta es `basico * stock` de la fila anterior. El costo del broker no entra (corregido 2026-10-29). Solo lo consume Crypto manual; Stock lee el costo de IB |
 | booktrading | `sell` | Cuánto del lote ya se consumió. **`cantidad - sell` es lo vivo solo si `activa = 'Y'`** — toda query que lea la columna filtra por `activa` (corregido 2026-10-30) |
+
+**`inst_ownership_pct` e `inst_score` tenían dos escritores cada una, y ganaba el que corría último**
+(2026-11-07). `sync_institutional` (Yahoo, 24h) y `sync_13f_scores` (13F, 24h) escribían las dos columnas
+con significados distintos: `inst_ownership_pct` era el `heldPercentInstitutions` de Yahoo (0–1) o el ratio
+propio `fh_total_shares / floatShares` (sin techo), e `inst_score` era el porcentaje de Yahoo o la fórmula
+de 4 términos. Medido antes del arreglo: 1.152 filas con el ratio 13F, 133 con el porcentaje de Yahoo.
+
+**El ratio propio se eliminó porque el numerador está mal, no el divisor.** El 13F agregado duplica
+acciones —co-filers y custodios reportan las mismas— y no se puede deduplicar desde los filings. Medido:
+GS sumaba 566,6M de acciones entre 3.375 fondos contra ~295M existentes → ratio **1,92** contra el
+**0,765** real de Yahoo; PEO daba **18,95** contra 0,386. No es antigüedad de los filings (3.314 de los
+3.375 fondos de GS filearon en 2026, aportan 566,3M de los 566,6M) ni duplicados de carga (0 filas
+duplicadas en `fund_holdings`). Con el `floatShares` correcto de Yahoo —298.213.315— el ratio queda en
+1,90: igual de absurdo.
+
+Hoy `sync_13f_scores` **lee** `inst_ownership_pct` de la fila para su término del 40% y no la escribe;
+`sync_institutional` dejó de escribir `inst_score`. Efecto: el score baja en los 46 símbolos donde el
+ratio pasaba de 100%. **El orden importa** — `sync_institutional` primero, `sync_13f_scores` después,
+o el 40% calcula en cero.
+
+`floatShares` sigue descargándose para la Rotación del Screener, pero **ya no es divisor de nada**: está
+poblado en solo 30 de 1.361 filas de `market` y 1.241 caen al `sharesOutstanding`.
 
 **`categoria_update` — por qué existe.** `Agente_DividendStatusScreener` ordenaba los ex-cartera por
 `lastPrice DESC` con `LIMIT 150`, así que repetía siempre los mismos 150 símbolos más caros y dejaba

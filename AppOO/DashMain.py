@@ -113,7 +113,7 @@ from Modulos_python import (
     traceback,
 )
 from Class_FondosInversion import ArsFondosInversion
-from Class_Screener import Screener, _ETF_TYPES
+from Class_Screener import Screener, _ETF_SYMBOLS, _ETF_TYPES
 from Class_DashBot import AsistenteChatbot
 from Class_IA_modelos import ModeloOportunidadesSell
 from Class_SystemStatus import system_status
@@ -1511,7 +1511,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # precio objetivo: ETF/trust -> maximo de 52 semanas (no tienen objetivo de analistas
                     # y audit_portfolio los borra de market). Resto -> fuente unica market, Yahoo de respaldo
                     # sin el criterio por nombre del Screener: 'trust' marca REITs con analistas (DLR, MPT)
-                    if (yf_activo.get("quoteType") or "").upper() in _ETF_TYPES:
+                    if (yf_activo.get("quoteType") or "").upper() in _ETF_TYPES or symbol in _ETF_SYMBOLS:
                         objetivo = yf_activo.get("fiftyTwoWeekHigh", 0)
                     else:
                         objetivo = p_targets.get(symbol, {}).get("objetivo", 0)
@@ -1867,9 +1867,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
             try:
                 found, iy = self.Market.select(account=self.account, symbol=x_symbol)
                 if not found:
-                    self.Market.insert(upd=campo, val=value, symbol=x_symbol)
+                    self.Market.insert(upd=campo, val=value, symbol=x_symbol, account=self.account)
                 else:
-                    self.Market.update(upd=campo, val=value, symbol=x_symbol)
+                    self.Market.update(upd=campo, val=value, symbol=x_symbol, account=self.account)
             except Exception as error:
                 self.logger.error("update_tabla_market({}): {}".format(x_symbol, error))
 
@@ -1901,8 +1901,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
             except Exception as error:
                 self.logger.error("construct_info_dividends({}): {}".format(x_symbol, error), exc_info=True)
 
-        _ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
-
         try:
             if self.vehiculo != "Stock":
                 return
@@ -1911,7 +1909,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 ticket = convierte_ticket_crypto(symbol)
                 yf_activo, datos, ind_update = self.ts_yfinance_symbol(symbol=ticket, vehiculo=self.vehiculo)
                 qt = (yf_activo.get("quoteType") or "").upper()
-                if qt in _ETF_TYPES:
+                if qt in _ETF_TYPES or symbol in _ETF_SYMBOLS:
                     continue  # ETF/fondo — no insertar en market
                 if not ind_update and ("dividendYield" in yf_activo) and ("Dividends" in datos):
                     self._validate_dividend_data_freshness(symbol, yf_activo, datos["Dividends"])

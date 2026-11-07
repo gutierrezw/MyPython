@@ -91,8 +91,10 @@ def _build_flujo_percentiles(cartera_rows):
 
 
 _ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
-# Palabras en el nombre que indican fondo/trust aunque Yahoo devuelva quoteType='EQUITY'
-_ETF_NAME_KEYWORDS = {"etf", "trust", "fund", "physical gold", "index fund", "reit index"}
+# Simbolos que Yahoo reporta como quoteType='EQUITY' pero son fondo/trust. Override por
+# simbolo, no por nombre: el criterio por nombre ('trust', 'fund') marca 125 filas de market,
+# entre ellas REITs con analistas (DLR, MPT) y 7 bancos operativos (NTRS, TRMK, WASH...)
+_ETF_SYMBOLS = {"PHYS"}
 
 
 def bind_tv_web_menu(tree, win, colors=None, col_symbol="#1", get_url=None, on_analisis=None):
@@ -1840,8 +1842,8 @@ class Screener(tk.Frame):
         for col, (txt, w, anchor) in enumerate(
             [
                 ("FUENTE", 15, "w"),
-                ("DETALLE", 34, "w"),
-                ("REGLA", 56, "w"),
+                ("DETALLE", 40, "w"),
+                ("REGLA", 90, "w"),
                 ("VOTO", 5, "center"),
             ]
         ):
@@ -1861,7 +1863,7 @@ class Screener(tk.Frame):
             voto_color = "#555555" if es_ia else _VOTO_COLOR.get(voto, "#444444")
             voto_txt = "  —" if es_ia else _VOTO_LABEL.get(voto, "  —")
             fg_det = "#555555" if es_ia else "#cccccc"
-            fg_reg = "#444444" if es_ia else "#666666"
+            fg_reg = "#5a5a5a" if es_ia else "#9aa4b2"
 
             tk.Label(
                 tf,
@@ -1879,7 +1881,7 @@ class Screener(tk.Frame):
                 bg=row_bg,
                 fg=fg_det,
                 font=("Consolas", 9),
-                width=34,
+                width=40,
                 anchor="w",
                 padx=4,
             ).grid(row=r_idx, column=1, padx=1, pady=1, sticky="ew")
@@ -1889,7 +1891,7 @@ class Screener(tk.Frame):
                 bg=row_bg,
                 fg=fg_reg,
                 font=("Consolas", 8),
-                width=56,
+                width=90,
                 anchor="w",
                 padx=4,
             ).grid(row=r_idx, column=2, padx=1, pady=1, sticky="ew")
@@ -2011,6 +2013,7 @@ class Screener(tk.Frame):
             float_str = _senal_float(ratio)
             inst_val = min(row["inst_ownership_pct"], 1.0) if row.get("inst_ownership_pct") else None
             inst_pct = f"{inst_val:.1%}" if inst_val else ""
+            inst_score_str = f"{float(row['inst_score']):.2f}" if row.get("inst_score") else ""
             buy_r_str = f"{fh_buy_ratio:.1%}" if fh_buy_ratio else ""
             sell_r_str = f"{fh_sell_ratio:.1%}" if fh_sell_ratio else ""
             n_inst = str(row["fh_count"]) if row.get("fh_count") else ""
@@ -2060,6 +2063,7 @@ class Screener(tk.Frame):
                         categ,
                         nombre,
                         f"{float(row['lastPrice']):.2f}" if row.get("lastPrice") else "",
+                        inst_score_str,
                         inst_pct,
                         n_inst,
                         buy_r_str,
@@ -2110,12 +2114,13 @@ class Screener(tk.Frame):
         )
         hdr.pack(pady=(8, 4))
 
-        _FIXED_COLS = ("Symbol", "Div", "Nombre", "Last", "Inst %", "13F Inst")
+        _FIXED_COLS = ("Symbol", "Div", "Nombre", "Last", "Inst Score", "Inst %", "13F Inst")
         _COL_DEFS = (
             ("Symbol", 65, "w"),
             ("Div", 38, "center"),
             ("Nombre", 200, "w"),
             ("Last", 65, "e"),
+            ("Inst Score", 75, "e"),
             ("Inst %", 65, "e"),
             ("13F Inst", 55, "e"),
             ("13F Buy%", 70, "e"),
@@ -2164,10 +2169,11 @@ class Screener(tk.Frame):
             ct.tree_fixed.tag_configure(tag, foreground=color)
             ct.tree_scroll.tag_configure(tag, foreground=color)
 
-        n_fixed = len(_FIXED_COLS)
+        # insert_row() y no insert() directo en cada arbol: es el unico camino que llena
+        # CustomTreeview._id_map, de donde sync_fixed_selection/sync_scroll_selection sacan
+        # el iid gemelo. Sin el mapa la linea de seleccion queda suelta entre las dos mitades.
         for f in filas:
-            ct.tree_fixed.insert("", tk.END, values=f["values"][:n_fixed], tags=(f["tag"],))
-            ct.tree_scroll.insert("", tk.END, values=f["values"][n_fixed:], tags=(f["tag"],))
+            ct.insert_row(values=f["values"], tag=f["tag"])
 
         def _open_website_consenso(event):
             tree = event.widget
@@ -2672,7 +2678,7 @@ def cleanup_market(account):
                     continue
                 campos, valores = _map_quote(s)
                 qt = (s.get("quoteType") or "").upper()
-                if qt in _ETF_TYPES and existing.get(sym, {}).get("categoriaActivo") == "N":
+                if (qt in _ETF_TYPES or sym in _ETF_SYMBOLS) and existing.get(sym, {}).get("categoriaActivo") == "N":
                     campos = list(campos) + ["categoriaActivo"]
                     valores = list(valores) + ["X"]
                 market.update(upd=campos, val=valores, symbol=sym)
@@ -2851,10 +2857,8 @@ def audit_portfolio(account):
             precio_yf = info.get("regularMarketPrice") or info.get("previousClose")
 
             # ETF/fondo → eliminar de market (posición vive en inversion/booktrading)
-            # PHYS y similares: Yahoo devuelve quoteType='EQUITY' para trusts de materias primas
-            nombre_lower = (nombre_yf or nombre_db or "").lower()
-            es_etf = qt in _ETF_TYPES or any(kw in nombre_lower for kw in _ETF_NAME_KEYWORDS)
-            if es_etf:
+            # PHYS y similares: Yahoo devuelve quoteType='EQUITY' → override por simbolo
+            if qt in _ETF_TYPES or sym in _ETF_SYMBOLS:
                 market.delete(sym, account)
                 etfs_upd += 1
                 _logger.warning(f"audit_portfolio: ETF/trust eliminado {sym} qt={qt} nombre={nombre_yf!r}")
@@ -3017,7 +3021,6 @@ def sync_prices(account):
 
 def sync_dividend_status_screener(account: str, limit: int = 150) -> dict:
     """Actualiza categoriaActivo en market para símbolos ex-cartera del Screener (sin plot)."""
-    _ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
     market = MarketScreen()
     symbols = market.select_screener_ex_cartera(account, limit=limit)
     categorias_actuales = market.load_symbols(account)
@@ -3032,7 +3035,7 @@ def sync_dividend_status_screener(account: str, limit: int = 150) -> dict:
             trailing_annual = activo.get("trailingAnnualDividendRate") or 0
             qt = (activo.get("quoteType") or "").upper()
 
-            if qt in _ETF_TYPES:
+            if qt in _ETF_TYPES or symbol in _ETF_SYMBOLS:
                 categoria, traza, meses_str = "X", None, ""
             elif trailing_annual == 0:
                 # No paga dividendos: 'N' es un hallazgo real, no una descarga fallida

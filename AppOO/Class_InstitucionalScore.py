@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "App
 
 from Modulos_python import (
     yf,
+    datetime,
     logging,
     math,
     requests,
@@ -116,14 +117,12 @@ def sync_institutional(account) -> dict:
             continue
 
         inst_pct = raw.get("inst_ownership_pct")
-        score = round(inst_pct, 4) if inst_pct is not None else None
 
         campos = [
             "inst_ownership_pct",
             "insider_ownership_pct",
             "inst_top_holder",
             "inst_top_holder_shares",
-            "inst_score",
             "inst_funds",
             "analyst_rec",
             "analyst_mean",
@@ -134,7 +133,6 @@ def sync_institutional(account) -> dict:
             raw.get("insider_ownership_pct"),
             raw.get("inst_top_holder"),
             raw.get("inst_top_holder_shares"),
-            score,
             raw.get("inst_funds"),
             raw.get("analyst_rec"),
             raw.get("analyst_mean"),
@@ -196,11 +194,13 @@ def sync_edgar_funds() -> dict:
 
 def sync_13f_scores(account: str) -> dict:
     """
-    Recalcula inst_score blendando fh_ownership_pct propio (40%)
-    con fh_count 13F (40%) y fh_buy_ratio (20%) y actualiza market.
+    Recalcula inst_score blendando inst_ownership_pct (40%) con fh_count 13F (20%),
+    fh_buy_ratio (20%) y flujo neto (20%), y actualiza market.
 
-    fh_ownership_pct = fh_total_shares / floatShares  (o sharesOutstanding si no hay float)
-    Fuente 100% propia — no depende de inst_ownership_pct de Yahoo.
+    inst_ownership_pct lo escribe sync_institutional desde Yahoo — dueno unico de esa
+    columna. Aca solo se lee. El ratio propio fh_total_shares / floatShares se elimino
+    el 2026-11-07: el 13F agregado duplica acciones (co-filers y custodios) y daba 1,92
+    en GS contra 0,765 real.
     """
     inst = InstitucionalScore()
     fh_stats = inst.market.load_fund_holdings_stats()
@@ -212,15 +212,9 @@ def sync_13f_scores(account: str) -> dict:
         fh_count = stats.get("fh_count", 0)
         fh_total_value = stats.get("fh_total_value")
         fh_buy_ratio = stats.get("fh_buy_ratio", 0.0)
-        fh_total_shares = stats.get("fh_total_shares", 0)
+        inst_ownership_pct = mkt.get("inst_ownership_pct")
 
-        float_shares = mkt.get("floatShares") or mkt.get("sharesOutstanding")
-        fh_ownership_pct = round(fh_total_shares / float_shares, 4) if float_shares and fh_total_shares else None
-
-        has_ownership = fh_ownership_pct is not None
-        has_13f = fh_count > 0
-
-        if not has_ownership and not has_13f:
+        if fh_count <= 0:
             skipped += 1
             continue
 
@@ -229,7 +223,7 @@ def sync_13f_scores(account: str) -> dict:
         flujo_neto = max(-1.0, min(1.0, (new_entrants - full_exits) / max(fh_count, 1)))
 
         score = round(
-            (fh_ownership_pct or 0.0) * 0.40
+            (inst_ownership_pct or 0.0) * 0.40
             + math.log(max(fh_count, 1)) * 0.20
             + fh_buy_ratio * 0.20
             + flujo_neto * 0.20,
@@ -253,7 +247,7 @@ def sync_13f_scores(account: str) -> dict:
                 "full_exits",
                 "delta_call_shares",
                 "delta_put_shares",
-                "inst_ownership_pct",
+                "inst_update",
             ],
             val=[
                 score,
@@ -267,7 +261,7 @@ def sync_13f_scores(account: str) -> dict:
                 full_exits if full_exits else None,
                 delta_call_shares,
                 delta_put_shares,
-                fh_ownership_pct,
+                datetime.now(),
             ],
             symbol=symbol,
             account=account,

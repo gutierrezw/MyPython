@@ -2030,11 +2030,13 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         finally:
             conn.close()
 
-    def insert(self, upd=None, val=None, symbol=None):
+    def insert(self, upd=None, val=None, symbol=None, account=None):
         """
         @param upd:  list() de campos para insertar en market
         @param val:  list() de valores que acompañan a upd
         @param symbol: symbol o ticket que se inserta en market
+        @param account: cuenta de la fila. Sin account la fila es invisible para load_symbols()
+                        y select(), y el Screener inserta un duplicado (caso FIRY, 2026-11-07)
         @return:  Agrega fila a partir de symbol y campos pasados como parameter
         """
         # Guard: rechazar preferreds/warrants (no tienen data suficiente)
@@ -2066,6 +2068,10 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             if "categoriaActivo" not in upd:
                 listvalues.append("N")
                 qry = qry + "categoriaActivo, "
+
+            if account and "account" not in upd:
+                listvalues.append(account)
+                qry = qry + "account, "
 
             listvalues.append(datetime.now())
             listvalues.append(symbol)
@@ -2376,6 +2382,30 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
+    def get_name_map(self, account: str) -> dict:
+        """Retorna {shortName: symbol} de los simbolos que aun no tienen cusip.
+        Es la entrada para aprender el cusip desde el nombre del emisor que
+        reportan los informes 13F — ver sync_13f_holdings."""
+        conn = self._conectar(tabla="select.market")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT shortName, symbol FROM market "
+                "WHERE (cusip IS NULL OR cusip = '') AND shortName IS NOT NULL AND shortName <> '' "
+                "AND account = %s",
+                (account,),
+            )
+            result = {}
+            for nombre, symbol in cursor.fetchall():
+                result.setdefault(nombre, []).append(symbol)
+            return result
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::get_name_map()]: {error}")
+            return {}
+        finally:
+            cursor.close()
+            conn.close()
+
     def update_market_cusip(self, symbol: str, account: str, cusip: str) -> None:
         """Actualiza el campo cusip en market para un símbolo."""
         conn = self._conectar(tabla="update.market")
@@ -2651,8 +2681,10 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
-    def mark_filings_processed(self, filenames: list) -> None:
-        """Marca como processed=1 los filenames indicados en fund_filings."""
+    def mark_filings_processed(self, filenames: list, estado: int = 1) -> None:
+        """Marca con processed=estado los filenames indicados en fund_filings.
+        estado=1 cargado en fund_holdings; estado=2 no cargable (XML ausente en disco o
+        fondo sin registrar) - lo saca de la cola de load_unprocessed_filings."""
         if not filenames:
             return
         conn = self._conectar(tabla="update.market")
@@ -2660,8 +2692,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         try:
             placeholders = ",".join(["%s"] * len(filenames))
             cursor.execute(
-                f"UPDATE fund_filings SET processed = 1 WHERE filename IN ({placeholders})",
-                filenames,
+                f"UPDATE fund_filings SET processed = %s WHERE filename IN ({placeholders})",
+                [estado] + list(filenames),
             )
             conn.commit()
         except (Exception, connect.Error) as error:

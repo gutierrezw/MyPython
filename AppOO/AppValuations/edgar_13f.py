@@ -3,7 +3,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from Modulos_python import ET, logging, requests, time, date, timedelta
+from Modulos_python import ET, logging, re, requests, time, date, timedelta
 from Modulos_Mysql import MarketScreen
 
 _logger = logging.getLogger("InstitucionalScore")
@@ -18,6 +18,10 @@ _13F_SAVE_DIR = os.path.join(
 )
 _13F_NS = {"tf": "http://www.sec.gov/edgar/document/thirteenf/informationtable"}
 _FILING_REFRESH_DAYS = 80  # umbral para re-chequear EDGAR (< 1 trimestre)
+_SUFIJOS_EMISOR = (
+    "INCORPORATED", "INC", "CORPORATION", "CORP", "COMPANY", "CO", "LIMITED", "LTD", "PLC", "LLC", "LP",
+    "TRUST", "REIT", "GROUP", "HOLDINGS", "HOLDING", "SA", "NV", "AG", "THE", "COM", "ORD", "NEW", "USD",
+)
 
 
 def _sec_get(url: str, timeout: int = 20) -> requests.Response | None:
@@ -183,7 +187,7 @@ def resolve_cusips_openfigi(cusips: list) -> dict:
         batch = cusips[i : i + batch_size]
         if i % 500 == 0 or i + batch_size >= total:
             _logger.warning(f"  OpenFIGI: [{i}/{total}] resueltos={len(result)}")
-        payload = [{"idType": "ID_CUSIP", "idValue": c} for c in batch]
+        payload = [{"idType": "ID_CUSIP", "idValue": c, "exchCode": "US"} for c in batch]
         try:
             r = requests.post(_OPENFIGI_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
             if r.status_code == 429:
@@ -200,6 +204,58 @@ def resolve_cusips_openfigi(cusips: list) -> dict:
             _logger.warning(f"resolve_cusips_openfigi batch {i}: {e}")
         time.sleep(2.5)
     return result
+
+
+def normaliza_emisor(nombre: str) -> str:
+    """Normaliza el nombre de un emisor para comparar informe 13F contra market.shortName."""
+    limpio = re.sub(r"[^A-Z0-9 ]", " ", (nombre or "").upper())
+    partes = [p for p in limpio.split() if p]
+    while partes and partes[-1] in _SUFIJOS_EMISOR:
+        partes.pop()
+    return " ".join(partes)
+
+
+def aprende_cusips_desde_emisores(account: str, emisores: dict, cusip_map: dict, escribir: bool = True) -> dict:
+    """Aprende el cusip de los simbolos que no lo tienen, cruzando el nombre del emisor
+    que reportan los informes 13F contra market.shortName.
+
+    emisores: {cusip: nombre} de los cusip que cusip_map no reconoce.
+    Descarta por ambiguedad (un nombre que apunta a varios simbolos, o un cusip ya
+    asignado a otro simbolo) y confirma contra OpenFIGI los cusip de EE.UU. Los CINS
+    extranjeros — primer caracter alfabetico — OpenFIGI no los indexa, asi que se
+    aceptan con las reglas de ambiguedad.
+    Retorna {symbol: cusip} de lo efectivamente escrito en market."""
+    market = MarketScreen()
+    por_nombre = {}
+    for nombre, symbols in market.get_name_map(account).items():
+        por_nombre.setdefault(normaliza_emisor(nombre), []).extend(symbols)
+
+    candidatos = {}
+    for cusip, nombre in emisores.items():
+        if cusip in cusip_map:
+            continue
+        symbols = por_nombre.get(normaliza_emisor(nombre)) or []
+        if len(symbols) != 1:
+            continue
+        candidatos.setdefault(symbols[0], set()).add(cusip)
+
+    a_confirmar = [c for cusips in candidatos.values() for c in cusips if c[:1].isdigit()]
+    tickers = resolve_cusips_openfigi(a_confirmar) if a_confirmar else {}
+
+    escritos = {}
+    for symbol, cusips in candidatos.items():
+        confirmados = [c for c in cusips if (tickers.get(c) or "").upper() == symbol.upper()]
+        elegidos = confirmados or [c for c in cusips if not c[:1].isdigit()]
+        if len(elegidos) != 1:
+            continue
+        if escribir:
+            market.update_market_cusip(symbol, account, elegidos[0])
+        escritos[symbol] = elegidos[0]
+    _logger.warning(
+        f"aprende_cusips_desde_emisores: {len(emisores)} emisores sin cusip, "
+        f"{len(candidatos)} simbolos candidatos, {len(escritos)} escritos"
+    )
+    return escritos
 
 
 def parse_13f_xml(filepath: str) -> list:
@@ -244,17 +300,30 @@ def sync_13f_holdings(account: str) -> dict:
 
     # Paso 1: recolectar posiciones de los XMLs no procesados
     all_positions = {}
+    no_cargables = []
     for entry in unprocessed:
         xml_file = entry["filename"]
         cik = entry["cik"]
         fund_id = market.get_fund_id_by_cik(cik)
         if not fund_id:
+            no_cargables.append((xml_file, "fondo no registrado"))
             continue
         filepath = os.path.join(_13F_SAVE_DIR, xml_file)
         if not os.path.exists(filepath):
+            no_cargables.append((xml_file, "XML ausente en disco"))
             continue
         positions = parse_13f_xml(filepath)
         all_positions[xml_file] = (fund_id, entry["filing_date"], positions)
+
+    # Paso 1b: aprender el cusip de los emisores que el mapa no reconoce — sin esto el
+    # paso 2 los descarta y el simbolo nunca llega a tener datos institucionales
+    emisores = {}
+    for _fid, _fecha, positions in all_positions.values():
+        for pos in positions:
+            if pos["cusip"] not in cusip_map and pos.get("name"):
+                emisores.setdefault(pos["cusip"], pos["name"])
+    if emisores:
+        cusip_map.update({c: s for s, c in aprende_cusips_desde_emisores(account, emisores, cusip_map).items()})
 
     # Paso 2: bulk upsert fund_holdings
     _logger.warning("sync_13f_holdings: cargando estado previo de fund_holdings...")
@@ -318,6 +387,17 @@ def sync_13f_holdings(account: str) -> dict:
 
     # Marcar como procesados en BD
     market.mark_filings_processed(list(all_positions.keys()))
+
+    # Un filing que no se puede cargar queda fuera de la cola con processed=2. Sin esto se
+    # recorre en cada corrida sin avanzar nunca: la unica condicion que lo cargaria es tener
+    # el XML, y si el archivo no esta no vuelve solo (sync_fund_filings solo reintenta la
+    # accession mas reciente del fondo). Medido 2026-11-06: 4152 filings atascados asi.
+    if no_cargables:
+        market.mark_filings_processed([f for f, _m in no_cargables], estado=2)
+        motivos = {}
+        for _f, motivo in no_cargables:
+            motivos[motivo] = motivos.get(motivo, 0) + 1
+        _logger.warning(f"sync_13f_holdings: {len(no_cargables)} filings no cargables {motivos}")
 
     return {
         "xml_files": len(unprocessed),
