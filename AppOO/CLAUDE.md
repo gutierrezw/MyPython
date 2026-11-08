@@ -376,6 +376,35 @@ Borrado el 9. Inocuo, se registra para no volver a investigarlo.
 | booktrading | `basico` | Costo medio de la posición **después** de ese hecho, calculado **solo con datos del libro**: el divisor es su propio `stock` y el total del que se descuenta es `basico * stock` de la fila anterior. El costo del broker no entra (corregido 2026-10-29). Solo lo consume Crypto manual; Stock lee el costo de IB |
 | booktrading | `sell` | Cuánto del lote ya se consumió. **`cantidad - sell` es lo vivo solo si `activa = 'Y'`** — toda query que lea la columna filtra por `activa` (corregido 2026-10-30) |
 | market | `consenso_suma` | Suma de los votos activos del Consenso. **NULL = no se emitió Señal** (menos de `MIN_VOTOS_SENAL = 3` votos con dato, tag `— S/D`). Un 0 ahí entraría al modelo Buy vía `load_consenso_features` como una Señal neutral **medida** (semántica 2026-11-07) |
+| market | `encartera` | Si **esa cuenta** tiene posición viva del símbolo. La sube a `'Y'` `dividends_en_market_stock`; la baja a `'N'` `update_inversion`. **NULL = símbolo del universo que nunca estuvo en cartera** — 1.298 de 1.359 filas (semántica 2026-11-08) |
+
+**`encartera` no se bajaba en el cierre normal de una posición, y el criterio de baja era el valor,
+no las unidades** (2026-11-08). `update_inversion` tiene **dos** caminos de baja y hacían cosas
+distintas:
+
+| Camino | Cuándo se dispara | Bajaba `market.encartera` |
+|---|---|---|
+| `baja()` | el broker **deja de reportar** el símbolo — el cierre normal | **no** |
+| el umbral dentro de `update()` | el broker sigue reportándolo con valor chico | sí |
+
+Al vender toda la posición IB y Binance dejan de reportar el símbolo, así que entra por `baja()`:
+el camino que no tocaba `market`. `audit_portfolio` tampoco la baja —solo borra ETF y deslistados,
+y actualiza nombre y cusip—, así que **ningún código cubría el cierre normal**. Las 14 filas de
+Stock que hoy están correctas en `'N'` vienen del **saneamiento manual del 2026-08-08**, no del
+código. Hoy `baja()` emite el `UPDATE` de `market`.
+
+**Y el umbral era `mrkprice * position < 5.0`, que confunde tres cosas distintas.** Da de baja una
+posición viva cuando el precio no llegó —`mrkprice` en 0 produce valor 0, que es `< 5`—, y una
+compra de menos de 5 USD nace de baja en el ciclo siguiente, porque el `insert` del mismo método
+escribe `iactiva='Y'` sin mirar el umbral. Hoy el criterio es `position == 0`.
+
+Medido antes del cambio: **ninguna** posición viva estaba bajo 5 USD en los tres vehículos —la más
+chica de toda la cartera es CGPTUSDT con 32,09 USD y la más chica de Stock 61,80—, así que el
+cambio no mueve ningún estado hoy. Las 55 filas bajo el umbral ya estaban en `iactiva='N'` y 54
+valen exactamente 0. El efecto es hacia adelante.
+
+**El dust queda vivo a propósito.** Un residuo de 0,1 unidad valiendo centavos ahora se ve como
+posición abierta en vez de desaparecer: la posición existe y es mejor que se vea.
 
 **`inst_ownership_pct` e `inst_score` tenían dos escritores cada una, y ganaba el que corría último**
 (2026-11-07). `sync_institutional` (Yahoo, 24h) y `sync_13f_scores` (13F, 24h) escribían las dos columnas

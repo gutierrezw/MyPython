@@ -4357,8 +4357,10 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 xlistvalues.append(keys["open"])
                 xlistvalues.append(keys["dgyp"])
 
-                # da baja si valor de mercado < $5 USD
-                Debaja = keys["mrkprice"] * keys["position"] < 5.0
+                # La posicion se cierra cuando no quedan unidades, no cuando vale poco: con el umbral
+                # de 5 USD un mrkprice que no llego (0) daba de baja una posicion viva, y una compra
+                # chica nacia de baja en el ciclo siguiente al insert, que escribe iactiva='Y'.
+                Debaja = keys["position"] == 0
                 if Debaja:
                     xlistvalues[0] = 0  # position[0] = 0 cuando iactiva='N'
                 xlistvalues.append("N" if Debaja else "Y")
@@ -4438,6 +4440,13 @@ class PlanInversion(BDsystem):  # ----------------------------------------------
                 xlistvalues.append(account)
                 valuesupd = tuple(xlistvalues)
                 cursor.execute(qry % valuesupd)
+                # Este es el camino real de cierre -- el broker deja de reportar el simbolo -- y no
+                # tocaba market: encartera quedaba en 'Y' para siempre. El umbral de valor dentro de
+                # update() solo se dispara si el broker todavia reporta la posicion.
+                cursor.execute(
+                    "UPDATE market SET encartera = 'N' WHERE symbol = %s AND account = %s",
+                    (keys, account),
+                )
             except Exception as e:
                 print("[update_inversion.baja({})]: {}".format(vehiculo, e))
 
