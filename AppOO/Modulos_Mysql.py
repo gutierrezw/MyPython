@@ -3246,14 +3246,16 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
     def load_consenso_features(self, account: str) -> dict:
         """Retorna {symbol: {consenso_suma, inst_score, fh_buy_ratio}} del universo de market.
         Sin filtro de encartera: las oportunidades de compra incluyen símbolos fuera de cartera.
-        Fallback 0 cuando sin datos."""
+        El filtro es por CUALQUIERA de las tres: consenso_suma solo esta calculada en cartera, y
+        exigirla descartaba filas con inst_score y fh_buy_ratio medidos. Fallback 0 cuando sin datos."""
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
         try:
             cursor.execute(
                 "SELECT symbol, consenso_suma, inst_score, fh_buy_ratio "
                 "FROM market "
-                "WHERE account = %s AND consenso_suma IS NOT NULL",
+                "WHERE account = %s AND (consenso_suma IS NOT NULL "
+                "OR inst_score IS NOT NULL OR fh_buy_ratio IS NOT NULL)",
                 (account,),
             )
             result = {}
