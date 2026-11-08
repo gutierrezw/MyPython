@@ -375,6 +375,7 @@ Borrado el 9. Inocuo, se registra para no volver a investigarlo.
 | ib_flex_trades | `exec_id` | execID de TWS — el **único** identificador que cruza contra `booktrading.idtrans`, y solo desde **2024-04-02** (creada 2026-09-21) |
 | booktrading | `basico` | Costo medio de la posición **después** de ese hecho, calculado **solo con datos del libro**: el divisor es su propio `stock` y el total del que se descuenta es `basico * stock` de la fila anterior. El costo del broker no entra (corregido 2026-10-29). Solo lo consume Crypto manual; Stock lee el costo de IB |
 | booktrading | `sell` | Cuánto del lote ya se consumió. **`cantidad - sell` es lo vivo solo si `activa = 'Y'`** — toda query que lea la columna filtra por `activa` (corregido 2026-10-30) |
+| market | `consenso_suma` | Suma de los votos activos del Consenso. **NULL = no se emitió Señal** (menos de `MIN_VOTOS_SENAL = 3` votos con dato, tag `— S/D`). Un 0 ahí entraría al modelo Buy vía `load_consenso_features` como una Señal neutral **medida** (semántica 2026-11-07) |
 
 **`inst_ownership_pct` e `inst_score` tenían dos escritores cada una, y ganaba el que corría último**
 (2026-11-07). `sync_institutional` (Yahoo, 24h) y `sync_13f_scores` (13F, 24h) escribían las dos columnas

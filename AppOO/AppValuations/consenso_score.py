@@ -71,6 +71,10 @@ NIVEL_NEUTRO = -0.20  # pct > -0.20
 NIVEL_ALERTA = -0.60  # pct > -0.60
 # NIVEL_SALIDA si pct ≤ -0.60
 
+# Minimo de votos activos para emitir senal. Con menos, el tag lo decidirian uno o dos votos
+# sobre un denominador diminuto: se devuelve S/D en vez de un nivel que no representa nada.
+MIN_VOTOS_SENAL = 3
+
 
 # ---------------------------------------------------------------------------
 # Funciones del modelo
@@ -92,11 +96,13 @@ def build_net_percentiles(fh_cartera: dict) -> tuple:
     return nets[n // 3], nets[(2 * n) // 3]
 
 
-def voto_net_relativo(buy_r: float, sell_r: float, p33: float, p67: float, fh_count=None) -> int:
+def voto_net_relativo(buy_r: float, sell_r: float, p33: float, p67: float, fh_count=None) -> int | None:
     """Voto Net: ranking relativo del flujo neto institucional 13F.
-    Top 33% de cartera → +1 | Medio → 0 | Bottom 33% → -1."""
+    Top 33% de cartera → +1 | Medio → 0 | Bottom 33% → -1.
+    Abstiene (None) si no hay cobertura 13F: un 0 entraria al denominador del promedio
+    como si fuera una lectura neutral medida, y hundiria el score del activo."""
     if not fh_count:
-        return 0
+        return None
     net = (buy_r or 0.0) - (sell_r or 0.0)
     if net >= p67:
         return 1
@@ -145,10 +151,14 @@ def voto_valuacion(categoria_activo: str) -> int | None:
     return None  # X, T, o vacío: abstiene
 
 
-def voto_cobertura(fh_count: int) -> int:
+def voto_cobertura(fh_count: int) -> int | None:
     """Voto Cobertura: número de fondos institucionales con posición.
-    ≥ 20 fondos → +1 | ≥ 5 → 0 | < 5 → -1."""
+    ≥ 20 fondos → +1 | ≥ 5 → 0 | < 5 → -1 | sin dato → None (abstiene).
+    El -1 se conserva con 1-4 fondos: ahi la poca cobertura es un hecho medido. Sin ningun
+    fondo no hay medicion, y votar -1 penaliza al activo por una ausencia de datos."""
     c = fh_count or 0
+    if not c:
+        return None
     if c >= FH_COUNT_POSITIVO:
         return 1
     if c >= FH_COUNT_NEUTRO:
@@ -161,8 +171,8 @@ def senal_consenso(votos_activos: list, suma: int) -> tuple:
     Retorna (etiqueta, suma, n_activos).
     pct = suma / n_activos → tabla de niveles."""
     n = len(votos_activos)
-    if n == 0:
-        return "— S/D", 0, 0
+    if n < MIN_VOTOS_SENAL:
+        return "— S/D", 0, n
     pct = suma / n
     if suma == n:
         etiqueta = "★ UNÁNIME"
@@ -179,11 +189,12 @@ def senal_consenso(votos_activos: list, suma: int) -> tuple:
     return etiqueta, suma, n
 
 
-def voto_flujo(new_entrants: int, full_exits: int, fh_count: int, p33: float, p67: float) -> int:
+def voto_flujo(new_entrants: int, full_exits: int, fh_count: int, p33: float, p67: float) -> int | None:
     """Voto Flujo: entrada/salida neta de fondos relativa a cartera.
-    Top 33% → +1 | Medio → 0 | Bottom 33% → -1. Abstiene (0) si sin cobertura."""
+    Top 33% → +1 | Medio → 0 | Bottom 33% → -1. Abstiene (None) si sin cobertura:
+    mismo motivo que voto_net_relativo — un 0 pesa en el denominador como dato real."""
     if not fh_count:
-        return 0
+        return None
     fn = max(-1.0, min(1.0, ((new_entrants or 0) - (full_exits or 0)) / fh_count))
     if fn >= p67:
         return 1

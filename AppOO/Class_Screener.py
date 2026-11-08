@@ -1717,8 +1717,11 @@ class Screener(tk.Frame):
             "T": "Descubierto 13F  →  abstiene",
         }
         d_val = _CATEG.get(categ, categ)
-        level_cob = "≥20" if fh_count >= 20 else ("≥5" if fh_count >= 5 else "<5")
-        d_cob = f"{fh_count} fondos 13F  ({level_cob})"
+        if fh_count:
+            level_cob = "≥20" if fh_count >= 20 else ("≥5" if fh_count >= 5 else "<5")
+            d_cob = f"{fh_count} fondos 13F  ({level_cob})"
+        else:
+            d_cob = "sin datos 13F  →  abstiene"
 
         if symbol in (analysis or {}):
             patron = analysis[symbol].get("patron", "neutro")
@@ -1775,7 +1778,7 @@ class Screener(tk.Frame):
             (
                 "6. COBERTURA",
                 d_cob,
-                "cantidad de fondos 13F que reportan el activo:  ≥20 → +1   ≥5 → 0   <5 → −1",
+                "fondos 13F que reportan el activo:  ≥20 → +1   ≥5 → 0   <5 → −1   sin dato → abstiene",
                 v_cob,
                 False,
             ),
@@ -2955,7 +2958,8 @@ def refresh_consenso_tags(account):
         suma = sum(activos.values())
         tag, _, _ = senal_consenso(list(activos.values()), suma)
 
-        mkt.update(upd=["consenso_tag", "consenso_suma"], val=[tag, int(suma)], symbol=sym, account=account)
+        _suma_persist = None if tag == "— S/D" else int(suma)
+        mkt.update(upd=["consenso_tag", "consenso_suma"], val=[tag, _suma_persist], symbol=sym, account=account)
         actualizados += 1
 
     return {"actualizados": actualizados, "total": len(cartera)}
