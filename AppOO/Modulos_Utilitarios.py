@@ -465,7 +465,7 @@ def buscar_ticker(positions, ticket) -> float:
 
 
 def convierte_ticket_crypto(s: str) -> str:
-    conversion_yfinance = {"VRLA": "VRLAF", "POL-USD": "MATIC-USD"}
+    conversion_yfinance = {"VRLA": "VRLAF", "POL-USD": "POL28321-USD"}
     ticket = s
     ticket = ticket.replace("USDT", "-USD")
     ticket = ticket.replace(" CRYPTO", "-USD")

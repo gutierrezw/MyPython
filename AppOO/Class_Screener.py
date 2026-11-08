@@ -7,6 +7,7 @@ from Modulos_Utilitarios import (
     mask_numero,
     define_FileCache,
     documentar_estructura,
+    convierte_ticket_crypto,
 )
 from Class_customer import CustomTreeview
 from Class_BrowserBridge import abrir_tradingview
@@ -2854,7 +2855,7 @@ def audit_portfolio(account):
         nombre_db = row.get("shortName") or ""
 
         try:
-            info = yf.Ticker(sym).info
+            info = yf.Ticker(convierte_ticket_crypto(sym)).info
             qt = (info.get("quoteType") or "").upper()
             nombre_yf = (info.get("shortName") or info.get("longName") or "").strip()
             precio_yf = info.get("regularMarketPrice") or info.get("previousClose")
