@@ -897,23 +897,34 @@ class Screener(tk.Frame):
                 return str(v) if v else ""
 
         def _rotacion(row_keys):
-            float_sh = row_keys[ix.index("floatShares")] if "floatShares" in ix else None
-            if not float_sh and "sharesOutstanding" in ix:
-                float_sh = row_keys[ix.index("sharesOutstanding")]
+            # En cripto el volumen de Yahoo viene en USD, no en unidades, asi que el divisor es el
+            # marketCap y no el supply: dividir USD por unidades daba BTC 831 -> "EXTREMA" fijo. El
+            # ratio resultante es exactamente el volume24HrMarketCapPercent del propio info. Los
+            # umbrales tambien son propios: los 17 pares medidos el 2026-11-08 caen entre 0,0111
+            # (BTC) y 0,2441 (FDUSD), o sea los 17 en "BAJA" con el corte 0,3 de las acciones.
+            categ = row_keys[ix.index("categoriaActivo")] if "categoriaActivo" in ix else ""
             vol = row_keys[ix.index("volume")] if "volume" in ix else None
+            if categ == "C":
+                divisor = row_keys[ix.index("marketCap")] if "marketCap" in ix else None
+                cortes = (0.20, 0.10, 0.04)
+            else:
+                divisor = row_keys[ix.index("floatShares")] if "floatShares" in ix else None
+                if not divisor and "sharesOutstanding" in ix:
+                    divisor = row_keys[ix.index("sharesOutstanding")]
+                cortes = (3.0, 1.0, 0.3)
             try:
-                float_sh = float(float_sh)
+                divisor = float(divisor)
                 vol = float(vol)
             except (TypeError, ValueError):
                 return ""
-            if not float_sh or not vol:
+            if not divisor or not vol:
                 return ""
-            ratio = vol / float_sh
-            if ratio >= 3.0:
+            ratio = vol / divisor
+            if ratio >= cortes[0]:
                 return "⚡ EXTREMA"
-            if ratio >= 1.0:
+            if ratio >= cortes[1]:
                 return "↑↑ ALTA"
-            if ratio >= 0.3:
+            if ratio >= cortes[2]:
                 return "↑ MEDIA"
             return "— BAJA"
 

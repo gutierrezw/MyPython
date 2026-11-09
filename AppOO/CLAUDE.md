@@ -378,6 +378,9 @@ Borrado el 9. Inocuo, se registra para no volver a investigarlo.
 | booktrading | `sell` | Cuánto del lote ya se consumió. **`cantidad - sell` es lo vivo solo si `activa = 'Y'`** — toda query que lea la columna filtra por `activa` (corregido 2026-10-30) |
 | market | `consenso_suma` | Suma de los votos activos del Consenso. **NULL = no se emitió Señal** (menos de `MIN_VOTOS_SENAL = 3` votos con dato, tag `— S/D`). Un 0 ahí entraría al modelo Buy vía `load_consenso_features` como una Señal neutral **medida** (semántica 2026-11-07) |
 | market | `encartera` | Si **esa cuenta** tiene posición viva del símbolo. La sube a `'Y'` `dividends_en_market_stock`; la baja a `'N'` `update_inversion`. **NULL = símbolo del universo que nunca estuvo en cartera** — 1.298 de 1.359 filas (semántica 2026-11-08) |
+| market | `sharesOutstanding` / `floatShares` | En Stock son acciones emitidas y float; en cripto (`categoriaActivo='C'`) son el `totalSupply` y el `circulatingSupply` del par. Se **reutiliza** la columna en vez de crear una de supply: es el mismo concepto de unidades existentes (semántica 2026-11-08) |
+| market | `volume` / `averageVolume` | `bigint`, no `float`: son conteos como el supply y `float` es exacto solo hasta 2^24 — **28 filas de `volume` y 25 de `averageVolume` lo pasaban** (peor caso INTC 173.770.300 → ...304). **En cripto el volumen de Yahoo viene en USD, no en unidades** (semántica 2026-11-08) |
+| market | `lastPrice` | En Stock sale de `currentPrice` de Yahoo; en cripto de `regularMarketPrice`, porque **`currentPrice` no existe en el `info` de un par** y leerlo habría escrito 0 (semántica 2026-11-08) |
 
 **`encartera` no se bajaba en el cierre normal de una posición, y el criterio de baja era el valor,
 no las unidades** (2026-11-08). `update_inversion` tiene **dos** caminos de baja y hacían cosas
@@ -465,6 +468,20 @@ por query. Tres la necesitaban y tres no:
 | `load_consenso_cartera` | se deja — queremos los pares visibles en el popup de Señales |
 | `select_candidatos_ia` | se deja — exige `consenso_suma >= n`, que en cripto es NULL |
 | dict de rotación/ownership | se deja — inocuo |
+
+**La Rotación de cripto no puede dividir por el supply: el volumen de Yahoo está en USD.** Es el mismo número
+que `volume24Hr`, y `volume / marketCap` es exactamente el `volume24HrMarketCapPercent` del propio `info`
+(verificado en BTC). Dividir USD por unidades daba BTC **831** → `⚡ EXTREMA` permanente. Por eso `_rotacion`
+tiene rama propia que divide por `marketCap`, **y los umbrales también son propios**: los 17 pares medibles del
+2026-11-08 caen entre **0,0111 (BTC) y 0,2441 (FDUSD)**, o sea los 17 en `— BAJA` con el corte 0,3 de las
+acciones. Los cortes `0,20 / 0,10 / 0,04` reparten 2/3/3/9.
+
+Dos de los 19 pares **no tienen perfil en Yahoo**: `CHIPUSDT` (`quoteType` NONE, 0 de 10 campos) y
+`AIGENSYNUSDT` (404, `Quote not found for symbol: AIGENSYN-USD`). El `.get()` sin default más el salto de
+`None` los deja **NULL, no 0** — una descarga vacía no degrada el dato. **Punto de atención:**
+`audit_portfolio` **borra de `market`** las filas cuyo `quoteType` es falsy o `"NONE"`; hoy corre con la
+cuenta de Stock, así que los pares de `B0000001` quedan fuera de su alcance, pero la exposición es real si
+alguna vez corre con una cuenta de cripto.
 
 `_get_pendientes_query`, `_DIV_CATS` (`Class_Screener.py:1070`) y el gate del gráfico de dividendos
 del popup (`Class_customer.py:5167`) **no se tocaron**: los tres matchean por lista blanca

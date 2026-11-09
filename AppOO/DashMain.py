@@ -1871,6 +1871,31 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 return "C"
             return "X" if quote_type in _ETF_TYPES else "N"
 
+        def campos_perfil_crypto(activo):
+            # El info de Yahoo del par ya esta en memoria (ts_yfinance_symbol): no agrega descargas.
+            # currentPrice no existe en cripto — el precio es regularMarketPrice. El supply se mapea
+            # sobre las columnas de acciones para no crear columnas nuevas.
+            mapa = {
+                "shortName": "shortName",
+                "regularMarketPrice": "lastPrice",
+                "marketCap": "marketCap",
+                "volume": "volume",
+                "averageVolume": "averageVolume",
+                "fiftyTwoWeekHigh": "fiftyTwoWeekHigh",
+                "fiftyTwoWeekLow": "fiftyTwoWeekLow",
+                "totalSupply": "sharesOutstanding",
+                "circulatingSupply": "floatShares",
+                "currency": "currency",
+            }
+            columnas, values = [], []
+            for origen, destino in mapa.items():
+                dato = activo.get(origen)
+                if dato is None:
+                    continue  # una descarga vacia no degrada el dato: la columna queda como estaba
+                columnas.append(destino)
+                values.append(dato)
+            return columnas, values
+
         def update_tabla_market(x_symbol, campo, value):
             try:
                 # La existencia la decide el rowcount del UPDATE, no un SELECT previo: select()
@@ -1952,6 +1977,11 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         values.append(categoria_default(qt))
                         columnas.append("categoria_update")
                         values.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                    if self.vehiculo == "Crypto":
+                        # Solo Crypto: en Stock estas columnas las escribe el pipeline del Screener.
+                        perfil_cols, perfil_vals = campos_perfil_crypto(yf_activo)
+                        columnas.extend(perfil_cols)
+                        values.extend(perfil_vals)
                     update_tabla_market(symbol, columnas, values)
 
             if self.vehiculo == "Stock":
