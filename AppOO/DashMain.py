@@ -1947,7 +1947,11 @@ class DatosVehivulo(TickerInfo, MyOrders):
             categorias_actuales = self.Market.load_symbols(self.account)
             for symbol in activos:
                 ticket = convierte_ticket_crypto(symbol)
-                yf_activo, datos, ind_update = self.ts_yfinance_symbol(symbol=ticket, vehiculo=self.vehiculo)
+                # get_yfinance ya convierte sola en Crypto: nombre Yahoo para yf.Ticker y par original
+                # para las klines de Binance. Pasarle el convertido le manda BNB-USD a Binance (-1121).
+                # Stock si necesita el convertido — VRLA no resuelve en Yahoo, VRLAF si.
+                ts_ticket = symbol if self.vehiculo == "Crypto" else ticket
+                yf_activo, datos, ind_update = self.ts_yfinance_symbol(symbol=ts_ticket, vehiculo=self.vehiculo)
                 qt = (yf_activo.get("quoteType") or "").upper()
                 if qt in _ETF_TYPES or symbol in _ETF_SYMBOLS:
                     continue  # ETF/fondo — no insertar en market
