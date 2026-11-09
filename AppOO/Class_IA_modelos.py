@@ -433,7 +433,9 @@ class ModeloOportunidadesSell:
             for col in ausentes:
                 df[col] = 0.0
             if ausentes:
-                self.logger.debug(f"predecir_modelo(): features ausentes rellenadas con 0.0 -> {ausentes}")
+                self.logger.debug(
+                    f"predecir_modelo({self.modelo_name}): features ausentes rellenadas con 0.0 -> {ausentes}"
+                )
 
             X_nuevo = df[self.modelo.feature_names_in_].copy()
             X_nuevo = X_nuevo.fillna(0)
@@ -896,7 +898,9 @@ class ModeloOportunidadesBuy:
             for col in ausentes:
                 df[col] = 0.0
             if ausentes:
-                self.logger.debug(f"predecir_modelo(): features ausentes rellenadas con 0.0 -> {ausentes}")
+                self.logger.debug(
+                    f"predecir_modelo({self.modelo_name}): features ausentes rellenadas con 0.0 -> {ausentes}"
+                )
 
             X_nuevo = df[self.modelo.feature_names_in_].copy()
             X_nuevo = X_nuevo.fillna(0)
