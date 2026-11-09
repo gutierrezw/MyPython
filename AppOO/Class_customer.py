@@ -4257,9 +4257,13 @@ class WidgetVehiculo(TickerInfo):
         except Exception as e:
             print("[on_treeview_select()]: {}".format(e))
 
-    def _on_symbol_menu(self, symbol, event):
-        """Muestra menú con opciones para el símbolo seleccionado."""
-        menu = tk.Toplevel(self.master)
+    def _on_symbol_menu(self, symbol, event, master=None):
+        """Muestra menú con opciones para el símbolo seleccionado.
+
+        `master` existe para la Lista de Ordenes, que hace grab_set(): un Toplevel que no es
+        descendiente de la ventana modal no recibe el clic. Sin master se usa el panel, como siempre.
+        """
+        menu = tk.Toplevel(master or self.master)
         menu.overrideredirect(True)  # sin borde de ventana
         menu.attributes("-topmost", True)
 
@@ -7573,6 +7577,76 @@ class MyMessageBox(tk.Toplevel):
         self.grab_release()
 
         return ask[0]
+
+    def askvalue(self, title, message, inicial=""):
+        """Pide un valor tipeado. Devuelve el texto tal cual, None si cancela o cierra."""
+        if not self.winfo_exists():
+            return None
+        self._clear_frames()
+        self.deiconify()
+
+        done = tk.BooleanVar(value=False)
+        dato = [None]
+
+        def respuesta(aceptar):
+            dato[0] = entry.get().strip() if aceptar else None
+            done.set(True)
+            self.withdraw()
+
+        imagen0, xlis = BDsystem.select_objeto(codigo=19)
+        imagen = Image.open(io.BytesIO(imagen0))
+        imagen = imagen.resize((48, 48), Image.ADAPTIVE)
+        imagen_tk = ImageTk.PhotoImage(imagen)
+        button = tk.Button(self.left, image=imagen_tk, bg=self.bg, relief=tk.FLAT)
+        button.imagen = imagen_tk
+
+        tk.Label(
+            self.right,
+            text=message,
+            justify="left",
+            wraplength=300,
+            bg=self.bg,
+            fg=self.fg,
+            font=self.font,
+        ).pack(fill=tk.X, padx=10, pady=(10, 2))
+
+        entry = tk.Entry(self.right, width=16, font=self.font, justify="right")
+        entry.insert(0, str(inicial))
+        entry.pack(padx=10, pady=(0, 4))
+        entry.select_range(0, tk.END)
+        entry.bind("<Return>", lambda _e: respuesta(True))
+        entry.bind("<Escape>", lambda _e: respuesta(False))
+
+        cancelar = tk.Button(
+            self.bottom,
+            text="Cancelar",
+            width=8,
+            bg="grey",
+            fg="black",
+            font=self.font,
+            command=lambda: respuesta(False),
+        )
+        aceptar = tk.Button(
+            self.bottom,
+            text="Aceptar",
+            width=8,
+            bg="grey",
+            fg="black",
+            font=self.font,
+            command=lambda: respuesta(True),
+        )
+        cancelar.pack(side=tk.RIGHT, padx=3, pady=6)
+        aceptar.pack(side=tk.RIGHT, padx=3, pady=6)
+        button.pack(padx=10, pady=10)
+
+        self.title(title)
+        self.transient()
+        self.grab_set()
+        entry.focus_set()
+        self.wait_variable(done)
+        self.grab_release()
+
+        return dato[0]
 
     def askchoice(self, title, message, opciones):
         """Elige una de las opciones [(etiqueta, valor)] con la primera marcada. Devuelve el valor, None si cancela"""

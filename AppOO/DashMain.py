@@ -3145,6 +3145,22 @@ class DashMain:
                 return
             _show_claude_popup(tree.set(item, "json_detalle"))
 
+        def on_symbol_menu_ordenes(event):
+            # el mismo menu del panel, no una copia: lo expone WidgetVehiculo y se reusa pasandole
+            # master=rnb -- con el grab_set de esta ventana un Toplevel ajeno no recibe el clic.
+            # window_estrategia() depende solo de self.symbol, asi que se sella antes de abrirlo
+            item = tree.identify_row(event.y)
+            if not item or not tree.parent(item):
+                return
+            symbol = tree.set(item, "symbol").strip()
+            if not symbol:
+                return
+            widget = self.crypto if tree.item(tree.parent(item), "text") == "Crypto" else self.stock
+            if widget is None:
+                return
+            widget.symbol = symbol
+            widget._on_symbol_menu(symbol, event, master=rnb)
+
         def config_treeview_ordenes(tree, heard):
             def sort_children_by_col(col, reverse, btn):
                 try:
@@ -3442,6 +3458,9 @@ class DashMain:
                 if accion == "enviar":
                     envia_orders_stock(vehiculo, fields, values)
 
+                if accion == "modifica":
+                    modificar_orden(vehiculo, fields, values)
+
         # cancela orders en espera para su ejecución
         def eliminar_orden(vehiculo, fields, values):
             try:
@@ -3482,6 +3501,157 @@ class DashMain:
 
             except Exception as e:
                 print("eliminar_orden(): {}".format(e))
+
+        # cambia el precio de una order viva. Stock modifica de verdad -- IB tiene endpoint propio y
+        # la orden conserva su id. Binance no expone modify en spot, asi que Crypto cancela y repone:
+        # la orden nueva nace con otro orderId, por eso en BD es un insert y no un update
+        def modificar_orden(vehiculo, fields, values):
+            def _tif_orden(_account, _symbol, _id_enviar):
+                # IB exige el tif completo en el modify y la fila del treeview no lo trae: se lee de
+                # order_trader, que si lo guarda. Sin dato cae a GTC, que es lo que manda la UI
+                try:
+                    rows, ix = self.RepositorioOportunidades.select_order_trader(
+                        account=_account, vehiculo="Stock", symbol=_symbol
+                    )
+                    for row in rows or []:
+                        r = dict(zip(ix, row))
+                        if str(r.get("clientOrderId") or "") == _id_enviar and r.get("tif"):
+                            return r["tif"]
+                except Exception as e:
+                    print("_tif_orden({}): {}".format(_symbol, e))
+                return "GTC"
+
+            try:
+                symbol = values[fields.index("symbol")]
+                account = values[fields.index("account")]
+                status = str(values[fields.index("status")])
+                tipo = str(values[fields.index("orderType")])
+                side = str(values[fields.index("side")])
+                qty = str_float(values[fields.index("quantity")])
+                conid = values[fields.index("conid")]
+                stop = values[fields.index("stop")]
+                precio = values[fields.index("price")]
+                id_order = str(values[fields.index("id")])
+                id_enviar = str(values[fields.index("id_enviar")])
+
+                if status.lower() in ("filled", "canceled", "cancelled"):
+                    self.messagebox.showinfo("Modificar", f"{symbol}: la orden esta {status} — ya no se modifica")
+                    return
+
+                nuevo = self.messagebox.askvalue(
+                    "Modificar precio",
+                    f"{symbol}   {side} {tipo}   x{qty}\nPrecio actual: {precio}",
+                    inicial=str(precio),
+                )
+                if not nuevo:
+                    return
+                nuevo = str_float(nuevo)
+                if nuevo <= 0:
+                    self.messagebox.showinfo("Modificar", "El precio tiene que ser mayor a cero")
+                    return
+
+                if vehiculo == "Stock":
+                    ib = getattr(self.stock, "IClient", None)
+                    if not ib:
+                        print("modificar_orden: IClient no disponible")
+                        return
+                    orden = {
+                        "conid": int(conid),
+                        "orderType": tipo,
+                        "side": side,
+                        "quantity": qty,
+                        "price": float(DataHub.quantiza_precio("Stock", symbol, nuevo)),
+                        "tif": _tif_orden(account, symbol, id_enviar),
+                    }
+                    if "STP" in tipo.upper() and stop:
+                        orden["auxPrice"] = str_float(stop)
+
+                    response = ib.modify_order(account_id=account, customer_order_id=id_enviar, order=orden)
+                    if not response:
+                        self.messagebox.showinfo("Modificar", f"{symbol}: IB no respondio el modify")
+                        return
+
+                    # IB contesta el modify igual que el place: puede devolver un aviso que hay que
+                    # confirmar antes de que el precio nuevo quede vigente de verdad
+                    resp = response[0] if isinstance(response, list) and response else response
+                    for _ronda in range(5):
+                        if not isinstance(resp, dict) or not resp.get("id"):
+                            break
+                        confirm = ib.orderconfirm(replyid=resp["id"])
+                        if not confirm:
+                            break
+                        temp = json.loads(confirm) if isinstance(confirm, str) else confirm
+                        resp = temp[0] if isinstance(temp, list) and temp else temp
+                        if isinstance(resp, dict) and "order_status" in resp:
+                            break
+
+                    self.RepositorioOportunidades.update_order_trader(
+                        account=account,
+                        values={"price": orden["price"]},
+                        symbol=symbol,
+                        orderid=id_enviar,
+                    )
+                    update_treeview_ordenes()
+
+                if vehiculo == "Crypto":
+                    bc = getattr(self.crypto, "BClient", None)
+                    if not bc:
+                        print("modificar_orden: BClient no disponible")
+                        return
+                    es_stop = "STOP" in tipo.upper()
+                    if es_stop and not stop:
+                        self.messagebox.showinfo("Modificar", f"{symbol}: {tipo} sin stop en la fila — no se repone")
+                        return
+                    if not bc.get_cancel_order(symbol=symbol, orderId=int(id_order)):
+                        self.messagebox.showinfo("Modificar", f"{symbol}: Binance no cancelo — no se repone")
+                        return
+                    self.RepositorioOportunidades.update_order_trader(
+                        account=account, values={"status": "CANCELED"}, symbol=symbol, orderid=id_order
+                    )
+
+                    nueva = bc.get_new_order(
+                        symbol=symbol,
+                        side=side,
+                        type=tipo,
+                        price=DataHub.quantiza_precio("Crypto", symbol, nuevo),
+                        quantity=qty,
+                        timeInForce="GTC",
+                        stopPrice=str_float(stop) if es_stop else None,
+                    )
+                    if not nueva or "orderId" not in nueva:
+                        # la vieja ya esta cancelada: la posicion quedo sin orden y nadie mas lo sabe
+                        DataHub.add_alert(
+                            f"🔴 {symbol}: se cancelo la orden para cambiarle el precio y Binance no acepto "
+                            f"la nueva — la posicion quedo sin orden",
+                            telegram=True,
+                            tipo="orden",
+                        )
+                        update_treeview_ordenes()
+                        return
+
+                    stamp = datetime.fromtimestamp(nueva["transactTime"] / 1000)
+                    self.RepositorioOportunidades.insert_order_trader(
+                        values={
+                            "account": account,
+                            "vehiculo": "Crypto",
+                            "id_order": nueva["orderId"],
+                            "conid": 0,
+                            "orderType": nueva["type"],
+                            "price": nueva["price"],
+                            "side": nueva["side"],
+                            "tif": nueva["timeInForce"],
+                            "status": "Submitted" if nueva["status"] == "NEW" else nueva["status"],
+                            "quantity": nueva["origQty"],
+                            "clientOrderId": nueva["clientOrderId"],
+                            "stampPlace": stamp,
+                            "stampSubmit": stamp,
+                        },
+                        symbol=symbol,
+                    )
+                    update_treeview_ordenes()
+
+            except Exception as e:
+                print("modificar_orden(): {}".format(e))
 
         def _sort_tree_by_symbol(padre):
             children = tree.get_children(padre)
@@ -3737,6 +3907,7 @@ class DashMain:
             tree["displaycolumns"] = _display_cols
             heard["displaycolumns"] = _display_cols
             tree.bind("<Double-Button-1>", on_claude_double_click)
+            tree.bind("<Button-3>", on_symbol_menu_ordenes)
 
             # Configurar el Treeview para usar los scrollbars
             hscroll = ttk.Scrollbar(win2, orient="horizontal", command=sync_scroll)
@@ -3797,7 +3968,6 @@ class DashMain:
             ct4.pack(side=tk.LEFT, padx=5, pady=20)
             ct6.pack(side=tk.LEFT, padx=40, pady=20)
 
-            ct2.config(state="disabled")
 
             heard.config(xscrollcommand=hscroll.set)
             tree.config(xscrollcommand=hscroll.set)
