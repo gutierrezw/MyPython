@@ -1594,6 +1594,15 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     x_positions.append(p)
                 # asignación atómica al final — evita corrupción por race condition con schedule_operativo
                 self.activos = x_activos
+
+                # la cantidad viajaba al panel solo a bordo de un tick de precio: el único escritor de
+                # position["position"] era update_symbol_en_positions, y en Stock lo llama nada más el
+                # on_message del websocket. Sin tick la fila conservaba la cantidad vieja aunque assets
+                # y la BD ya tuvieran la nueva — medido en SMR, 40 contra 71 durante 9 minutos.
+                # useraccount no está en p y el contrato del struct lo exige: se agrega sin mutar la fila
+                for pos in x_positions:
+                    self.update_symbol_en_positions({**pos, "useraccount": self.account})
+
                 return x_positions
             except Exception as e:
                 print("update_inversion_stock(): {}".format(e))
