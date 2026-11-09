@@ -188,7 +188,15 @@ class ClassAgenteIA:
     _LATIDO_SEG = 4 * 3600
 
     def _consenso_info(self, symbol):
-        rows, ix = MarketScreen().select(account=self.account, symbol=symbol)
+        """Tag y suma del Consenso del simbolo. Busca en las dos cuentas, Stock y Crypto.
+
+        Con la cuenta de Stock sola un par cripto no se encuentra nunca: vive en la cuenta de Crypto,
+        asi que la linea de Señal del mensaje de oportunidad —condicional al tag— no salia. Pasar las
+        dos no mezcla nada: el ticker de una accion y el par de Binance no coinciden (ZIL contra
+        ZILUSDT), y la rama de `symbol` de select() filtra por `account IN (...)` sin el defecto de
+        precedencia que arrastra la rama de busqueda por nombre.
+        """
+        rows, ix = MarketScreen().select(account=[self.account, self.account_crypto], symbol=symbol)
         if not rows or not ix:
             return None, None
         try:

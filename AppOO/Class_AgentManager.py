@@ -430,6 +430,14 @@ class AgentManager:
         except Exception as e:
             self._log_crypto.error(f"Agente_ObjetivoCrypto(): {e}")
 
+    @wait_rate(86400, persist=True, desc="Posicionamiento futuros Binance -> crypto_positioning (24h)", nivel=1)
+    def Agente_CryptoPositioning(self):
+        try:
+            result = ServiciosCrypto().sync_positioning_cartera()
+            self._log_crypto.warning(f"CryptoPositioning: {result}")
+        except Exception as e:
+            self._log_crypto.error(f"Agente_CryptoPositioning(): {e}")
+
     @wait_rate(21600)
     def Agente_CryptoBeta(self):
         try:
@@ -1589,6 +1597,7 @@ class AgentManager:
             ("Agente_BinanceApiSync", self.Agente_BinanceApiSync, 3600),
             ("Agente_BinanceTrades", self.Agente_BinanceTrades, 3600),
             ("Agente_ObjetivoCrypto", self.Agente_ObjetivoCrypto, 3600),
+            ("Agente_CryptoPositioning", self.Agente_CryptoPositioning, 3600),
             ("Agente_ManagerPreservation", self.Agente_ManagerPreservation, 1),
         ]
         for name, target, sleep in _threads:

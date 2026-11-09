@@ -3798,6 +3798,71 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         finally:
             conn.close()
 
+    def insert_positioning(self, rows: list) -> int:
+        """Upsert en crypto_positioning. rows = [(symbol, fecha, ls_cuentas, ls_top_pos, taker, oi), ...]
+
+        Binance solo expone los ultimos 31 dias de estas series, asi que el valor de la tabla es acumular:
+        se reescribe el dia por si la corrida anterior lo trajo incompleto, y los dias ya fuera de la ventana
+        del endpoint quedan intactos."""
+        if not rows:
+            return 0
+        conn = self._conectar(tabla="insert.crypto_positioning")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.executemany(
+                "INSERT INTO crypto_positioning "
+                "(symbol, fecha, ls_cuentas, ls_top_pos, taker_ratio, open_interest) "
+                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE ls_cuentas=VALUES(ls_cuentas), ls_top_pos=VALUES(ls_top_pos), "
+                "taker_ratio=VALUES(taker_ratio), open_interest=VALUES(open_interest)",
+                rows,
+            )
+            conn.commit()
+            return cursor.rowcount
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::insert_positioning]: {error}")
+            return 0
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def load_positioning(self, symbols=None, dias: int = 30) -> dict:
+        """Devuelve {symbol: [{fecha, ls_cuentas, ls_top_pos, taker_ratio, open_interest}, ...]} por fecha ASC.
+
+        `dias` cuenta hacia atras desde hoy. Sin `symbols` trae todos los pares de la tabla."""
+        conn = self._conectar(tabla="select.crypto_positioning")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            qry = ("SELECT symbol, fecha, ls_cuentas, ls_top_pos, taker_ratio, open_interest "
+                   "FROM crypto_positioning WHERE fecha >= %s")
+            params = [(datetime.now() - timedelta(days=int(dias))).date()]
+            if symbols:
+                lista = [symbols] if isinstance(symbols, str) else list(symbols)
+                qry += " AND symbol IN ({})".format(", ".join(["%s"] * len(lista)))
+                params.extend(lista)
+            cursor.execute(qry + " ORDER BY symbol, fecha ASC", params)
+            salida = {}
+            for sym, fecha, lsc, lst, tk, oi in cursor.fetchall():
+                salida.setdefault(sym, []).append({
+                    "fecha": fecha,
+                    "ls_cuentas": float(lsc) if lsc is not None else None,
+                    "ls_top_pos": float(lst) if lst is not None else None,
+                    "taker_ratio": float(tk) if tk is not None else None,
+                    "open_interest": float(oi) if oi is not None else None,
+                })
+            return salida
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_positioning]: {error}")
+            return {}
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+
 
 class PlanInversion(BDsystem):  # ------------------------------------------------------------------------------------
     """

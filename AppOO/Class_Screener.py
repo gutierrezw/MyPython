@@ -20,6 +20,8 @@ from AppValuations.consenso_score import (
     voto_cobertura,
     voto_flujo,
     senal_consenso,
+    senal_cripto,
+    UMBRAL_DIVERGENCIA_CRIPTO,
 )
 from Modulos_python import (
     tk,
@@ -816,8 +818,8 @@ class Screener(tk.Frame):
 
             ttk.Button(
                 btn_frame,
-                text="Señal",
-                width=10,
+                text="Señal Stock",
+                width=12,
                 command=self._show_institucionales_cartera,
             ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
 
@@ -2139,13 +2141,13 @@ class Screener(tk.Frame):
             "WM_DELETE_WINDOW",
             lambda: (win.destroy(), setattr(self, "_inst_win", None)),
         )
-        win.title("Señales — En Cartera")
+        win.title("Señales — Stock en Cartera")
         win.configure(bg="black")
         win.geometry(f"1200x530+{650}+{400}")
 
         hdr = tk.Label(
             win,
-            text=f"Señales — Cartera ({len(filas)} activos)",
+            text=f"Señales — Stock en Cartera ({len(filas)} activos)",
             bg="black",
             fg="cyan",
             font=("Arial", 11, "bold"),
@@ -2302,6 +2304,15 @@ class Screener(tk.Frame):
             "TECHO": "◤ TECHO",
             "S/D": "— S/D",
         }
+        # Los mismos colores que la ventana de Stock: la escala de lectura es la misma aunque el voto
+        # no. Las etiquetas las devuelve senal_cripto() ya formateadas -- es la misma cadena que
+        # guarda market.consenso_tag, asi que la ventana y Telegram no pueden divergir.
+        _SENAL_COLOR = (
+            ("↗ TENDENCIA", "cyan"),
+            ("→ NEUTRO", "#888888"),
+            ("↘ ALERTA", "#FFA500"),
+            ("— S/D", "#555555"),
+        )
         _TAG_COLOR = (
             ("PISO", "#00D4FF"),
             ("BAJO", "#00FF88"),
@@ -2343,6 +2354,34 @@ class Screener(tk.Frame):
                 return ""
             return f"{v:+.1%}" if signo else f"{v:.1%}"
 
+        def _divergencia(serie):
+            # El unico insumo de futuros con signos mezclados entre pares: las cuentas grandes contra
+            # la masa. Taker y open interest apuntan igual en 16-18 de los 18 pares (regimen, no
+            # discriminacion por par), asi que no votan -- se informan como regimen en el encabezado.
+            # El umbral y la etiqueta no viven aca: los decide senal_cripto() en consenso_score.
+            if not serie:
+                return None
+            top, glob = serie[-1].get("ls_top_pos"), serie[-1].get("ls_cuentas")
+            if top is None or glob is None:
+                return None
+            return top - glob
+
+        def _regimen(series):
+            # Lo que taker y open interest si dicen: hacia donde va el libro entero. Se cuenta, no se
+            # promedia -- un par con open interest chico no debe pesar igual que BTC en una media.
+            oi_baja, tk_baja, medidos = 0, 0, 0
+            for serie in series.values():
+                oi = [f["open_interest"] for f in serie if f["open_interest"] is not None]
+                tk = [f["taker_ratio"] for f in serie if f["taker_ratio"] is not None]
+                if len(oi) < 8 or len(tk) < 3:
+                    continue
+                medidos += 1
+                if sum(oi[-7:]) / 7 < sum(oi) / len(oi):
+                    oi_baja += 1
+                if tk[-1] < sum(tk[:-1]) / (len(tk) - 1):
+                    tk_baja += 1
+            return medidos, oi_baja, tk_baja
+
         def _rango_52s(last, maximo, minimo):
             # Donde esta el precio dentro del ano: 0 = minimo, 1 = maximo. Es descriptivo, no un
             # voto -- no hay 13F ni analistas que opinen sobre un par.
@@ -2360,6 +2399,10 @@ class Screener(tk.Frame):
             return pos, "TECHO"
 
         cartera = self.ScMarket.load_cartera_inst(self.accounts, categoria="C", orden="marketCap DESC")
+        # Una sola consulta para toda la ventana, no una por par: Binance solo expone 31 dias de estas
+        # series y por eso las persiste Agente_CryptoPositioning -- aca se lee de crypto_positioning.
+        series = self.ScMarket.load_positioning([r["symbol"] for r in cartera])
+        medidos, oi_baja, tk_baja = _regimen(series)
 
         filas = []
         for row in cartera:
@@ -2372,12 +2415,16 @@ class Screener(tk.Frame):
             dist = (last / maximo - 1) if last and maximo else None
             pct_circ = (circ / total) if circ and total else None
             rango = f"{_TAG_DISPLAY[tag]:<9}  {pos:.0%}" if pos is not None else _TAG_DISPLAY[tag]
+            div = _divergencia(series.get(row["symbol"]))
+            senal, voto, _n = senal_cripto(div)
             filas.append(
                 {
                     "values": (
                         row["symbol"],
                         (row.get("shortName") or "")[:30],
                         _precio(last),
+                        senal,
+                        f"{div:+.2f}" if div is not None else "",
                         _mag(row.get("marketCap")),
                         rotacion_tag(
                             "C",
@@ -2396,14 +2443,20 @@ class Screener(tk.Frame):
                         _pct(dist, signo=True),
                         rango,
                     ),
-                    "tag": tag,
+                    "tag": senal,
+                    "rango_tag": tag,
+                    "voto": voto,
                 }
             )
 
-        filas.sort(key=lambda r: (_TAG_ORDER.get(r["tag"], 99), r["values"][0]))
-        contadores = {}
+        # La fila se colorea por Senal, igual que en Stock -- ttk.Treeview colorea por fila y no por
+        # celda, asi que el color va al dato que manda. El rango de 52 semanas queda como texto y
+        # ordena dentro de cada grupo de Senal.
+        filas.sort(key=lambda r: (-r["voto"], _TAG_ORDER.get(r["rango_tag"], 99), r["values"][0]))
+        contadores, cont_senal = {}, {}
         for f in filas:
-            contadores[f["tag"]] = contadores.get(f["tag"], 0) + 1
+            contadores[f["rango_tag"]] = contadores.get(f["rango_tag"], 0) + 1
+            cont_senal[f["tag"]] = cont_senal.get(f["tag"], 0) + 1
 
         win = tk.Toplevel(self)
         self._cripto_win = win
@@ -2413,7 +2466,7 @@ class Screener(tk.Frame):
         )
         win.title("Señales — Cripto")
         win.configure(bg="black")
-        win.geometry(f"1140x480+{650}+{400}")
+        win.geometry(f"1140x520+{650}+{400}")
 
         tk.Label(
             win,
@@ -2421,13 +2474,22 @@ class Screener(tk.Frame):
             bg="black",
             fg="cyan",
             font=("Arial", 11, "bold"),
-        ).pack(pady=(8, 4))
+        ).pack(pady=(8, 2))
+
+        if medidos:
+            regimen = (f"régimen del libro ({medidos} pares medidos):   open interest cayendo en "
+                       f"{oi_baja}   ·   taker bajo su media en {tk_baja}")
+        else:
+            regimen = "régimen del libro: sin serie persistida — corre Agente_CryptoPositioning"
+        tk.Label(win, text=regimen, bg="black", fg="#999999", font=("Arial", 9)).pack(pady=(0, 4))
 
         _FIXED_COLS = ("Symbol", "Nombre", "Last")
         _COL_DEFS = (
             ("Symbol", 95, "w"),
             ("Nombre", 165, "w"),
             ("Last", 95, "e"),
+            ("Señal", 100, "center"),
+            ("Diverg", 65, "e"),
             ("Market Cap", 90, "e"),
             ("Rotación", 85, "center"),
             ("Vol 24h USD", 95, "e"),
@@ -2442,6 +2504,40 @@ class Screener(tk.Frame):
         )
         all_cols = tuple(d[0] for d in _COL_DEFS)
         col_align = {d[0]: {"anchor": d[2], "width": d[1]} for d in _COL_DEFS}
+
+        # El pie se empaqueta ANTES del treeview y con side=BOTTOM: pack reparte en orden de
+        # llamada, asi que el ultimo widget es el que se recorta si falta alto. Con el pie primero
+        # los contadores y el Cancel tienen su franja asegurada, no dependen de la geometria.
+        resumen_frame = tk.Frame(win, bg="#111111")
+        resumen_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(2, 6))
+        for key, color in _TAG_COLOR:
+            tk.Label(
+                resumen_frame,
+                text=f"{_TAG_DISPLAY[key]}: {contadores.get(key, 0)}",
+                bg="#111111",
+                fg=color,
+                font=("Arial", 9),
+            ).pack(side=tk.LEFT, padx=10, pady=2)
+
+        ttk.Button(
+            resumen_frame,
+            text="Cancel",
+            width=10,
+            command=lambda: (win.destroy(), setattr(self, "_cripto_win", None)),
+        ).pack(side=tk.RIGHT, padx=8, pady=2)
+
+        senal_frame = tk.Frame(win, bg="#111111")
+        senal_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(2, 0))
+        tk.Label(senal_frame, text=f"Señal (umbral {UMBRAL_DIVERGENCIA_CRIPTO:.2f}):", bg="#111111",
+                 fg="#777777", font=("Arial", 9)).pack(side=tk.LEFT, padx=(10, 4), pady=2)
+        for key, color in _SENAL_COLOR:
+            tk.Label(
+                senal_frame,
+                text=f"{key}: {cont_senal.get(key, 0)}",
+                bg="#111111",
+                fg=color,
+                font=("Arial", 9),
+            ).pack(side=tk.LEFT, padx=10, pady=2)
 
         frame = tk.Frame(win, bg="black")
         frame.pack(fill=tk.X, padx=8, pady=4)
@@ -2458,7 +2554,7 @@ class Screener(tk.Frame):
         ct.heard.config(bg="black")
         ct.right.config(bg="black")
 
-        for tag, color in _TAG_COLOR:
+        for tag, color in _SENAL_COLOR:
             ct.tree_fixed.tag_configure(tag, foreground=color)
             ct.tree_scroll.tag_configure(tag, foreground=color)
 
@@ -2469,23 +2565,6 @@ class Screener(tk.Frame):
 
         bind_tv_web_menu(ct.tree_fixed, win, colors=self.colors)
 
-        resumen_frame = tk.Frame(win, bg="#111111")
-        resumen_frame.pack(fill=tk.X, padx=8, pady=(2, 6))
-        for key, color in _TAG_COLOR:
-            tk.Label(
-                resumen_frame,
-                text=f"{_TAG_DISPLAY[key]}: {contadores.get(key, 0)}",
-                bg="#111111",
-                fg=color,
-                font=("Arial", 9),
-            ).pack(side=tk.LEFT, padx=10, pady=2)
-
-        ttk.Button(
-            resumen_frame,
-            text="Cancel",
-            width=10,
-            command=lambda: (win.destroy(), setattr(self, "_cripto_win", None)),
-        ).pack(side=tk.RIGHT, padx=8, pady=2)
 
 
 def sync_market(account):

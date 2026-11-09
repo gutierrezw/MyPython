@@ -61,6 +61,17 @@ BINANCE_ENV = {
     },
 }
 
+# Posicionamiento de futuros perpetuos: otro host, publico y sin firma. No depende del ambiente --
+# fapi no tiene testnet equivalente con estas series y el dato es publico de solo lectura, asi que
+# siempre va contra produccion.
+FAPI_URL = "https://fapi.binance.com"
+FAPI_SERIES = {
+    "ls_cuentas": ("/futures/data/globalLongShortAccountRatio", "longShortRatio"),
+    "ls_top_pos": ("/futures/data/topLongShortPositionRatio", "longShortRatio"),
+    "taker_ratio": ("/futures/data/takerlongshortRatio", "buySellRatio"),
+    "open_interest": ("/futures/data/openInterestHist", "sumOpenInterest"),
+}
+
 
 # =============================================================================
 # RELOJ CORREGIDO CONTRA BINANCE
@@ -742,6 +753,41 @@ class BinanceClient:
                     page += 1
                 desde = hasta + 1
         return ordenes
+
+    def fetch_positioning(self, symbol: str, dias: int = 30) -> dict:
+        """Series diarias de posicionamiento de futuros perpetuos para un par.
+
+        Devuelve {fecha (date): {ls_cuentas, ls_top_pos, taker_ratio, open_interest}} con las claves que
+        el endpoint devolvio; una serie que falla se omite y las demas se conservan. Un par sin contrato
+        de futuros devuelve {} (Binance responde 400 -- caso FDUSDUSDT).
+
+        No lleva firma ni API key: son endpoints publicos. Binance solo expone los ultimos 31 dias, de
+        ahi que el dato se persista en crypto_positioning para construir la serie larga.
+        """
+        par = symbol if symbol.endswith("USDT") else f"{symbol}USDT"
+        dias = max(1, min(int(dias), 30))
+        series = {}
+        for campo, (ruta, clave) in FAPI_SERIES.items():
+            try:
+                r = requests.get(f"{FAPI_URL}{ruta}", params={"symbol": par, "period": "1d", "limit": dias},
+                                 headers={"User-Agent": "AppOO/1.0"}, timeout=20)
+                if r.status_code == 400:
+                    return {}
+                r.raise_for_status()
+                series[campo] = r.json() or []
+            except Exception as e:
+                self.logger.error(f"fetch_positioning({par}, {campo}): {e}")
+
+        salida = {}
+        for campo, filas in series.items():
+            for fila in filas:
+                try:
+                    fecha = datetime.fromtimestamp(int(fila["timestamp"]) / 1000).date()
+                    valor = float(fila[FAPI_SERIES[campo][1]])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                salida.setdefault(fecha, {})[campo] = valor
+        return salida
 
     def sync_trades(self, account: str, symbols: list, desde=None) -> dict:
         """Descarga trades de Binance e inserta los nuevos en booktrading.

@@ -9,8 +9,9 @@ import json
 import logging
 import time
 
+from AppValuations.consenso_score import senal_cripto
 from Class_DataFrame import get_yfinance
-from Modulos_Mysql import PlanInversion
+from Modulos_Mysql import MarketScreen, PlanInversion
 from Modulos_python import timedelta
 
 
@@ -350,6 +351,69 @@ class ServiciosCrypto:
             resultado["actualizados"] += 1
 
         return resultado
+
+    def sync_positioning_cartera(self) -> dict:
+        """Persiste en crypto_positioning las series diarias de posicionamiento de futuros de la cartera.
+
+        Binance solo expone los ultimos 31 dias de long/short, taker y open interest, asi que la serie
+        larga no se puede consultar: hay que guardarla. La primera corrida trae los 30 dias que el
+        endpoint ya publica y las siguientes reescriben esa ventana, de modo que el historico crece un
+        dia por dia sin backfill aparte.
+
+        31 dias no alcanzan para entrenar una feature del modelo —eso sigue siendo cierto y es lo que
+        cerro la etapa 2 del plan— pero si alcanzan para votar hoy: el eje de divergencia compara el
+        posicionamiento de las cuentas grandes contra el de la masa en el dia, no contra la historia.
+
+        Un par sin contrato de futuros devuelve {} y se cuenta aparte (caso FDUSDUSDT).
+        """
+        account, symbols = self._pares_activos()
+        if not symbols:
+            return {"pares": 0, "filas": 0, "sin_futuros": [], "detalle": f"sin pares activos para {account}"}
+
+        resultado = {"pares": len(symbols), "filas": 0, "sin_futuros": []}
+        filas, divergencias = [], {}
+        for symbol in symbols:
+            series = self._client.fetch_positioning(symbol)
+            if not series:
+                resultado["sin_futuros"].append(symbol)
+                divergencias[symbol] = None
+                continue
+            for fecha, valores in series.items():
+                filas.append((symbol, fecha, valores.get("ls_cuentas"), valores.get("ls_top_pos"),
+                              valores.get("taker_ratio"), valores.get("open_interest")))
+            ultimo = series[max(series)]
+            top, glob = ultimo.get("ls_top_pos"), ultimo.get("ls_cuentas")
+            divergencias[symbol] = None if top is None or glob is None else top - glob
+
+        if filas:
+            resultado["filas"] = MarketScreen().insert_positioning(filas)
+        resultado.update(self._persiste_senal(account, divergencias))
+        return resultado
+
+    def _persiste_senal(self, account, divergencias):
+        """Escribe consenso_tag / consenso_suma de los pares en market. Devuelve el conteo por tag.
+
+        Va junto a la descarga y no en un metodo aparte a proposito: el tag describe la divergencia
+        del dia que se acaba de traer. Separarlos abre la ventana a que market quede sellado con una
+        serie vieja si la segunda corrida falla.
+
+        Persistir y no calcular en la ventana es lo que hace que la Senal exista fuera del Screener:
+        la leen el mensaje de oportunidad de Telegram, los gates via _consenso_clave y el Consenso.
+
+        Un par sin divergencia medida se escribe NULL, no 0 -- la semantica de consenso_suma es que
+        NULL significa "no se emitio Senal" y un 0 es un NEUTRO medido.
+        """
+        market, conteo = MarketScreen(), {}
+        for symbol, div in divergencias.items():
+            tag, suma, n = senal_cripto(div)
+            ok = market.update(upd=["consenso_tag", "consenso_suma"],
+                               val=[tag if n else None, suma if n else None],
+                               symbol=symbol, account=account)
+            if ok is None:
+                self._logger.error(f"_persiste_senal({symbol}): fallo la BD, no se escribio el tag")
+                continue
+            conteo[tag] = conteo.get(tag, 0) + 1
+        return {"senales": conteo}
 
     def _pares_activos(self):
         """Devuelve (cuenta de la sesion, pares USDT activos de la cartera Crypto)."""

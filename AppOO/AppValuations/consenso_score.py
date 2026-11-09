@@ -75,6 +75,13 @@ NIVEL_ALERTA = -0.60  # pct > -0.60
 # sobre un denominador diminuto: se devuelve S/D en vez de un nivel que no representa nada.
 MIN_VOTOS_SENAL = 3
 
+# Umbral del unico eje medible hoy en cripto: |ls_top_pos - ls_cuentas| de los futuros perpetuos.
+# No sale de un salto natural en los datos -- medido el 2026-11-09 sobre 540 observaciones (18 pares
+# x 30 dias) la |divergencia| es continua: p10 0,135 / p25 0,313 / p50 0,702 / p75 1,294 / p90 1,993.
+# Los cortes 0,40, 0,50 y 0,60 dan los mismos 12 votantes de 18, asi que 0,50 esta en el medio de una
+# banda insensible: se elige el redondo y no un decimal con falsa precision.
+UMBRAL_DIVERGENCIA_CRIPTO = 0.50
+
 
 # ---------------------------------------------------------------------------
 # Funciones del modelo
@@ -187,6 +194,33 @@ def senal_consenso(votos_activos: list, suma: int) -> tuple:
     else:
         etiqueta = "▼ SALIDA"
     return etiqueta, suma, n
+
+
+def senal_cripto(divergencia) -> tuple:
+    """Senal de un par cripto. Mismo contrato que senal_consenso: (etiqueta, suma, n_activos).
+
+    Es funcion aparte y no un voto mas de senal_consenso porque los 8 votos del Consenso se abstienen
+    en un par: Net/Opt/Flujo/Cob necesitan los fh_* del 13F, Ana necesita analyst_rec, Val ve 'C' y se
+    abstiene, Mod lee los CSV del modelo de Stock y Sent el sentimiento de Stock. Con MIN_VOTOS_SENAL
+    el resultado seria siempre "— S/D".
+
+    Tampoco reusa la tabla de niveles: con un solo voto pct = suma/1 da 1 y todo positivo saldria
+    UNANIME. Las etiquetas si son las mismas cadenas formateadas que senal_consenso -- es lo que
+    guarda market.consenso_tag y lo que leen los gates via _consenso_clave.
+
+    Con un solo eje medido solo existen tres estados, asi que UNANIME, CONSENSO y SALIDA quedan sin
+    emitir a proposito: llenarlos hoy inventaria precision que la medicion no tiene.
+
+    `divergencia` None (par sin contrato de futuros, o sin serie persistida) devuelve S/D con n=0,
+    que es lo que distingue "no medido" de "medido y neutral".
+    """
+    if divergencia is None:
+        return "— S/D", 0, 0
+    if divergencia >= UMBRAL_DIVERGENCIA_CRIPTO:
+        return "\u2197 TENDENCIA", 1, 1
+    if divergencia <= -UMBRAL_DIVERGENCIA_CRIPTO:
+        return "\u2198 ALERTA", -1, 1
+    return "\u2192 NEUTRO", 0, 1
 
 
 def voto_flujo(new_entrants: int, full_exits: int, fh_count: int, p33: float, p67: float) -> int | None:
