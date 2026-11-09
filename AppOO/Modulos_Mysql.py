@@ -2278,7 +2278,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 """
                 SELECT symbol FROM market
                 WHERE account = %s
-                  AND categoriaActivo NOT IN ('I','S','X')
+                  AND categoriaActivo NOT IN ('I','S','X','C')
                   AND (
                     country       IS NULL OR country       = ''  OR
                     sector        IS NULL OR sector        = ''  OR
@@ -2314,13 +2314,13 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
 
     def select_top_marketcap(self, account, top_n=200) -> list:
         """Retorna lista de symbols ordenados por marketCap DESC, limitados a top_n.
-        Excluye categoriaActivo I/S/X y símbolos sin marketCap."""
+        Excluye categoriaActivo I/S/X/C y símbolos sin marketCap."""
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
         try:
             cursor.execute(
                 "SELECT symbol FROM market WHERE account = %s AND marketCap IS NOT NULL "
-                "AND categoriaActivo NOT IN ('I', 'S', 'X') ORDER BY marketCap DESC LIMIT %s",
+                "AND categoriaActivo NOT IN ('I', 'S', 'X', 'C') ORDER BY marketCap DESC LIMIT %s",
                 (account, top_n),
             )
             return [row[0] for row in cursor.fetchall()]
@@ -2345,7 +2345,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 SELECT symbol FROM market
                 WHERE account = %s
                   AND (encartera IS NULL OR encartera != 'Y')
-                  AND (categoriaActivo IS NULL OR categoriaActivo NOT IN ('X'))
+                  AND (categoriaActivo IS NULL OR categoriaActivo NOT IN ('X', 'C'))
                 ORDER BY
                   CASE WHEN categoria_update IS NULL THEN 0 ELSE 1 END,
                   categoria_update ASC

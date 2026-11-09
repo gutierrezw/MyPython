@@ -450,12 +450,11 @@ class DataHub:
     now = datetime.now()
     wait_3m = now + timedelta(minutes=3)
     last_process = {
-        "Stock": {"diaria_book_performance": None, "wait": wait_3m},
-        "Crypto": {"diaria_book_performance": None, "wait": wait_3m},
-        "BBVA.ARS": {"diaria_book_performance": None, "wait": wait_3m},
-        "BotCrypto": {"diaria_book_performance": None, "wait": wait_3m},
+        "Stock": {"diaria_book_performance": None, "wait": wait_3m, "dividends_market": now},
+        "Crypto": {"diaria_book_performance": None, "wait": wait_3m, "dividends_market": now},
+        "BBVA.ARS": {"diaria_book_performance": None, "wait": wait_3m, "dividends_market": now},
+        "BotCrypto": {"diaria_book_performance": None, "wait": wait_3m, "dividends_market": now},
         "graph_performace_portafolio": False,
-        "dividends_en_market_stock": now,
     }
     ultimoTraderCrypto = None
 
@@ -3410,13 +3409,14 @@ class TickerInfo(MyOrders):
             # obtiene lista de activos
             activos = self.list_activos_vehiculo()
 
-            # update de dividends en tabla market aplica solo para Stock
-            wait = DataHub.last_process["dividends_en_market_stock"]
+            # update de dividends en tabla market — aplica a Stock y Crypto. El turno es por
+            # vehiculo: con una clave global los dos se robaban los 5 minutos entre si.
+            wait = DataHub.last_process[self.vehiculo]["dividends_market"]
             if wait < datetime.now():
 
                 # Versión con yfinance (para comparar con IB)
                 self.dividends_en_market_stock(activos)
-                DataHub.last_process["dividends_en_market_stock"] = datetime.now() + timedelta(minutes=5)
+                DataHub.last_process[self.vehiculo]["dividends_market"] = datetime.now() + timedelta(minutes=5)
 
             # contabiliza ejecución del schedule
             task = f"schedule_operativo({self.vehiculo})"

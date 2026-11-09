@@ -1863,6 +1863,14 @@ class DatosVehivulo(TickerInfo, MyOrders):
             return [], 0, 0.0
 
     def dividends_en_market_stock(self, activos):
+        def categoria_default(quote_type):
+            # En Crypto la categoria es el tipo de activo, no la valuacion por dividendos. La columna
+            # es NOT NULL y el insert de market escribe 'N' por default, que es justo la categoria que
+            # toma GainsCapture, asi que el par necesita marca propia: 'C' sigue el criterio de 'X'.
+            if self.vehiculo == "Crypto":
+                return "C"
+            return "X" if quote_type in _ETF_TYPES else "N"
+
         def update_tabla_market(x_symbol, campo, value):
             try:
                 # La existencia la decide el rowcount del UPDATE, no un SELECT previo: select()
@@ -1891,7 +1899,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # ('I'/'S') al universo de GainsCapture, que solo debe tomar 'N'.
                     qt = (activo.get("quoteType") or "").upper()
                     if not categorias_actuales.get(x_symbol):
-                        campos.update({"categoriaActivo": "X" if qt in _ETF_TYPES else "N"})
+                        campos.update({"categoriaActivo": categoria_default(qt)})
                         campos.update({"categoria_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
                 campos.update({"trailingAnnualDividendRate": activo.get("trailingAnnualDividendRate", 0)})
                 campos.update({"dividendYield": activo.get("dividendYield", 0)})
@@ -1906,7 +1914,10 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 self.logger.error("construct_info_dividends({}): {}".format(x_symbol, error), exc_info=True)
 
         try:
-            if self.vehiculo != "Stock":
+            # Crypto entra para que sus 12 pares tengan fila en market: el Screener y el pipeline de
+            # Senal leen de ahi. Las klines de Binance no traen columna Dividends, asi que el par
+            # siempre cae en la rama sin dividendos. FCI y BotCrypto siguen afuera.
+            if self.vehiculo not in ("Stock", "Crypto"):
                 return
             categorias_actuales = self.Market.load_symbols(self.account)
             for symbol in activos:
@@ -1938,13 +1949,15 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     columnas, values = ["encartera", "account"], ["Y", self.account]
                     if not categorias_actuales.get(symbol):
                         columnas.append("categoriaActivo")
-                        values.append("X" if qt in _ETF_TYPES else "N")
+                        values.append(categoria_default(qt))
                         columnas.append("categoria_update")
                         values.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                     update_tabla_market(symbol, columnas, values)
 
-            filas = self.Market.sync_market_to_inversion(self.account)
-            self.logger.warning("dividends_en_market_stock(): sync market -> inversion, {} filas".format(filas))
+            if self.vehiculo == "Stock":
+                # el SQL filtra i.tipoinv = 'Stock': en Crypto devolveria 0 filas y un log cada 5 min
+                filas = self.Market.sync_market_to_inversion(self.account)
+                self.logger.warning("dividends_en_market_stock(): sync market -> inversion, {} filas".format(filas))
         except Exception as e:
             self.logger.error("dividends_en_market_stock(): {}".format(e))
 

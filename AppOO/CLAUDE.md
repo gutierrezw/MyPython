@@ -358,6 +358,7 @@ Borrado el 9. Inocuo, se registra para no volver a investigarlo.
 | market | `inst_update` | Última corrida de `sync_13f_scores` que escribió la fila. **Columna muerta hasta el 2026-11-07** — existía en la BD y ningún código la tocaba. Solo se sella cuando hay dato real; los `skipped` quedan en NULL |
 | market | `inst_ownership_pct` | % del float en manos institucionales, **de Yahoo** (`heldPercentInstitutions`). Dueño único: `sync_institutional`. Puede pasar de 1 por desfase float/holdings — la UI lo acota a 100% |
 | market | `inst_score` | Score institucional compuesto. Dueño único: `sync_13f_scores`. **No tiene techo** — el término `log(fh_count)` solo ya vale 1,68 con 4.482 fondos |
+| market | `categoriaActivo` | Mezcla dos cosas en una columna: **cómo se valúa** (`I`/`S`/`N`, por dividendos) y **qué es el activo** (`X` ETF/fondo, `C` par cripto). `char(4) NOT NULL` — **NULL es imposible**, y el `insert` escribe `'N'` cuando el llamador la omite (`C` creada 2026-11-08) |
 | market | `categoria_update` | Última vez que se recalculó `categoriaActivo` (creada 2026-08-25) |
 | fund_filings | `processed` | `0` en cola, `1` cargado en `fund_holdings`, **`2` no cargable — no reintentar**: el XML no está en disco o el fondo no está registrado. Sin el 2 el filing se recorre en cada corrida sin avanzar nunca, porque `sync_fund_filings` solo reintenta la accession más reciente de cada fondo. Medido 2026-11-06: **4.152 filings atascados** así (creada la semántica 2026-11-07) |
 | order_trader | `sync_broker` | Si podemos creerle a la fila — **independiente de `status`** (creada 2026-08-29) |
@@ -444,6 +445,30 @@ real; si no lo hay se conserva la vigente y solo se asigna `'N'` a símbolos que
 `trailing_annual == 0` sí escribe `'N'`: es un hallazgo, no un fallo de descarga.
 La fecha, en cambio, se sella **siempre** — un símbolo que falla debe irse al final de la cola o los
 fallos repetidos bloquean la rotación.
+
+**`categoriaActivo = 'C'` — un par cripto necesita marca propia porque el default es la peor casilla**
+(2026-11-08). La etapa 4 de [[plan-market-crypto]] le da fila en `market` a los 12 pares de cartera, y
+la columna es `char(4) NOT NULL`: no hay "sin categoría". Lo que había que evitar es el default —
+`MarketScreen.insert` escribe `'N'` cuando la categoría no viene en `upd` (`Modulos_Mysql.py:2068`), y
+`'N'` es justo la categoría que consume GainsCapture, así que el par nacía en la peor casilla posible.
+`'C'` sigue el criterio **ya vigente** de `'X'` para ETF: la columna mezcla tipo de activo con
+valuación desde antes, no es un criterio nuevo.
+
+**Los filtros son listas negras, así que `'C'` no excluye nada por sí sola** — hay que agregarla query
+por query. Tres la necesitaban y tres no:
+
+| Query | Decisión |
+|---|---|
+| `select_screener_ex_cartera` | **se agregó** — alimenta `Agente_DividendStatusScreener`, que le calcularía una categoría de dividendos al par y **pisaría la `'C'`** |
+| `load_symbols_needing_fundamentals` | **se agregó** — cripto no tiene `country`/`sector`/`industry` en Yahoo, así que se seleccionaría en cada corrida y nunca completaría |
+| `select_top_marketcap` | **se agregó** — competiría con las acciones en el mismo ranking de marketCap |
+| `load_consenso_cartera` | se deja — queremos los pares visibles en el popup de Señales |
+| `select_candidatos_ia` | se deja — exige `consenso_suma >= n`, que en cripto es NULL |
+| dict de rotación/ownership | se deja — inocuo |
+
+`_get_pendientes_query`, `_DIV_CATS` (`Class_Screener.py:1070`) y el gate del gráfico de dividendos
+del popup (`Class_customer.py:5167`) **no se tocaron**: los tres matchean por lista blanca
+(`'X'` o `I`/`S`/`N`), así que `'C'` queda afuera sola — y eso es lo correcto en los tres casos.
 
 **`trazaplan.costobase` no se usa — el costo base del paso es `tinversion`.** `insert_trazaplan()`
 la escribe literalmente en `0` y ningún camino la actualiza después; los valores que traen las filas
