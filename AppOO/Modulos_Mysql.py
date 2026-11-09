@@ -1951,7 +1951,8 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         return conn
 
     def select(self, account=None, tipo=None, symbol=None, country=None, sector=None, name=None):
-        """@param account: id de cuenta inversionista
+        """@param account: id de cuenta inversionista, o lista de ids cuando la pantalla muestra
+                          el universo de varias cuentas a la vez (Screener: Stock + Crypto)
         @param tipo: tipo de inversion: Dividends y crecimiento
         @param symbol: activo a consultar
         @param country: pais a consultar
@@ -1961,38 +1962,40 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
         qry, sql, ix = " ", [], []
+        accs = account if isinstance(account, (list, tuple, set)) else [account]
+        acc_in = ",".join("'{}'".format(a) for a in accs)
         try:
 
             if not is_none(symbol) and is_none(name):
-                qry = """SELECT * FROM market WHERE account= '%s' AND symbol = '%s';"""
-                cursor.execute(qry % (account, symbol))
+                qry = """SELECT * FROM market WHERE account IN (%s) AND symbol = '%s';"""
+                cursor.execute(qry % (acc_in, symbol))
                 sql = cursor.fetchall()
 
             if not is_none(symbol) and not is_none(name):
 
-                qry = """SELECT * FROM market WHERE account= '%s' AND shortname LIKE '%s' OR symbol = '%s';"""
+                qry = """SELECT * FROM market WHERE account IN (%s) AND shortname LIKE '%s' OR symbol = '%s';"""
                 key = name + "%"
-                cursor.execute(qry % (account, key.upper(), symbol.upper()))
+                cursor.execute(qry % (acc_in, key.upper(), symbol.upper()))
                 sql = cursor.fetchall()
 
             if is_none(symbol) and is_none(name) and is_none(country) and is_none(sector):
-                qry = """SELECT  * FROM market WHERE account= '%s' AND tipo = '%s';"""
-                cursor.execute(qry % (account, tipo))
+                qry = """SELECT  * FROM market WHERE account IN (%s) AND tipo = '%s';"""
+                cursor.execute(qry % (acc_in, tipo))
                 sql = cursor.fetchall()
 
             if is_none(symbol) and is_none(name) and not is_none(country) and is_none(sector):
-                qry = """SELECT  * FROM market WHERE account= '%s' AND country = '%s';"""
-                cursor.execute(qry % (account, country))
+                qry = """SELECT  * FROM market WHERE account IN (%s) AND country = '%s';"""
+                cursor.execute(qry % (acc_in, country))
                 sql = cursor.fetchall()
 
             if is_none(symbol) and is_none(name) and is_none(country) and not is_none(sector):
-                qry = """SELECT  * FROM market WHERE account= '%s' AND sector = '%s';"""
-                cursor.execute(qry % (account, sector))
+                qry = """SELECT  * FROM market WHERE account IN (%s) AND sector = '%s';"""
+                cursor.execute(qry % (acc_in, sector))
                 sql = cursor.fetchall()
 
             if is_none(symbol) and is_none(name) and not is_none(country) and not is_none(sector):
-                qry = """SELECT  * FROM market WHERE account= '%s' AND country = '%s' AND sector = '%s';"""
-                cursor.execute(qry % (account, country, sector))
+                qry = """SELECT  * FROM market WHERE account IN (%s) AND country = '%s' AND sector = '%s';"""
+                cursor.execute(qry % (acc_in, country, sector))
                 sql = cursor.fetchall()
 
             ix = [columna[0] for columna in cursor.description]
@@ -2218,10 +2221,17 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         finally:
             conn.close()
 
-    def load_cartera_inst(self, account) -> list:
-        """Retorna lista de dicts con campos institucionales para activos en cartera (encartera='Y')."""
+    def load_cartera_inst(self, account, categoria=None, orden=None) -> list:
+        """Retorna lista de dicts con campos institucionales para activos en cartera (encartera='Y').
+        @param account: id de cuenta, o lista de ids cuando el llamador abarca varias cuentas
+        @param categoria: categoriaActivo exacta a traer; sin ella se excluyen los ETF ('X')
+        @param orden: columna de orden; por defecto inst_score DESC, que en cripto es NULL
+        """
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
+        accs = account if isinstance(account, (list, tuple, set)) else [account]
+        acc_in = ",".join("'{}'".format(a) for a in accs)
+        filtro = "categoriaActivo = '{}'".format(categoria) if categoria else "categoriaActivo != 'X'"
         try:
             cursor.execute(
                 "SELECT symbol, shortName, lastPrice, inst_ownership_pct, inst_score, "
@@ -2229,10 +2239,10 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 "fh_call_shares, fh_put_shares, new_entrants, full_exits, "
                 "delta_call_shares, delta_put_shares, "
                 "analyst_rec, analyst_mean, analyst_count, categoriaActivo, "
-                "floatShares, sharesOutstanding, volume, insider_ownership_pct, website "
-                "FROM market WHERE account = %s AND encartera = 'Y' AND categoriaActivo != 'X' "
-                "ORDER BY inst_score DESC",
-                (account,),
+                "floatShares, sharesOutstanding, volume, insider_ownership_pct, website, "
+                "marketCap, averageVolume, fiftyTwoWeekHigh, fiftyTwoWeekLow "
+                "FROM market WHERE account IN ({}) AND encartera = 'Y' AND {} "
+                "ORDER BY {}".format(acc_in, filtro, orden or "inst_score DESC")
             )
             cols = [c[0] for c in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]

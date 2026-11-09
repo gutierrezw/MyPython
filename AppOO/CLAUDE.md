@@ -155,6 +155,52 @@ DOT −32%; a 90 días FIL −67%, ICP −58%, ADA −48%, DOT −50%. Esto invi
 persigue al precio hacia abajo. Se eligen 52 semanas igual, por el mismo criterio que el ETF, y se
 deja anotado el escalón para que los objetivos más bajos de diciembre no se lean como un defecto.
 
+## Señal — dos ventanas, Stock y Cripto (2026-11-09)
+
+**El Screener estaba atado a una sola `account`, y eso explicaba los dos síntomas a la vez.** Se instanciaba
+con la cuenta de Stock y las seis ramas de `MarketScreen.select()` filtraban `WHERE account = '%s'`, así que
+las 19 filas de cripto —que viven con su propia cuenta— no entraban nunca en `self.market`: ni al arrancar ni
+al marcar **En Cartera**.
+
+Se veían igual por un detalle de precedencia: la rama de búsqueda es
+`WHERE account = 'x' AND shortname LIKE 'y' OR symbol = 'z'`, y el `OR` sin paréntesis **anula el filtro de
+cuenta**, así que buscar el par por símbolo lo traía. Con la caja vacía el filtro cae a la rama de `tipo` y
+devolvía 0 pares. Ese defecto de precedencia **sigue ahí y se deja**: hoy ya no hace falta.
+
+Hoy `select()` y `load_cartera_inst()` aceptan **una cuenta o una lista** (`account IN (...)`) y el Screener
+recibe `accounts=[stock, crypto]`. **Ensanchar sólo la lectura es seguro porque el Screener no escribe en
+`market`**: los 11 usos de `self.account` son lecturas. `self.account` sigue siendo la cuenta de la pantalla
+—salud del pipeline, booktrading, sentimiento—, así que esos tres siguen contando sólo Stock. Medido: la lista
+pasa de 1.359 a **1.378** filas y **En Cartera de 38 a 57** (38 Stock + 19 pares).
+
+**La Señal se partió en dos ventanas porque los 8 votos del Consenso se abstienen en un par, no por comodidad.**
+`Net`/`Opt`/`Flujo`/`Cob` necesitan los `fh_*` del 13F, `Ana` necesita `analyst_rec`, `Val` ve `'C'` y se
+abstiene, `Mod` lee los CSV del modelo de Stock y `Sent` el sentimiento de Stock. Con `MIN_VOTOS_SENAL = 3`,
+`senal_consenso([], 0)` devuelve `— S/D`: los 19 pares tienen `consenso_suma` y `consenso_tag` **NULL** en
+`market`. Mezclados en la ventana de Stock serían 19 filas en blanco ordenadas al final por
+`_TAG_ORDER.get("— S/D", 99)`, con los contadores del pie sin moverse.
+
+`_show_cripto_cartera()` (botón **Señal Cripto**) muestra lo que cripto sí tiene medido, y ordena por
+**posición dentro del rango de 52 semanas** — la dimensión con la que ya se valúa el vehículo, porque el
+objetivo de la cartera **es** el máximo de 52 semanas. Las bandas son descriptivas, no un voto:
+`◢ PISO ≤20% · ↘ BAJO ≤40% · → MEDIO ≤60% · ↗ ALTO ≤80% · ◤ TECHO >80%`.
+
+Medido el 2026-11-09 sobre los 19 pares: **12 en PISO, 5 en BAJO, 2 en S/D** (CHIPUSDT y AIGENSYNUSDT, sin
+perfil en Yahoo). Que casi todo caiga en una banda **no es un defecto de calibración** — es el mismo escalón
+de la ventana ya anotado en § "Precio objetivo" § Crypto: el pico del ciclo está saliendo de las 52 semanas,
+así que el libro entero cotiza cerca de su mínimo anual. Las bandas siguen discriminando entre sí (POL 17%
+contra ZIL 1%).
+
+**Punto de atención — en una stablecoin la banda es ruido.** USDC y FDUSD entran en `BAJO` con un rango anual
+de ±0,5% (`Dist Máx` −0,3% y −0,8%): el número es correcto y la banda no significa nada. No se filtran: la
+posición existe y debe verse.
+
+`rotacion_tag()` pasó a ser **función de módulo** en `Class_Screener.py` y es el único dueño de los umbrales
+de rotación: los consumen el Screener (que lee la fila como tupla con índice) y esta ventana (que la lee como
+dict). Antes la lógica vivía dentro del `_rotacion` anidado de `insert_treeview`, inalcanzable desde fuera.
+
+---
+
 ## Autonomía del usuario
 
 - **Nunca ejecutar scripts ni procesos largos en background sin que el usuario lo pida.**
@@ -465,14 +511,15 @@ por query. Tres la necesitaban y tres no:
 | `select_screener_ex_cartera` | **se agregó** — alimenta `Agente_DividendStatusScreener`, que le calcularía una categoría de dividendos al par y **pisaría la `'C'`** |
 | `load_symbols_needing_fundamentals` | **se agregó** — cripto no tiene `country`/`sector`/`industry` en Yahoo, así que se seleccionaría en cada corrida y nunca completaría |
 | `select_top_marketcap` | **se agregó** — competiría con las acciones en el mismo ranking de marketCap |
-| `load_consenso_cartera` | se deja — queremos los pares visibles en el popup de Señales |
+| `load_cartera_inst` | se deja, y ahora **se pide la `'C'` a propósito**: es la fuente de la ventana Señal Cripto. Hasta el 2026-11-09 se documentó acá como `load_consenso_cartera`, **un método que no existe** |
 | `select_candidatos_ia` | se deja — exige `consenso_suma >= n`, que en cripto es NULL |
 | dict de rotación/ownership | se deja — inocuo |
 
 **La Rotación de cripto no puede dividir por el supply: el volumen de Yahoo está en USD.** Es el mismo número
 que `volume24Hr`, y `volume / marketCap` es exactamente el `volume24HrMarketCapPercent` del propio `info`
-(verificado en BTC). Dividir USD por unidades daba BTC **831** → `⚡ EXTREMA` permanente. Por eso `_rotacion`
-tiene rama propia que divide por `marketCap`, **y los umbrales también son propios**: los 17 pares medibles del
+(verificado en BTC). Dividir USD por unidades daba BTC **831** → `⚡ EXTREMA` permanente. Por eso
+`rotacion_tag()` tiene rama propia que divide por `marketCap`, **y los umbrales también son propios**: los 17
+pares medibles del
 2026-11-08 caen entre **0,0111 (BTC) y 0,2441 (FDUSD)**, o sea los 17 en `— BAJA` con el corte 0,3 de las
 acciones. Los cortes `0,20 / 0,10 / 0,04` reparten 2/3/3/9.
 

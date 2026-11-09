@@ -98,6 +98,37 @@ _ETF_TYPES = {"ETF", "MUTUALFUND", "TRUST", "INDEX", "MONEYMARKET"}
 _ETF_SYMBOLS = {"PHYS"}
 
 
+def rotacion_tag(categoria, volume, market_cap, float_shares, shares_outstanding):
+    """Banda de rotacion del volumen. Unico dueno de los umbrales: los consumen el Screener y la
+    ventana de Senal Cripto, que leen la fila con estructuras distintas (tupla con indice y dict).
+
+    En cripto el volumen de Yahoo viene en USD, no en unidades, asi que el divisor es el marketCap
+    y no el supply: dividir USD por unidades daba BTC 831 -> "EXTREMA" fijo. El ratio resultante es
+    exactamente el volume24HrMarketCapPercent del propio info. Los umbrales tambien son propios:
+    los 17 pares medidos el 2026-11-08 caen entre 0,0111 (BTC) y 0,2441 (FDUSD), o sea los 17 en
+    "BAJA" con el corte 0,3 de las acciones.
+    """
+    if categoria == "C":
+        divisor, cortes = market_cap, (0.20, 0.10, 0.04)
+    else:
+        divisor, cortes = float_shares or shares_outstanding, (3.0, 1.0, 0.3)
+    try:
+        divisor = float(divisor)
+        volume = float(volume)
+    except (TypeError, ValueError):
+        return ""
+    if not divisor or not volume:
+        return ""
+    ratio = volume / divisor
+    if ratio >= cortes[0]:
+        return "⚡ EXTREMA"
+    if ratio >= cortes[1]:
+        return "↑↑ ALTA"
+    if ratio >= cortes[2]:
+        return "↑ MEDIA"
+    return "— BAJA"
+
+
 def bind_tv_web_menu(tree, win, colors=None, col_symbol="#1", get_url=None, on_analisis=None):
     """Agrega menú contextual TradingView/Web/Análisis al hacer click en columna Symbol de un Treeview.
 
@@ -259,10 +290,14 @@ def _yahoo_session():
 
 
 class Screener(tk.Frame):
-    def __init__(self, master=None, account=None, colors=None):
+    def __init__(self, master=None, account=None, colors=None, accounts=None):
         super().__init__(master)
         self.root = ttk.Frame(master, padding=(1, 1, 1, 1), style="B.TFrame")
         self.account = account
+        # Universo visible del Screener. self.account sigue siendo la cuenta de la pantalla
+        # (salud, booktrading, sentimiento); accounts solo ensancha la lectura de market para
+        # que los pares cripto -- que viven en otra cuenta -- entren en la lista y en "En Cartera".
+        self.accounts = [a for a in (accounts or [account]) if a]
         self.colors = colors
         self.config(bg="black")
         self.s_country = None
@@ -281,6 +316,7 @@ class Screener(tk.Frame):
         self.market = None
         self.counter = 0
         self._inst_win = None
+        self._cripto_win = None
         self._cand_win = None
         self._exp_win = None
         self._analisis_win = None
@@ -297,7 +333,7 @@ class Screener(tk.Frame):
     def start(self):
         # carga de datos e insert treeview
         self.market, self.ix = self.ScMarket.select(
-            account=self.account,
+            account=self.accounts,
             tipo=self.s_tipo,
             country=self.s_country,
             sector=self.s_sector,
@@ -787,6 +823,13 @@ class Screener(tk.Frame):
 
             ttk.Button(
                 btn_frame,
+                text="Señal Cripto",
+                width=12,
+                command=self._show_cripto_cartera,
+            ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
+
+            ttk.Button(
+                btn_frame,
                 text="Candidatos",
                 width=10,
                 command=self._show_youtube_candidatos,
@@ -897,36 +940,16 @@ class Screener(tk.Frame):
                 return str(v) if v else ""
 
         def _rotacion(row_keys):
-            # En cripto el volumen de Yahoo viene en USD, no en unidades, asi que el divisor es el
-            # marketCap y no el supply: dividir USD por unidades daba BTC 831 -> "EXTREMA" fijo. El
-            # ratio resultante es exactamente el volume24HrMarketCapPercent del propio info. Los
-            # umbrales tambien son propios: los 17 pares medidos el 2026-11-08 caen entre 0,0111
-            # (BTC) y 0,2441 (FDUSD), o sea los 17 en "BAJA" con el corte 0,3 de las acciones.
-            categ = row_keys[ix.index("categoriaActivo")] if "categoriaActivo" in ix else ""
-            vol = row_keys[ix.index("volume")] if "volume" in ix else None
-            if categ == "C":
-                divisor = row_keys[ix.index("marketCap")] if "marketCap" in ix else None
-                cortes = (0.20, 0.10, 0.04)
-            else:
-                divisor = row_keys[ix.index("floatShares")] if "floatShares" in ix else None
-                if not divisor and "sharesOutstanding" in ix:
-                    divisor = row_keys[ix.index("sharesOutstanding")]
-                cortes = (3.0, 1.0, 0.3)
-            try:
-                divisor = float(divisor)
-                vol = float(vol)
-            except (TypeError, ValueError):
-                return ""
-            if not divisor or not vol:
-                return ""
-            ratio = vol / divisor
-            if ratio >= cortes[0]:
-                return "⚡ EXTREMA"
-            if ratio >= cortes[1]:
-                return "↑↑ ALTA"
-            if ratio >= cortes[2]:
-                return "↑ MEDIA"
-            return "— BAJA"
+            def _col(nombre):
+                return row_keys[ix.index(nombre)] if nombre in ix else None
+
+            return rotacion_tag(
+                _col("categoriaActivo") or "",
+                _col("volume"),
+                _col("marketCap"),
+                _col("floatShares"),
+                _col("sharesOutstanding"),
+            )
 
         for keys in self.market:
             self.ctree_widget.insert_row(
@@ -1013,7 +1036,7 @@ class Screener(tk.Frame):
     def filtra_seleccion(self):
 
         self.market, self.ix = self.ScMarket.select(
-            account=self.account,
+            account=self.accounts,
             tipo=self.s_tipo,
             country=self.s_country,
             sector=self.s_sector,
@@ -2251,6 +2274,218 @@ class Screener(tk.Frame):
                 fg=color,
                 font=("Arial", 9),
             ).pack(side=tk.LEFT, padx=10, pady=2)
+
+        ttk.Button(
+            resumen_frame,
+            text="Cancel",
+            width=10,
+            command=lambda: (win.destroy(), setattr(self, "_inst_win", None)),
+        ).pack(side=tk.RIGHT, padx=8, pady=2)
+
+    def _show_cripto_cartera(self):
+        """Ventana de Senal para los pares cripto. Separada de la de Stock a proposito: los 8 votos
+        del Consenso son 13F, analistas y dividendos, y para un par los 8 se abstienen -- mezclarlos
+        en la ventana de Stock serian filas en blanco ordenadas al final. Lo que si tiene dato medido
+        es la posicion dentro del rango de 52 semanas, la dimension con la que se valua cripto: el
+        objetivo de la cartera es el maximo de 52 semanas (ver CLAUDE.md).
+        """
+        if self._cripto_win is not None and self._cripto_win.winfo_exists():
+            self._cripto_win.lift()
+            return
+
+        _TAG_ORDER = {"PISO": 0, "BAJO": 1, "MEDIO": 2, "ALTO": 3, "TECHO": 4}
+        _TAG_DISPLAY = {
+            "PISO": "◢ PISO",
+            "BAJO": "↘ BAJO",
+            "MEDIO": "→ MEDIO",
+            "ALTO": "↗ ALTO",
+            "TECHO": "◤ TECHO",
+            "S/D": "— S/D",
+        }
+        _TAG_COLOR = (
+            ("PISO", "#00D4FF"),
+            ("BAJO", "#00FF88"),
+            ("MEDIO", "#888888"),
+            ("ALTO", "#FFA500"),
+            ("TECHO", "#FF6060"),
+            ("S/D", "#555555"),
+        )
+
+        def _flt(val):
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return None
+
+        def _precio(val):
+            # Un par puede valer 0,00049817: con 2 decimales fijos media cartera se veria en 0
+            v = _flt(val)
+            if v is None:
+                return ""
+            if abs(v) >= 1:
+                return f"{v:,.2f}"
+            if abs(v) >= 0.01:
+                return f"{v:.4f}"
+            return f"{v:.8f}"
+
+        def _mag(val):
+            v = _flt(val)
+            if v is None or v == 0:
+                return ""
+            for corte, suf in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
+                if abs(v) >= corte:
+                    return f"{v / corte:,.2f}{suf}"
+            return f"{v:,.0f}"
+
+        def _pct(val, signo=False):
+            v = _flt(val)
+            if v is None:
+                return ""
+            return f"{v:+.1%}" if signo else f"{v:.1%}"
+
+        def _rango_52s(last, maximo, minimo):
+            # Donde esta el precio dentro del ano: 0 = minimo, 1 = maximo. Es descriptivo, no un
+            # voto -- no hay 13F ni analistas que opinen sobre un par.
+            if last is None or maximo is None or minimo is None or maximo <= minimo:
+                return None, "S/D"
+            pos = max(0.0, min(1.0, (last - minimo) / (maximo - minimo)))
+            if pos <= 0.20:
+                return pos, "PISO"
+            if pos <= 0.40:
+                return pos, "BAJO"
+            if pos <= 0.60:
+                return pos, "MEDIO"
+            if pos <= 0.80:
+                return pos, "ALTO"
+            return pos, "TECHO"
+
+        cartera = self.ScMarket.load_cartera_inst(self.accounts, categoria="C", orden="marketCap DESC")
+
+        filas = []
+        for row in cartera:
+            last = _flt(row.get("lastPrice"))
+            maximo = _flt(row.get("fiftyTwoWeekHigh"))
+            minimo = _flt(row.get("fiftyTwoWeekLow"))
+            circ = _flt(row.get("floatShares"))
+            total = _flt(row.get("sharesOutstanding"))
+            pos, tag = _rango_52s(last, maximo, minimo)
+            dist = (last / maximo - 1) if last and maximo else None
+            pct_circ = (circ / total) if circ and total else None
+            rango = f"{_TAG_DISPLAY[tag]:<9}  {pos:.0%}" if pos is not None else _TAG_DISPLAY[tag]
+            filas.append(
+                {
+                    "values": (
+                        row["symbol"],
+                        (row.get("shortName") or "")[:30],
+                        _precio(last),
+                        _mag(row.get("marketCap")),
+                        rotacion_tag(
+                            "C",
+                            row.get("volume"),
+                            row.get("marketCap"),
+                            row.get("floatShares"),
+                            row.get("sharesOutstanding"),
+                        ),
+                        _mag(row.get("volume")),
+                        _mag(row.get("averageVolume")),
+                        _mag(circ),
+                        _mag(total),
+                        _pct(pct_circ),
+                        _precio(maximo),
+                        _precio(minimo),
+                        _pct(dist, signo=True),
+                        rango,
+                    ),
+                    "tag": tag,
+                }
+            )
+
+        filas.sort(key=lambda r: (_TAG_ORDER.get(r["tag"], 99), r["values"][0]))
+        contadores = {}
+        for f in filas:
+            contadores[f["tag"]] = contadores.get(f["tag"], 0) + 1
+
+        win = tk.Toplevel(self)
+        self._cripto_win = win
+        win.protocol(
+            "WM_DELETE_WINDOW",
+            lambda: (win.destroy(), setattr(self, "_cripto_win", None)),
+        )
+        win.title("Señales — Cripto")
+        win.configure(bg="black")
+        win.geometry(f"1140x480+{650}+{400}")
+
+        tk.Label(
+            win,
+            text=f"Señales — Cripto ({len(filas)} pares)   ·   el Consenso 13F/analistas no aplica a cripto",
+            bg="black",
+            fg="cyan",
+            font=("Arial", 11, "bold"),
+        ).pack(pady=(8, 4))
+
+        _FIXED_COLS = ("Symbol", "Nombre", "Last")
+        _COL_DEFS = (
+            ("Symbol", 95, "w"),
+            ("Nombre", 165, "w"),
+            ("Last", 95, "e"),
+            ("Market Cap", 90, "e"),
+            ("Rotación", 85, "center"),
+            ("Vol 24h USD", 95, "e"),
+            ("Vol Prom", 90, "e"),
+            ("Supply Circ", 95, "e"),
+            ("Supply Total", 95, "e"),
+            ("% Circ", 65, "e"),
+            ("Máx 52s (Obj)", 100, "e"),
+            ("Mín 52s", 95, "e"),
+            ("Dist Máx", 75, "e"),
+            ("Rango 52s", 130, "w"),
+        )
+        all_cols = tuple(d[0] for d in _COL_DEFS)
+        col_align = {d[0]: {"anchor": d[2], "width": d[1]} for d in _COL_DEFS}
+
+        frame = tk.Frame(win, bg="black")
+        frame.pack(fill=tk.X, padx=8, pady=4)
+
+        ct = CustomTreeview(
+            master=frame,
+            columns=all_cols,
+            fixed_columns=_FIXED_COLS,
+            sort_columns=True,
+            height=19,
+            column_alignments=col_align,
+        )
+        ct.master.config(bg="black")
+        ct.heard.config(bg="black")
+        ct.right.config(bg="black")
+
+        for tag, color in _TAG_COLOR:
+            ct.tree_fixed.tag_configure(tag, foreground=color)
+            ct.tree_scroll.tag_configure(tag, foreground=color)
+
+        # insert_row() y no insert() directo: es el unico camino que llena CustomTreeview._id_map,
+        # de donde sale el iid gemelo para sincronizar la seleccion entre las dos mitades.
+        for f in filas:
+            ct.insert_row(values=f["values"], tag=f["tag"])
+
+        bind_tv_web_menu(ct.tree_fixed, win, colors=self.colors)
+
+        resumen_frame = tk.Frame(win, bg="#111111")
+        resumen_frame.pack(fill=tk.X, padx=8, pady=(2, 6))
+        for key, color in _TAG_COLOR:
+            tk.Label(
+                resumen_frame,
+                text=f"{_TAG_DISPLAY[key]}: {contadores.get(key, 0)}",
+                bg="#111111",
+                fg=color,
+                font=("Arial", 9),
+            ).pack(side=tk.LEFT, padx=10, pady=2)
+
+        ttk.Button(
+            resumen_frame,
+            text="Cancel",
+            width=10,
+            command=lambda: (win.destroy(), setattr(self, "_cripto_win", None)),
+        ).pack(side=tk.RIGHT, padx=8, pady=2)
 
 
 def sync_market(account):

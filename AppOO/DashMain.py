@@ -6457,7 +6457,14 @@ class DashMain:
 
         if self._tab_enabled("Screener") and self.sesion_stock:
             self._splash_step(splash, "Cargando Screener...")
-            self.screener = Screener(master=self.win2, account=self.sesion_stock["idcuenta"], colors=self.colors)
+            # El universo incluye la cuenta de Crypto: los pares viven en market con su propia cuenta y
+            # sin esto quedaban fuera de la lista y del filtro "En Cartera".
+            _cuentas = [self.sesion_stock["idcuenta"]]
+            if self.sesion_crypto:
+                _cuentas.append(self.sesion_crypto["idcuenta"])
+            self.screener = Screener(
+                master=self.win2, account=self.sesion_stock["idcuenta"], colors=self.colors, accounts=_cuentas
+            )
             self.screener.pack()
 
         # Inicia servidor HTTP para datos TradingView (Tampermonkey) ------------------------------------
