@@ -421,6 +421,12 @@ class Debugging:
         self.logger["Agente.EDGAR"].setLevel(logging.WARNING)
         self.logger.update({"Agente.Institucion": logging.getLogger("Agente.Institucion")})
         self.logger["Agente.Institucion"].setLevel(logging.WARNING)
+        # los 7 van al mismo archivo, fuera de la rotacion par/impar: el log comun se borra cada dos
+        # dias (handled_CacheLogger_name) y estos agentes corren cada 24h o menos seguido, asi que
+        # una corrida deja rastro un dia y desaparece -- justo lo que hay que poder auditar
+        for _dominio in ("Stock", "Crypto", "IA", "Infra", "Performa", "EDGAR", "Institucion"):
+            self._logger_a_su_archivo(f"Agente.{_dominio}", "agentes.log",
+                                      max_bytes=2_500_000, backup_count=1)
 
         # manager logging
         # los dos agentes de venta van al mismo archivo: se cruzan por el gate H5

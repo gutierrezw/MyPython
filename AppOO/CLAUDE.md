@@ -257,6 +257,35 @@ def Agente_NombreNuevo(self):
 
 **4. Logger** (si emite logs propios) → registrar en `Class_debugging.py` junto a los otros loggers.
 
+### La traza de un agente no puede vivir en el log común
+
+El log principal **se borra cada dos días**: `handled_CacheLogger_name()` alterna `dashmain_log_even` /
+`dashmain_log_old` y **elimina el otro al instanciar `Debugging`**. Un agente de 24 h deja rastro un día
+y desaparece, así que el log común no sirve para ver si viene corriendo.
+
+Los 7 loggers `Agente.*` (`Stock`, `Crypto`, `IA`, `Infra`, `Performa`, `EDGAR`, `Institucion`) van por eso
+a **`agentes.log`** vía `_logger_a_su_archivo`, que rota por tamaño y queda fuera de la alternancia.
+
+**El tamaño se eligió por lo que alguien va a leer, no por espacio en disco:** `2_500_000` con
+`backup_count=1`. Medido sobre los logs reales (190 b/línea en `agentes_venta.log`, 102 en
+`dashmain_log_even`), 2,5 MB son **13.000 a 24.000 líneas** — del orden de 6 meses a la tasa actual. El
+default de `_logger_a_su_archivo` (5 MB × 10) daría 240.000 líneas de backup que nadie va a abrir: la
+serie larga vive en la BD, y el log solo responde *¿corrió y qué escribió?*, que se lee en el archivo
+vivo. El único backup existe para no perder la línea justo cuando rota. Es el mismo mecanismo que ya comparten Preservation y GainsCapture en `agentes_venta.log`;
+el formato incluye `%(name)s`, así que las líneas de los 7 se distinguen en una sola línea de tiempo.
+`propagate=False` los saca del archivo común, y el nivel se sigue manejando desde el panel Debugging.
+
+**Lo que destapó el caso:** `Agente_CryptoPositioning` corrió el 2026-11-09 a las 11:11 y su línea de
+resultado **no estaba en ningún archivo**, aunque `dashmain_log_even` cubría las 19 h siguientes sin
+rotar (48 KB contra 10 MB de `maxBytes`). Sin esa línea no se puede afirmar que esa corrida escribió
+las filas que hay en BD — y `crypto_positioning` no tiene columna de inserción para verificarlo.
+
+**Punto de atención — el `rowcount` de un upsert no es "filas escritas".** Un `executemany` con
+`ON DUPLICATE KEY UPDATE` cuenta **1 por insert y 2 por update**: reescribir los 31 días de 18 pares
+devuelve **1116 para 558 filas**. Un agente que loguee ese número está reportando una estadística sin
+significado único. `sync_positioning_cartera` informa `len(filas)` —lo enviado— y usa el retorno del
+insert solo para lo único que distingue: **0 con filas no vacías es un fallo de BD** (`error_bd`).
+
 ### Lo que hace `wait_rate` automáticamente
 - `persist=True` → sobrevive reinicios (guarda último run en `../tmp/agents_schedule.json`)
 - `desc` presente → se auto-registra en `AGENTES_SCHEDULE` al importar el módulo

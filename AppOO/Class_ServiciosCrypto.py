@@ -370,7 +370,7 @@ class ServiciosCrypto:
         if not symbols:
             return {"pares": 0, "filas": 0, "sin_futuros": [], "detalle": f"sin pares activos para {account}"}
 
-        resultado = {"pares": len(symbols), "filas": 0, "sin_futuros": []}
+        resultado = {"pares": len(symbols), "con_dato": 0, "filas": 0, "sin_futuros": []}
         filas, divergencias = [], {}
         for symbol in symbols:
             series = self._client.fetch_positioning(symbol)
@@ -378,6 +378,7 @@ class ServiciosCrypto:
                 resultado["sin_futuros"].append(symbol)
                 divergencias[symbol] = None
                 continue
+            resultado["con_dato"] += 1
             for fecha, valores in series.items():
                 filas.append((symbol, fecha, valores.get("ls_cuentas"), valores.get("ls_top_pos"),
                               valores.get("taker_ratio"), valores.get("open_interest")))
@@ -386,7 +387,14 @@ class ServiciosCrypto:
             divergencias[symbol] = None if top is None or glob is None else top - glob
 
         if filas:
-            resultado["filas"] = MarketScreen().insert_positioning(filas)
+            # `filas` es lo enviado, no el retorno del insert: el rowcount de un executemany con
+            # ON DUPLICATE KEY cuenta 1 por insert y 2 por update, asi que no es el numero de filas
+            # escritas -- reescribir los 31 dias de 18 pares devuelve 1116 para 558 filas. El
+            # retorno solo distingue una cosa: 0 con filas no vacias es un fallo de BD
+            resultado["filas"] = len(filas)
+            resultado["rango"] = f"{min(f[1] for f in filas)} -> {max(f[1] for f in filas)}"
+            if not MarketScreen().insert_positioning(filas):
+                resultado["error_bd"] = True
         resultado.update(self._persiste_senal(account, divergencias))
         return resultado
 
