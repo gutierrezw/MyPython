@@ -5357,8 +5357,23 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
 
     # consulta oportunidades por tipo, subtipo y estado
     def obtener_por_tipo(self, tipo="sell", subtipo=None, estado=None):
-        sql = "SELECT * FROM oportunidadesbuysell WHERE tipo = %s"
-        params = [tipo]
+        # Este es el dataset de entrenamiento de los modelos IA, y hash_id no es unico en la tabla:
+        # el fallback de actualizar_oportunidad* solo mira estado='pendiente', asi que una fila ya
+        # ejecutada queda invisible y se inserta otra con el mismo hash. Medido 2026-11-10: 12 filas
+        # excedentes de 122 en buy (9,8%) — FIRY pesaba 4x y UUUU 3x en el entrenamiento.
+        # Se agrupa por (hash_id, recomendado) y no por hash_id solo: el duplicado con la misma
+        # etiqueta colapsa, pero el grupo con etiquetas distintas conserva sus dos filas. Con MAX(id)
+        # sobre hash_id solo ganaria la fila mas nueva, que en 3 grupos es la propuesta sin cerrar
+        # (recomendado 0) y no el hecho consumado — se perdian VGSH rechazada, NOMD y PBR ejecutadas.
+        # El filtro de recomendado lo aplica el consumidor, asi que aqui el contrato no cambia:
+        # las pendientes siguen devolviendose
+        sql = """
+            SELECT * FROM oportunidadesbuysell
+             WHERE tipo = %s
+               AND id IN (SELECT MAX(id) FROM oportunidadesbuysell
+                           WHERE tipo = %s GROUP BY hash_id, recomendado)
+        """
+        params = [tipo, tipo]
         if subtipo:
             sql += " AND subtipo = %s"
             params.append(subtipo)
@@ -5431,6 +5446,23 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 return False
         except (Exception, EncodingWarning, connect.Error) as error:
             print(f"[Mysql:: RepositorioOportunidadesBuySell.ya_existe_con_tolerancia(): {error}]")
+
+    def ya_existe_hash(self, hash_id):
+        # True existe, False no existe, None error de BD. El fallback de actualizar_oportunidad* solo
+        # mira estado='pendiente', asi que una fila ya ejecutada o rechazada queda invisible, devuelve
+        # existe=False y nace otra fila pendiente con el mismo hash. Medido 2026-11-10: 15 grupos
+        # duplicados sobre 370 filas y 12 excedentes de 122 en el dataset de entrenamiento buy (9,8%)
+        # — FIRY pesaba 4x y UUUU 3x. No se cierra con un indice UNIQUE: abortaria con 1062 el
+        # UPDATE ... SET hash_id de actualizar_oportunidad*, que reescribe el hash de las pendientes
+        try:
+            sql = "SELECT id FROM oportunidadesbuysell WHERE hash_id = %s LIMIT 1"
+            with self._conectar(tabla="oportunidadesbuysell") as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql, (hash_id,))
+                return cursor.fetchone() is not None
+        except (Exception, EncodingWarning, connect.Error) as error:
+            _logger.error(f"[Mysql:: RepositorioOportunidadesBuySell.ya_existe_hash(): {error}]")
+            return None
 
     # Detalle de oportunidad de venta
     def detalle_OportunidadSell(self, origen, grafico_url=None, row=None):
@@ -5508,6 +5540,11 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 subtipo,
                 row.get("Recomendado"),
             )
+            # None es error de BD y tampoco inserta: ante la duda no se ensucia el dataset de
+            # entrenamiento, la propuesta se re-evalua en el ciclo siguiente
+            if self.ya_existe_hash(hash_id) is not False:
+                return False
+
             detalle = self.detalle_OportunidadBuy(origen, row)
 
             sql = """
@@ -5569,6 +5606,11 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 subtipo,
                 row.get("Recomendado"),
             )
+            # None es error de BD y tampoco inserta: ante la duda no se ensucia el dataset de
+            # entrenamiento, la propuesta se re-evalua en el ciclo siguiente
+            if self.ya_existe_hash(hash_id) is not False:
+                return False
+
             detalle = self.detalle_OportunidadSell(origen, grafico_url, row)
 
             sql = """
