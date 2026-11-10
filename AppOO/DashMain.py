@@ -652,22 +652,37 @@ class DatosVehivulo(TickerInfo, MyOrders):
         except Exception as error:
             print("[on_message_IBrks_websocket({})]: {}".format(self.vehiculo, error))
 
-    def update_symbol_en_positions(self, struct):
+    def update_symbol_en_positions(self, struct, solo_portfolio=False):
         def update_position():
             try:
-                position["unrealizedpnl"] = struct["unrealizedpnl"]
                 position["useraccount"] = struct["useraccount"]
                 position["dividendo"] = struct["dividendo"]
                 position["costobase"] = struct["costobase"]
-                position["mrkprice"] = struct["mrkprice"]
                 position["position"] = struct["position"]
-                position["mktvalue"] = struct["mktvalue"]
                 position["objetivo"] = struct["objetivo"]
-                position["retorno"] = struct["retorno"]
                 position["deuda"] = struct["deuda"]
                 position["conid"] = struct["conid"]
-                position["open"] = struct["open"]
-                position["dgyp"] = struct["dgyp"]
+
+                # solo_portfolio: los campos de precio los duena el websocket y no se pisan. Son dos fuentes
+                # del mismo dato con distinto retraso -- el tick en vivo y el portfolio de IB cada 60s -- y
+                # el panel alternaba entre las dos. mktvalue y unrealizedpnl si se recalculan, con el precio
+                # que ya tiene la fila, para que una compra mueva el valor sin esperar un tick. El dgyp se
+                # corrige en el tick siguiente: con el mercado cerrado no hay ticks, pero tampoco compras
+                if solo_portfolio:
+                    position["mrkprice"] = position.get("mrkprice") or struct["mrkprice"]
+                    position["mktvalue"] = position["mrkprice"] * struct["position"]
+                    position["unrealizedpnl"] = position["mktvalue"] - struct["costobase"]
+                    position["retorno"] = (
+                        position["unrealizedpnl"] / struct["costobase"] if struct["costobase"] > 0 else 0
+                    )
+                else:
+                    position["unrealizedpnl"] = struct["unrealizedpnl"]
+                    position["mrkprice"] = struct["mrkprice"]
+                    position["mktvalue"] = struct["mktvalue"]
+                    position["retorno"] = struct["retorno"]
+                    position["open"] = struct["open"]
+                    position["dgyp"] = struct["dgyp"]
+
                 position["gypp"] = struct["position"] * struct["objetivo"] - struct["costobase"]
                 position["v_prc"] = 0.0
                 position["v_gan"] = 0.0
@@ -1498,7 +1513,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # obtiene información de dividendos
                     yf_activo, datos, ind_update = self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
 
-                    objetivo, x_open, price, empresa = 0.0, 0.0, 0.0, ""
+                    objetivo, x_open, x_cierre, price, empresa = 0.0, 0.0, 0.0, 0.0, ""
                     sector = key["sector"] if "sector" in key else "buscar"
 
                     price = key["mktPrice"]
@@ -1507,6 +1522,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     dividendo, dividendYield, exDividendDate = get_dividends_yfinance()
 
                     x_open = yf_activo.get("open", 0) * factor
+                    x_cierre = yf_activo.get("previousClose", 0) * factor
 
                     # precio objetivo: ETF/trust -> maximo de 52 semanas (no tienen objetivo de analistas
                     # y audit_portfolio los borra de market). Resto -> fuente unica market, Yahoo de respaldo
@@ -1558,7 +1574,13 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     p["open"] = x_open
                     p["factor_cambio"] = factor
                     p["divisa"] = key.get("currency", "USD")
-                    p["dgyp"] = (p["mrkprice"] - p["open"] if p["open"] > 0 else 0) * p["position"]
+                    # el dGyP diario de IB (campo 82) se mide contra el CIERRE ANTERIOR, no contra el open
+                    # del dia: esa es la cifra de la app movil. Medido el 2026-11-10 sobre las 41 posiciones,
+                    # la base del open daba -248,62 contra -385,40 reales (VALE -3,71 contra -35,64).
+                    # Cascada previousClose -> open: un 0 se leeria como "no se movio hoy", que es peor que
+                    # la base menos exacta. p["open"] conserva su significado, solo cambia la base del dgyp
+                    x_base = x_cierre if x_cierre > 0 else x_open
+                    p["dgyp"] = (p["mrkprice"] - x_base if x_base > 0 else 0) * p["position"]
                     p["peso"] = 0
 
                     # obtiene la positions anterior, la estrategia y otros valores
@@ -1599,9 +1621,11 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 # position["position"] era update_symbol_en_positions, y en Stock lo llama nada más el
                 # on_message del websocket. Sin tick la fila conservaba la cantidad vieja aunque assets
                 # y la BD ya tuvieran la nueva — medido en SMR, 40 contra 71 durante 9 minutos.
-                # useraccount no está en p y el contrato del struct lo exige: se agrega sin mutar la fila
+                # useraccount no está en p y el contrato del struct lo exige: se agrega sin mutar la fila.
+                # solo_portfolio deja los campos de precio al websocket, que los tiene en vivo: este camino
+                # corre cada 60s y el panel alternaba entre las dos fuentes
                 for pos in x_positions:
-                    self.update_symbol_en_positions({**pos, "useraccount": self.account})
+                    self.update_symbol_en_positions({**pos, "useraccount": self.account}, solo_portfolio=True)
 
                 return x_positions
             except Exception as e:

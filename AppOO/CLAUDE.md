@@ -767,6 +767,62 @@ Hoy `struct_positions_fci()` devuelve `(mrkprice - open) * position` y `change_a
 no la suma de deltas por cuotaparte. Las filas viejas se corrigen solas — `update_FCI_en_positions()`
 reconstruye la posición en cada ciclo.
 
+**El `dgyp` del panel de Stock tenía tres escritores con tres fórmulas, y dos se pisaban cada 60 s**
+(2026-11-10). El síntoma era que el número daba saltos grandes y casi nunca coincidía con la app móvil
+de IB:
+
+| Escritor | Fórmula (al diagnosticar) | Referencia |
+|---|---|---|
+| websocket `procesa_stock` (`DashMain.py:424`) | `change * stock` | **campo 82 de IB** = last − cierre anterior |
+| `update_inversion_stock` (`DashMain.py:1561`) | `(mrkprice − open) * position` | **`open` del día, de Yahoo** |
+| fallback sin auth (`DashMain.py:3014`) | `(last − xopen) * qty` | el `open` que dejó el último escritor |
+
+**La cifra de la app móvil es el campo 82** — IB lo llama *Change* y es contra el **cierre anterior**.
+El camino de portfolio usa el **`open` del día**, así que difiere en el **gap de apertura × cantidad**;
+y ese `open` sale de `yf_activo.get("open", 0)` vía `CacheHut`, que puede traer el de un día previo.
+
+Lo que destapó el caso fue `bdb57a9` — el arreglo de la cantidad congelada tras una compra. La línea
+1561 ya existía, pero su `p` sólo iba a la BD; el commit agregó la llamada a
+`update_symbol_en_positions`, que **escribe 13 campos, no sólo la cantidad**. Con eso cada ciclo de
+`api_vehiculo_iteractive` pisaba el panel con la fórmula 2 y cada tick lo devolvía a la 1: el panel
+alternaba entre dos números distintos. No rompió el dGyP — le conectó al panel una segunda fórmula que
+ya estaba mal.
+
+Hoy `update_symbol_en_positions(struct, solo_portfolio=False)` separa los dos dueños. Con
+`solo_portfolio=True` —el único llamador que lo pasa es el camino de portfolio— los campos de precio
+(`mrkprice`, `open`, `dgyp`) **quedan en manos del websocket** y no se pisan; `mktvalue`,
+`unrealizedpnl` y `retorno` **sí se recalculan**, con el precio que ya tiene la fila, para que una
+compra mueva el valor sin esperar un tick. El `mrkprice` del portfolio entra sólo como respaldo
+(`position.get("mrkprice") or struct["mrkprice"]`), para la fila que todavía no recibió ningún tick.
+Es la regla que ya estaba escrita en el comentario del propio websocket: *la cantidad y el costo son
+datos de portfolio, no de precio*.
+
+El KPI del panel se arregla con esto: `header_panel()` suma `position["dgyp"]` de `self.positions`
+hacia `DataHub.manager_GyP[vehiculo]["dGyP"]`.
+
+**Y el `inversion.dgyp` de la BD pasó a medirse contra el cierre anterior, el mismo día.** La fórmula 2
+es la que persiste la columna, así que `SUM(dgyp)` → `total_ganancia_dia` de `get_totales_inversiones()`
+**no era el P&L diario de IB**: le sobraba o le faltaba el gap de apertura. Medido sobre las 41
+posiciones de Stock antes del cambio: el guardado era **−248,62**, que coincide **exacto** con el
+recálculo contra el `open` —un solo escritor, coherente—, mientras contra `previousClose` daba
+**−385,40**: **136,78 USD** de desvío. El caso más grande es VALE, **−3,71** contra **−35,64**.
+
+El dato ya estaba en memoria: `yf_activo` trae `previousClose` y `get_dividends_yfinance` ya lo leía,
+así que el cambio **no agrega descargas ni consultas**. La cascada es `previousClose → open` porque un
+0 se lee como *no se movió hoy*, que es peor que la base menos exacta — medido: **3 posiciones**
+(XIFR, MPT, BTG) tenían el `open` en 0 y por eso su `dgyp` guardado era **0,00 siempre**.
+`p["open"]` conserva su significado; lo único que cambió es la base del `dgyp`.
+
+**Reversión anotada — la reserva que frenaba el cambio era falsa.** Se dejó escrito que movía "un
+número que se compara contra histórico". No hay tal histórico: `inversion` tiene **114 filas y 114
+tickets distintos, 0 duplicados**, y el `timestamp` de todas estaba a minutos de la medición — es la
+**fila viva** de cada posición, reescrita en cada ciclo. La serie diaria vive en `diaria_performance`.
+
+**Punto de atención — el fallback sin auth sigue en la base vieja.** `DashMain.py:3028` lee
+`position.get("open", 0)` de la fila en memoria y `inversion` no tiene columna de cierre anterior. Solo
+corre cuando IB no está autenticado; no se tocó. Scripts de la medición:
+`AppTest/diag_inversion_dgyp.py` y `AppTest/diag_dgyp_gap.py`.
+
 **`inversion.conid` es el mercado donde operó la cuenta, no una propiedad del ticker** (2026-09-16). La
 compra de un símbolo fuera de cartera tomaba el primer resultado de la búsqueda de IB, que es difusa y no
 trae `currency`: ENB salió en Toronto (TSE, en CAD) antes que en NYSE, y BIL devolvía BHP antes que el ETF.
@@ -975,6 +1031,7 @@ Si el commit toca el código de la izquierda, revisar el doc de la derecha antes
 | Agentes nuevos / `AGENTES_SCHEDULE` | sección "Patrón para agregar un nuevo agente" en este archivo |
 | `add_alert`, `insert_incidencia`, tab Alertas | sección "Columnas con semántica propia" en este archivo |
 | `load_target_prices`, `api_vehiculo_iteractive`, columna Objetivo | sección "Precio objetivo — fuente única" en este archivo |
+| `update_symbol_en_positions`, `procesa_stock`, el dGyP del panel | bloque `inversion.dgyp` en "Columnas con semántica propia" |
 | `sync_objetivo_cartera`, `Agente_ObjetivoCrypto`, `otros_activos.objetivo` | sección "Precio objetivo — fuente única" § Crypto, en este archivo |
 | `FinanceScreen`, `Class_Finance`, tablas `fin_*` | `20-Proyecto/spec-finanzas.md` (§0: objetivos, etapas, regla de KPIs, mapa de categorías) |
 | Cualquier hallazgo de la revisión Opus (H1–H10) | `30-Gestion/resultado-revision-opus-preservation-gainscapture.md` + `30-Gestion/BACKLOG.md` |
