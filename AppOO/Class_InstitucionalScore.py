@@ -12,6 +12,7 @@ from Modulos_python import (
     time,
 )
 from Modulos_Mysql import MarketScreen
+from Modulos_Utilitarios import read_json_tmp
 
 _logger = logging.getLogger("InstitucionalScore")
 _EDGAR_HEADERS = {"User-Agent": "InversionesWildaga Research Bot (gutierrez.madrid.wilmer@example.com)"}
@@ -19,6 +20,14 @@ _EDGAR_IDX_URLS = [
     "https://www.sec.gov/Archives/edgar/full-index/2026/QTR1/company.idx",
     "https://www.sec.gov/Archives/edgar/full-index/2025/QTR4/company.idx",
 ]
+# el ownership de Yahoo lo escribe Agente_InstitucionalScore y el score lo LEE para su termino del
+# 40%: son dos @wait_rate(86400) independientes y nada fuerza el orden. El score tiene ventana=(0,6)
+# y el ownership no, asi que la hora del ownership deriva cada dia y puede caer dentro de esa franja.
+# Medido 2026-11-07: 1.172 de 1.294 scores calculados contra el ownership del dia anterior.
+# El tope existe porque 37 de los 1.185 simbolos con fh_count>0 no tienen ownership en Yahoo (AL con
+# 524 fondos, SEE 509, NSA 446): diferir sin techo los dejaria sin score para siempre
+_OWNERSHIP_FRESCO_H = 24
+_OWNERSHIP_TOPE_H = 48
 
 
 def _safe_float(val):
@@ -202,6 +211,23 @@ def sync_13f_scores(account: str) -> dict:
     el 2026-11-07: el 13F agregado duplica acciones (co-filers y custodios) y daba 1,92
     en GS contra 0,765 real.
     """
+    nota = ""
+    ts_own = read_json_tmp("agents_schedule.json").get("Agente_InstitucionalScore", 0)
+    edad_own = (time.time() - ts_own) / 3600 if ts_own else None
+    if edad_own is not None and edad_own > _OWNERSHIP_FRESCO_H:
+        nota = f"ownership de hace {edad_own:.1f}h"
+        if edad_own <= _OWNERSHIP_TOPE_H:
+            _logger.warning(
+                f"sync_13f_scores: DIFERIDO — {nota}, por encima de {_OWNERSHIP_FRESCO_H}h. No se "
+                f"escribe nada: correr sync_institutional antes o esperar el ciclo siguiente"
+            )
+            return {"symbols": 0, "updated": 0, "skipped": 0, "nota": f"DIFERIDO ({nota})"}
+        _logger.error(
+            f"sync_13f_scores: {nota} supera el tope de {_OWNERSHIP_TOPE_H}h — se calcula igual para "
+            f"no dejar los simbolos sin score, con el termino del 40% contra un valor vencido"
+        )
+        nota = f"OWNERSHIP VENCIDO ({nota})"
+
     inst = InstitucionalScore()
     fh_stats = inst.market.load_fund_holdings_stats()
     inst_fields = inst.market.load_market_inst_fields(account)
@@ -269,4 +295,4 @@ def sync_13f_scores(account: str) -> dict:
         if ok:
             updated += 1
 
-    return {"symbols": len(inst_fields), "updated": updated, "skipped": skipped}
+    return {"symbols": len(inst_fields), "updated": updated, "skipped": skipped, "nota": nota}

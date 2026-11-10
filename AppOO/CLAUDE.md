@@ -504,6 +504,39 @@ Hoy `sync_13f_scores` **lee** `inst_ownership_pct` de la fila para su término d
 ratio pasaba de 100%. **El orden importa** — `sync_institutional` primero, `sync_13f_scores` después,
 o el 40% calcula en cero.
 
+**Y el orden no estaba garantizado por nada: hoy se verifica** (2026-11-10). Los dos son
+`@wait_rate(86400)` independientes, pero **`Agente_13FScores` lleva `ventana=(0, 6)` y el de ownership
+no**, así que la hora del ownership deriva cada día y tarde o temprano cae dentro de esa franja. Medido
+el 2026-11-07: `inst_update` quedó en 09:30 y `market.timestamp` en 14:04 → **1.172 de 1.294 scores**
+calculados contra el ownership del día anterior, sin que ninguna columna diga contra qué versión del
+otro dato se calculó.
+
+**La marca de “última corrida de ownership” ya existía: es el `last_run` que `wait_rate(persist=True)`
+escribe en `tmp/agents_schedule.json`.** No hizo falta columna nueva. `sync_13f_scores` lee
+`Agente_InstitucionalScore` de ese JSON y mide la antigüedad:
+
+| Antigüedad del ownership | Qué hace |
+|---|---|
+| ≤ `_OWNERSHIP_FRESCO_H` (24 h) | calcula normal — el dato es de este ciclo |
+| 24 h a `_OWNERSHIP_TOPE_H` (48 h) | **difiere: no escribe nada** y loguea a WARNING. El turno se pierde |
+| > 48 h | **calcula igual** y loguea a ERROR, con la nota `OWNERSHIP VENCIDO` en el log del agente |
+
+**El tope de 48 h no es prudencia genérica: sin él 37 símbolos quedan sin score para siempre.** De los
+**1.185** con `fh_count > 0`, **37 tienen `inst_ownership_pct` NULL o 0** porque Yahoo no se lo
+devuelve nunca — AL con 524 fondos, SEE 509, NSA 446, TGNA 388. Diferir sin techo los deja fuera de
+forma permanente, que es peor que el desfase que la guarda arregla: hoy esos 37 sí tienen score, con
+el término del 40% en cero (AL = 1,2836).
+
+**El diferimiento cuesta 24 h, no menos** — la `ventana=(0, 6)` le da al score una sola oportunidad
+por día. El costo es bajo igual: un `inst_score` NULL se lee como `0.0` (`Class_Screener.py:1965`,
+`inst_score or 0.0`) y **no entra a los 7 votos del Consenso**; solo apaga el `Inst Señal` de la
+ventana de cartera. Un día sin score no inyecta un voto falso.
+
+**Si el JSON no se encuentra, no difiere.** `read_json_tmp` devuelve `{}` ante cualquier error, así
+que `ts_own` queda en 0 y la guarda no se aplica — ante la duda se calcula, nunca se bloquea el
+pipeline por no poder leer una marca. Verificado: con el cwd de la app el JSON trae las 41 claves y
+`Agente_InstitucionalScore` = 2026-11-09 18:06 (18,7 h → calcula).
+
 `floatShares` sigue descargándose para la Rotación del Screener, pero **ya no es divisor de nada**: está
 poblado en solo 30 de 1.361 filas de `market` y 1.241 caen al `sharesOutstanding`.
 

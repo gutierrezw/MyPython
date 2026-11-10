@@ -226,7 +226,8 @@ class AgentManager:
         try:
             result = sync_13f_scores(account=self.account)
             self._log_edgar.warning(
-                f"13FScores: símbolos={result['symbols']} actualizados={result['updated']} skipped={result['skipped']}"
+                f"13FScores: símbolos={result['symbols']} actualizados={result['updated']} "
+                f"skipped={result['skipped']} {result['nota']}"
             )
         except Exception as e:
             self._log_edgar.error(f"Agente_13FScores(): {e}")
