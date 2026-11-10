@@ -322,28 +322,30 @@ class AgentManager:
                     vehiculo=veh,
                     extreme_threshold=extreme_threshold
                 )
-                if result["purgados"]:
+                if result["anomalias"]:
                     extremas = result.get("extremas", 0)
                     if extremas > 0:
                         self._log_performa.critical(
                             f"PerformaValidator {veh}: ⚠️ {extremas} ANOMALÍAS EXTREMAS (>100x) detectadas y purgadas"
                         )
                     for a in result["anomalias"]:
-                        sym, fecha, ratio = a["symbol"], a["fecha"], a["ratio"]
-                        if a.get("extrema", False):
+                        sym, fecha, ratio = a["symbol"], a["fecha"], a.get("ratio")
+                        if a.get("hueco"):
+                            estado = "en cuarentena" if a.get("quarantined") else "pendiente de regenerar"
+                            self._log_performa.warning(
+                                f"PerformaValidator {veh}: {sym} {fecha} HUECO — sin fila con posición abierta, "
+                                f"{estado} (no se purga: el borrado no repara un hueco)"
+                            )
+                            CacheHut.add_bypass(sym)
+                        elif a.get("extrema", False):
                             self._log_performa.critical(
                                 f"PerformaValidator {veh}: {sym} {fecha} EXTREMA ratio={ratio:.1f}x — purgado"
                             )
                         elif a.get("quarantined"):
                             self._log_performa.critical(
-                                f"PerformaValidator {veh}: {sym} CUARENTENA — purgado 3+ veces en 6h, ratio={ratio:.2f}x"
+                                f"PerformaValidator {veh}: {sym} {fecha} CUARENTENA ratio={ratio:.2f}x — "
+                                f"3+ purgas en 6h, NO se purga"
                             )
-                        elif a.get("hueco"):
-                            self._log_performa.warning(
-                                f"PerformaValidator {veh}: {sym} {fecha} HUECO — sin fila con posición abierta, "
-                                f"purgado para regenerar"
-                            )
-                            CacheHut.add_bypass(sym)
                         else:
                             self._log_performa.warning(
                                 f"PerformaValidator {veh}: {sym} {fecha} ratio={ratio:.2f}x purgado — bypass cache"

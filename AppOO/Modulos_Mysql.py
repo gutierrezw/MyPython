@@ -1275,8 +1275,10 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                 for r in anomalias_cb
             ]
 
+            # el hueco no lleva ratio: no hay dos valores que comparar. Antes iba en 0.0 y el log lo
+            # imprimia como si fuera una medicion ("ratio=0.00x"), que se lee como precio colapsado
             anomalias += [
-                {"fecha": r[0], "symbol": r[1], "hueco": True, "ratio": 0.0, "extrema": False}
+                {"fecha": r[0], "symbol": r[1], "hueco": True, "extrema": False}
                 for r in anomalias_huecos
             ]
 
@@ -1286,9 +1288,44 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                 if anomalia_extrema not in anomalias:
                     anomalias.append(anomalia_extrema)
 
-            # purga quirúrgica: solo los registros del símbolo afectado
+            # cuarentena: se evalua ANTES de purgar y bloquea la purga. Antes se evaluaba al final y
+            # solo condicionaba el reset del schedule, asi que un simbolo cuarentenado se seguia
+            # borrando y ya no se regeneraba: la cuarentena frenaba el rescate, no el dano
+            _QUARANTINE_LIMIT = 3
+            _QUARANTINE_WINDOW = 6 * 3600
+            now = time.time()
+
+            _ch = read_json_tmp("cache_health")
+            purge_hist = _ch.get("purge_history", {})
+            quarantine = _ch.get("quarantine", {})
+
+            symbols_ok = []
+            for a in anomalias:
+                sym = a["symbol"]
+                recientes = [t for t in purge_hist.get(sym, []) if now - t < _QUARANTINE_WINDOW]
+                if len(recientes) >= _QUARANTINE_LIMIT:
+                    quarantine[sym] = now
+                    a["quarantined"] = True
+                    continue
+                a["quarantined"] = False
+                symbols_ok.append(sym)
+                # purge_history cuenta PURGAS, no detecciones: un hueco no se purga, asi que no suma.
+                # Si sumara, un hueco persistente se cuarentenaria a si mismo en 3 horas y quedaria
+                # bloqueando su propia regeneracion
+                purge_hist[sym] = recientes if a.get("hueco") else recientes + [now]
+
+            write_json_tmp("cache_health", {"purge_history": purge_hist, "quarantine": quarantine})
+
+            # purga quirúrgica: solo los registros del símbolo afectado.
+            # Un hueco NO se purga. Es una fila ausente: en esa fecha no hay nada que borrar y el
+            # DELETE desde ahi se lleva las filas POSTERIORES, que son las buenas — y justamente la
+            # condicion del hueco exige una fila posterior, asi que el borrado destruye la evidencia
+            # sin reparar nada y el hueco vuelve a detectarse a la hora siguiente. Lo unico que
+            # regenera un hueco es el retroceso del schedule
             simbolos_purgados = set()
             for a in anomalias:
+                if a.get("quarantined") or a.get("hueco"):
+                    continue
                 key = (a["symbol"], str(a["fecha"]))
                 if key not in simbolos_purgados:
                     cursor.execute(
@@ -1301,19 +1338,24 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             cursor.close()
             conn.close()
 
-            # purga performa_inversion desde la fecha mínima afectada (aggregate queda inválido)
-            fecha_min = min(a["fecha"] for a in anomalias)
-            conn2 = self._conectar(tabla="validate_performa.purga_pi")
-            try:
-                cur2 = conn2.cursor()
-                cur2.execute(
-                    "DELETE FROM performa_inversion WHERE idcuenta = %s AND vehiculo = %s AND fechaclose >= %s",
-                    (account, vehiculo, str(fecha_min)),
-                )
-                conn2.commit()
-            finally:
-                cur2.close()
-                conn2.close()
+            # performa_inversion se reagrega desde la fecha minima a regenerar. Sin symbols_ok no hay
+            # nada que regenerar: purgar el agregado dejaria la serie vacia y sin retroceso de
+            # schedule que la reconstruya, que es el estado en el que quedo Stock el 2026-11-10
+            fechas_reset = []
+            if symbols_ok:
+                fecha_min = min(a["fecha"] for a in anomalias if not a.get("quarantined"))
+                fechas_reset.append(fecha_min)
+                conn2 = self._conectar(tabla="validate_performa.purga_pi")
+                try:
+                    cur2 = conn2.cursor()
+                    cur2.execute(
+                        "DELETE FROM performa_inversion WHERE idcuenta = %s AND vehiculo = %s AND fechaclose >= %s",
+                        (account, vehiculo, str(fecha_min)),
+                    )
+                    conn2.commit()
+                finally:
+                    cur2.close()
+                    conn2.close()
 
             # ── validación adicional: costo_base en performa_inversion ────────
             # Detecta filas donde costo_base colapsa (ej: 313 vs 43K del día anterior)
@@ -1349,57 +1391,28 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                         (account, vehiculo, str(fecha_cb_min)),
                     )
                     conn3.commit()
+                    fechas_reset.append(fecha_cb_min)
                     for row in cb_anomalias:
-                        print(
+                        _logger.error(
                             f"[validate_performa] costo_base ANOMALIA — "
                             f"fechaclose={row[0]} costo_base={row[1]:.2f} "
                             f"ayer={row[2]:.2f} ratio={row[3]:.4f} → purgado desde {fecha_cb_min}"
                         )
-                    # resetear schedule para que reagrege desde fecha_cb_min
-                    key = f"diaria_{vehiculo}"
-                    desde_reset = (fecha_cb_min - timedelta(days=1)).strftime("%Y-%m-%d")
-                    data = read_json_tmp("agents_schedule.json")
-                    data[key] = desde_reset
-                    write_json_tmp("agents_schedule.json", data)
             finally:
                 cur3.close()
                 conn3.close()
 
-            # cuarentena: si el mismo símbolo se purga 3+ veces en 6 horas, entra en cuarentena 24h
-            _QUARANTINE_LIMIT = 3
-            _QUARANTINE_WINDOW = 6 * 3600
-            _QUARANTINE_TTL = 24 * 3600
-            now = time.time()
-
-            _ch = read_json_tmp("cache_health")
-            purge_hist = _ch.get("purge_history", {})
-            quarantine = _ch.get("quarantine", {})
-
-            symbols_ok = []
-            for a in anomalias:
-                sym = a["symbol"]
-                recientes = [t for t in purge_hist.get(sym, []) if now - t < _QUARANTINE_WINDOW]
-                recientes.append(now)
-                purge_hist[sym] = recientes
-                if len(recientes) >= _QUARANTINE_LIMIT:
-                    quarantine[sym] = now
-                    a["quarantined"] = True
-                else:
-                    a["quarantined"] = False
-                    symbols_ok.append(sym)
-
-            write_json_tmp("cache_health", {"purge_history": purge_hist, "quarantine": quarantine})
-
-            # solo resetea el schedule si hay símbolos no cuarentenados con anomalías
-            if symbols_ok:
+            # un solo reset, con la fecha mas antigua de las dos purgas: antes el bloque de costo_base
+            # escribia el JSON despues y pisaba el retroceso de fecha_min, que puede ser anterior
+            if fechas_reset:
                 key = f"diaria_{vehiculo}"
-                desde_reset = (fecha_min - timedelta(days=1)).strftime("%Y-%m-%d")
+                desde_reset = (min(fechas_reset) - timedelta(days=1)).strftime("%Y-%m-%d")
                 data = read_json_tmp("agents_schedule.json")
                 data[key] = desde_reset
                 write_json_tmp("agents_schedule.json", data)
 
             extremas_count = sum(1 for a in anomalias if a.get("extrema", False))
-            return {"anomalias": anomalias, "purgados": True, "extremas": extremas_count}
+            return {"anomalias": anomalias, "purgados": bool(simbolos_purgados), "extremas": extremas_count}
 
         except (Exception, connect.Error) as error:
             print(f"[Mysql:: IPerformance.validate_performa()]: {error}")
