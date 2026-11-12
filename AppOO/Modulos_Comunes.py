@@ -102,7 +102,11 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
                 datos[index_ref] = datos[cum_index]
                 datos["++ Portafolio"] = datos["CumPort"]
 
-        # Stock / Crypto: recalcula desde diaria_performance
+        # Stock / Crypto: TWR sobre performa_inversion -- la serie persistida es la fuente del
+        # grafico. Se habia cambiado a recalcular desde diaria_performance (9986292, 2026-03-08,
+        # sin motivo declarado): con eso el grafico mostraba dias que la tabla no tenia y una
+        # tabla congelada dejaba de verse. El indice tambien sale de la tabla (p_referencia), asi
+        # que el grafico ya no depende de una descarga de Yahoo para dibujarse
         elif tipo in ("Stock", "Crypto"):
             if account is None:
                 try:
@@ -112,47 +116,45 @@ def performa_asset(account=None, vehiculo=None, tipo=None, asset=None):
                 except Exception:
                     pass
 
-            diaria_all, ix = [], []
-            sql, iy = Performa.select_diaria_performance(account=account)
-            if sql:
-                diaria_all.extend(sql)
-                ix = iy
+            sql, iy = Performa.select_performa_inversion(account=account, vehiculo=vehiculo)
+            if sql and iy:
+                df = pd.DataFrame(sql, columns=iy)
+                df["fechaclose"] = pd.to_datetime(df["fechaclose"])
+                for col in ["p_referencia", "value", "costo_base", "gyp_dia", "dividends"]:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+                df = df.groupby("fechaclose").agg(
+                    value=("value", "sum"),
+                    costo_base=("costo_base", "sum"),
+                    gyp_dia=("gyp_dia", "sum"),
+                    dividends=("dividends", "sum"),
+                    p_referencia=("p_referencia", "mean"),
+                ).sort_index()
+                # mismo agregado que crea_dataframe_diaria: el valor del portafolio del dia incluye
+                # lo devengado, no solo el valor de mercado
+                df["value Portafolio"] = df["value"] + df["dividends"] + df["gyp_dia"]
 
-            if diaria_all and ix:
-                pdatos = crea_dataframe_diaria(diaria=diaria_all, ix=ix)
-                if pdatos is not None and not pdatos.empty:
-                    # TWR real: aísla flujos de capital (aportes/retiros) del rendimiento de mercado,
-                    # evita que value/costo_base se distorsione con cada compra/venta nueva (mismo
-                    # esquema que BBVA.ARS, reutiliza select_bbva_ars_cashflows)
-                    cf_rows = Performa.select_bbva_ars_cashflows(categoria=tipo, cuentas=account)
-                    if cf_rows:
-                        cf_df = pd.DataFrame(cf_rows, columns=["fecha", "usd_invested"])
-                        cf_df["fecha"] = pd.to_datetime(cf_df["fecha"]).dt.date
-                        cf_series = cf_df.set_index("fecha")["usd_invested"].astype(float)
-                        new_capital = cf_series.reindex(pdatos.index, fill_value=0.0)
-                    else:
-                        new_capital = pd.Series(0.0, index=pdatos.index)
-                    denom = (pdatos["value Portafolio"].shift(1) + new_capital).replace(0, float("nan"))
-                    pdatos["daily_twr"] = (pdatos["value Portafolio"] / denom - 1).fillna(0)
-                    # Anula saltos imposibles (dato faltante/gap de fuente). Umbral mayor al 30% de
-                    # BBVA.ARS porque Stock/Crypto son activos más volátiles que un FCI
-                    pdatos.loc[pdatos["daily_twr"].abs() > 0.50, "daily_twr"] = 0.0
-                    pdatos["CumPort"] = (1 + pdatos["daily_twr"]).cumprod() - 1
-
-                    first_date = pdatos.index[0]
-                    result = crea_dataframe_index(vehiculo=vehiculo, desde=first_date)
-                    if result is not None:
-                        indice, _, _ = result
-                        pdatos.index = pd.to_datetime(pdatos.index)
-                        indice.index = pd.to_datetime(indice.index)
-                        cols_pdatos = ["CumPort"] + [c for c in ("value", "costo_base") if c in pdatos.columns]
-                        datos = (
-                            pdatos[cols_pdatos]
-                            .join(indice[[cum_index]], how="inner")
-                            .dropna(subset=["CumPort", cum_index])
-                        )
-                        datos[index_ref] = datos[cum_index]
-                        datos["++ Portafolio"] = datos["CumPort"]
+                # TWR real: aisla flujos de capital (aportes/retiros) del rendimiento de mercado,
+                # evita que value/costo_base se distorsione con cada compra/venta nueva (mismo
+                # esquema que BBVA.ARS, reutiliza select_bbva_ars_cashflows)
+                cf_rows = Performa.select_bbva_ars_cashflows(categoria=tipo, cuentas=account)
+                if cf_rows:
+                    cf_df = pd.DataFrame(cf_rows, columns=["fecha", "usd_invested"])
+                    cf_df["fecha"] = pd.to_datetime(cf_df["fecha"])
+                    cf_series = cf_df.set_index("fecha")["usd_invested"].astype(float)
+                    new_capital = cf_series.reindex(df.index, fill_value=0.0)
+                else:
+                    new_capital = pd.Series(0.0, index=df.index)
+                denom = (df["value Portafolio"].shift(1) + new_capital).replace(0, float("nan"))
+                df["daily_twr"] = (df["value Portafolio"] / denom - 1).fillna(0)
+                # Anula saltos imposibles (dato faltante/gap de fuente). Umbral mayor al 30% de
+                # BBVA.ARS porque Stock/Crypto son activos mas volatiles que un FCI
+                df.loc[df["daily_twr"].abs() > 0.50, "daily_twr"] = 0.0
+                df["CumPort"] = (1 + df["daily_twr"]).cumprod() - 1
+                df[cum_index] = (1 + df["p_referencia"]).cumprod() - 1
+                datos = df[["CumPort", "value", "costo_base", cum_index]].copy()
+                datos[index_ref] = datos[cum_index]
+                datos["++ Portafolio"] = datos["CumPort"]
 
         # obtiene DataFrame para un activo individual desde diaria_performance
         if tipo == "activo":

@@ -983,6 +983,30 @@ correcto, el `value` no se mueve. A PBR la renueva `Agente_PerformaValidator` po
 que sus propios números no dan (22 unidades a 20,87 contra 431,59 de costo da 1,06), así que el 2,44
 viene de otra fila. Frente aparte — `AppTest/diag_performa_cuarentena.py`.
 
+## Gráfico de performance — la fuente es `performa_inversion`, no un recálculo (2026-11-11)
+
+**Reversión de `9986292` (2026-03-08), que cambió la fuente sin declarar motivo.** Ese commit hizo
+que la rama Stock/Crypto de `performa_asset` recalculara la serie leyendo `diaria_performance` fila
+por fila en vez de leer `performa_inversion`, la tabla que ya guarda el cierre diario del vehículo.
+
+Dos consecuencias, las dos del mismo tipo: **el gráfico dejaba de ser un espejo de la tabla.**
+Dibujaba días que `performa_inversion` no tenía —porque los recalculaba al vuelo— y, al revés, una
+tabla congelada **no se veía**: el gráfico seguía saliendo lindo mientras la serie persistida estaba
+detenida. Es justo lo que tapó los huecos de cobertura que arregla la sección anterior.
+
+Hoy lee `select_performa_inversion(account, vehiculo)`, agrupa por `fechaclose` y arma
+`value Portafolio = value + dividends + gyp_dia` —el mismo agregado que `crea_dataframe_diaria`, el
+valor del día incluye lo devengado, no sólo el valor de mercado—. El TWR real sigue igual
+(`select_bbva_ars_cashflows`, saltos de `|daily_twr| > 0,50` anulados).
+
+**El índice también sale de la tabla.** `cum_index` se deriva de `p_referencia`, que ya está
+persistida, en vez de `crea_dataframe_index`: el gráfico **ya no depende de una descarga de Yahoo
+para dibujarse**.
+
+`select_performa_inversion` sumó `gyp_dia, dividends` **al final** del SELECT a propósito:
+`calcular_tir` lee ese mismo resultado **por nombre de columna**, así que agregar al final no mueve
+nada de lo que ya leía.
+
 ---
 
 ## Procedimiento de release
@@ -1079,6 +1103,7 @@ Si el commit toca el código de la izquierda, revisar el doc de la derecha antes
 | `update_symbol_en_positions`, `procesa_stock`, el dGyP del panel | bloque `inversion.dgyp` en "Columnas con semántica propia" |
 | `sync_objetivo_cartera`, `Agente_ObjetivoCrypto`, `otros_activos.objetivo` | sección "Precio objetivo — fuente única" § Crypto, en este archivo |
 | `detalle_book`, `carry_forward`, la cuarentena de la diaria | sección "Diaria — un símbolo sin precio del día aporta su fila igual" en este archivo |
+| `performa_asset`, `select_performa_inversion`, el gráfico de performance | sección "Gráfico de performance — la fuente es `performa_inversion`" en este archivo |
 | `FinanceScreen`, `Class_Finance`, tablas `fin_*` | `20-Proyecto/spec-finanzas.md` (§0: objetivos, etapas, regla de KPIs, mapa de categorías) |
 | Cualquier hallazgo de la revisión Opus (H1–H10) | `30-Gestion/resultado-revision-opus-preservation-gainscapture.md` + `30-Gestion/BACKLOG.md` |
 

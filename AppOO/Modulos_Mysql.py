@@ -873,7 +873,9 @@ class IPerformance(BDsystem):  # -----------------------------------------------
 
             # uso mas frecuente para sumar valores por account y vehiculo
             elif is_none(accion) and is_none(referencia):
-                qry = """SELECT fechaclose, p_referencia, p_vehiculo, nr_gyp, value, costo_base FROM performa_inversion 
+                qry = """SELECT fechaclose, p_referencia, p_vehiculo, nr_gyp, value, costo_base,
+                               gyp_dia, dividends
+                        FROM performa_inversion
                         WHERE idcuenta = '%s'  AND vehiculo = '%s' ORDER by fechaclose ASC;"""
                 cursor.execute(qry % (account, vehiculo))
                 sql = cursor.fetchall()
