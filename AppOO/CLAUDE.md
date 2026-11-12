@@ -940,6 +940,51 @@ Cada lunes 8am → reporte HTML por Gmail (configurado en Claude Scheduled).
 
 ---
 
+## Diaria — un símbolo sin precio del día aporta su fila igual (2026-11-11)
+
+**El `costo_base` de `performa_inversion` no bajaba por ventas: bajaba porque faltaban símbolos.**
+Es la **suma de los símbolos que tienen fila en `diaria_performance` ese día**, así que un símbolo que
+no aporta fila se lleva su costo del total. Medido en Stock: el 11-02 y el 11-03 había **28 de 41
+símbolos** y el costo caía de 63.571 a **47.002 — 16.246 USD** que ninguna operación explica.
+
+`detalle_book` tenía **dos salidas** que descartaban el símbolo completo, y las dos están antes de la
+rama por categoría, así que valen para los cuatro vehículos:
+
+| Salida | Cuándo se dispara |
+|---|---|
+| cuarentena (`cache_health.quarantine`, 24 h) | el símbolo acumuló purgas de caché — no usar un precio corrupto es correcto |
+| `datos is None or datos.empty` | Yahoo no devuelve nada para la ventana pedida |
+
+**Arreglar sólo la cuarentena dejaba la mitad del agujero abierto.** Hoy las dos registran el símbolo
+en `pendientes` y `carry_forward()` le escribe su fila al cierre del recorrido: **cantidad y costo del
+booktrading, el último `AdjClose` conocido de `diaria_performance`, `gyp_dia` 0**. Las fechas son las
+que escribieron los símbolos sanos (`fechas_escritas`), filtradas a las **posteriores** a la última
+fila del símbolo — los huecos interiores son trabajo de una reconstrucción, no de la corrida diaria.
+
+**El costo declarado es que ese día el símbolo queda planchado** (retorno 0). Es mucho más barato que
+borrarle 16.246 USD al `costo_base`, que es el número contra el que se lee el histórico.
+
+**La fila del deslistado no se duplica:** el camino de descarga vacía registra el pendiente sólo si
+`sym_hasta == f_hasta`; la rama `sym_hasta != f_hasta` sigue escribiendo su `-1.0` de pérdida total.
+**Y si todos los símbolos están en cuarentena no se escribe nada** — sin un símbolo sano no hay forma
+de saber qué días fueron de mercado.
+
+**El comentario del código decía que `Agente_PerformaValidator` repara el hueco. No lo repara:**
+loguea y llama `CacheHut.add_bypass(sym)`, **no escribe ninguna fila**, y `diaria_app` no reconstruye
+hacia atrás. Ese comentario es lo que hizo que el defecto pasara sin verse.
+
+Medido tras reconstruir octubre y noviembre (`AppTest/run_rebuild_diaria_cartera.py --desde
+2026-10-01`): **41 símbolos todos los días** y el costo continuo. El caso en vivo fue **PBR**, en
+cuarentena desde 0,6 h antes de la corrida: aportó sus **29 filas** con su último cierre (20,87) en
+vez de desaparecer del 10-01 al 11-10.
+
+**Punto de atención — el valor queda congelado mientras la cuarentena se renueve.** El costo es
+correcto, el `value` no se mueve. A PBR la renueva `Agente_PerformaValidator` por un `ratio=2.44x`
+que sus propios números no dan (22 unidades a 20,87 contra 431,59 de costo da 1,06), así que el 2,44
+viene de otra fila. Frente aparte — `AppTest/diag_performa_cuarentena.py`.
+
+---
+
 ## Procedimiento de release
 
 Antes de taggear un release, siempre actualizar `version.py`:
@@ -1033,6 +1078,7 @@ Si el commit toca el código de la izquierda, revisar el doc de la derecha antes
 | `load_target_prices`, `api_vehiculo_iteractive`, columna Objetivo | sección "Precio objetivo — fuente única" en este archivo |
 | `update_symbol_en_positions`, `procesa_stock`, el dGyP del panel | bloque `inversion.dgyp` en "Columnas con semántica propia" |
 | `sync_objetivo_cartera`, `Agente_ObjetivoCrypto`, `otros_activos.objetivo` | sección "Precio objetivo — fuente única" § Crypto, en este archivo |
+| `detalle_book`, `carry_forward`, la cuarentena de la diaria | sección "Diaria — un símbolo sin precio del día aporta su fila igual" en este archivo |
 | `FinanceScreen`, `Class_Finance`, tablas `fin_*` | `20-Proyecto/spec-finanzas.md` (§0: objetivos, etapas, regla de KPIs, mapa de categorías) |
 | Cualquier hallazgo de la revisión Opus (H1–H10) | `30-Gestion/resultado-revision-opus-preservation-gainscapture.md` + `30-Gestion/BACKLOG.md` |
 

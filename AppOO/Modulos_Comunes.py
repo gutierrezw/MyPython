@@ -278,6 +278,8 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                         factor,
                     ]
                 )
+                fechas_escritas.add(eof_datos.date())
+                return True
         except Exception as error:
             print(f"write_csv({vehiculo})]: {error}")
 
@@ -314,9 +316,50 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
             write_csv(gyp, fee)
             eof_datos, row = next(idatos, (None, None))
 
+    def registra_pendiente(skey, s_read):
+        try:
+            if float(s_read[ix.index("stock")]) > 0:
+                pendientes.append((skey, s_read))
+        except Exception:
+            pass
+
+    def carry_forward():
+        nonlocal eof_datos, row, a_read
+
+        if not pendientes or not fechas_escritas:
+            return
+
+        escritas = 0
+        Performa = IPerformance()
+        for skey, s_read in pendientes:
+            last, iy = Performa.select_diaria_performance(accion="last", account=account, symbol=skey)
+            if not last:
+                continue
+
+            f_last = last[iy.index("Date")]
+            f_last = f_last.date() if hasattr(f_last, "date") else f_last
+            close_last = last[iy.index("AdjClose")]
+            if close_last is None or float(close_last) <= 0:
+                continue
+
+            factor = float(s_read[ix.index("factor_cambio")])
+            a_read = s_read
+            for fecha in sorted(f for f in fechas_escritas if f > f_last):
+                eof_datos = pd.Timestamp(fecha)
+                row = {"Close": float(close_last) * factor, "Dividends": 0.0}
+                if write_csv(0.0, 0.0):
+                    escritas += 1
+
+        if escritas:
+            _log_diaria_performa.warning(
+                f"detalle_book({vehiculo}): carry_forward {escritas} filas sobre "
+                f"{len(pendientes)} simbolos sin precio del dia"
+            )
+
     try:
         eof_datos, a_read = [], []
         eof_book, read = [], []
+        pendientes, fechas_escritas = list(), set()
 
         prefijo = "csv_datos_" if option == "inicio" else "csv_app_"
         path = define_FileCache(name=f"{prefijo}{vehiculo}.csv")
@@ -408,8 +451,11 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                 _quarantine = read_json_tmp("cache_health").get("quarantine", {})
                 _q_ts = _quarantine.get(bkey, 0)
                 if _q_ts and (time.time() - _q_ts) < 86400:
+                    last_read = read
                     while eof_book is not None and read[ix.index("simbolo")] == bkey:
+                        last_read = read
                         eof_book, read = next(ebook, (None, None))
+                    registra_pendiente(bkey, last_read)
                     continue
 
                 # ventana colapsada: el ultimo movimiento del simbolo cae en el dia a cerrar o
@@ -441,16 +487,21 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                         last_read = read
                         eof_book, read = next(ebook, (None, None))
 
-                    # sin datos y con posicion abierta: ese dia queda sin fila y la diaria
-                    # incompleta — Agente_PerformaValidator lo detecta como hueco y lo repara
+                    # sin datos y con posicion abierta: el carry_forward del final le escribe la
+                    # fila con su ultimo precio conocido — Agente_PerformaValidator solo detecta el
+                    # hueco y nunca lo repara, no escribe ninguna fila
                     try:
                         if float(last_read[ix.index("stock")]) > 0:
                             _log_diaria_performa.warning(
                                 f"detalle_book({vehiculo}): {bkey} sin datos yfinance "
-                                f"({f_desde} -> {sym_hasta}) — la diaria queda sin esa fila"
+                                f"({f_desde} -> {sym_hasta}) — se arrastra el ultimo precio"
                             )
                     except Exception:
                         pass
+
+                    # no delisted: el simbolo aporta su fila con el ultimo precio conocido
+                    if sym_hasta == f_hasta:
+                        registra_pendiente(bkey, last_read)
 
                     # delisted con fecha_deliste pero sin datos yfinance → registrar pérdida total
                     if sym_hasta != f_hasta:
@@ -501,6 +552,8 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                     # por fin simbolo completar diaria para el bkey anterior, si stock > 0
                     if (a_read[ix.index("simbolo")] == bkey) and (a_read[ix.index("stock")] > 0):
                         completa_diaria()
+
+            carry_forward()
 
         return path
     except Exception as error:
