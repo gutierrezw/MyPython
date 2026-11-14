@@ -1221,6 +1221,9 @@ class ClassAgenteIA:
                     self.gains_capture_state[symbol] = state
                     DataHub.del_alert(f"gc_{symbol}")
                     write_json_tmp("gains_capture_state.json", self.gains_capture_state)
+                    self._gains_capture_registrar_respuesta(
+                        symbol, "CANCELLED", "vencida", f"vencida sin respuesta: {_causa}", _pend,
+                    )
                     _gc_logger.warning(f"GainsCapture({symbol}): {_causa} → propuesta vencida, se re-evalua")
                     estado = "normal"
                 else:
@@ -2319,6 +2322,10 @@ class Telegram:
                 expirados.append((symbol, f"{elapsed / 60:.0f}m"))
 
         for symbol, motivo in expirados:
+            self._gains_capture_registrar_respuesta(
+                symbol, "CANCELLED", "vencida", f"vencida sin respuesta ({motivo})",
+                self.gains_capture_state[symbol].get("pendiente"),
+            )
             self.gains_capture_state[symbol] = {
                 **self.gains_capture_state[symbol], "estado": "normal", "pendiente": None
             }
@@ -2337,6 +2344,36 @@ class Telegram:
         if pendiente_id is None:
             return True
         return str(state.get("pendiente_id", "")) == str(pendiente_id)
+
+    def _gains_capture_registrar_respuesta(self, symbol, tag, respuesta, mensaje, pendiente, order_id=None):
+        """Deja en symbol_decision_history como termino una propuesta: aprobada, diferida o vencida.
+
+        La tabla solo guardaba la opinion de Claude (tag CLAUDE), nunca el desenlace, asi que no se
+        podia medir cuantas propuestas se aprobaron ni unir una recomendacion con su orden. Va sin
+        dedup_key: cada desenlace es un hecho unico y ademas cierra la corrida de la recomendacion.
+        """
+        pendiente = pendiente or {}
+        try:
+            self.RepositorioOportunidades.insert_symbol_decision_history(
+                symbol=symbol,
+                agente="GainsCapture",
+                tag=tag,
+                mensaje=mensaje,
+                json_contexto={
+                    "respuesta": respuesta,
+                    "escenario": pendiente.get("escenario"),
+                    "qty": pendiente.get("qty"),
+                    "lmt_price": pendiente.get("lmt_price"),
+                    "order_id": str(order_id) if order_id else None,
+                },
+                order_trader_id=self.RepositorioOportunidades.get_order_trader_id(
+                    pendiente.get("account"), order_id
+                ) if order_id else None,
+            )
+        except Exception as e:
+            logging.getLogger("GainsCapture").error(
+                f"GainsCapture({symbol}): no se pudo registrar la respuesta {respuesta!r} → {e}"
+            )
 
     def _gains_capture_aprobar(self, symbol, pendiente_id=None):
         """Aprueba una propuesta GainsCapture pendiente y manda la orden. Devuelve el texto a responder.
@@ -2365,6 +2402,10 @@ class Telegram:
                 f"GainsCapture({symbol}): aprobacion rechazada — qty={pendiente['qty']} + "
                 f"comprometida={_comp:g} > position={_pos_ok:g}"
             )
+            self._gains_capture_registrar_respuesta(
+                symbol, "CANCELLED", "aprobada_bloqueada",
+                f"aprobada por el usuario, bloqueada: venta viva por {_comp:g} sobre {_pos_ok:g}", pendiente,
+            )
             return (
                 f"⚠️ {symbol}: ya hay una venta viva por {_comp:g} sobre esta posicion "
                 f"({_pos_ok:g}). No se manda la orden para no comprometer mas de lo que hay."
@@ -2387,6 +2428,10 @@ class Telegram:
             # el estado queda en pendiente_autorizacion: se puede reintentar con /ok
             logging.getLogger("GainsCapture").error(
                 f"GainsCapture({symbol}): el broker no devolvio order_id | response={response}"
+            )
+            self._gains_capture_registrar_respuesta(
+                symbol, "CANCELLED", "aprobada_rechazada_broker",
+                f"aprobada por el usuario, rechazada por el broker — LMT SELL {pendiente.get('qty')}", pendiente,
             )
             return f"⚠️ {symbol}: el broker rechazo la orden. La propuesta sigue pendiente, podes reintentar."
         niveles_ejecutados = state.get("niveles_ejecutados", []) + [pendiente.get("escenario")]
@@ -2430,6 +2475,12 @@ class Telegram:
             )
         except Exception as _e:
             self.logger.error(f"_gains_capture_aprobar({symbol}): insert → {_e}")
+        self._gains_capture_registrar_respuesta(
+            symbol, "ENVIADA", "aprobada",
+            f"aprobada por el usuario — LMT SELL {pendiente['qty']} @ "
+            f"${DataHub.format_precio(vehiculo, symbol, pendiente['lmt_price'])}",
+            pendiente, order_id=order_id,
+        )
         logging.getLogger("GainsCapture").warning(
             f"GainsCapture({symbol}): aprobado por usuario → order_id={order_id}"
         )
@@ -2447,6 +2498,9 @@ class Telegram:
             return f"⚠️ {symbol}: esa propuesta ya vencio. Hay una nueva mas abajo en el chat."
         self.gains_capture_state[symbol] = {**state, "estado": "normal", "pendiente": None}
         write_json_tmp("gains_capture_state.json", self.gains_capture_state)
+        self._gains_capture_registrar_respuesta(
+            symbol, "CANCELLED", "diferida", "diferida por el usuario", state.get("pendiente"),
+        )
         logging.getLogger("GainsCapture").warning(f"GainsCapture({symbol}): rechazado por usuario")
         return f"❌ GainsCapture {symbol}: propuesta cancelada."
 

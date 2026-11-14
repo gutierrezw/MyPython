@@ -7044,6 +7044,32 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.close()
             conn.close()
 
+    def get_order_trader_id(self, account: str, client_order_id: str):
+        """Devuelve el `id` de la fila de order_trader de esa orden, o None si no esta.
+
+        Es el puente de symbol_decision_history.order_trader_id: une la decision del agente con
+        la orden que produjo. MIN(id) porque la fila que escribe el envio es la primera.
+        """
+        if not client_order_id:
+            return None
+        conn = self._conectar(tabla="select.order_trader")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT MIN(id) FROM order_trader WHERE clientOrderId = %s AND account = %s",
+                (str(client_order_id), account),
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::get_order_trader_id]: {error}")
+            return None
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
     def select_pending_orders(self, account: str, vehiculo: str, symbol: str = None) -> tuple:
         """Retorna todas las órdenes pendientes (sin importar fecha) para account/vehiculo.
 
