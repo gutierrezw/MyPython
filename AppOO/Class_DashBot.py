@@ -101,6 +101,18 @@ GC_PENDIENTE_TTL = 14400
 GC_ESPERA_TTL = 14400
 GC_ESPERA_ROI = 0.01
 
+# RSI diario minimo para tratar el momento como "movimiento violento" y recien ahi consultar a
+# Claude. Antes la violencia la juzgaba Claude solo, y se contradecia: FIRY el 23-09 con RSI 79
+# recibio 29 "esperar" y 2 "vender". Medido sobre los 18 simbolos 'N' de Stock en 2026
+# (AppTest/diag_gc_violento.py): el primer dia de un tramo con RSI >= 70 (49 tramos, 14 simbolos)
+# el precio a 20 ruedas queda -14,2% de mediana y 72% de las veces abajo, contra -3,7% y 59% de
+# un dia cualquiera. 75 y 80 no mejoran y dejan 18 y 3 tramos.
+# Crypto, mismo corte (AppTest/diag_gc_violento_crypto.py, 25 pares 'N', klines de Binance): 70 tramos,
+# -8,3% a 20 dias y 67% abajo contra -2,7% y 61%. La ventaja es menor y no es pareja: en BTC, SOL y BNB
+# el precio no cae despues; la caida esta en los pares chicos.
+# Se pisa con parameters.gains_capture.rsi_violento (0 = sin filtro).
+GC_RSI_VIOLENTO = {"Stock": 70.0, "Crypto": 70.0}
+
 
 # Admistrador de Agentes IA
 class ClassAgenteIA:
@@ -1070,6 +1082,7 @@ class ClassAgenteIA:
         _gc_cfg = DataHub.gains_config(vehiculo, "gains_capture")
         min_roi = _gc_cfg["min_roi"]
         min_ganancia = _gc_cfg["min_ganancia"]
+        rsi_violento = float(params["gains_capture"].get("rsi_violento", GC_RSI_VIOLENTO.get(vehiculo, 0)))
         gc_modo = DataHub.modo_operacion  # semáforo único del sistema — GainsCapture no tiene switch propio
 
         _claude_key = None
@@ -1103,19 +1116,19 @@ class ClassAgenteIA:
 
         # la config es estatica: se loguea al cargarla y cuando cambia, como ya hace Preservation.
         # Repetirla en cada corrida son ~96 lineas/dia que no dicen nada nuevo
-        _cfg_snap = (min_roi, min_ganancia, gc_modo)
+        _cfg_snap = (min_roi, min_ganancia, rsi_violento, gc_modo)
         if self._gc_config_log.get(vehiculo) != _cfg_snap:
             self._gc_config_log[vehiculo] = _cfg_snap
             _gc_logger.warning(
                 f"GainsCapture({vehiculo}): config cargada | min_roi={min_roi:.0%} | "
-                f"min_gan={min_ganancia} | modo={gc_modo}"
+                f"min_gan={min_ganancia} | rsi_violento={rsi_violento or 'sin filtro'} | modo={gc_modo}"
             )
 
         self._gains_capture_expirar_pendientes()
 
         # los tres descartes de abajo son `continue` mudos y cada uno responde una pregunta distinta
         # de calibracion: no es lo mismo "ningun lote llega al ROI" que "llega pero no paga la friccion"
-        _desc = {"sin_lotes": 0, "roi_lote": 0, "sin_escenario": 0}
+        _desc = {"sin_lotes": 0, "roi_lote": 0, "sin_escenario": 0, "sin_violencia": 0}
 
         for sym_data in symbols_gain:
             symbol = sym_data.get("symbol")
@@ -1308,6 +1321,19 @@ class ClassAgenteIA:
                 _gc_logger.debug(f"GainsCapture({symbol}): {vehiculo} fuera de sesion → no se consulta a Claude")
                 continue
 
+            # La violencia del movimiento es regla fija, no criterio de Claude: bajo el umbral no hay
+            # nada que preguntarle. Sin RSI tampoco se consulta: no se puede afirmar que haya un pico.
+            # Va despues del bloque de pendientes: una propuesta viva no se retira porque el RSI afloje
+            datos_tecnicos = DataHub.info.get(symbol, {}).get("datos_tecnicos", {})
+            _rsi_d = datos_tecnicos.get("diaria", {}).get("rsi")
+            if rsi_violento and (not _rsi_d or float(_rsi_d) < rsi_violento):
+                _desc["sin_violencia"] += 1
+                _gc_logger.debug(
+                    f"GainsCapture({symbol}): RSI_d={_rsi_d if _rsi_d else 'N/D'} < {rsi_violento:.0f} → "
+                    f"sin movimiento violento, no se consulta a Claude"
+                )
+                continue
+
             _espera = state.get("espera") or {}
             if (
                 _espera.get("clases") == escenarios_disponibles
@@ -1320,7 +1346,6 @@ class ClassAgenteIA:
                 )
                 continue
 
-            datos_tecnicos = DataHub.info.get(symbol, {}).get("datos_tecnicos", {})
             claude_result = None
             if _claude_key:
                 claude_result = self._gains_capture_claude_eval(
@@ -1333,7 +1358,6 @@ class ClassAgenteIA:
                     # hace falta para entender la decision sin abrir el json: que decidio, sobre
                     # que clase, con que ROI y RSI, y el motivo. urgencia se saco: Claude nunca lo
                     # devuelve (accion/escenario/razon), siempre logueaba None
-                    _rsi_d = datos_tecnicos.get("diaria", {}).get("rsi")
                     _razon = claude_result.get("razon") or ""
                     _clase = (claude_result.get("escenario") or "").strip()
                     _partes = [claude_result.get("accion") or "?"]
@@ -1655,7 +1679,7 @@ class ClassAgenteIA:
             _gc_logger.warning(
                 f"GainsCapture({vehiculo}): CIERRE | sin lotes en ganancia={_desc['sin_lotes']} | "
                 f"ningun lote llega a min_roi={_desc['roi_lote']} | ningun escenario llega a "
-                f"min_ganancia={_desc['sin_escenario']}{_rep}"
+                f"min_ganancia={_desc['sin_escenario']} | sin movimiento violento={_desc['sin_violencia']}{_rep}"
             )
 
     def _gains_capture_claude_eval(
