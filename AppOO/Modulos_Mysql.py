@@ -7385,7 +7385,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 "DELETE FROM order_trader WHERE account = %s "
                 "AND DATE(stampPlace) <= DATE_SUB(CURDATE(), INTERVAL 2 DAY) "
                 "AND status IN ('PreSubmitted', 'PARTIALLY_FILLED') "
-                "AND orderType NOT LIKE 'STP%%'",
+                "AND orderType NOT LIKE 'STP%%' AND orderType NOT LIKE 'STOP%%'",
                 (account,),
             )
             d3 = cursor.rowcount
@@ -7393,7 +7393,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 "DELETE FROM order_trader WHERE account = %s "
                 "AND DATE(stampPlace) <= DATE_SUB(CURDATE(), INTERVAL 7 DAY) "
                 "AND status NOT IN ('Filled', 'FILLED') "
-                "AND orderType NOT LIKE 'STP%%'",
+                "AND orderType NOT LIKE 'STP%%' AND orderType NOT LIKE 'STOP%%'",
                 (account,),
             )
             d4 = cursor.rowcount
@@ -7421,7 +7421,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 "AND DATE(stampPlace) <= DATE_SUB(CURDATE(), INTERVAL %s DAY) "
                 "AND DATE(stampPlace) > DATE_SUB(CURDATE(), INTERVAL %s DAY) "
                 "AND id_order IS NOT NULL AND id_order != '' "
-                "AND orderType NOT LIKE 'STP%%'",
+                "AND orderType NOT LIKE 'STP%%' AND orderType NOT LIKE 'STOP%%'",
                 (account, vehiculo, days_min, days_max),
             )
             cols = [d[0] for d in cursor.description]

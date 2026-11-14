@@ -1357,8 +1357,8 @@ class DataHub:
         return None
 
     @staticmethod
-    def preservation_send_order(vehiculo, trama):
-        """Envía orden STOP via QremoteOrder. Retorna response."""
+    def send_order_sell(vehiculo, trama):
+        """Envía la trama de build_trama_sell (STOP de Preservation o LMT de GainsCapture). Retorna response."""
         return DataHub.QremoteOrder[vehiculo]._request(trama)
 
     @staticmethod
@@ -1612,6 +1612,8 @@ class MyOrders:
                     price=pedido["price"],
                     quantity=pedido["quantity"],
                     timeInForce=pedido["timeInForce"],
+                    # sin el disparo Binance rechaza un STOP_LOSS_LIMIT; en una LIMIT viene None y no se envia
+                    stopPrice=pedido.get("stopPrice"),
                 )
                 _BINANCE_STATUS = {
                     "NEW": "Submitted",

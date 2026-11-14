@@ -1556,7 +1556,7 @@ class ClassAgenteIA:
                 continue
 
             try:
-                response = DataHub.preservation_send_order(vehiculo, trama)
+                response = DataHub.send_order_sell(vehiculo, trama)
                 order_id = DataHub.preservation_extract_order_id(response)
 
                 # Un rechazo del broker no levanta excepcion: vuelve como response vacio. Sin este
@@ -2470,7 +2470,7 @@ class Telegram:
         )
         if not trama:
             return f"⚠️ {symbol}: sin trama para el vehiculo {vehiculo}."
-        response = DataHub.preservation_send_order(vehiculo, trama)
+        response = DataHub.send_order_sell(vehiculo, trama)
         order_id = DataHub.preservation_extract_order_id(response)
         if not order_id or str(order_id) in ("None", "null", ""):
             # el estado queda en pendiente_autorizacion: se puede reintentar con /ok

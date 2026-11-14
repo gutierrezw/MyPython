@@ -1383,7 +1383,7 @@ class AgentManager:
                         stop_persistido = stop_anterior
                         if order_id_prev:
                             DataHub.preservation_cancel_order(vehiculo, account, order_id_prev, symbol)
-                        response = DataHub.preservation_send_order(vehiculo, trama)
+                        response = DataHub.send_order_sell(vehiculo, trama)
                         order_id = DataHub.preservation_extract_order_id(response)
                         if not order_id:
                             # el reintento era solo de Stock porque solo IB exponia get_preservation_stops().
@@ -1458,23 +1458,8 @@ class AgentManager:
                             _pedido = trama["pedido"]["orders"][0] if vehiculo == "Stock" else trama["pedido"]
                             limit_price = float(_pedido.get("price") or 0)
                             if order_id and str(order_id) not in ("None", "null", ""):
-                                values = {
-                                    "account": account,
-                                    "vehiculo": vehiculo,
-                                    "conid": int(conid),
-                                    "orderType": "STP LMT",
-                                    "price": limit_price,
-                                    "side": "SELL",
-                                    "intent": "PRESERV",
-                                    "tif": "GTC",
-                                    "quantity": float(qty),
-                                    "clientOrderId": str(order_id),
-                                    "stampPlace": datetime.now(),
-                                    "stampSubmit": datetime.now(),
-                                    "hash_id_oportunidad": hash_id,
-                                    "json_detalle": json.dumps(_det),
-                                }
-                                self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
+                                # la fila de order_trader ya la escribio place_Order* al enviar, con su
+                                # id_order y su status. Insertar otra aca dejaba dos filas por STOP
                                 try:
                                     tag_accion = "MODIFICADA" if order_id_prev else "ENVIADA"
                                     self.RepositorioOportunidades.append_order_audit_log(
