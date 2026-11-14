@@ -1082,6 +1082,10 @@ class AgentManager:
         stop_max_atr_mult = pconfig.get("stop_max_atr_mult", 1.0)
         proteccion_qty_pct = pconfig.get("proteccion_qty_pct", 0.33)
         stop_limit_pct = pconfig.get("stop_limit_pct", 0.01)
+        # fraccion de los dos umbrales de entrada por debajo de la cual se cancela un STOP vivo.
+        # 1.0 = sin histeresis (el comportamiento anterior). Sin calibrar: nunca hubo un STOP
+        # real cruzando el umbral contra el que medirlo
+        histeresis_salida = pconfig.get("histeresis_salida", 0.5)
 
         _claude_key = None
         try:
@@ -1140,6 +1144,30 @@ class AgentManager:
                         _desc["ganancia_baja"] += 1
                     _state_exit = self.preservation_state.get(symbol, {})
                     _order_exit = _state_exit.get("order_id")
+                    # Histeresis: entrar exige roi_minimo y gainInversion; salir, caer bajo una
+                    # fraccion de los dos. Con un solo umbral una posicion que oscila alrededor
+                    # cancela y recrea el STOP en cada cruce, y lo cancela justo cuando el precio
+                    # cae hacia el. En la banda el STOP queda como esta: ni se cancela ni se sube
+                    if (
+                        _order_exit
+                        and roi >= roi_minimo * histeresis_salida
+                        and unrealizedpnl >= gain_inv_usd * histeresis_salida
+                    ):
+                        _diferir(
+                            f"Preservation({vehiculo}/{symbol}): ROI={roi:.1%} bajo la entrada "
+                            f"({roi_minimo:.0%}) pero sobre la salida ({roi_minimo * histeresis_salida:.1%}) "
+                            f"→ el STOP {_order_exit} se conserva", "banda", symbol
+                        )
+                        continue
+                    # DRY-RUN no toca el broker: sin esta guarda el EXIT cancelaba una orden real
+                    # aunque el agente estuviera simulando (BACKLOG #84). Tampoco se toca el estado
+                    if _order_exit and self._preservation_dry_run:
+                        _flush()
+                        self._preservation_logger.warning(
+                            f"[DRY-RUN] [EXIT] {symbol}: ROI={roi:.1%} → cancelaria la orden {_order_exit}; "
+                            f"no se cancela ni se limpia el estado"
+                        )
+                        continue
                     if _order_exit:
                         _flush()
                         try:
