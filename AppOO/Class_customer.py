@@ -1352,6 +1352,7 @@ class DataHub:
                 "symbol": symbol,
                 "pedido": pedido,
                 "hash_id_Op": hash_id,
+                "intent": intent,
             }
         return None
 
@@ -1566,6 +1567,9 @@ class MyOrders:
         def place_OrderCrypto(pedido):
             try:
                 response, enviada, values = {}, {}, {}
+                # mismo criterio y mismos literales que place_OrderStock: order_trader es una sola
+                # tabla y el vehiculo ya va en su columna
+                _intent = intent or ("MANUAL" if origen == "UI" else "")
 
                 self.logger.warning(
                     f"place_OrderCrypto: origen={origen} | symbol={symbol} | side={pedido['side']} | qty={pedido['quantity']} | price={pedido['price']}"
@@ -1644,6 +1648,7 @@ class MyOrders:
                             "stampPlace": datetime.fromtimestamp(stamp),
                             "stampSubmit": datetime.fromtimestamp(stamp),
                             "hash_id_oportunidad": hash_id_Op,
+                            **({"intent": _intent} if _intent else {}),
                         }
                         self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
                         self.logger.warning(

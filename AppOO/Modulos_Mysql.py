@@ -7218,11 +7218,11 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                         conn.close()
                         if row:
                             symbol, intent = row[0], row[1]
-                            # Solo registrar órdenes de agentes (PRESERV o GAINS_CAPTURE)
+                            # Solo registrar órdenes de agentes (PRESERV o GAINS)
                             # Órdenes manuales (intent=NULL) se ignoran — symbol_decision_history es audit de agentes
                             if intent == "PRESERV":
                                 agente = "Preservation"
-                            elif intent == "GAINS_CAPTURE":
+                            elif intent == "GAINS":
                                 agente = "GainsCapture"
                             else:
                                 # Sin intent específico = orden manual, no se registra
@@ -7301,11 +7301,11 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                         try:
                             symbol = r.get("symbol")
                             intent = r.get("intent", "")
-                            # Solo registrar órdenes de agentes (PRESERV o GAINS_CAPTURE)
+                            # Solo registrar órdenes de agentes (PRESERV o GAINS)
                             # Órdenes manuales sin intent se ignoran
                             if intent == "PRESERV":
                                 agente = "Preservation"
-                            elif intent == "GAINS_CAPTURE":
+                            elif intent == "GAINS":
                                 agente = "GainsCapture"
                             else:
                                 # Sin intent específico = orden manual, no se registra en audit de agentes

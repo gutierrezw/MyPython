@@ -1530,7 +1530,7 @@ class ClassAgenteIA:
                             "stampSubmit": datetime.now(),
                             "hash_id_oportunidad": state.get("hash_id_Op"),
                             "json_detalle": json.dumps(_det),
-                            "intent": "GAINS_CAPTURE",
+                            "intent": "GAINS",
                         }
                         self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
                         # Registrar en json_audit_log (ENVIADA)
