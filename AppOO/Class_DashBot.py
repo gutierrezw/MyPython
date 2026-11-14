@@ -93,6 +93,14 @@ from ConvergIA.Interprete_Sentimiento import interpretar_sentimiento
 # la vuelta siguiente y se recreaba entera: FIRY dio 18 propuestas en 8 horas y media.
 GC_PENDIENTE_TTL = 14400
 
+# Cuanto vale un "esperar" de Claude antes de volver a preguntarle. Se le vuelve a consultar cuando
+# cambia lo que Claude tiene para decidir: otras clases disponibles, el ROI de referencia se movio
+# GC_ESPERA_ROI o paso GC_ESPERA_TTL. Medido sobre los 105 "esperar" de FIRY con mercado abierto
+# (07-09 al 14-11): entre dos turnos el ROI se mueve 0,5 puntos de mediana y 2,1 en el p90, asi
+# que 1 punto / 4 h deja 42 consultas de 105. Sin muestra de Crypto: ahi el umbral esta sin calibrar.
+GC_ESPERA_TTL = 14400
+GC_ESPERA_ROI = 0.01
+
 
 # Admistrador de Agentes IA
 class ClassAgenteIA:
@@ -1291,6 +1299,27 @@ class ClassAgenteIA:
                 _gc_logger.debug(f"GainsCapture({symbol}): escalon_pendiente → esperando fill")
                 continue
 
+            # Fuera de la sesion regular el precio no se mueve y la orden no se puede ejecutar: la
+            # consulta a Claude devuelve lo mismo que la ultima. De los 425 "esperar" de FIRY en
+            # agentes_venta.log, 320 se pidieron con el mercado cerrado. Va despues del bloque de
+            # pendientes a proposito: una propuesta viva se sigue refrescando y venciendo igual.
+            # Crypto opera 24x7 y mercado_abierto() lo devuelve siempre abierto
+            if not DataHub.mercado_abierto(vehiculo, con_horario=True):
+                _gc_logger.debug(f"GainsCapture({symbol}): {vehiculo} fuera de sesion → no se consulta a Claude")
+                continue
+
+            _espera = state.get("espera") or {}
+            if (
+                _espera.get("clases") == escenarios_disponibles
+                and abs(roi_ref - _espera.get("roi", 0)) < GC_ESPERA_ROI
+                and (time.time() - _espera.get("ts", 0)) < GC_ESPERA_TTL
+            ):
+                _gc_logger.debug(
+                    f"GainsCapture({symbol}): roi={roi_ref:.1%} → sigue el ESPERAR de Claude "
+                    f"(roi {_espera.get('roi', 0):.1%}), sin consulta nueva"
+                )
+                continue
+
             datos_tecnicos = DataHub.info.get(symbol, {}).get("datos_tecnicos", {})
             claude_result = None
             if _claude_key:
@@ -1337,7 +1366,19 @@ class ClassAgenteIA:
                 _gc_logger.warning(
                     f"GainsCapture({symbol}): roi={roi_ref:.1%} gain=${ganancia_ref:.0f} → ESPERAR — {razon}"
                 )
+                # solo se memoriza una respuesta real: sin evaluacion (sin clave o fallo de la API)
+                # no hay decision que recordar y el proximo turno tiene que volver a intentar
+                if claude_result:
+                    self.gains_capture_state[symbol] = {
+                        **state,
+                        "espera": {"ts": time.time(), "roi": roi_ref, "clases": escenarios_disponibles},
+                    }
+                    write_json_tmp("gains_capture_state.json", self.gains_capture_state)
                 continue
+
+            # Claude dijo vender: el "esperar" anterior deja de valer, y los estados que siguen se
+            # arman con **state
+            state = {**state, "espera": None}
 
             # Si Claude elige una clase que no está entre las válidas, se usa la más chica (fail-closed)
             _elegido = (claude_result.get("escenario") or "").strip()
