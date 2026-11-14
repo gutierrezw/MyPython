@@ -1582,24 +1582,7 @@ class ClassAgenteIA:
                 write_json_tmp("gains_capture_state.json", self.gains_capture_state)
                 try:
                     if order_id and str(order_id) not in ("None", "null", ""):
-                        limit_price = float(round(lmt_price * 0.99, 2))
-                        values = {
-                            "account": account,
-                            "vehiculo": vehiculo,
-                            "conid": int(conid or 0),
-                            "orderType": "LMT",
-                            "price": lmt_price,
-                            "side": "SELL",
-                            "tif": "DAY",
-                            "quantity": float(vender_qty),
-                            "clientOrderId": str(order_id),
-                            "stampPlace": datetime.now(),
-                            "stampSubmit": datetime.now(),
-                            "hash_id_oportunidad": state.get("hash_id_Op"),
-                            "json_detalle": json.dumps(_det),
-                            "intent": "GAINS",
-                        }
-                        self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
+                        # la fila de order_trader ya la escribio el envio al broker (place_Order*)
                         # Registrar en json_audit_log (ENVIADA)
                         try:
                             self.RepositorioOportunidades.append_order_audit_log(
@@ -1642,6 +1625,7 @@ class ClassAgenteIA:
                         lmt_price,
                         float(vender_qty),
                         json.dumps(_det),
+                        cancelar_previas=False,
                     )
                 except Exception as _e:
                     _gc_logger.error(f"GainsCapture({symbol}): insert_preservation_order → {_e}")
@@ -2509,24 +2493,8 @@ class Telegram:
         }
         write_json_tmp("gains_capture_state.json", self.gains_capture_state)
         try:
-            if order_id and str(order_id) not in ("None", "null", ""):
-                lmt_price = float(pendiente["lmt_price"])
-                values = {
-                    "account": pendiente["account"],
-                    "vehiculo": vehiculo,
-                    "conid": int(pendiente["conid"] or 0),
-                    "orderType": "LMT",
-                    "price": lmt_price,
-                    "side": "SELL",
-                    "tif": "DAY",
-                    "quantity": float(pendiente["qty"]),
-                    "clientOrderId": str(order_id),
-                    "stampPlace": datetime.now(),
-                    "stampSubmit": datetime.now(),
-                    "hash_id_oportunidad": state.get("hash_id"),
-                    "json_detalle": json.dumps(pendiente.get("det", {})),
-                }
-                self.RepositorioOportunidades.insert_order_trader(values=values, symbol=symbol)
+            # la fila de order_trader ya la escribio el envio al broker (place_Order*), con id_order,
+            # status e intent: aca solo se le agrega el detalle de la decision
             self.RepositorioOportunidades.insert_preservation_order(
                 pendiente["account"],
                 vehiculo,
@@ -2536,6 +2504,7 @@ class Telegram:
                 pendiente["lmt_price"],
                 float(pendiente["qty"]),
                 json.dumps(pendiente.get("det", {})),
+                cancelar_previas=False,
             )
         except Exception as _e:
             self.logger.error(f"_gains_capture_aprobar({symbol}): insert → {_e}")

@@ -7649,9 +7649,14 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         stop_price: float,
         qty: float,
         json_detalle: str,
+        cancelar_previas: bool = True,
     ) -> bool:
         """Enriquece la fila ya insertada por place_OrderStock con el detalle de la decisión.
         Cancela registros previos activos del mismo símbolo (excluyendo el order_id actual).
+
+        `cancelar_previas=False` solo guarda el detalle. Lo pasa GainsCapture: su venta LMT no
+        reemplaza al STOP de Preservation, que sigue vivo en el broker — marcarlo cancelado aca
+        lo esconde del gate de qty comprometida.
         """
         if not order_id or str(order_id) in ("None", "null", ""):
             _logger.error(
@@ -7665,14 +7670,15 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
         try:
             cursor = conn.cursor()
             placeholders = ",".join(["%s"] * len(_ACTIVE))
-            cursor.execute(
-                f"UPDATE order_trader SET status='Cancelled' "
-                f"WHERE account=%s AND vehiculo=%s AND symbol=%s "
-                f"AND (intent='PRESERV' OR (orderType='STP LMT' AND side='SELL' AND intent IS NULL)) "
-                f"AND status IN ({placeholders}) "
-                f"AND (clientOrderId != %s OR clientOrderId IS NULL)",
-                (account, vehiculo, symbol, *_ACTIVE, str(order_id)),
-            )
+            if cancelar_previas:
+                cursor.execute(
+                    f"UPDATE order_trader SET status='Cancelled' "
+                    f"WHERE account=%s AND vehiculo=%s AND symbol=%s "
+                    f"AND (intent='PRESERV' OR (orderType='STP LMT' AND side='SELL' AND intent IS NULL)) "
+                    f"AND status IN ({placeholders}) "
+                    f"AND (clientOrderId != %s OR clientOrderId IS NULL)",
+                    (account, vehiculo, symbol, *_ACTIVE, str(order_id)),
+                )
             cursor.execute(
                 "UPDATE order_trader SET json_detalle=%s "
                 "WHERE clientOrderId=%s AND account=%s",
