@@ -1259,7 +1259,11 @@ class AgentManager:
 
                 ctx = {}
                 claude_result = None
-                if _claude_key:
+                # En DRY-RUN no se consulta: la respuesta solo puede subir un stop que no se va a
+                # enviar. Medido sobre symbol_decision_history desde el 2026-09-01: 259 consultas
+                # (BTCUSDT 97, SOLUSDT 93, BNBUSDT 51, PBR 12, CIG 3, SWK 3) y ninguna orden. El
+                # stop simulado queda en la base de reglas, y el log lo dice
+                if _claude_key and not self._preservation_dry_run:
                     ctx = self._build_preservation_context(
                         symbol, account, roi, last, sma_base, max_price, stop_calculado, stop_anterior, atr, base_limit
                     )
@@ -1344,7 +1348,7 @@ class AgentManager:
                     if not is_live:
                         order_id = order_id_prev
                         stop_persistido = stop_final
-                        self._preservation_logger.warning(f"[DRY-RUN] {msg}")
+                        self._preservation_logger.warning(f"[DRY-RUN] {msg} | stop de reglas, sin Claude")
                     else:
                         stop_persistido = stop_anterior
                         if order_id_prev:
