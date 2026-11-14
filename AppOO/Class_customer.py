@@ -1356,20 +1356,14 @@ class DataHub:
             }
         return None
 
-    preservation_live_enabled = True  # True = live activo para símbolos en _preservation_live_symbols
-
     @staticmethod
     def preservation_send_order(vehiculo, trama):
         """Envía orden STOP via QremoteOrder. Retorna response."""
-        if not DataHub.preservation_live_enabled:
-            raise RuntimeError("preservation_send_order bloqueado: DataHub.preservation_live_enabled=False")
         return DataHub.QremoteOrder[vehiculo]._request(trama)
 
     @staticmethod
     def preservation_cancel_order(vehiculo, account, order_id, symbol):
         """Cancela una orden PRESERVATION_STOP existente."""
-        if not DataHub.preservation_live_enabled:
-            raise RuntimeError("preservation_cancel_order bloqueado: DataHub.preservation_live_enabled=False")
         trama = {
             "account": account,
             "vehiculo": vehiculo,

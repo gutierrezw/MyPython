@@ -152,7 +152,6 @@ class ClassAgenteIA:
         self.preservation_config = {}  # {vehiculo: sub-dict "preservation"} — extraído de _params_cache
         self.preservation_last_run = {}  # {vehiculo: datetime} — última evaluación por vehículo
         self._params_cache = {}  # {vehiculo: full parsed parameters dict} — compartido entre agentes
-        self._preservation_dry_run = False
         # Cargar estado persistido (sobrevive reinicios — stop_prev correcto sin depender de IB)
         _saved = read_json_tmp("preservation_state.json")
         self.preservation_state = {

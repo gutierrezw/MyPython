@@ -62,9 +62,6 @@ class AgentManager:
         self.preservation_state = {}
         self.preservation_last_run = {}
         self._pres_run_log = {}  # {vehiculo: (snapshot, veces, ultima_escritura)} — dedup de corridas mudas
-        # DRY-RUN para los dos vehiculos: Crypto recien entra al loop y Stock acompania hasta que
-        # se vea el comportamiento de los dos juntos. Poner en False habilita el envio real.
-        self._preservation_dry_run = True
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
@@ -868,7 +865,8 @@ class AgentManager:
         Crypto vuelve al loop (2026-08-31), revirtiendo la decisión H6 del 2026-08-21 que lo había
         sacado. El motivo de entonces era que `is_live` dependía de vehiculo=="Stock", así que Crypto
         simulaba en silencio sin que nadie lo supiera. Eso ya no pasa: `is_live` solo mira
-        `_preservation_dry_run`, que hoy vale True para los dos — los dos simulan, y se ve en el log.
+        `parameters.preservation.modo` de cada vehiculo ("real" envia; sin la clave simula, que es
+        el estado de los dos hoy) y la linea "config cargada" lo dice.
         Los tres frenos que faltaban para Crypto quedaron cerrados el 2026-09-07: la ventana sale de
         `parameters.preservation` y Crypto ya trae 0-24h; el limite del stop se separa del disparador
         por `stop_limit_pct`; y `resolve_unconfirmed_orders()` corre para los dos vehiculos contra el
@@ -1011,7 +1009,8 @@ class AgentManager:
             self._preservation_logger.warning(
                 f"Preservation({vehiculo}): config cargada | roi_min={pconfig.get('roi_minimo', 0.10)} | "
                 f"prot={pconfig.get('proteccion_base', 0.50)} | "
-                f"ventana={ventana_desde}-{ventana_hasta}h cada {intervalo_min / 3600:.1f}h"
+                f"ventana={ventana_desde}-{ventana_hasta}h cada {intervalo_min / 3600:.1f}h | "
+                f"modo={'REAL' if pconfig.get('modo') == 'real' else 'SIMULACION'}"
             )
 
         _preservation_state_fresh = read_json_tmp("preservation_state.json")
@@ -1086,6 +1085,9 @@ class AgentManager:
         # 1.0 = sin histeresis (el comportamiento anterior). Sin calibrar: nunca hubo un STOP
         # real cruzando el umbral contra el que medirlo
         histeresis_salida = pconfig.get("histeresis_salida", 0.5)
+        # unico interruptor de Preservation, por vehiculo: solo "real" envia al broker. Sin la clave
+        # o con cualquier otro valor se simula — un error de tipeo no puede habilitar ordenes
+        dry_run = pconfig.get("modo", "simulacion") != "real"
 
         _claude_key = None
         try:
@@ -1161,7 +1163,7 @@ class AgentManager:
                         continue
                     # DRY-RUN no toca el broker: sin esta guarda el EXIT cancelaba una orden real
                     # aunque el agente estuviera simulando (BACKLOG #84). Tampoco se toca el estado
-                    if _order_exit and self._preservation_dry_run:
+                    if _order_exit and dry_run:
                         _flush()
                         self._preservation_logger.warning(
                             f"[DRY-RUN] [EXIT] {symbol}: ROI={roi:.1%} → cancelaria la orden {_order_exit}; "
@@ -1291,7 +1293,7 @@ class AgentManager:
                 # enviar. Medido sobre symbol_decision_history desde el 2026-09-01: 259 consultas
                 # (BTCUSDT 97, SOLUSDT 93, BNBUSDT 51, PBR 12, CIG 3, SWK 3) y ninguna orden. El
                 # stop simulado queda en la base de reglas, y el log lo dice
-                if _claude_key and not self._preservation_dry_run:
+                if _claude_key and not dry_run:
                     ctx = self._build_preservation_context(
                         symbol, account, roi, last, sma_base, max_price, stop_calculado, stop_anterior, atr, base_limit
                     )
@@ -1357,7 +1359,7 @@ class AgentManager:
                     price=stop_final * (1 - stop_limit_pct), intent="PRESERV", stop_price=stop_final,
                 )
 
-                is_live = not self._preservation_dry_run
+                is_live = not dry_run
 
                 if stop_final > stop_anterior or not order_id_prev:
                     _flush()
