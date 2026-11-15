@@ -75,12 +75,24 @@ NIVEL_ALERTA = -0.60  # pct > -0.60
 # sobre un denominador diminuto: se devuelve S/D en vez de un nivel que no representa nada.
 MIN_VOTOS_SENAL = 3
 
-# Umbral del unico eje medible hoy en cripto: |ls_top_pos - ls_cuentas| de los futuros perpetuos.
-# No sale de un salto natural en los datos -- medido el 2026-11-09 sobre 540 observaciones (18 pares
-# x 30 dias) la |divergencia| es continua: p10 0,135 / p25 0,313 / p50 0,702 / p75 1,294 / p90 1,993.
-# Los cortes 0,40, 0,50 y 0,60 dan los mismos 12 votantes de 18, asi que 0,50 esta en el medio de una
-# banda insensible: se elige el redondo y no un decimal con falsa precision.
-UMBRAL_DIVERGENCIA_CRIPTO = 0.50
+# Umbral del unico eje medible hoy en cripto: ls_top_pos - ls_cuentas de los futuros perpetuos,
+# medido en desvios contra la historia propia del par (ver divergencia_cripto).
+# Hasta el 2026-11-15 el umbral era 0,50 sobre la resta cruda y eso media el tamano del par, no su
+# posicionamiento: Spearman -0,64 contra marketCap, con el voto casi fijo por par (BNB/XRP/SOL nunca
+# positivos, las chicas nunca negativas). Contra la historia propia la correlacion con el tamano
+# desaparece. Con 1,5 desvios vota cerca de un tercio de las observaciones.
+UMBRAL_DIVERGENCIA_CRIPTO = 1.5
+
+# Dias previos que necesita un par para tener una media propia que signifique algo. Con menos, S/D.
+MIN_DIAS_DIVERGENCIA_CRIPTO = 14
+
+# Ventana de la historia propia. La serie crece un dia por dia, asi que la media se afirma sola hasta
+# este tope; despues rueda, para no comparar contra un mercado que ya no existe.
+DIAS_HISTORIA_DIVERGENCIA_CRIPTO = 90
+
+# Bases que no emiten Senal: una stablecoin no tiene tendencia que leer, y su posicionamiento de
+# futuros es arbitraje de la paridad. USDCUSDT llego a figurar como TENDENCIA.
+STABLECOINS_CRIPTO = ("USDC", "FDUSD", "BUSD", "TUSD", "DAI", "USDP")
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +208,34 @@ def senal_consenso(votos_activos: list, suma: int) -> tuple:
     return etiqueta, suma, n
 
 
+def divergencia_cripto(symbol, serie):
+    """Divergencia del ultimo dia de un par, en desvios contra su propia historia. None = no se mide.
+
+    `serie` es la lista por fecha ASC que devuelve MarketScreen.load_positioning. La divergencia del
+    dia es ls_top_pos - ls_cuentas; se le resta la media de los dias PREVIOS del mismo par y se divide
+    por su desvio. El dia medido no entra en su propia media.
+
+    Devuelve None, y por lo tanto S/D en senal_cripto, cuando el par es una stablecoin, cuando el
+    ultimo dia no trae los dos ratios, cuando hay menos de MIN_DIAS_DIVERGENCIA_CRIPTO dias previos
+    o cuando la historia no tiene dispersion.
+    """
+    base = symbol[:-4] if symbol.endswith("USDT") else symbol
+    if base in STABLECOINS_CRIPTO or not serie:
+        return None
+    top, glob = serie[-1].get("ls_top_pos"), serie[-1].get("ls_cuentas")
+    if top is None or glob is None:
+        return None
+    previas = [f["ls_top_pos"] - f["ls_cuentas"] for f in serie[:-1]
+               if f.get("ls_top_pos") is not None and f.get("ls_cuentas") is not None]
+    if len(previas) < MIN_DIAS_DIVERGENCIA_CRIPTO:
+        return None
+    media = sum(previas) / len(previas)
+    desvio = (sum((p - media) ** 2 for p in previas) / (len(previas) - 1)) ** 0.5
+    if desvio <= 0:
+        return None
+    return (top - glob - media) / desvio
+
+
 def senal_cripto(divergencia) -> tuple:
     """Senal de un par cripto. Mismo contrato que senal_consenso: (etiqueta, suma, n_activos).
 
@@ -211,8 +251,9 @@ def senal_cripto(divergencia) -> tuple:
     Con un solo eje medido solo existen tres estados, asi que UNANIME, CONSENSO y SALIDA quedan sin
     emitir a proposito: llenarlos hoy inventaria precision que la medicion no tiene.
 
-    `divergencia` None (par sin contrato de futuros, o sin serie persistida) devuelve S/D con n=0,
-    que es lo que distingue "no medido" de "medido y neutral".
+    `divergencia` viene de divergencia_cripto: desvios contra la historia propia del par. None (par
+    sin contrato de futuros, sin historia suficiente, o stablecoin) devuelve S/D con n=0, que es lo
+    que distingue "no medido" de "medido y neutral".
     """
     if divergencia is None:
         return "— S/D", 0, 0

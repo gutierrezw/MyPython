@@ -9,7 +9,7 @@ import json
 import logging
 import time
 
-from AppValuations.consenso_score import senal_cripto
+from AppValuations.consenso_score import DIAS_HISTORIA_DIVERGENCIA_CRIPTO, divergencia_cripto, senal_cripto
 from Class_DataFrame import get_yfinance
 from Modulos_Mysql import MarketScreen, PlanInversion
 from Modulos_python import timedelta
@@ -361,8 +361,10 @@ class ServiciosCrypto:
         dia por dia sin backfill aparte.
 
         31 dias no alcanzan para entrenar una feature del modelo —eso sigue siendo cierto y es lo que
-        cerro la etapa 2 del plan— pero si alcanzan para votar hoy: el eje de divergencia compara el
-        posicionamiento de las cuentas grandes contra el de la masa en el dia, no contra la historia.
+        cerro la etapa 2 del plan— pero si alcanzan para votar: el eje de divergencia compara el
+        posicionamiento de las cuentas grandes contra el de la masa, y ese numero contra la historia
+        propia del par. Por eso la Senal se calcula leyendo la serie persistida y no la descarga:
+        la tabla guarda mas dias que los que Binance expone.
 
         Un par sin contrato de futuros devuelve {} y se cuenta aparte (caso FDUSDUSDT).
         """
@@ -371,20 +373,17 @@ class ServiciosCrypto:
             return {"pares": 0, "filas": 0, "sin_futuros": [], "detalle": f"sin pares activos para {account}"}
 
         resultado = {"pares": len(symbols), "con_dato": 0, "filas": 0, "sin_futuros": []}
-        filas, divergencias = [], {}
+        filas, con_dato = [], []
         for symbol in symbols:
             series = self._client.fetch_positioning(symbol)
             if not series:
                 resultado["sin_futuros"].append(symbol)
-                divergencias[symbol] = None
                 continue
             resultado["con_dato"] += 1
+            con_dato.append(symbol)
             for fecha, valores in series.items():
                 filas.append((symbol, fecha, valores.get("ls_cuentas"), valores.get("ls_top_pos"),
                               valores.get("taker_ratio"), valores.get("open_interest")))
-            ultimo = series[max(series)]
-            top, glob = ultimo.get("ls_top_pos"), ultimo.get("ls_cuentas")
-            divergencias[symbol] = None if top is None or glob is None else top - glob
 
         if filas:
             # `filas` es lo enviado, no el retorno del insert: el rowcount de un executemany con
@@ -394,7 +393,11 @@ class ServiciosCrypto:
             resultado["filas"] = len(filas)
             resultado["rango"] = f"{min(f[1] for f in filas)} -> {max(f[1] for f in filas)}"
             if not MarketScreen().insert_positioning(filas):
+                # sin el dia de hoy en la tabla la Senal saldria de una serie vieja: no se sella
                 resultado["error_bd"] = True
+                return resultado
+        historia = MarketScreen().load_positioning(con_dato, dias=DIAS_HISTORIA_DIVERGENCIA_CRIPTO) if con_dato else {}
+        divergencias = {symbol: divergencia_cripto(symbol, historia.get(symbol)) for symbol in symbols}
         resultado.update(self._persiste_senal(account, divergencias))
         return resultado
 

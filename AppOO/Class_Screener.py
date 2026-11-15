@@ -21,7 +21,9 @@ from AppValuations.consenso_score import (
     voto_flujo,
     senal_consenso,
     senal_cripto,
+    divergencia_cripto,
     UMBRAL_DIVERGENCIA_CRIPTO,
+    DIAS_HISTORIA_DIVERGENCIA_CRIPTO,
 )
 from Modulos_python import (
     tk,
@@ -2354,18 +2356,6 @@ class Screener(tk.Frame):
                 return ""
             return f"{v:+.1%}" if signo else f"{v:.1%}"
 
-        def _divergencia(serie):
-            # El unico insumo de futuros con signos mezclados entre pares: las cuentas grandes contra
-            # la masa. Taker y open interest apuntan igual en 16-18 de los 18 pares (regimen, no
-            # discriminacion por par), asi que no votan -- se informan como regimen en el encabezado.
-            # El umbral y la etiqueta no viven aca: los decide senal_cripto() en consenso_score.
-            if not serie:
-                return None
-            top, glob = serie[-1].get("ls_top_pos"), serie[-1].get("ls_cuentas")
-            if top is None or glob is None:
-                return None
-            return top - glob
-
         def _regimen(series):
             # Lo que taker y open interest si dicen: hacia donde va el libro entero. Se cuenta, no se
             # promedia -- un par con open interest chico no debe pesar igual que BTC en una media.
@@ -2401,8 +2391,10 @@ class Screener(tk.Frame):
         cartera = self.ScMarket.load_cartera_inst(self.accounts, categoria="C", orden="marketCap DESC")
         # Una sola consulta para toda la ventana, no una por par: Binance solo expone 31 dias de estas
         # series y por eso las persiste Agente_CryptoPositioning -- aca se lee de crypto_positioning.
-        series = self.ScMarket.load_positioning([r["symbol"] for r in cartera])
-        medidos, oi_baja, tk_baja = _regimen(series)
+        # La ventana larga es la de la Senal; el regimen sigue leyendo el ultimo mes.
+        series = self.ScMarket.load_positioning([r["symbol"] for r in cartera],
+                                                dias=DIAS_HISTORIA_DIVERGENCIA_CRIPTO)
+        medidos, oi_baja, tk_baja = _regimen({sym: serie[-30:] for sym, serie in series.items()})
 
         filas = []
         for row in cartera:
@@ -2415,7 +2407,11 @@ class Screener(tk.Frame):
             dist = (last / maximo - 1) if last and maximo else None
             pct_circ = (circ / total) if circ and total else None
             rango = f"{_TAG_DISPLAY[tag]:<9}  {pos:.0%}" if pos is not None else _TAG_DISPLAY[tag]
-            div = _divergencia(series.get(row["symbol"]))
+            # El unico insumo de futuros con signos mezclados entre pares: las cuentas grandes contra
+            # la masa. Taker y open interest apuntan igual en 16-18 de los 18 pares (regimen, no
+            # discriminacion por par), asi que no votan -- se informan como regimen en el encabezado.
+            # La medida, el umbral y la etiqueta no viven aca: los decide consenso_score.
+            div = divergencia_cripto(row["symbol"], series.get(row["symbol"]))
             senal, voto, _n = senal_cripto(div)
             filas.append(
                 {
@@ -2528,7 +2524,7 @@ class Screener(tk.Frame):
 
         senal_frame = tk.Frame(win, bg="#111111")
         senal_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(2, 0))
-        tk.Label(senal_frame, text=f"Señal (umbral {UMBRAL_DIVERGENCIA_CRIPTO:.2f}):", bg="#111111",
+        tk.Label(senal_frame, text=f"Señal (umbral {UMBRAL_DIVERGENCIA_CRIPTO:.1f} desvíos):", bg="#111111",
                  fg="#777777", font=("Arial", 9)).pack(side=tk.LEFT, padx=(10, 4), pady=2)
         for key, color in _SENAL_COLOR:
             tk.Label(

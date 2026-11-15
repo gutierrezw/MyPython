@@ -212,11 +212,32 @@ convierte en UTC; las 648 filas existentes se corrieron un día con un `UPDATE .
 solo sale con el día cerrado. Se completa solo con el upsert del día siguiente. Quien lo consuma lee
 el **último día cerrado**, no la última fila.
 
-**Punto de atención — la divergencia hoy mide el tamaño del par.** Medido sobre 30 días y 15 pares:
-correlación con `marketCap` **−0,64**, negativa los 30 días. Las grandes casi nunca votan positivo
-(BNB, XRP, SOL 0%) y las chicas casi nunca negativo; lo mueve `ls_cuentas` (+0,60 contra tamaño), no
-las cuentas grandes (−0,15), y el logaritmo no lo corrige (−0,63). El eje sirve solo comparando cada
-par contra su propia historia — pendiente.
+### La Señal cripto compara cada par contra su propia historia (2026-11-15)
+
+**La divergencia cruda medía el tamaño del par, no su posicionamiento.** Con el umbral 0,50 sobre
+`ls_top_pos − ls_cuentas`, medido sobre 30 días y 15 pares: correlación con `marketCap` **−0,64**,
+negativa los 30 días. Las grandes casi nunca votaban positivo (BNB, XRP, SOL 0%) y las chicas casi nunca
+negativo; lo movía `ls_cuentas` (+0,60 contra tamaño), no las cuentas grandes (−0,15), y el logaritmo
+no lo corregía (−0,63). El voto era casi una constante por par.
+
+Hoy `divergencia_cripto(symbol, serie)` (`consenso_score.py`) devuelve la divergencia del último día
+**en desvíos contra la media de los días previos del mismo par**, y `senal_cripto` vota con
+`UMBRAL_DIVERGENCIA_CRIPTO = 1,5`. Medido con la función real sobre 272 observaciones: la correlación
+con `marketCap` baja a **+0,09** y vota el **29%** (antes 51%). Es el único dueño de la medida: la usan
+`sync_positioning_cartera` (que persiste en `market`) y la ventana Señal Cripto.
+
+- **`S/D` con menos de 14 días previos** (`MIN_DIAS_DIVERGENCIA_CRIPTO`): un par nuevo no vota hasta
+  tener media propia.
+- **La historia se lee de `crypto_positioning`, no de la descarga**, con ventana de 90 días
+  (`DIAS_HISTORIA_DIVERGENCIA_CRIPTO`). La tabla suma un día por día, así que la media se afirma sola
+  hasta ese tope y después rueda. Si el insert del día falla, la Señal **no se sella**.
+- **Las stablecoins no emiten Señal** (`STABLECOINS_CRIPTO`): quedan `S/D` y `consenso_tag` NULL.
+  USDCUSDT figuraba como `↗ TENDENCIA`. La fila sigue viéndose en la ventana.
+
+**Puntos de atención.** La muestra es corta: 16 días medibles; alcanza para ver que el sesgo de tamaño
+desaparece, **no** para saber si la Señal predice. Y sale cargada a la baja (22% negativos, 7%
+positivos): cuando el libro entero se mueve junto, la historia propia lo lee como par por par.
+`UNANIME`/`CONSENSO`/`SALIDA` siguen sin emitirse: un solo eje.
 
 ---
 
