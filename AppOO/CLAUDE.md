@@ -199,6 +199,25 @@ posición existe y debe verse.
 de rotación: los consumen el Screener (que lee la fila como tupla con índice) y esta ventana (que la lee como
 dict). Antes la lógica vivía dentro del `_rotacion` anidado de `insert_treeview`, inalcanzable desde fuera.
 
+### `crypto_positioning` — la fecha es el día de Binance (UTC), y el taker llega un día atrás (2026-11-15)
+
+**`fecha` estaba corrida un día.** `fetch_positioning` convertía el `timestamp` con la hora local: las
+00:00 UTC son las 21:00 de la víspera, así que el día 14 de Binance se guardaba como 13. Era parejo en
+las cuatro series —no las desalineaba entre sí— pero no coincidía con las klines del mismo día. Hoy
+convierte en UTC; las 648 filas existentes se corrieron un día con un `UPDATE ... ORDER BY fecha DESC`
+(el orden evita chocar con `uq_crypto_pos`).
+
+**`taker_ratio` vacío en la fila más nueva no es un fallo.** `ls_cuentas`, `ls_top_pos` y
+`open_interest` son una foto y Binance publica la del día en curso; el taker es volumen acumulado y
+solo sale con el día cerrado. Se completa solo con el upsert del día siguiente. Quien lo consuma lee
+el **último día cerrado**, no la última fila.
+
+**Punto de atención — la divergencia hoy mide el tamaño del par.** Medido sobre 30 días y 15 pares:
+correlación con `marketCap` **−0,64**, negativa los 30 días. Las grandes casi nunca votan positivo
+(BNB, XRP, SOL 0%) y las chicas casi nunca negativo; lo mueve `ls_cuentas` (+0,60 contra tamaño), no
+las cuentas grandes (−0,15), y el logaritmo no lo corrige (−0,63). El eje sirve solo comparando cada
+par contra su propia historia — pendiente.
+
 ---
 
 ## Autonomía del usuario

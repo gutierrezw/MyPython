@@ -39,6 +39,7 @@ from Modulos_python import (
     webbrowser,
     datetime,
     date,
+    timezone,
 )
 import pathlib
 from Modulos_Mysql import BDsystem, RepositorioOportunidadesBuySell
@@ -782,7 +783,9 @@ class BinanceClient:
         for campo, filas in series.items():
             for fila in filas:
                 try:
-                    fecha = datetime.fromtimestamp(int(fila["timestamp"]) / 1000).date()
+                    # el dia es el de Binance (UTC). Con la hora local las 00:00 UTC caian en la
+                    # vispera y la fila quedaba fechada un dia antes que las klines del mismo dia
+                    fecha = datetime.fromtimestamp(int(fila["timestamp"]) / 1000, timezone.utc).date()
                     valor = float(fila[FAPI_SERIES[campo][1]])
                 except (KeyError, TypeError, ValueError):
                     continue
