@@ -983,6 +983,27 @@ correcto, el `value` no se mueve. A PBR la renueva `Agente_PerformaValidator` po
 que sus propios números no dan (22 unidades a 20,87 contra 431,59 de costo da 1,06), así que el 2,44
 viene de otra fila. Frente aparte — `AppTest/diag_performa_cuarentena.py`.
 
+### El validador compara precio, no valor (2026-11-15)
+
+**`performa_inversion` de Stock quedó congelada en el 11-06 por una compra, no por un dato roto.**
+`validate_performa` marcaba como precio corrupto todo `value / value_ayer` fuera de `[0,1 ; 2,0]`. El
+09-11 se compraron 14 LUNR (18 → 32 unidades) y el valor pasó de 188,46 a 385,28: **ratio 2,04 con el
+precio sano** (12,04 / 10,47 = 1,15).
+
+El lazo no tenía salida porque el dato siempre volvía igual: la diaria reescribía LUNR, el validador
+lo borraba a la hora, **borraba `performa_inversion` de Stock desde el 09-11** y devolvía
+`diaria_Stock` al 08-11. A las 3 purgas, cuarentena de 24 h; al vencer, de nuevo.
+
+Hoy las tres detecciones dividen por `cantidad`: valor y extremas de Crypto comparan
+`value / cantidad`, y el costo compara `costo_base / cantidad`. Medido sobre el último año, las
+detecciones bajan en Stock de 17 a 5 (valor) y de 9 a 3 (costo); en Crypto de 3 a 0 y en BotCrypto de
+61 a 0 — eran operaciones, no precios.
+
+**Punto de atención — el chequeo de `costo_base` sobre `performa_inversion` sigue por total.** Es el
+agregado del vehículo y no tiene cantidad que dividir; solo dispararía si una operación duplica el
+costo de toda la cartera. Y la purga sigue sin dejar línea en ningún log: el caso se reconstruyó desde
+`cache_health` y `booktrading`.
+
 ## Gráfico de performance — la fuente es `performa_inversion`, no un recálculo (2026-11-11)
 
 **Reversión de `9986292` (2026-03-08), que cambió la fuente sin declarar motivo.** Ese commit hizo

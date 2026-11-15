@@ -1158,19 +1158,23 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             cursor = conn.cursor()
 
             # ── 1. Validar diaria_performance.value ───────────────────────────
+            # el ratio es de PRECIO (value / cantidad), no de valor: una compra que duplica la
+            # posicion mueve el valor mas de 2x con el precio sano y se purgaba en lazo
+            # (LUNR 18 → 32 unidades el 2026-11-09). Lo mismo en 1b y en el costo_base de 2
             cursor.execute(
                 """
                 SELECT t.Date, t.symbol, t.value, t.value_ayer,
-                       t.value / t.value_ayer AS value_ratio
+                       t.precio / t.precio_ayer AS value_ratio
                 FROM (
-                    SELECT Date, symbol, value,
-                           LAG(value) OVER (PARTITION BY account, symbol ORDER BY Date) AS value_ayer
+                    SELECT Date, symbol, value, value / cantidad AS precio,
+                           LAG(value) OVER (PARTITION BY account, symbol ORDER BY Date) AS value_ayer,
+                           LAG(value / cantidad) OVER (PARTITION BY account, symbol ORDER BY Date) AS precio_ayer
                     FROM diaria_performance
-                    WHERE account = %s AND value > 0
+                    WHERE account = %s AND value > 0 AND cantidad > 0
                 ) t
-                WHERE t.value_ayer > 0
+                WHERE t.precio_ayer > 0
                   AND t.Date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-                  AND (t.value / t.value_ayer > %s OR t.value / t.value_ayer < %s)
+                  AND (t.precio / t.precio_ayer > %s OR t.precio / t.precio_ayer < %s)
                 ORDER BY t.Date ASC
                 """,
                 (account, threshold, low_threshold),
@@ -1183,16 +1187,17 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                 cursor.execute(
                     """
                     SELECT t.Date, t.symbol, t.value, t.value_ayer,
-                           t.value / t.value_ayer AS value_ratio
+                           t.precio / t.precio_ayer AS value_ratio
                     FROM (
-                        SELECT Date, symbol, value,
-                               LAG(value) OVER (PARTITION BY account, symbol ORDER BY Date) AS value_ayer
+                        SELECT Date, symbol, value, value / cantidad AS precio,
+                               LAG(value) OVER (PARTITION BY account, symbol ORDER BY Date) AS value_ayer,
+                               LAG(value / cantidad) OVER (PARTITION BY account, symbol ORDER BY Date) AS precio_ayer
                         FROM diaria_performance
-                        WHERE account = %s AND value > 0
+                        WHERE account = %s AND value > 0 AND cantidad > 0
                     ) t
-                    WHERE t.value_ayer > 0
+                    WHERE t.precio_ayer > 0
                       AND t.Date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-                      AND (t.value / t.value_ayer > %s OR t.value / t.value_ayer < %s)
+                      AND (t.precio / t.precio_ayer > %s OR t.precio / t.precio_ayer < %s)
                     ORDER BY t.Date ASC
                     """,
                     (account, extreme_threshold, 1.0 / extreme_threshold),
@@ -1203,16 +1208,17 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             cursor.execute(
                 """
                 SELECT t.Date, t.symbol, t.costo_base, t.costo_base_ayer,
-                       t.costo_base / t.costo_base_ayer AS ratio
+                       t.costo_u / t.costo_u_ayer AS ratio
                 FROM (
-                    SELECT Date, symbol, costo_base,
-                           LAG(costo_base) OVER (PARTITION BY account, symbol ORDER BY Date) AS costo_base_ayer
+                    SELECT Date, symbol, costo_base, costo_base / cantidad AS costo_u,
+                           LAG(costo_base) OVER (PARTITION BY account, symbol ORDER BY Date) AS costo_base_ayer,
+                           LAG(costo_base / cantidad) OVER (PARTITION BY account, symbol ORDER BY Date) AS costo_u_ayer
                     FROM diaria_performance
-                    WHERE account = %s AND costo_base > 0
+                    WHERE account = %s AND costo_base > 0 AND cantidad > 0
                 ) t
-                WHERE t.costo_base_ayer > 0
+                WHERE t.costo_u_ayer > 0
                   AND t.Date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-                  AND (t.costo_base / t.costo_base_ayer > %s OR t.costo_base / t.costo_base_ayer < %s)
+                  AND (t.costo_u / t.costo_u_ayer > %s OR t.costo_u / t.costo_u_ayer < %s)
                 ORDER BY t.Date ASC
                 """,
                 (account, threshold, low_threshold),
