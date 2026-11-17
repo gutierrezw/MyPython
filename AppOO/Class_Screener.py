@@ -1693,11 +1693,8 @@ class Screener(tk.Frame):
         if not row:
             return
 
-        p33_net, p67_net = _build_net_percentiles(cartera)
-        p33_flujo, p67_flujo = _build_flujo_percentiles(cartera)
-        syms_buy, syms_sell = _load_csv_signals()
-        sentiment = load_sentiment(self.account)
-        analysis = load_analysis(self.account)
+        ctx = contexto_consenso(self.account, cartera)
+        votos = votos_consenso(row, ctx)
 
         buy_r = float(row.get("fh_buy_ratio") or 0.0)
         sell_r = float(row.get("fh_sell_ratio") or 0.0)
@@ -1710,14 +1707,9 @@ class Screener(tk.Frame):
         n_ana = row.get("analyst_count") or 0
         categ = row.get("categoriaActivo") or ""
 
-        v_net = voto_net_relativo(buy_r, sell_r, p33_net, p67_net, row.get("fh_count"))
-        v_opt = voto_options(call_s, put_s)
-        v_flujo = voto_flujo(new_ent, exits, row.get("fh_count"), p33_flujo, p67_flujo)
-        v_ana = voto_analistas(rec)
-        v_val = voto_valuacion(categ)
-        v_cob = voto_cobertura(fh_count)
-        v_sent = voto_tech_alignment(symbol, sentiment, analysis)
-        ia_signal = "BUY" if symbol in syms_buy else ("SELL" if symbol in syms_sell else "—")
+        v_net, v_opt, v_flujo = votos["Net"], votos["Opt"], votos["Flujo"]
+        v_ana, v_val, v_cob, v_sent = votos["Ana"], votos["Val"], votos["Cob"], votos["Sent"]
+        ia_signal = {1: "BUY", -1: "SELL"}.get(votos["Mod"], "—")
 
         def _rank(val, p33, p67):
             if val >= p67:
@@ -1728,7 +1720,7 @@ class Screener(tk.Frame):
 
         if fh_count:
             net = buy_r - sell_r
-            d_net = f"Buy {buy_r:.1%}  Sell {sell_r:.1%}  →  {_rank(net, p33_net, p67_net)}"
+            d_net = f"Buy {buy_r:.1%}  Sell {sell_r:.1%}  →  {_rank(net, ctx['p33_net'], ctx['p67_net'])}"
         else:
             d_net = "sin fondos 13F"
 
@@ -1741,7 +1733,7 @@ class Screener(tk.Frame):
 
         if fh_count:
             fn = max(-1.0, min(1.0, (new_ent - exits) / fh_count))
-            d_flujo = f"+{new_ent} nuevos  −{exits} salidas  →  {_rank(fn, p33_flujo, p67_flujo)}"
+            d_flujo = f"+{new_ent} nuevos  −{exits} salidas  →  {_rank(fn, ctx['p33_flujo'], ctx['p67_flujo'])}"
         else:
             d_flujo = "sin datos de flujo"
 
@@ -1762,11 +1754,11 @@ class Screener(tk.Frame):
         else:
             d_cob = "sin datos 13F  →  abstiene"
 
-        if symbol in (analysis or {}):
-            patron = analysis[symbol].get("patron", "neutro")
+        if symbol in (ctx["analysis"] or {}):
+            patron = ctx["analysis"][symbol].get("patron", "neutro")
             d_sent = f"patron: {patron}"
-        elif symbol in (sentiment or {}):
-            d_sent = f"sentimiento: {sentiment[symbol]:+d}"
+        elif symbol in (ctx["sentiment"] or {}):
+            d_sent = f"sentimiento: {ctx['sentiment'][symbol]:+d}"
         else:
             d_sent = "sin datos de sentimiento"
 
@@ -1790,10 +1782,7 @@ class Screener(tk.Frame):
             "SALIDA": "#FF6060",
         }
 
-        votos_activos = [v for v in [v_net, v_opt, v_flujo, v_ana, v_val, v_cob, v_sent] if v is not None]
-        suma = sum(votos_activos)
-        tag, _, _ = senal_consenso(votos_activos, suma)
-        n_activos = len(votos_activos)
+        tag, suma, n_activos = senal_votos(votos)
 
         # (fuente, detalle, regla, voto, es_ia)
         filas = [
@@ -1974,17 +1963,6 @@ class Screener(tk.Frame):
             else:
                 return "REVISAR"
 
-        def _read_csv_signals(filename):
-            try:
-                path = define_FileCache(name=f"{filename}.CSV")
-                df = pd.read_csv(path, header=0, sep=",", encoding="utf-8", index_col=False)
-                df.columns = df.columns.str.strip()
-                return set(df["Symbol"].dropna().str.strip().tolist()) if "Symbol" in df.columns else set()
-            except (EmptyDataError, FileNotFoundError):
-                return set()
-            except Exception:
-                return set()
-
         def _float_ratio(row):
             float_shares = row.get("floatShares") or 0
             vol = row.get("volume") or 0
@@ -2028,15 +2006,9 @@ class Screener(tk.Frame):
             return _TAG_DISPLAY.get(tag, tag), s, n
 
         cartera = self.ScMarket.load_cartera_inst(self.account)
-        syms_buy = _read_csv_signals("csv_datosIA_buy")
-        syms_sell = _read_csv_signals("csv_datosIA_sell")
-
-        p33_net, p67_net = _build_net_percentiles(cartera)
-        p33_flujo, p67_flujo = _build_flujo_percentiles(cartera)
+        ctx = contexto_consenso(self.account, cartera)
 
         # Construir filas y ordenar por prioridad de consenso
-        sentiment = load_sentiment(self.account)
-        analysis = load_analysis(self.account)
         filas = []
         for row in cartera:
             sym = row["symbol"]
@@ -2048,9 +2020,8 @@ class Screener(tk.Frame):
             _senal = _senal_analyst(rec)
             _n_ana = str(row["analyst_count"]) if row.get("analyst_count") else ""
             senal_ana = f"{_senal:<10}  {_n_ana:>3}" if _senal and _n_ana else _senal
-            en_buy = sym in syms_buy
-            en_sell = sym in syms_sell
-            modelo = "▲ COMPRAR" if en_buy else ("▼ VENDER" if en_sell else "—")
+            votos = votos_consenso(row, ctx)
+            modelo = {1: "▲ COMPRAR", -1: "▼ VENDER"}.get(votos["Mod"], "—")
             ratio = _float_ratio(row)
             float_str = _senal_float(ratio)
             inst_val = min(row["inst_ownership_pct"], 1.0) if row.get("inst_ownership_pct") else None
@@ -2061,21 +2032,7 @@ class Screener(tk.Frame):
             n_inst = str(row["fh_count"]) if row.get("fh_count") else ""
             nombre = (row.get("shortName") or "")[:35]
 
-            votos = {
-                "Net": voto_net_relativo(fh_buy_ratio, fh_sell_ratio, p33_net, p67_net, row.get("fh_count")),
-                "Opt": voto_options(row.get("fh_call_shares"), row.get("fh_put_shares")),
-                "Flujo": voto_flujo(
-                    row.get("new_entrants"), row.get("full_exits"), row.get("fh_count"), p33_flujo, p67_flujo
-                ),
-                "Ana": voto_analistas(rec),
-                "Mod": (1 if en_buy else (-1 if en_sell else 0)),
-                "Val": voto_valuacion(categ),
-                "Cob": voto_cobertura(row.get("fh_count")),
-                "Sent": voto_tech_alignment(sym, sentiment, analysis),
-            }
-            activos = {k: v for k, v in votos.items() if k != "Mod" and v is not None}
-            suma = sum(activos.values())
-            tag, _suma, _n = senal_consenso(list(activos.values()), suma)
+            tag, _suma, _n = senal_votos(votos)
             _etiq = _TAG_DISPLAY.get(tag, tag)
             consenso = f"{_etiq:<12}  {_suma:+d}/{_n}" if _n else _etiq
 
@@ -3245,41 +3202,68 @@ def _load_csv_signals():
     return _read("csv_datosIA_buy"), _read("csv_datosIA_sell")
 
 
+def contexto_consenso(account, cartera):
+    """Lo que los votos miden contra toda la cartera, leido una vez por pasada (no por simbolo)."""
+    p33_net, p67_net = _build_net_percentiles(cartera)
+    p33_flujo, p67_flujo = _build_flujo_percentiles(cartera)
+    syms_buy, syms_sell = _load_csv_signals()
+    return {
+        "p33_net": p33_net,
+        "p67_net": p67_net,
+        "p33_flujo": p33_flujo,
+        "p67_flujo": p67_flujo,
+        "syms_buy": syms_buy,
+        "syms_sell": syms_sell,
+        "sentiment": load_sentiment(account),
+        "analysis": load_analysis(account),
+    }
+
+
+def votos_consenso(row, ctx):
+    """Los votos del Consenso Stock de un simbolo. Fuente unica: el Desglose, la ventana Señales y
+    refresh_consenso_tags (lo que leen TV, Telegram y DashBot) votan con esta funcion. Antes eran tres
+    copias y la persistida no tenia Sent: TV mostraba otra señal que el Screener."""
+    sym = row["symbol"]
+    fh_count = row.get("fh_count")
+    return {
+        "Net": voto_net_relativo(
+            float(row.get("fh_buy_ratio") or 0.0),
+            float(row.get("fh_sell_ratio") or 0.0),
+            ctx["p33_net"],
+            ctx["p67_net"],
+            fh_count,
+        ),
+        "Opt": voto_options(row.get("fh_call_shares"), row.get("fh_put_shares")),
+        "Flujo": voto_flujo(
+            row.get("new_entrants"), row.get("full_exits"), fh_count, ctx["p33_flujo"], ctx["p67_flujo"]
+        ),
+        "Ana": voto_analistas(row.get("analyst_rec")),
+        "Mod": 1 if sym in ctx["syms_buy"] else (-1 if sym in ctx["syms_sell"] else 0),
+        "Val": voto_valuacion(row.get("categoriaActivo") or ""),
+        "Cob": voto_cobertura(fh_count),
+        "Sent": voto_tech_alignment(sym, ctx["sentiment"], ctx["analysis"]),
+    }
+
+
+def senal_votos(votos):
+    """(etiqueta, suma, n) del Consenso. Mod se muestra pero no vota; un None se abstiene."""
+    activos = [v for k, v in votos.items() if k != "Mod" and v is not None]
+    return senal_consenso(activos, sum(activos))
+
+
 def refresh_consenso_tags(account):
-    """Recalcula consenso_tag y consenso_suma (7 votos) para todos los símbolos
+    """Recalcula consenso_tag y consenso_suma (votos de votos_consenso) para todos los símbolos
     en cartera y los persiste en market. Llamado por Agente_ConsensoCache cada 5 min."""
     mkt = MarketScreen()
     cartera = mkt.load_cartera_inst(account)
     if not cartera:
         return {"actualizados": 0, "total": 0}
 
-    p33_net, p67_net = _build_net_percentiles(cartera)
-    p33_flujo, p67_flujo = _build_flujo_percentiles(cartera)
-    syms_buy, syms_sell = _load_csv_signals()
-
+    ctx = contexto_consenso(account, cartera)
     actualizados = 0
     for row in cartera:
         sym = row["symbol"]
-        fh_buy_ratio = float(row.get("fh_buy_ratio") or 0.0)
-        fh_sell_ratio = float(row.get("fh_sell_ratio") or 0.0)
-        rec = (row.get("analyst_rec") or "").lower().replace(" ", "_")
-        categ = row.get("categoriaActivo") or ""
-
-        votos = {
-            "Net": voto_net_relativo(fh_buy_ratio, fh_sell_ratio, p33_net, p67_net, row.get("fh_count")),
-            "Opt": voto_options(row.get("fh_call_shares"), row.get("fh_put_shares")),
-            "Flujo": voto_flujo(
-                row.get("new_entrants"), row.get("full_exits"), row.get("fh_count"), p33_flujo, p67_flujo
-            ),
-            "Ana": voto_analistas(rec),
-            "Mod": (1 if sym in syms_buy else (-1 if sym in syms_sell else 0)),
-            "Val": voto_valuacion(categ),
-            "Cob": voto_cobertura(row.get("fh_count")),
-        }
-        activos = {k: v for k, v in votos.items() if k != "Mod" and v is not None}
-        suma = sum(activos.values())
-        tag, _, _ = senal_consenso(list(activos.values()), suma)
-
+        tag, suma, _ = senal_votos(votos_consenso(row, ctx))
         _suma_persist = None if tag == "— S/D" else int(suma)
         mkt.update(upd=["consenso_tag", "consenso_suma"], val=[tag, _suma_persist], symbol=sym, account=account)
         actualizados += 1
