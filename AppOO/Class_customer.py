@@ -5707,7 +5707,8 @@ class WidgetVehiculo(TickerInfo):
             gt0.imagen = imagen_tk
 
             # bottom de gráfica de velas ---------------------------------------------------------------------------
-            imagen_tk = BDsystem.select_image(idd=100, size=(16, 16))
+            # sys_objeto: 101 es el icono de velas y 100 el de linea (estaban cruzados)
+            imagen_tk = BDsystem.select_image(idd=101, size=(16, 16))
             gt1 = tk.Button(
                 win21,
                 image=imagen_tk,
@@ -5718,7 +5719,7 @@ class WidgetVehiculo(TickerInfo):
             gt1.imagen = imagen_tk
 
             # bottom de gráfica de linea
-            imagen_tk = BDsystem.select_image(idd=101, size=(16, 16))
+            imagen_tk = BDsystem.select_image(idd=100, size=(16, 16))
             gt2 = tk.Button(
                 win21,
                 image=imagen_tk,

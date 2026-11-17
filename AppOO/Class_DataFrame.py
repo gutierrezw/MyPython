@@ -966,21 +966,25 @@ def chart_symbol(fg=None, datos=None, keys=None):
             where=(pdatos["EMA009"] < pdatos["EMA021"].values),
         )
 
+        # modo linea: area bajo el cierre. Con posicion el color dice de que lado del costo medio
+        # estuvo el precio (verde arriba, rojo abajo); sin posicion es un solo tono
+        base = float(keys["avgCost"]) if keys["position"] else vmin
+        sobre_base = pdatos["Close"] >= base
+        # el rojo se extiende una barra a cada lado: sin eso queda una rendija en cada cruce del costo
+        bajo_base = ~sobre_base | ~sobre_base.shift(1, fill_value=True) | ~sobre_base.shift(-1, fill_value=True)
         l_above = dict(
             y1=vmin,
             y2=pdatos["Close"].values,
-            alpha=0.4,
-            color="blue",
-            interpolate=True,
-            where=(vmin > pdatos["Close"].values),
+            alpha=0.3,
+            color="green" if keys["position"] else "steelblue",
+            where=sobre_base.values,
         )
         l_below = dict(
             y1=vmin,
             y2=pdatos["Close"].values,
-            alpha=0.4,
+            alpha=0.3,
             color="red",
-            interpolate=True,
-            where=(vmin < pdatos["Close"].values),
+            where=bajo_base.values,
         )
         if keys["position"]:
             buy_signal, x1, x2 = operaciones_book(p_tipo="O", frame=keys["booktrading"], df=pclose)
@@ -1047,7 +1051,7 @@ def chart_symbol(fg=None, datos=None, keys=None):
                 ema = [
                     mpf.make_addplot(
                         pdatos["Close"],
-                        fill_between=[l_above, l_below],
+                        fill_between=[l_above, l_below, z_buy],
                         ax=ax,
                         alpha=0.6,
                     ),
@@ -1139,10 +1143,12 @@ def chart_symbol(fg=None, datos=None, keys=None):
             ix = pdatos.index[-1]
             l_ix = len(pdatos.index)
 
+            # el precio con su distancia al costo medio: es el numero que dice si conviene promediar
+            vs_base = f" ({float(keys['mkPrice']) / float(keys['avgCost']) - 1:+.1%})" if keys["avgCost"] else ""
             ae.text(
                 0,
                 keys["mkPrice"],
-                currency(keys["mkPrice"]),
+                currency(keys["mkPrice"]) + vs_base,
                 fontsize=5,
                 ha="left",
                 color=keys["pcolor"],
@@ -1223,6 +1229,10 @@ def chart_symbol(fg=None, datos=None, keys=None):
                 ax = nivel_fib(ax, ndesde, x_alcista, x_bajista, x_long)
 
         if p_tipo == "line":
+            # el area, la zona de compra y el panel de RSI los arma m_emaplot igual que en velas
+            x_emaline, x_alcista, x_bajista, x_long, f_desde, _z_buy, _z_sell = m_emaplot(p_tipo)
+            z_buy.update(_z_buy)
+            z_sell.update(_z_sell)
             mpf.plot(
                 pdatos,
                 type=tipo,
