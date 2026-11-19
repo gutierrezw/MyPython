@@ -2699,13 +2699,20 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             bg="#181825",
             relief=tk.FLAT,
             cursor="hand2",
-            command=self.ver_noticias,
+            command=lambda: self._mostrar_vista("sugerencias"),
         )
         self.BNews.imagen = Imagen_tk
         self.BNews.pack(side=tk.LEFT, padx=(10, 4), pady=6)
 
         Imagen_tk = BDsystem.select_image(idd=334, size=(26, 26))
-        self.IA = tk.Button(barra, image=Imagen_tk, bg="#181825", relief=tk.FLAT)
+        self.IA = tk.Button(
+            barra,
+            image=Imagen_tk,
+            bg="#181825",
+            relief=tk.FLAT,
+            cursor="hand2",
+            command=lambda: self._mostrar_vista("ia"),
+        )
         self.IA.imagen = Imagen_tk
         self.IA.pack(side=tk.LEFT, padx=4, pady=6)
 
@@ -2754,27 +2761,32 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         # separador vertical
         tk.Frame(main, bg="#2a2a3a", width=1).pack(side=tk.LEFT, fill=tk.Y)
 
-        # ── COLUMNA DERECHA — chat ────────────────────────────────────────────
+        # ── COLUMNA DERECHA — dos vistas: sugerencias (ícono 333) y consulta IA (ícono 334) ──────
         right = tk.Frame(main, bg=self.bgcolor)
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._vistas = {"sugerencias": tk.Frame(right, bg=self.bgcolor), "ia": tk.Frame(right, bg=self.bgcolor)}
+        self._botones_vista = {"sugerencias": self.BNews, "ia": self.IA}
 
-        # ── AREA CHAT ────────────────────────────────────────────────────────
-        self.area_mensaje = scrolledtext.ScrolledText(
-            right,
-            wrap=tk.WORD,
-            bg="#181825",
-            fg=self.fgcolor,
-            font=("Segoe UI", 11),
-            relief=tk.FLAT,
-            padx=16,
-            pady=12,
-            selectbackground="#45475a",
-        )
-        self.area_mensaje.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+        tk.Label(
+            self._vistas["sugerencias"],
+            text="💡 Sugerencias — oportunidades y decisiones",
+            bg=self.bgcolor,
+            fg="#00BFFF",
+            font=("Consolas", 8, "bold"),
+            anchor="w",
+        ).pack(fill=tk.X, padx=6, pady=(4, 2))
+        self.area_mensaje = self._crear_area(self._vistas["sugerencias"])
+        self._agregar_mensaje("💡  Las oportunidades de compra y venta aparecen acá.")
 
-        self.area_mensaje.tag_configure("usuario", foreground=self.usercolor, font=("Segoe UI", 11, "bold"))
-        self.area_mensaje.tag_configure("asistente", foreground=self.botcolor, font=("Segoe UI", 11))
-        self.area_mensaje.tag_configure("thinking", foreground="#6c7086", font=("Segoe UI", 11, "italic"))
+        tk.Label(
+            self._vistas["ia"],
+            text="🧠 Consulta IA — preguntá sobre tu cartera (Claude Opus)",
+            bg=self.bgcolor,
+            fg="#cba6f7",
+            font=("Consolas", 8, "bold"),
+            anchor="w",
+        ).pack(fill=tk.X, padx=6, pady=(4, 2))
+        self.area_chat = self._crear_area(self._vistas["ia"])
 
         self._chat_messages = []
         self._chat_display = []
@@ -2782,16 +2794,13 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         if _hist:
             self._chat_messages = _hist.get("messages", [])[-40:]
             self._chat_display = _hist.get("display", [])[-40:]
-            self.area_mensaje.configure(state="normal")
             for _item in self._chat_display:
-                self.area_mensaje.insert(tk.END, _item["text"] + "\n\n", _item["tag"])
+                self._agregar_mensaje(_item["text"], tag=_item["tag"], area=self.area_chat)
         else:
-            self.area_mensaje.insert(tk.END, "🤖  ¿En qué puedo ayudarte?\n\n", "asistente")
-        self.area_mensaje.configure(state="disabled")
-        self.area_mensaje.yview(tk.END)
+            self._agregar_mensaje("🤖  ¿Qué querés saber de tu cartera?", area=self.area_chat)
 
-        # ── INPUT ────────────────────────────────────────────────────────────
-        footer = tk.Frame(right, bg=self.bgcolor)
+        # ── INPUT (solo en la vista IA) ──────────────────────────────────────
+        footer = tk.Frame(self._vistas["ia"], bg=self.bgcolor)
         footer.pack(fill=tk.X, pady=(0, 4))
 
         self.entrada = tk.Entry(
@@ -2816,6 +2825,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             command=self._enviar,
             padx=10,
         ).pack(side=tk.LEFT)
+        self._mostrar_vista("sugerencias")
 
         self.protocol("WM_DELETE_WINDOW", self._al_perder_foco)
 
@@ -2972,21 +2982,15 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                 sep,
             ]
 
+            self._mostrar_vista("sugerencias")
             self._agregar_mensaje("\n".join(lineas), tag="asistente")
         except Exception as e:
             self.logger.error(f"_ia_feed_click: {e}")
 
     def _enviar(self, event=None):
-        texto = self.entrada.get().strip()
-        if not texto:
-            return
-        self._agregar_mensaje(f"👤  {texto}", tag="usuario")
-        self._agregar_mensaje("⏳  Analizando...", tag="thinking")
-        self.entrada.delete(0, tk.END)
-        self.entrada.config(state="disabled")
-
         def _worker():
-            respuesta = ""
+            n_previo = len(self._chat_messages)
+            respuesta = None
             try:
                 contexto = self._build_contexto()
                 self._chat_messages.append({"role": "user", "content": texto})
@@ -3002,24 +3006,66 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
                     },
                 )
             except Exception as e:
-                respuesta = f"Error al consultar Claude: {e}"
-            self.after(0, lambda: self._reemplazar_ultimo(f"🤖  {respuesta}", tag="asistente"))
+                if respuesta is None:
+                    # sin respuesta la pregunta no queda en el historial: dos "user" seguidos los rechaza la API
+                    del self._chat_messages[n_previo:]
+                    respuesta = f"Error al consultar Claude: {e}"
+                self.logger.error(f"_enviar(): {e}")
+            self.after(0, lambda: self._reemplazar_ultimo(f"🤖  {respuesta}", tag="asistente", area=self.area_chat))
             self.after(0, lambda: self.entrada.config(state="normal"))
 
+        texto = self.entrada.get().strip()
+        if not texto:
+            return
+        self._agregar_mensaje(f"👤  {texto}", tag="usuario", area=self.area_chat)
+        self._agregar_mensaje("⏳  Analizando...", tag="thinking", area=self.area_chat)
+        self.entrada.delete(0, tk.END)
+        self.entrada.config(state="disabled")
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _agregar_mensaje(self, mensaje, tag="asistente"):
-        self.area_mensaje.configure(state="normal")
-        self.area_mensaje.insert(tk.END, mensaje + "\n\n", tag)
-        self.area_mensaje.configure(state="disabled")
-        self.area_mensaje.yview(tk.END)
+    def _agregar_mensaje(self, mensaje, tag="asistente", area=None):
+        area = area or self.area_mensaje
+        area.configure(state="normal")
+        area.mark_set("ultimo", "end-1c")
+        area.mark_gravity("ultimo", "left")
+        area.insert(tk.END, mensaje + "\n\n", tag)
+        area.configure(state="disabled")
+        area.yview(tk.END)
 
-    def _reemplazar_ultimo(self, nuevo, tag="asistente"):
-        self.area_mensaje.configure(state="normal")
-        self.area_mensaje.delete("end-3l linestart", "end-1l lineend+1c")
-        self.area_mensaje.insert(tk.END, nuevo + "\n\n", tag)
-        self.area_mensaje.configure(state="disabled")
-        self.area_mensaje.yview(tk.END)
+    def _reemplazar_ultimo(self, nuevo, tag="asistente", area=None):
+        area = area or self.area_mensaje
+        area.configure(state="normal")
+        area.delete("ultimo", "end-1c")
+        area.insert(tk.END, nuevo + "\n\n", tag)
+        area.configure(state="disabled")
+        area.yview(tk.END)
+
+    def _mostrar_vista(self, nombre):
+        for clave, frame in self._vistas.items():
+            frame.pack_forget()
+            self._botones_vista[clave].configure(bg="#45475a" if clave == nombre else "#181825")
+        self._vistas[nombre].pack(fill=tk.BOTH, expand=True)
+        if nombre == "ia":
+            self.entrada.focus_set()
+
+    def _crear_area(self, padre):
+        area = scrolledtext.ScrolledText(
+            padre,
+            wrap=tk.WORD,
+            bg="#181825",
+            fg=self.fgcolor,
+            font=("Segoe UI", 11),
+            relief=tk.FLAT,
+            padx=16,
+            pady=12,
+            selectbackground="#45475a",
+            state="disabled",
+        )
+        area.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+        area.tag_configure("usuario", foreground=self.usercolor, font=("Segoe UI", 11, "bold"))
+        area.tag_configure("asistente", foreground=self.botcolor, font=("Segoe UI", 11))
+        area.tag_configure("thinking", foreground="#6c7086", font=("Segoe UI", 11, "italic"))
+        return area
 
     def _build_contexto(self):
         posiciones = []
@@ -3037,16 +3083,6 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             return ""
         lineas = [f"{p['symbol']} ({p['nombre']}): ${p['precio']:.2f}" for p in posiciones[:20]]
         return "Posiciones en cartera:\n" + "\n".join(lineas)
-
-    def ver_noticias(self):
-        mensaje = "📰 Últimas noticias relacionadas con tu cartera..."
-        self.enviar_mensaje(mensaje)
-
-    def ver_consejos(self):
-        mensaje = "💡 Consejo de hoy: Rebalancear tu cartera puede mejorar tu rendimiento."
-        self.enviar_mensaje(mensaje)
-
-        # muestra botón flotante
 
     def _al_perder_foco(self, event=None):
         self.withdraw()
