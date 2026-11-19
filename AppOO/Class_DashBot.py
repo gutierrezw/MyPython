@@ -70,8 +70,8 @@ from Modulos_Mysql import (
 )
 from Class_customer import DataHub, TickerInfo
 from Class_ServiciosCrypto import ServiciosCrypto
-from Class_BrowserBridge import set_claude_contexto
 from Class_IA_modelos import ModeloOportunidadesSell, ModeloOportunidadesBuy
+from Class_AsesorIA import AsesorCartera
 from Modulos_Utilitarios import (
     define_FileCache,
     read_json_tmp,
@@ -461,41 +461,6 @@ class ClassAgenteIA:
         except Exception as e:
             self.logger.error(f"_call_claude({session_key}): {e}")
         return None
-
-    def _consultar_claude(self, mensaje_usuario, contexto="", messages=None):
-        """Llamada a Claude API. Si messages se provee, usa conversación multi-turno con historial."""
-        sesion_claude = BDsystem.get_sesion_by_vehiculo("ClaudeAPIC")
-        api_key = sesion_claude["userapi"].decode("utf-8")
-
-        sistema = (
-            "Sos un asistente de inversión integrado en una app de trading. "
-            "Respondé en español, de forma concisa y directa. "
-            "Tenés acceso al estado actual de la cartera del usuario."
-        )
-        if contexto:
-            sistema += f"\n\nContexto actual:\n{contexto}"
-
-        msgs = messages[-20:] if messages else [{"role": "user", "content": mensaje_usuario}]
-        resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 512,
-                "system": sistema,
-                "messages": msgs,
-            },
-            timeout=30,
-        )
-        if not resp.ok:
-            raise RuntimeError(f"{resp.status_code} — {resp.json()}")
-        usage = resp.json().get("usage", {})
-        track_claude_usage("ClaudeAPIC", usage.get("input_tokens", 0), usage.get("output_tokens", 0))
-        return resp.json()["content"][0]["text"].strip()
 
     @wait_rate(300, persist=True)
     def Agente_SyncOrders(self):
@@ -2679,6 +2644,7 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         self.IAbuy = ModeloOportunidadesBuy()
         self.modelo_name = self.IAsell.modelo_name
         self.modelo_name_buy = self.IAbuy.modelo_name
+        self.Asesor = AsesorCartera(self.account, self.account_crypto, self.logger, self.readCSV_sell, self.readCSV_buy)
 
         self.bot = None
         self.MessageTelegram = None
@@ -2992,9 +2958,8 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             n_previo = len(self._chat_messages)
             respuesta = None
             try:
-                contexto = self._build_contexto()
                 self._chat_messages.append({"role": "user", "content": texto})
-                respuesta = self._consultar_claude(texto, contexto, messages=self._chat_messages)
+                respuesta = self.Asesor.consultar(self._chat_messages)
                 self._chat_messages.append({"role": "assistant", "content": respuesta})
                 self._chat_display.append({"text": f"👤  {texto}", "tag": "usuario"})
                 self._chat_display.append({"text": f"🤖  {respuesta}", "tag": "asistente"})
@@ -3066,23 +3031,6 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         area.tag_configure("asistente", foreground=self.botcolor, font=("Segoe UI", 11))
         area.tag_configure("thinking", foreground="#6c7086", font=("Segoe UI", 11, "italic"))
         return area
-
-    def _build_contexto(self):
-        posiciones = []
-        for symbol, data in DataHub.info.copy().items():
-            if not isinstance(data, dict):
-                continue
-            activos = data.get("activos", {})
-            if not activos or not isinstance(activos, dict):
-                continue
-            precio = activos.get("currentPrice") or activos.get("regularMarketPrice", 0)
-            nombre = activos.get("shortName", symbol)
-            posiciones.append({"symbol": symbol, "nombre": nombre, "precio": precio})
-        set_claude_contexto({"posiciones": posiciones[:20]})
-        if not posiciones:
-            return ""
-        lineas = [f"{p['symbol']} ({p['nombre']}): ${p['precio']:.2f}" for p in posiciones[:20]]
-        return "Posiciones en cartera:\n" + "\n".join(lineas)
 
     def _al_perder_foco(self, event=None):
         self.withdraw()

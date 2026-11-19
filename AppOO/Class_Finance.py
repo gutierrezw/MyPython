@@ -21,7 +21,6 @@ from Modulos_python import (
     FigureCanvasTkAgg,
     ticker,
 )
-from Modulos_Utilitarios import read_json_tmp
 from Modulos_Mysql import BDsystem, FinanceScreen, PlanInversion
 from Class_ApiBinnace import BinanceClient
 
@@ -1981,30 +1980,14 @@ class FinancePanel(tk.Frame):
     def _deuda_inversion(self) -> float:
         """
         Deuda que se le resta al capital propio: el margen de IB más el préstamo flexible de Binance.
-
-        No sale de `inversion.deuda`, que daba 411 contra los 6.900 reales: esa columna es por posición y no
-        refleja el saldo del broker. La fuente viva es la misma que alimenta la barra `Deuda Total` del panel
-        principal — `DataHub.manager_GyP[vehiculo]["Debit"]`, que escriben el header de cada pestaña (IB) y
-        Agente_LtvControl (Binance). Corregido el 2026-09-20 a pedido del usuario.
-
-        Si la fuente viva viene en 0 se cae al `kpi_snapshot` que DashMain persiste cada 30s, igual que las
-        barras: sin eso el margen desaparece y el avance sale infladísimo. Las dos mitades usan criterios
-        distintos porque lo que significa un 0 es distinto. En Stock hay que preguntarle a `ws_stock_connected`
-        —con el websocket vivo un 0 es real, sin margen abierto—; en Crypto no hace falta bandera porque
-        Agente_LtvControl corta con `return` cuando la API no devuelve préstamos, así que nunca escribe 0.
+        Corregido el 2026-09-20 a pedido del usuario; el criterio de la fuente vive en `DataHub.deuda_real()`,
+        que también lee la Consulta IA del Asistente. Sin el fallback al snapshot el margen desaparece y el
+        avance sale infladísimo.
         """
         # import diferido — watch_extractos importa este módulo y no debe cargar la cadena de brokers
         from Class_customer import DataHub
 
-        stock = float(DataHub.manager_GyP.get("Stock", {}).get("Debit", 0) or 0.0)
-        crypto = float(DataHub.manager_GyP.get("Crypto", {}).get("Debit", 0) or 0.0)
-        if not stock or not crypto:
-            snap = read_json_tmp("kpi_snapshot")
-            if not stock and not DataHub.ws_stock_connected:
-                stock = float(snap.get("stock_debit", 0) or 0.0)
-            if not crypto:
-                crypto = float(snap.get("crypto_debit", 0) or 0.0)
-        return stock + crypto
+        return sum(DataHub.deuda_real().values())
 
     # ── lógica edición de categoría ───────────────────────────────────────────
 

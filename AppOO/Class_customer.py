@@ -611,6 +611,31 @@ class DataHub:
             "min_roi": float(cfg.get("min_roi", DataHub.MaxRoi)),
         }
 
+    # deuda real por vehículo — margen de IB y préstamo de Binance
+    def deuda_real() -> dict:
+        """{"Stock": margen IB, "Crypto": préstamo Binance}, en USD.
+
+        No sale de `inversion.deuda`, que daba 411 contra los 6.900 reales: esa columna es por posición y no
+        refleja el saldo del broker. La fuente viva es la misma que alimenta la barra `Deuda Total` del panel
+        principal — `manager_GyP[vehiculo]["Debit"]`, que escriben el header de cada pestaña (IB) y
+        Agente_LtvControl (Binance).
+
+        Si la fuente viva viene en 0 se cae al `kpi_snapshot` que DashMain persiste cada 30s, igual que las
+        barras. Las dos mitades usan criterios distintos porque lo que significa un 0 es distinto. En Stock hay
+        que preguntarle a `ws_stock_connected` —con el websocket vivo un 0 es real, sin margen abierto—; en
+        Crypto no hace falta bandera porque Agente_LtvControl corta con `return` cuando la API no devuelve
+        préstamos, así que nunca escribe 0.
+        """
+        stock = float(DataHub.manager_GyP.get("Stock", {}).get("Debit", 0) or 0.0)
+        crypto = float(DataHub.manager_GyP.get("Crypto", {}).get("Debit", 0) or 0.0)
+        if not stock or not crypto:
+            snap = read_json_tmp("kpi_snapshot")
+            if not stock and not DataHub.ws_stock_connected:
+                stock = float(snap.get("stock_debit", 0) or 0.0)
+            if not crypto:
+                crypto = float(snap.get("crypto_debit", 0) or 0.0)
+        return {"Stock": stock, "Crypto": crypto}
+
     # calendario de mercado por vehículo
     def mercado_abierto(vehiculo="Stock", con_horario=False) -> bool:
         """True si el vehículo opera hoy. Crypto/BotCrypto 24x7; el resto, solo días hábiles.

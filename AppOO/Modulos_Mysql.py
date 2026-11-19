@@ -2261,7 +2261,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 "delta_call_shares, delta_put_shares, "
                 "analyst_rec, analyst_mean, analyst_count, categoriaActivo, "
                 "floatShares, sharesOutstanding, volume, insider_ownership_pct, website, "
-                "marketCap, averageVolume, fiftyTwoWeekHigh, fiftyTwoWeekLow "
+                "marketCap, averageVolume, fiftyTwoWeekHigh, fiftyTwoWeekLow, consenso_tag, consenso_suma "
                 "FROM market WHERE account IN ({}) AND encartera = 'Y' AND {} "
                 "ORDER BY {}".format(acc_in, filtro, orden or "inst_score DESC")
             )
@@ -6927,6 +6927,26 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                 cursor.close()
             conn.close()
 
+    def select_symbol_decision_history(self, symbol: str = None, limit: int = 15) -> list:
+        """Ultimos eventos de decision de los agentes (GainsCapture, Preservation), del simbolo o de todos.
+        Una fila con veces > 1 es la misma recomendacion repetida sin novedad desde primera_vez."""
+        conn = self._conectar(tabla="select.symbol_decision_history")
+        try:
+            cursor = conn.cursor()
+            filtro = "WHERE symbol = %s " if symbol else ""
+            cursor.execute(
+                "SELECT timestamp, symbol, agente, tag, veces, primera_vez, mensaje "
+                f"FROM symbol_decision_history {filtro}ORDER BY timestamp DESC LIMIT %s",
+                ((symbol, limit) if symbol else (limit,)),
+            )
+            cols = [c[0] for c in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"select_symbol_decision_history({symbol}): {error}")
+            return []
+        finally:
+            conn.close()
+
     def append_order_audit_log(self, order_id: int, tag: str, mensaje: str = None, data: dict = None) -> bool:
         """
         Registra un evento en order_trader.json_audit_log (Fase 1 - GainsCapture + Preservation).
@@ -9323,14 +9343,15 @@ class IaTraceScreen(BDsystem):  # ----------------------------------------------
             cursor.close()
             conn.close()
 
-    def select_trace(self, limit: int = 100) -> list:
+    def select_trace(self, limit: int = 100, simbolo: str = None) -> list:
         conn = self._conectar(tabla="ia_trace.select")
         try:
             cursor = conn.cursor()
+            filtro = "WHERE simbolo = %s " if simbolo else ""
             cursor.execute(
                 "SELECT id, timestamp, vehiculo, simbolo, decision, monto, motivo, estado, gates_ok "
-                "FROM ia_trace ORDER BY timestamp DESC LIMIT %s",
-                (limit,),
+                f"FROM ia_trace {filtro}ORDER BY timestamp DESC LIMIT %s",
+                ((simbolo, limit) if simbolo else (limit,)),
             )
             cols = [c[0] for c in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]

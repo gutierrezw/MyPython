@@ -1181,6 +1181,7 @@ Si el commit toca el código de la izquierda, revisar el doc de la derecha antes
 | `detalle_book`, `carry_forward`, la cuarentena de la diaria | sección "Diaria — un símbolo sin precio del día aporta su fila igual" en este archivo |
 | `performa_asset`, `select_performa_inversion`, el gráfico de performance | sección "Gráfico de performance — la fuente es `performa_inversion`" en este archivo |
 | `FinanceScreen`, `Class_Finance`, tablas `fin_*` | `20-Proyecto/spec-finanzas.md` (§0: objetivos, etapas, regla de KPIs, mapa de categorías) |
+| `Class_AsesorIA`, `Chatbot` (vistas, `_enviar`) | `20-Proyecto/design-agente-ia.md` § "Asistente de Inversión (Chat)" |
 | Cualquier hallazgo de la revisión Opus (H1–H10) | `30-Gestion/resultado-revision-opus-preservation-gainscapture.md` + `30-Gestion/BACKLOG.md` |
 
 Los docs viven en `AppOO/Doc/` (= `20-Proyecto/` del vault vía junction) y se comitean en el

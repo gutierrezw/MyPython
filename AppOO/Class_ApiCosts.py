@@ -15,6 +15,7 @@ _TMP_FILE = "api_costs.json"
 
 # Precio por 1M tokens (USD) — para calcular tokens a partir del costo
 _PRECIO_INPUT = {
+    "claude-opus-5-5": 4.00,
     "claude-opus-4": 5.00,
     "claude-opus-4-5": 5.00,
     "claude-opus-4-6": 5.00,
@@ -25,6 +26,7 @@ _PRECIO_INPUT = {
     "claude-3-5-haiku": 0.80,
 }
 _PRECIO_OUTPUT = {
+    "claude-opus-5-5": 20.00,
     "claude-opus-4": 25.00,
     "claude-opus-4-5": 25.00,
     "claude-opus-4-6": 25.00,
