@@ -114,6 +114,13 @@ sacaba del Screener — figuraba con `fh_count` 764 y entraba al Consenso como s
 El override cierra los tres caminos a la vez: `audit_portfolio` lo borra de `market`,
 `dividends_en_market_stock` ya no lo reinserta, y el panel le da el 52w directo.
 
+**Cuarto camino, cerrado el 2026-11-19: el sector.** `update_inversion_stock` tomaba el `sector` de Yahoo
+como fuente de verdad en cada ciclo, y Yahoo le pone a PHYS **"Financial Services"**: en *Diversificación
+vs Performance Sector* el oro físico figuraba entre PFLT y PSEC. Hoy, si es fondo (el mismo criterio
+`_ETF_TYPES` + `_ETF_SYMBOLS`), manda el `inversion.sector` de BD — como ya pasaba con TLT
+(`Treasury +20years`), al que Yahoo no le da sector. La estrategia nunca se desvió: PHYS sigue en
+`P01 = Oro` y la vista por tipo de activo lo cuenta como Oro.
+
 `inversion.objetivo` queda como **espejo histórico, no como fuente** — lo escribe el panel con el valor
 ya resuelto.
 

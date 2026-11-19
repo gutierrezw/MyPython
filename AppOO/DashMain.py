@@ -1527,7 +1527,8 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     # precio objetivo: ETF/trust -> maximo de 52 semanas (no tienen objetivo de analistas
                     # y audit_portfolio los borra de market). Resto -> fuente unica market, Yahoo de respaldo
                     # sin el criterio por nombre del Screener: 'trust' marca REITs con analistas (DLR, MPT)
-                    if (yf_activo.get("quoteType") or "").upper() in _ETF_TYPES or symbol in _ETF_SYMBOLS:
+                    es_fondo = (yf_activo.get("quoteType") or "").upper() in _ETF_TYPES or symbol in _ETF_SYMBOLS
+                    if es_fondo:
                         objetivo = yf_activo.get("fiftyTwoWeekHigh", 0)
                     else:
                         objetivo = p_targets.get(symbol, {}).get("objetivo", 0)
@@ -1540,8 +1541,10 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         if objetivo == 0:
                             objetivo = yf_activo.get("fiftyTwoWeekHigh", 0)
 
-                    # sector: yfinance es fuente de verdad; si no trae dato, preservar el de BD
-                    sector = yf_activo.get("sector", "")
+                    # sector: yfinance es fuente de verdad; si no trae dato, preservar el de BD. En un fondo
+                    # manda siempre el de BD: Yahoo tipa PHYS (oro fisico) como EQUITY y le pone "Financial
+                    # Services", que pisaba el sector en cada ciclo
+                    sector = "" if es_fondo else yf_activo.get("sector", "")
                     if is_vacio(sector) or is_null(sector):
                         existing = next((pos["sector"] for pos in p_positions if pos["ticket"] == symbol), "")
                         sector = existing if existing and not is_vacio(existing) and not is_null(existing) else ""
