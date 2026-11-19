@@ -4402,6 +4402,9 @@ class DashMain:
                             "dividends": dividends,
                             "costobase": position["costobase"],
                             "activo": position["tipoActivo"],
+                            "vehiculo": (
+                                "Balance" if position.get("tipoinv") in ("FCI", "Balance") else position.get("tipoinv")
+                            ),
                             "exdiv": exdiv,
                             "yield": rend,
                         }
@@ -4647,7 +4650,7 @@ class DashMain:
                     activo_groups.setdefault(t, []).append((symbol, activo))
 
                 resumen_mes, costobase_total, producto_total = [0.0] * 12, 0.0, 0.0
-                min_base, ticket = pow(10, 9), ""
+                min_base, ticket, activo_data = pow(10, 9), "", None
 
                 for TActivo, items in activo_groups.items():
                     sec_cost = sum(a["costobase"] for _, a in items)
@@ -4673,6 +4676,7 @@ class DashMain:
 
                         if activo["costobase"] < min_base:
                             min_base, ticket = activo["costobase"], symbol
+                            activo_data = {"vehiculo": activo["vehiculo"]}
 
                         total_row = "{:4.1f}".format(sum(activo["dividends"]))
                         costo = "{:9.1f}".format(activo["costobase"])
