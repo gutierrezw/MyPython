@@ -532,6 +532,14 @@ valen exactamente 0. El efecto es hacia adelante.
 **El dust queda vivo a propósito.** Un residuo de 0,1 unidad valiendo centavos ahora se ve como
 posición abierta en vez de desaparecer: la posición existe y es mejor que se vea.
 
+**Y el dust vivo heredaba el precio de otra fila** (2026-11-19). `update_inversion_crypto` copiaba
+`mrkprice`/`open`/`dgyp` de `self.positions` vía `buscar_ticker`, pero `self.positions` solo carga
+posiciones con `costobase > 5` y `buscar_ticker` sin coincidencia devuelve la **última** fila del orden en
+pantalla. Con BTC último por dGyP, 7 tokens de polvo quedaron a 63.781 USD: +90K de UnP&L ficticio en el
+KPI *UnP&L vs Capital* y en *Diversificación vs Activos*. Hoy, sin coincidencia, el precio sale de
+`ticker_24hr`; sin par USDT, queda el costo medio, como en el alta. `buscar_ticker` sigue devolviendo la
+última fila cuando `found` es False: quien lo llame tiene que mirar `found`.
+
 **`inst_ownership_pct` e `inst_score` tenían dos escritores cada una, y ganaba el que corría último**
 (2026-11-07). `sync_institutional` (Yahoo, 24h) y `sync_13f_scores` (13F, 24h) escribían las dos columnas
 con significados distintos: `inst_ownership_pct` era el `heldPercentInstitutions` de Yahoo (0–1) o el ratio

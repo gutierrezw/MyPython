@@ -1192,6 +1192,14 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
     def api_vehiculo_binance(self):
         def update_inversion_crypto(api=None, in_positions=None) -> list:
+            # precio y apertura del dia por REST; un token sin par USDT queda a su costo medio, como al insertarlo
+            def precio_rest(symbol, avgcost):
+                try:
+                    ticker = self.BClient.ticker_24hr(symbol=symbol)
+                    return float(ticker["lastPrice"]), float(ticker["openPrice"])
+                except Exception:
+                    return avgcost, avgcost
+
             try:
                 x_positions: list[dict] = []
 
@@ -1219,11 +1227,18 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         yf_activo, datos, ind_update = self.ts_yfinance_symbol(symbol=asset, vehiculo=self.vehiculo)
 
                         keys_asset = values["position"]
-                        position["mrkprice"] = self_position["mrkprice"]
-                        position["dgyp"] = self_position["dgyp"]
-                        position["open"] = self_position["open"]
-
                         position["position"] = keys_asset["borrowed"] + keys_asset["netAsset"]
+                        if found:
+                            position["mrkprice"] = self_position["mrkprice"]
+                            position["dgyp"] = self_position["dgyp"]
+                            position["open"] = self_position["open"]
+                        else:
+                            # la tabla en pantalla solo carga posiciones de mas de 5 USD, y sin coincidencia
+                            # buscar_ticker devuelve la ultima fila del orden en pantalla: el polvo heredaba
+                            # ese precio (con BTC al final, +90K ficticios en UnP&L)
+                            position["mrkprice"], position["open"] = precio_rest(asset, crypto[0]["avgcost"])
+                            position["dgyp"] = (position["mrkprice"] - position["open"]) * position["position"]
+
                         position["objetivo"] = crypto[0]["objetivo"]
                         position["empresa"] = crypto[0]["descripcion"]
                         position["costobase"] = crypto[0]["avgcost"] * position["position"]
