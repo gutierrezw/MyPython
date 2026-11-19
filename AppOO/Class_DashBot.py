@@ -3535,16 +3535,13 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             mensaje += f"{'-' * 37}\n"
             mensaje += f"{'Profit'          :<18} {row['Profit']:>12.2f}\n"
             mensaje += f"{'ROI (%)'         :<18} {row['%Roi'] * 100:>12.2f}\n"
-            _cant = f"{row['CantidadSell']:.1f}/{row['Disponible']:.1f}"
+            _cant = f"{self._compacto(row['CantidadSell'])}/{self._compacto(row['Disponible'])}"
             mensaje += f"{'Cant Sell'        :<18} {_cant:>12}\n"
             _importe_sell = row['CantidadSell'] * row['PriceMarket']
             mensaje += f"{'Importe'          :<18} {_importe_sell:>12.2f}\n"
-            mensaje += f"{'CostoAcum'        :<18} {row['CostoCum']:>12.2f}\n"
-            mensaje += f"{'Prec. posVenta'   :<18} {row['PosAvgCost']:>12.4f}\n"
-            mensaje += f"{'Pos. posVenta'    :<18} {row['PosPosition']:>12.4f}\n"
-            mensaje += f"{'CostoB posVenta'  :<18} {row['PosCostobase']:>12.2f}\n"
+            _queda = f"{self._compacto(row['PosPosition'])} @ {self._compacto(row['PosAvgCost'])}"
+            mensaje += f"{'Queda'            :<18} {_queda:>12}\n"
             mensaje += f"{'Objetivo'         :<18} {row.get('Objetivo', 0):>12.4f}\n"
-            mensaje += f"{'Valoracion'       :<18} {""}\n"
 
             if modo == "ia" and confianza is not None:
                 mensaje += f"{'-' * 37}\n"
@@ -3900,13 +3897,12 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
             mensaje += f"{'Ganancia Inv.'    :<18} {row.get('ganancia_inversion', 0):>12.2f}\n"
             mensaje += f"{'Dividend Yield'   :<18} {row.get('dividend_yield', 0):>12.2%}\n"
             mensaje += f"{'Monto Invertir'   :<18} {row.get('pinvertir', 0):>12.2f}\n"
-            mensaje += f"{'Cantidad Buy'     :<18} {row.get('cantidad_buy', 0):>12.1f}\n"
+            mensaje += f"{'Cantidad Buy'     :<18} {self._compacto(row.get('cantidad_buy')):>12}\n"
             _importe_buy = row.get("cantidad_buy", 0) * last
             mensaje += f"{'Importe'          :<18} {_importe_buy:>12.2f}\n"
-            mensaje += f"{'Prec. preBuy'     :<18} {row.get('avgcost', 0):>12.4f}\n"
-            mensaje += f"{'Prec. posBuy'     :<18} {row.get('avgcost_post', 0):>12.4f}\n"
+            _costo = f"{self._compacto(row.get('avgcost'))} → {self._compacto(row.get('avgcost_post'))}"
+            mensaje += f"{'Costo'            :<18} {_costo:>12}\n"
             mensaje += f"{'Objetivo'         :<18} {row.get('objetivo', 0):>12.4f}\n"
-            mensaje += f"{'Valoracion'       :<18} {""}\n"
 
             _raw_tec = row.get("Datostecnicos") or row.get("datos_tecnicos")
             if _raw_tec:
@@ -4265,6 +4261,13 @@ class Chatbot(tk.Toplevel, ClassAgenteIA, Telegram):
         except Exception as e:
             print(f"get_top_buy(): {e}")
             return []
+
+    @staticmethod
+    def _compacto(valor):
+        """Numero sin ceros sobrantes: 7 en vez de 7.0000, y 0.00123 de una cripto sin truncar a 0.0."""
+        valor = float(valor or 0)
+        decimales = 4 if abs(valor) >= 1 else 8
+        return f"{valor:,.{decimales}f}".rstrip("0").rstrip(".")
 
 
 # Inicio chatbot ----------------------------------------------------------------------------------------------------------------
