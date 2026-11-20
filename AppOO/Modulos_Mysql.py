@@ -1205,18 +1205,22 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                 anomalias_extremas = cursor.fetchall()
 
             # ── 2. Validar diaria_performance.costo_base ──────────────────────
+            # Solo dias sin operacion: una venta consume lotes y el costo unitario de lo que queda
+            # cambia de verdad (FIRY 11-18: 105 de 112 vendidas, 15,45 → 96,96 por accion).
             cursor.execute(
                 """
                 SELECT t.Date, t.symbol, t.costo_base, t.costo_base_ayer,
                        t.costo_u / t.costo_u_ayer AS ratio
                 FROM (
-                    SELECT Date, symbol, costo_base, costo_base / cantidad AS costo_u,
+                    SELECT Date, symbol, costo_base, cantidad, costo_base / cantidad AS costo_u,
                            LAG(costo_base) OVER (PARTITION BY account, symbol ORDER BY Date) AS costo_base_ayer,
-                           LAG(costo_base / cantidad) OVER (PARTITION BY account, symbol ORDER BY Date) AS costo_u_ayer
+                           LAG(costo_base / cantidad) OVER (PARTITION BY account, symbol ORDER BY Date) AS costo_u_ayer,
+                           LAG(cantidad) OVER (PARTITION BY account, symbol ORDER BY Date) AS cantidad_ayer
                     FROM diaria_performance
                     WHERE account = %s AND costo_base > 0 AND cantidad > 0
                 ) t
                 WHERE t.costo_u_ayer > 0
+                  AND ABS(t.cantidad - t.cantidad_ayer) < 0.0001
                   AND t.Date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
                   AND (t.costo_u / t.costo_u_ayer > %s OR t.costo_u / t.costo_u_ayer < %s)
                 ORDER BY t.Date ASC

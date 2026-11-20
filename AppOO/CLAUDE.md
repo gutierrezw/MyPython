@@ -1059,6 +1059,22 @@ agregado del vehículo y no tiene cantidad que dividir; solo dispararía si una 
 costo de toda la cartera. Y la purga sigue sin dejar línea en ningún log: el caso se reconstruyó desde
 `cache_health` y `booktrading`.
 
+**Corregido el 2026-11-20 — el costo por unidad tampoco es estable en un día con operación.** Dividir por
+`cantidad` arregló la compra pero no la venta: una venta consume lotes y el costo medio de lo que queda
+cambia de verdad. FIRY vendió 105 de 112 el 11-18 y le quedaron los 7 lotes de 2021-22: **15,45 → 96,96
+por acción, ratio 6,28**, el mismo costo que reporta IB. Fue el mismo lazo de arriba —purga, cuarentena,
+`performa_inversion` de Stock cortada en el 11-18— y además, en cuarentena, `carry_forward` le escribió
+`gyp_dia` 0: **la ganancia realizada de la venta (380,37 USD) no aparecía en la diaria**.
+
+Hoy el chequeo de costo compara **solo días en que la cantidad no cambió** (`LAG(cantidad)`): con la
+cantidad quieta, un costo unitario que salta 2x sí es un dato roto. Medido sobre el último año en Stock:
+las 4 detecciones eran todas cambios de cantidad —el split inverso de TLRY (780 → 78), WKHS y dos ventas
+de FIRY— y con el filtro quedan **0**. Crypto y BotCrypto ya estaban en 0.
+
+**Punto de atención — sigue abierto que un símbolo en cuarentena el día de una venta pierde su
+`gprealizadas`:** `carry_forward` escribe `gyp_dia` 0 por diseño. Con este arreglo FIRY no entra en
+cuarentena, pero el agujero existe para cualquier otra causa de cuarentena.
+
 ## Gráfico de performance — la fuente es `performa_inversion`, no un recálculo (2026-11-11)
 
 **Reversión de `9986292` (2026-03-08), que cambió la fuente sin declarar motivo.** Ese commit hizo
