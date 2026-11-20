@@ -66,12 +66,9 @@ class AnalisisBase:
         self.account = account
         self.positions = positions or []
         self.top = 3
-        # Solo las ventanas que se repueblan sin efectos colaterales muestran el boton ⟳.
-        # AnalisisFCI lo habilita; Crypto/Stock lanzan hilos al poblar y no se pueden redibujar en caliente.
+        # El boton ⟳ es el unico refresco: ninguna ventana se repuebla sola. El ciclo automatico de Crypto
+        # (repoblado cada 60s + prestamos cada 10s) se quito el 2026-11-20 por consumo de CPU.
         self.refresh_habilitado = False
-        # Id del after del ciclo automatico (solo Crypto lo usa). Vive en self y no en una local
-        # porque refrescar() tiene que cancelarlo: si no, cada refresh manual deja un ciclo mas vivo.
-        self._after_id = None
 
         # DataFrames para análisis
         self.df_lotes = pd.DataFrame()
@@ -125,14 +122,13 @@ class AnalisisBase:
             traceback.print_exc()
 
     def cerrar_ventana(self):
-        """Cierra la ventana, corta el ciclo automatico y libera el binding global del mousewheel.
+        """Cierra la ventana y libera el binding global del mousewheel.
 
         El destroy va protegido y el estado se limpia igual: Tk recorre los hijos y a veces no puede
         borrar el comando Tcl de un canvas de matplotlib que ya se habia ido. Sin proteccion el
         destroy corta a mitad, `_ventana_activa` queda apuntando a una ventana rota y no se puede
         abrir otra hasta reiniciar la app.
         """
-        self._cancelar_ciclo()
         try:
             self.canvas.unbind_all("<MouseWheel>")
         except tk.TclError:
@@ -147,7 +143,6 @@ class AnalisisBase:
         quedarse mirando el mismo grafico, no volver al encabezado.
         """
         try:
-            self._cancelar_ciclo()
             pos = self.canvas.yview()[0]
             for w in self.scrollable_frame.winfo_children():
                 self._destruir(w)
@@ -201,15 +196,6 @@ class AnalisisBase:
             widget.destroy()
         except tk.TclError as e:
             _logger.debug(f"[AnalisisBase._destruir] {e}")
-
-    def _cancelar_ciclo(self):
-        """Cancela el after del ciclo automatico si hay uno pendiente."""
-        if self._after_id:
-            try:
-                self.canvas.after_cancel(self._after_id)
-            except Exception:
-                pass
-            self._after_id = None
 
     def formato_eje_tiempo(self, eje, dias):
         """Escala la etiqueta del eje X a la ventana: dia en 1m, semana en 3m, mes de 6m en adelante.
@@ -1915,10 +1901,6 @@ class AnalisisCrypto(AnalisisBase):
 
         row = self.crear_grafico_vs_indice(parent=frame, row=row)
 
-        # Ciclo automatico cada 60s por el mismo camino que el boton ⟳: un solo repoblado, que ademas
-        # repone el boton Cancel (el ciclo anterior destruia el frame entero y lo dejaba afuera).
-        self._after_id = frame.after(60000, self.refrescar)
-
     def _seccion_deuda(self, frame, row):
         """Sección de análisis de préstamos flexibles Binance con simulador loan_distribute."""
         from Class_customer import DataHub  # import diferido — evita ciclo: Class_Analisis→Class_customer
@@ -2089,7 +2071,7 @@ class AnalisisCrypto(AnalisisBase):
 
         def _crear_grafico_prestamos(parent, prestamos_data, earn_map_local, row):
             if not prestamos_data:
-                return row, None
+                return row
             fg = Figure(figsize=(5.6, 3.2), dpi=100)
             _draw_grafico_en_fig(fg, prestamos_data, earn_map_local)
             frm = tk.Frame(parent, bg=self.CG_COLOR)
@@ -2098,9 +2080,7 @@ class AnalisisCrypto(AnalisisBase):
             canvas_fig.draw()
             canvas_fig.get_tk_widget().pack(fill="x", expand=True)
             self.boton_refrescar(frm, propia_fila=True)
-            frm._fg = fg
-            frm._canvas = canvas_fig
-            return row + 1, frm
+            return row + 1
 
         def _calcular_distribucion():
             try:
@@ -2239,7 +2219,7 @@ class AnalisisCrypto(AnalisisBase):
         self._mrg_data = (total_deuda, capital_neto)
         row += 1
 
-        row, frm_grafico = _crear_grafico_prestamos(frame, prestamos, earn_map, row)
+        row = _crear_grafico_prestamos(frame, prestamos, earn_map, row)
 
         # simulador loan_distribute
         row = self.crear_seccion(frame, "Simulador loan_distribute", row)
@@ -2321,51 +2301,6 @@ class AnalisisCrypto(AnalisisBase):
         sb_sim.pack(side="right", fill="y")
         row += 1
 
-        def _actualizar_live():
-            nonlocal frm_grafico, prestamos, earn_map
-            # El widget muere en cada repoblado del panel (ciclo de 60s o boton ⟳) y el after seguia
-            # reprogramandose sobre un widget destruido: TclError en cada vuelta. Si no existe, el ciclo
-            # termina — el repoblado ya dejo uno nuevo corriendo sobre el tree nuevo.
-            if not tree_result.winfo_exists():
-                return
-            try:
-                nuevos = _get_loan_data()
-                if nuevos:
-                    # actualizar treeview
-                    iids = tree_result.get_children()
-                    for iid, p in zip(iids, nuevos):
-                        vals = tree_result.item(iid, "values")
-                        if vals[0] == "TOTAL":
-                            continue
-                        tree_result.set(iid, "Col USD", f"{p['col_usd']:,.2f}")
-                        tree_result.set(iid, "LTV actual", f"{p['ltv']:.2%}")
-                        tree_result.set(iid, "USDT Actual", f"{p['deuda']:,.2f}")
-                        tree_result.set(iid, "Pedir USDT", "-")
-                        tree_result.set(iid, "LTV final", f"{p['ltv']:.2%}")
-                    total_iid = iids[-1] if iids else None
-                    if total_iid:
-                        t_col = sum(p["col_usd"] for p in nuevos)
-                        t_deu = sum(p["deuda"] for p in nuevos)
-                        t_ltv = t_deu / t_col if t_col > 0 else 0
-                        tree_result.set(total_iid, "Col USD", f"{t_col:,.2f}")
-                        tree_result.set(total_iid, "USDT Actual", f"{t_deu:,.2f}")
-                        tree_result.set(total_iid, "LTV final", f"{t_ltv:.2%}")
-                    # actualizar closures para que _calcular_distribucion use datos frescos
-                    earn_nuevo = {b["asset"]: b.get("usdt_value", 0.0) for b in ServiciosCrypto().earn_spot_balances()}
-                    prestamos = nuevos
-                    earn_map = earn_nuevo
-                    # redibujar gráfico in-place — sin destroy para eliminar parpadeo
-                    if frm_grafico is not None and hasattr(frm_grafico, "_fg"):
-                        frm_grafico._fg.clear()
-                        _draw_grafico_en_fig(frm_grafico._fg, nuevos, earn_nuevo)
-                        frm_grafico._canvas.draw_idle()
-            except Exception as e:
-                _logger.error(f"_actualizar_live: {e}")
-            if tree_result.winfo_exists():
-                tree_result.after(10000, _actualizar_live)
-
-        tree_result.after(10000, _actualizar_live)
-
         def _ejecutar_prestamo():
             from Class_ApiBinnace import BinanceClient  # import diferido — evita ciclo con Modulos_python chain
             from Class_customer import MyMessageBox  # import diferido — evita ciclo
@@ -2395,6 +2330,10 @@ class AnalisisCrypto(AnalisisBase):
                 if errores:
                     msg += f"\n\nErrores:\n" + "\n".join(errores)
                 MyMessageBox(frame).showinfo("Préstamo", msg)
+                # Sin ciclo automatico, la deuda nueva solo se ve recargando: una vez, si algo se ejecuto.
+                # showinfo bloquea hasta Aceptar y cuelga del root, asi que el repoblado no lo destruye.
+                if ok:
+                    self.refrescar()
             except Exception as e:
                 MyMessageBox(frame).showinfo("Error", str(e))
                 _logger.error(f"_ejecutar_prestamo(): {e}")
@@ -2413,6 +2352,8 @@ class AnalisisCrypto(AnalisisBase):
                 if resultado["errores"]:
                     msg += "\n\nErrores:\n" + "\n".join(resultado["errores"])
                 MyMessageBox(frame).showinfo("Pagar", msg)
+                if resultado["ok"]:
+                    self.refrescar()
             except Exception as e:
                 MyMessageBox(frame).showinfo("Error", str(e))
                 _logger.error(f"_ejecutar_pago(): {e}")
