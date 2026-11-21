@@ -2849,7 +2849,8 @@ class TickerInfo(MyOrders):
         #   3. Llama ts_yfinance_symbol() para poblar DataHub.info[symbol]["datos_tecnicos"]
         #      (EMAs, RSI, MACD) — necesarios para predecir_modelo(); sin esto el modelo falla
         #      con "EMA020_d not in index"
-        # El método es invocado por schedule_ib_offline_sync() cada 5 min mientras IClient.authenticated=False.
+        # El método es invocado por schedule_ib_offline_sync() cada 5 min mientras el socket de IB no está
+        # conectado (DataHub.ws_stock_connected=False).
         try:
             if not self.positions:
                 return "sin posiciones"
@@ -2889,7 +2890,7 @@ class TickerInfo(MyOrders):
                     fx_rates[currency] = 1.0
 
             close = df["Close"]
-            actualizados = 0
+            actualizados, fallidos = 0, []
             for position in self.positions:
                 symbol = position.get("ticket")
                 if not symbol:
@@ -2918,9 +2919,10 @@ class TickerInfo(MyOrders):
                         self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
                         actualizados += 1
                 except Exception:
-                    continue
+                    fallidos.append(symbol)
 
-            return f"{actualizados}/{len(symbols)} símbolos sincronizados (ib_offline_sync)"
+            sin_precio = f" — sin precio: {', '.join(fallidos)}" if fallidos else ""
+            return f"{actualizados}/{len(symbols)} símbolos sincronizados (ib_offline_sync){sin_precio}"
         except Exception as e:
             return f"ib_offline_sync: {e}"
 

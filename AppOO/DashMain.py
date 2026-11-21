@@ -197,10 +197,13 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
     def schedule_ib_offline_sync(self):
         try:
-            if not self.IClient.authenticated:
+            # el camino lo decide el socket, no la sesion: IClient.authenticated se sella al abrir la sesion y no
+            # vuelve a False, asi que una caida de IB durante el dia dejaba el panel congelado sin pasar a yfinance
+            if not DataHub.ws_stock_connected:
                 self.summary = {}
                 result = self.ib_offline_sync()
-                self.logger.warning(f"IBFallback yfinance: {result}")
+                # IBroks_Client y no self.logger: ClassMyOrders esta en ERROR y el resultado no llegaba a ningun log
+                logging.getLogger("IBroks_Client").warning(f"IBFallback yfinance: {result}")
                 if " Conexión   :" in self.resumen:
                     self.resumen[" Conexión   :"] = "ONLINE (yf)"
         except Exception as e:
@@ -3040,7 +3043,8 @@ class DashMain:
                 self.stock.summary = self.stock_ts.summary
                 self.stock.positions = self.stock_ts.positions
 
-                if not self.stock_ts.IClient.authenticated:
+                # sin socket IB el precio lo deja ib_offline_sync en DataHub.info (ver schedule_ib_offline_sync)
+                if not DataHub.ws_stock_connected:
                     for position in self.stock.positions:
                         symbol = position.get("ticket")
                         ws = DataHub.info.get(symbol, {}).get("websocket", {})

@@ -878,6 +878,17 @@ tickets distintos, 0 duplicados**, y el `timestamp` de todas estaba a minutos de
 corre cuando IB no está autenticado; no se tocó. Scripts de la medición:
 `AppTest/diag_inversion_dgyp.py` y `AppTest/diag_dgyp_gap.py`.
 
+**Matizado el 2026-11-20 — el respaldo lo decide el socket, no la sesión.** El precio de Stock tiene dos
+caminos: con el socket de IB vivo lo pone cada mensaje (`procesa_stock`); sin él, `ib_offline_sync` baja
+yfinance cada 5 min y `update_widget` lo aplica cada segundo. El que elegía entre los dos era
+`IClient.authenticated`, que **solo `create_session()` pone en True y nada vuelve a False** (el tickle
+corre sobre otra instancia de `IB()`). Arrancar sin IB funcionaba; **una caída de IB durante el día
+dejaba el panel congelado** sin pasar nunca a yfinance. Hoy los dos puntos (`schedule_ib_offline_sync` y
+`update_widget`) miran `DataHub.ws_stock_connected`, que baja al terminar `websocket_loop` — y el watchdog
+lo termina tras 5 min sin `smd+` con el mercado abierto. El resultado del respaldo sale por
+`IBroks_Client` con los símbolos sin precio: por `ClassMyOrders` (en ERROR) no llegaba a ningún log, y el
+11-20 no se pudo saber si había corrido.
+
 **`inversion.conid` es el mercado donde operó la cuenta, no una propiedad del ticker** (2026-09-16). La
 compra de un símbolo fuera de cartera tomaba el primer resultado de la búsqueda de IB, que es difusa y no
 trae `currency`: ENB salió en Toronto (TSE, en CAD) antes que en NYSE, y BIL devolvía BHP antes que el ETF.
