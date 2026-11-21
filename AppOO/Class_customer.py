@@ -5865,7 +5865,7 @@ class WidgetVehiculo(TickerInfo):
     def total_gain(self, tipo):
         total, cantidad = 0, 0
         try:
-            for key, value in self.info.items():
+            for key, value in list(self.info.items()):
 
                 # recupera profit que este  self.info[*]['sell']
                 if "sell" in value and tipo == "sell":
@@ -6133,7 +6133,8 @@ class WidgetVehiculo(TickerInfo):
 
             # inserta registros en treeview
             Newheight = 0
-            for key, value in self.info.items():
+            # copia: self.info es DataHub.info y otro hilo le agrega simbolos mientras se recorre
+            for key, value in list(self.info.items()):
                 tipo = "dividends" if "dividends" in value else "buy"
                 if tipo in value:
                     if "ganancia precio" in value[tipo]:
