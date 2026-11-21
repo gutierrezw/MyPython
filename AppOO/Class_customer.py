@@ -6897,7 +6897,7 @@ class WidgetVehiculo(TickerInfo):
                 if response and "price" in response:
                     precio = float(response["price"])
                     crypto, found = self.RepositorioOportunidades.select_otros_activos(
-                        accout=self.account, symbol=symbol
+                        account=self.account, symbol=symbol
                     )
                     conid = crypto[0]["idcrypto"] if found else None
 
