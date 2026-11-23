@@ -25,7 +25,7 @@ from AppValuations.consenso_score import (
     UMBRAL_DIVERGENCIA_CRIPTO,
     DIAS_HISTORIA_DIVERGENCIA_CRIPTO,
 )
-from AppValuations.valoracion_radar import valoracion_historial
+from AppValuations.valoracion_radar import valoracion_historial, pares_por_grupo, valoracion, ejes_radar
 from Modulos_python import (
     tk,
     ttk,
@@ -3404,6 +3404,46 @@ def sync_dividend_status_screener(account: str, limit: int = 150) -> dict:
     sincronizados = market.sync_market_to_inversion(account)
 
     return {"processed": processed, "errors": errors, "total": len(symbols), "sync_inversion": sincronizados}
+
+
+def sync_valoracion_semanal(account: str) -> dict:
+    """Foto semanal de valoración en valoracion_historia: los 5 ejes, el voto y sus insumos crudos, de todo Stock.
+
+    Sale entera de `market` (la traza de dividendos incluida), sin descargas. La Señal se copia de `market`: existe
+    para encartera Y/N y queda NULL en el resto del universo (Doc/plan-valoracion.md § 5)."""
+    market = MarketScreen()
+    universo = market.load_universo_valoracion(account)
+    pares = pares_por_grupo(universo)
+    fecha = datetime.now().date()
+    filas, errors = [], 0
+
+    for row in universo:
+        try:
+            val = valoracion(row, pares)
+            ejes = ejes_radar(row, val, pares)
+            cobertura = val["cobertura"]
+            filas.append(
+                dict(
+                    row,
+                    **{f"eje_{eje}": nota for eje, nota in ejes.items()},
+                    account=account,
+                    fecha=fecha,
+                    precio=row["lastPrice"],
+                    val_metodo=val["metodo"],
+                    val_desvio=val["desvio"],
+                    val_voto=val["voto"],
+                    val_media=val["media"],
+                    # inf = ni la ganancia ni el flujo cubren el dividendo; la trampa queda en val_motivos
+                    val_cobertura=cobertura if cobertura is not None and math.isfinite(cobertura) else None,
+                    val_motivos=", ".join(val["motivos"]) or None,
+                )
+            )
+        except Exception as e:
+            _logger.error(f"sync_valoracion_semanal({row.get('symbol')}): {e}")
+            errors += 1
+
+    escritas = market.insert_valoracion_historia(filas)
+    return {"enviadas": len(filas), "errors": errors, "total": len(universo), "error_bd": bool(filas) and not escritas}
 
 
 if __name__ == "__main__":

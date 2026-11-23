@@ -586,6 +586,10 @@ Borrado el 9. Inocuo, se registra para no volver a investigarlo.
 | market | `sharesOutstanding` / `floatShares` | En Stock son acciones emitidas y float; en cripto (`categoriaActivo='C'`) son el `totalSupply` y el `circulatingSupply` del par. Se **reutiliza** la columna en vez de crear una de supply: es el mismo concepto de unidades existentes (semántica 2026-11-08) |
 | market | `volume` / `averageVolume` | `bigint`, no `float`: son conteos como el supply y `float` es exacto solo hasta 2^24 — **28 filas de `volume` y 25 de `averageVolume` lo pasaban** (peor caso INTC 173.770.300 → ...304). **En cripto el volumen de Yahoo viene en USD, no en unidades** (semántica 2026-11-08) |
 | market | `lastPrice` | En Stock sale de `currentPrice` de Yahoo; en cripto de `regularMarketPrice`, porque **`currentPrice` no existe en el `info` de un par** y leerlo habría escrito 0 (semántica 2026-11-08) |
+| valoracion_historia | `consenso_tag` / `consenso_suma` | **Copia** de `market` el día de la foto, no un cálculo. Existe para `encartera` Y y N; **NULL en el resto del universo**, que no tiene Señal calculada (semántica 2026-11-23) |
+| valoracion_historia | `eje_dividendo` | **0 = no paga**, es una nota medida. **NULL = sin dato**. No se promedian como lo mismo (semántica 2026-11-23). **Hoy el 0 se decide con el trailing de Yahoo, que viene en 0 para empresas que pagan**: en la primera foto, 194 filas en 0, y al menos 126 son falta de dato o pagan (`plan-valoracion.md` § 9.3) |
+| valoracion_historia | `val_cobertura` | Cobertura del dividendo por ganancia o flujo. **NULL si es infinita** (nada lo cubre: la trampa queda en `val_motivos`) **o si no se mide** (sector exento, sin dividendo) (semántica 2026-11-23) |
+| valoracion_historia | `trailingAnnualDividendRate` | `DEFAULT NULL`, **no el `'0'` de `market`**: en la foto un 0 significa "no paga" y "sin dato" queda NULL (semántica 2026-11-23) |
 
 **`encartera` no se bajaba en el cierre normal de una posición, y el criterio de baja era el valor,
 no las unidades** (2026-11-08). `update_inversion` tiene **dos** caminos de baja y hacían cosas
@@ -698,6 +702,12 @@ fallos repetidos bloquean la rotación.
 Desde el 2026-11-23 la misma regla cubre una valoración que no decide. Si la traza es corta o el dividendo es
 incoherente, `valoracion()` devuelve `categoria` `None`, y eso se trata igual que una descarga vacía: se conserva la
 vigente.
+
+**Revertido el 2026-11-23: el `trailing_annual == 0` de Yahoo no es un hallazgo.** Yahoo devuelve `0.0` escrito
+para empresas que pagan: BDX, con `dividendRate` 4,24, y ERIC, con 0,32. ASH lo devuelve en 0 de forma
+intermitente. Con esa regla hoy hay **56 ex-cartera que pagan clasificadas `'N'`**, ninguna en cartera. La regla
+sigue en el código hasta el arreglo: decidir si paga con el dividendo de 12 meses del historial. Detalle y lugares
+en `Doc/plan-valoracion.md` § 9.3.
 
 **`categoriaActivo = 'C'` — un par cripto necesita marca propia porque el default es la peor casilla**
 (2026-11-08). La etapa 4 de [[plan-market-crypto]] le da fila en `market` a los 12 pares de cartera, y
@@ -1297,6 +1307,7 @@ Si el commit toca el código de la izquierda, revisar el doc de la derecha antes
 | `FinanceScreen`, `Class_Finance`, tablas `fin_*` | `20-Proyecto/spec-finanzas.md` (§0: objetivos, etapas, regla de KPIs, mapa de categorías) |
 | `Class_AsesorIA`, `Chatbot` (vistas, `_enviar`) | `20-Proyecto/design-agente-ia.md` § "Asistente de Inversión (Chat)" |
 | `trailingAnnualDividendRate`, `freeCashflow`, `totalDebt`, o cualquier cociente contra `lastPrice`/`marketCap` | sección "Moneda de los datos de Yahoo" en este archivo |
+| `valoracion_radar`, `sync_valoracion_semanal`, `Agente_ValoracionSemanal`, tabla `valoracion_historia` | `20-Proyecto/plan-valoracion.md` (Estado, § 5 y § 9) |
 | Cualquier hallazgo de la revisión Opus (H1–H10) | `30-Gestion/resultado-revision-opus-preservation-gainscapture.md` + `30-Gestion/BACKLOG.md` |
 
 Los docs viven en `AppOO/Doc/` (= `20-Proyecto/` del vault vía junction) y se comitean en el

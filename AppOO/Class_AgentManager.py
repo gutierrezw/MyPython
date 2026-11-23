@@ -16,7 +16,14 @@ from Modulos_Mysql import (
 from Class_Finance import scan_extractos, sync_binance_api
 from Class_IbFlex import Class_IbFlex
 from Class_IbReconcile import Class_IbReconcile
-from Class_Screener import sync_market, sync_prices, audit_portfolio, refresh_consenso_tags, sync_dividend_status_screener
+from Class_Screener import (
+    sync_market,
+    sync_prices,
+    audit_portfolio,
+    refresh_consenso_tags,
+    sync_dividend_status_screener,
+    sync_valoracion_semanal,
+)
 from Class_InstitucionalScore import sync_institutional, sync_edgar_funds, sync_13f_scores
 from edgar_13f import sync_fund_filings, sync_13f_holdings
 from ConvergIA.Scanner_Sentimiento import scan_sentimiento
@@ -266,6 +273,19 @@ class AgentManager:
             )
         except Exception as e:
             self._log_stock.error(f"Agente_DividendStatusScreener(): {e}")
+
+    @wait_rate(604800, persist=True, desc="Foto semanal de valoración (7d)", nivel=2)
+    def Agente_ValoracionSemanal(self):
+        try:
+            result = sync_valoracion_semanal(account=self.account)
+            msg = (f"ValoracionSemanal: enviadas={result['enviadas']} errores={result['errors']} "
+                   f"total={result['total']}")
+            if result["error_bd"]:
+                self._log_stock.error(f"{msg} — la BD no escribió la foto")
+            else:
+                self._log_stock.warning(msg)
+        except Exception as e:
+            self._log_stock.error(f"Agente_ValoracionSemanal(): {e}")
 
     @wait_rate(3600, persist=True)
     def Agente_StockBeta(self):
@@ -1604,6 +1624,7 @@ class AgentManager:
             ("Agente_13FScores", self.Agente_13FScores, 300),
             ("Agente_AuditPortfolio", self.Agente_AuditPortfolio, 300),
             ("Agente_DividendStatusScreener", self.Agente_DividendStatusScreener, 300),
+            ("Agente_ValoracionSemanal", self.Agente_ValoracionSemanal, 300),
             ("Agente_ClasificadorETF", self.Agente_ClasificadorETF, 300),
             ("Agente_ClasificadorCrypto", self.Agente_ClasificadorCrypto, 300),
             ("Agente_ApiCostTracker", self.Agente_ApiCostTracker, 300),

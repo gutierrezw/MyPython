@@ -3887,6 +3887,70 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 cursor.close()
             conn.close()
 
+    def load_universo_valoracion(self, account) -> list:
+        """Filas de `market` que entran a la foto semanal de valoración: Stock sin ETF ('X') ni cripto ('C').
+        Trae los insumos de `valoracion` y `ejes_radar`, más los que la foto guarda crudos."""
+        conn = self._conectar(tabla="select.market")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT symbol, encartera, sector, industry, lastPrice, currency, financialCurrency, "
+                "trailingAnnualDividendRate, dividendRate, dividendYield, payoutRatio, trazaDividends, "
+                "trailingPE, forwardPE, priceToBook, trailingEps, forwardEps, revenueGrowth, earningsGrowth, "
+                "returnOnEquity, returnOnAssets, operatingMargins, totalDebt, freeCashflow, marketCap, "
+                "targetMeanPrice, inst_score, fh_count, consenso_tag, consenso_suma "
+                "FROM market WHERE account = %s AND categoriaActivo NOT IN ('X', 'C')",
+                (account,),
+            )
+            cols = [c[0] for c in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_universo_valoracion]: {error}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
+    def insert_valoracion_historia(self, filas: list) -> int:
+        """Upsert de la foto semanal en valoracion_historia. filas = dicts con las columnas de la tabla.
+
+        Si el agente corre dos veces el mismo día, la segunda foto reescribe la primera (`uq_valoracion_historia`)."""
+        if not filas:
+            return 0
+        cols = (
+            "account", "symbol", "fecha", "encartera", "sector", "industry", "precio",
+            "eje_valor", "eje_futuro", "eje_pasado", "eje_salud", "eje_dividendo",
+            "val_metodo", "val_desvio", "val_voto", "val_media", "val_cobertura", "val_motivos",
+            "consenso_tag", "consenso_suma", "trailingPE", "forwardPE", "priceToBook", "trailingEps", "forwardEps",
+            "dividendYield", "dividendRate", "trailingAnnualDividendRate", "payoutRatio", "returnOnEquity",
+            "returnOnAssets", "operatingMargins", "revenueGrowth", "earningsGrowth", "totalDebt", "freeCashflow",
+            "marketCap", "targetMeanPrice", "inst_score", "fh_count", "currency", "financialCurrency",
+        )
+        clave = ("account", "symbol", "fecha")
+        conn = self._conectar(tabla="insert.valoracion_historia")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.executemany(
+                "INSERT INTO valoracion_historia ({}) VALUES ({}) ON DUPLICATE KEY UPDATE {}".format(
+                    ", ".join(cols),
+                    ", ".join(["%s"] * len(cols)),
+                    ", ".join(f"{c}=VALUES({c})" for c in cols if c not in clave),
+                ),
+                [tuple(f.get(c) for c in cols) for f in filas],
+            )
+            conn.commit()
+            return cursor.rowcount
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::insert_valoracion_historia]: {error}")
+            return 0
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
 
 
 class PlanInversion(BDsystem):  # ------------------------------------------------------------------------------------
