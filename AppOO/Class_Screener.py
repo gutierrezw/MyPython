@@ -8,6 +8,8 @@ from Modulos_Utilitarios import (
     define_FileCache,
     documentar_estructura,
     convierte_ticket_crypto,
+    read_json_tmp,
+    write_json_tmp,
 )
 from Class_customer import CustomTreeview
 from Class_BrowserBridge import abrir_tradingview
@@ -25,7 +27,13 @@ from AppValuations.consenso_score import (
     UMBRAL_DIVERGENCIA_CRIPTO,
     DIAS_HISTORIA_DIVERGENCIA_CRIPTO,
 )
-from AppValuations.valoracion_radar import valoracion_historial, pares_por_grupo, valoracion, ejes_radar
+from AppValuations.valoracion_radar import (
+    valoracion_historial,
+    pares_por_grupo,
+    valoracion,
+    ejes_radar,
+    dividendo_maduro,
+)
 from Modulos_python import (
     tk,
     ttk,
@@ -2523,10 +2531,116 @@ class Screener(tk.Frame):
 
 
 
+_SEC_HEADERS = {"User-Agent": "AppOO research@appoo.com"}
+_SEC_NCSR_URL = (
+    "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={:010d}&type=N-CSR"
+    "&dateb=&owner=include&count=10&output=atom"
+)
+_EXCLUIDOS_JSON = "market_excluidos.json"
+_EXCLUIDOS_DIAS = 30
+
+
+def _nasdaq_fetch():
+    """Filas del screener de NASDAQ y el total que declara: está completa si trae tantas filas como el total."""
+    ua = UserAgent()
+    headers = {"User-Agent": ua.random, "Accept": "application/json"}
+    base_url = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=5000"
+    rows, offset, total = [], 0, 0
+    while True:
+        resp = requests.get(f"{base_url}&offset={offset}", headers=headers, timeout=30)
+        resp.raise_for_status()
+        data = resp.json().get("data", {})
+        table = data.get("table") or data
+        page = table.get("rows") or []
+        rows.extend(page)
+        total = int(data.get("totalrecords") or 0)
+        offset += len(page)
+        if not page or offset >= total:
+            break
+    return rows, total
+
+
+def _sec_tickers():
+    """{ticker: (cik, exchange)} del padrón de la SEC; {} si no se pudo bajar."""
+    try:
+        resp = requests.get(
+            "https://www.sec.gov/files/company_tickers_exchange.json", headers=_SEC_HEADERS, timeout=30
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        i_tk, i_cik, i_ex = (data["fields"].index(c) for c in ("ticker", "cik", "exchange"))
+        return {f[i_tk]: (f[i_cik], f[i_ex]) for f in data["data"]}
+    except Exception as e:
+        _logger.warning(f"_sec_tickers: {e}")
+        return {}
+
+
+def _sec_fondo_cerrado(cik):
+    """True si el emisor presenta N-CSR (fondo cerrado; una BDC presenta 10-K), False si no, None si falló."""
+    time.sleep(0.11)
+    try:
+        resp = requests.get(_SEC_NCSR_URL.format(int(cik)), headers=_SEC_HEADERS, timeout=15)
+        resp.raise_for_status()
+        return "<entry>" in resp.text
+    except Exception:
+        return None
+
+
+def _excluidos_vigentes():
+    """Símbolos rechazados hace menos de _EXCLUIDOS_DIAS: sync_market no los vuelve a evaluar hasta entonces."""
+    limite = (datetime.now() - timedelta(days=_EXCLUIDOS_DIAS)).strftime("%Y-%m-%d")
+    return {s for s, d in read_json_tmp(_EXCLUIDOS_JSON).items() if d.get("fecha", "") >= limite}
+
+
+def _registrar_excluidos(nuevos):
+    if not nuevos:
+        return
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    data = read_json_tmp(_EXCLUIDOS_JSON)
+    data.update({s: {"motivo": m, "fecha": hoy} for s, m in nuevos.items()})
+    write_json_tmp(_EXCLUIDOS_JSON, data)
+
+
+def _motivo_fuera_de_universo(symbol, sec):
+    """Por qué el símbolo no pertenece a market, que es de acciones comunes con dividendo maduro.
+    None = pertenece; "" = sin dato para decidir, se conserva (una descarga vacía no decide nada)."""
+    cik, exchange = sec.get(symbol, (None, None))
+    if exchange == "OTC":
+        return "otc"
+    try:
+        result = get_yfinance(ticket=symbol, vehiculo="Stock")
+        if result is None:
+            return ""
+        info, datos = result
+        qt = (info.get("quoteType") or "").upper()
+        if not qt or qt == "NONE":
+            return ""
+        if qt in _ETF_TYPES or symbol in _ETF_SYMBOLS:
+            return "etf"
+        if not info.get("sector"):
+            return "sin_sector"
+        if datos is None or datos.empty or "Dividends" not in datos:
+            return ""
+        y_datos, _ = valoracion_historial(info, datos)
+    except Exception as e:
+        _logger.warning(f"_motivo_fuera_de_universo({symbol}): {e}")
+        return ""
+    maduro = dividendo_maduro(y_datos)
+    if maduro is None:
+        # Sin pagos en el historial: si Yahoo declara dividendo, el historial vino incompleto
+        return "" if (info.get("dividendRate") or 0) > 0 else "no_maduro"
+    if not maduro:
+        return "no_maduro"
+    if cik and _sec_fondo_cerrado(cik):
+        return "fondo_cerrado"
+    return None
+
+
 def sync_market(account):
     """
     Sincroniza la tabla market en 2 fases:
-      Phase 1 — NASDAQ : descubre símbolos nuevos de dividendos (INSERT mínimo)
+      Phase 1 — NASDAQ : descubre símbolos nuevos de dividendos (INSERT mínimo). Solo entra lo que
+                _motivo_fuera_de_universo acepta; un rechazo no se reevalúa por _EXCLUIDOS_DIAS
       Phase 2 — yfinance: actualiza precio, mercado y fundamentales por símbolo (paralelo)
     Reemplaza HTTP directo + crumb por yf.Ticker().info — más robusto ante cambios de Yahoo.
     """
@@ -2549,24 +2663,6 @@ def sync_market(account):
             return None
 
     # ── Phase 1: NASDAQ discovery ────────────────────────────────────────────
-    def _nasdaq_fetch():
-        ua = UserAgent()
-        headers = {"User-Agent": ua.random, "Accept": "application/json"}
-        base_url = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=5000"
-        rows, offset = [], 0
-        while True:
-            resp = requests.get(f"{base_url}&offset={offset}", headers=headers, timeout=30)
-            resp.raise_for_status()
-            data = resp.json().get("data", {})
-            table = data.get("table") or data
-            page = table.get("rows") or []
-            rows.extend(page)
-            total = int(data.get("totalrecords") or 0)
-            offset += len(page)
-            if not page or offset >= total:
-                break
-        return rows
-
     def _is_dividend_candidate(row):
         sector = row.get("sector", "") or ""
         industry = row.get("industry", "") or ""
@@ -2682,9 +2778,11 @@ def sync_market(account):
     market = MarketScreen()
     existing = market.load_symbols(account=account)
 
-    # Phase 1: NASDAQ — solo INSERT símbolos nuevos
-    rows = _nasdaq_fetch()
-    insertados, omitidos = 0, 0
+    # Phase 1: NASDAQ — solo INSERT símbolos nuevos que pertenecen al universo
+    rows, _ = _nasdaq_fetch()
+    sec = _sec_tickers()
+    excluidos = _excluidos_vigentes()
+    insertados, omitidos, rechazados = 0, 0, {}
     for row in rows:
         if not _is_dividend_candidate(row):
             continue
@@ -2694,12 +2792,22 @@ def sync_market(account):
         # Filtrar preferreds, warrants, rights, units (símbolo con guión/acento: ABR-D, ABR^D, AHT-F, GPMT^A, etc.)
         if "-" in symbol or "^" in symbol:
             continue
-        if symbol not in existing:
-            market.insert(upd=["account", "tipo"], val=[account, "Dividends"], symbol=symbol)
-            existing[symbol] = "N"
-            insertados += 1
-        elif existing[symbol] in ("I", "S", "X"):
-            omitidos += 1
+        if symbol in existing:
+            if existing[symbol] in ("I", "S", "X"):
+                omitidos += 1
+            continue
+        # Sin el padrón de la SEC no se puede descartar OTC ni fondo cerrado: el candidato espera a mañana
+        if not sec or symbol in excluidos:
+            continue
+        motivo = _motivo_fuera_de_universo(symbol, sec)
+        if motivo is not None:
+            if motivo:
+                rechazados[symbol] = motivo
+            continue
+        market.insert(upd=["account", "tipo"], val=[account, "Dividends"], symbol=symbol)
+        existing[symbol] = "N"
+        insertados += 1
+    _registrar_excluidos(rechazados)
 
     # Phase 2: yfinance — todos los símbolos activos, paralelo
     active_symbols = [s for s, cat in existing.items() if cat not in ("X",)]
@@ -2718,6 +2826,7 @@ def sync_market(account):
         "descargados": len(rows),
         "insertados": insertados,
         "omitidos": omitidos,
+        "rechazados": len(rechazados),
         "actualizados": data_ok,
         "sector_sync": sector_ok,
     }
@@ -2725,9 +2834,13 @@ def sync_market(account):
 
 def cleanup_market(account):
     """
-    Valida y completa todos los símbolos de la tabla market contra Yahoo Finance.
+    Valida y completa todos los símbolos de la tabla market contra Yahoo Finance. Nada en cartera (encartera='Y')
+    se elimina.
     - Actualiza campos de quote (precio, mercado) para símbolos devueltos por Yahoo.
-    - Elimina símbolos NO devueltos por Yahoo, SALVO los que están en cartera (encartera='Y').
+    - Elimina deslistados: fuera de una descarga COMPLETA de NASDAQ y sin cotización vigente en Yahoo (no devuelto,
+      sin precio o sin operar hace más de 7 días). NASDAQ solo no alcanza: CFR, BIPC, UTZ cotizan y no figuran.
+    - Elimina lo que _motivo_fuera_de_universo rechaza (preferentes, OTC, fondos cerrados, no maduros) y lo anota
+      para que sync_market no lo reinserte por _EXCLUIDOS_DIAS.
     - Completa campos vacíos (country, shortName) con datos de Yahoo Fundamentals.
     - Batches que fallan (429 u otro error) se omiten sin eliminar nada.
     """
@@ -2764,7 +2877,10 @@ def cleanup_market(account):
             "batches_ok": 0,
             "quote_actualizados": 0,
             "eliminados": 0,
+            "renombrados": 0,
             "preferreds_eliminados": 0,
+            "preferreds_huerfanos": [],
+            "fuera_de_universo": {},
             "fund_completados": 0,
         }
 
@@ -2912,6 +3028,16 @@ def cleanup_market(account):
         }
     all_symbols = list(existing.keys())
 
+    nasdaq = None
+    try:
+        filas_nasdaq, total_nasdaq = _nasdaq_fetch()
+        if total_nasdaq and len(filas_nasdaq) >= total_nasdaq:
+            nasdaq = {(f.get("symbol") or "").strip() for f in filas_nasdaq}
+    except Exception as e:
+        _logger.warning(f"cleanup_market: NASDAQ no disponible ({e})")
+    if nasdaq is None:
+        _logger.warning("cleanup_market: descarga de NASDAQ incompleta — no se elimina ningún deslistado")
+
     # ── Phase 0: Eliminar preferreds/warrants/rights ya existentes ────────────
     preferreds_eliminados = 0
     preferreds_huerfanos = []  # preferreds sin lastPrice (huérfanos)
@@ -2936,6 +3062,7 @@ def cleanup_market(account):
     not_found = []
     batches_ok = 0
     quote_ok = 0
+    operado_desde = time.time() - 7 * 86400
 
     for batch in _chunks(all_symbols, 250):
         time.sleep(1.0)
@@ -2958,7 +3085,9 @@ def cleanup_market(account):
                 sym = s.get("symbol", "").strip()
                 if not sym:
                     continue
-                if not _safe_float(s.get("regularMarketPrice")) and existing.get(sym, {}).get("encartera") != "Y":
+                operado = (s.get("regularMarketTime") or 0) >= operado_desde
+                vigente = _safe_float(s.get("regularMarketPrice")) and operado
+                if not vigente and existing.get(sym, {}).get("encartera") != "Y":
                     not_found.append(sym)
                     continue
                 campos, valores = _map_quote(s)
@@ -2970,7 +3099,7 @@ def cleanup_market(account):
                 quote_ok += 1
             # Detectar no encontrados en este batch
             for sym in batch:
-                if sym not in returned:
+                if sym not in returned and existing.get(sym, {}).get("encartera") != "Y":
                     not_found.append(sym)
         except Exception as e:
             _logger.warning(f"cleanup_market batch skip ({e}) — no se procesan {len(batch)} símbolos")
@@ -2993,13 +3122,28 @@ def cleanup_market(account):
         if new_sym and new_sym not in existing:
             rows = market.rename_symbol(old_symbol=sym, new_symbol=new_sym, account=account)
             _logger.warning(f"cleanup_market: renombrado {sym} → {new_sym} {rows}")
+            existing[new_sym] = existing.pop(sym)
             renombrados += 1
-        else:
+        elif nasdaq is not None and sym not in nasdaq:
             market.delete(symbol=sym, account=account)
+            existing.pop(sym, None)
             eliminados += 1
-            _logger.warning(f"cleanup_market: eliminado {sym}")
+            _logger.warning(f"cleanup_market: eliminado {sym} (deslistado)")
 
-    # ── Phase 3: Fundamentals — cualquier campo fundamental ausente ──────────────
+    # ── Phase 3: Universo — preferentes, OTC, fondos cerrados y no maduros, salvo cartera ───────
+    sec = _sec_tickers()
+    fuera = {}
+    for sym, d in list(existing.items()):
+        if d.get("encartera") == "Y" or d.get("categoriaActivo") in ("X", "C"):
+            continue
+        motivo = _motivo_fuera_de_universo(sym, sec)
+        if motivo:
+            market.delete(symbol=sym, account=account)
+            fuera[sym] = motivo
+            _logger.warning(f"cleanup_market: eliminado {sym} ({motivo})")
+    _registrar_excluidos(fuera)
+
+    # ── Phase 4: Fundamentals — cualquier campo fundamental ausente ──────────────
     needs_fund = market.load_symbols_needing_fundamentals(account)
     fund_ok = 0
     with ThreadPoolExecutor(max_workers=3) as ex:
@@ -3018,6 +3162,7 @@ def cleanup_market(account):
         "renombrados": renombrados,
         "preferreds_eliminados": preferreds_eliminados,
         "preferreds_huerfanos": preferreds_huerfanos,
+        "fuera_de_universo": {m: list(fuera.values()).count(m) for m in set(fuera.values())},
         "fund_completados": fund_ok,
     }
 

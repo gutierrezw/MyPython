@@ -331,6 +331,70 @@ rotación de `categoria_update`.
 
 ---
 
+## Universo de `market` — acciones comunes con dividendo maduro (2026-11-23)
+
+**`market` guarda acciones comunes que pagan dividendo maduro, más lo que está en cartera aunque no pague.** No
+entran preferentes, fondos cerrados, OTC ni ETF. Lo aplican dos caminos con la misma función,
+`_motivo_fuera_de_universo(symbol, sec)` (`Class_Screener.py`):
+
+- **A la entrada:** `sync_market` evalúa cada símbolo nuevo antes de insertarlo.
+- **A lo que ya está:** `cleanup_market`, que corre `Agente_CleanupMarket` (7 días, `ventana=(0, 6)`). Hasta hoy
+  `cleanup_market` no tenía llamador automático, solo el `__main__` y los scripts de `AppTest/`.
+
+**Nunca sale lo que tiene `encartera = 'Y'`.** La ex-cartera (`'N'`) sí queda sujeta a la regla.
+
+| Motivo | Cómo se decide |
+|---|---|
+| deslistado | Falta en una descarga **completa** de NASDAQ (filas ≥ total declarado) **y** Yahoo no lo cotiza: no lo devuelve, no trae `regularMarketPrice` o su `regularMarketTime` tiene más de 7 días. NASDAQ solo da falsos positivos: CFR, BIPC, UTZ, LXFR y MERC cotizan y no figuran en su lista. Con una descarga de NASDAQ incompleta no se borra ningún deslistado |
+| `otc` | `exchange == "OTC"` en `company_tickers_exchange.json` de la SEC |
+| `etf` | `quoteType in _ETF_TYPES` o `_ETF_SYMBOLS`: el mismo criterio que el panel y `audit_portfolio` |
+| `sin_sector` | Yahoo no le da sector. Son las preferentes: NASDAQ las lista sin "-" (BPOPM, FITBO), así que el filtro por símbolo no las atrapa |
+| `no_maduro` | `dividendo_maduro(traza)` (`AppValuations/valoracion_radar.py`): menos de `MIN_ANIOS_DIVIDENDO` (3) años completos, o dejó de pagar |
+| `fondo_cerrado` | Presenta N-CSR en EDGAR (el feed atom de `browse-edgar`, que también trae N-CSRS). Las BDC presentan 10-K, así que se quedan |
+
+**La madurez se decide con una descarga nueva, nunca con `market.trazaDividends`.** La traza de la BD queda vieja
+cuando Yahoo no trae dividendos, porque `sync_dividend_status_screener` no la reescribe. Ejemplos: TLK, ITRN, HPP
+y UNIT terminan en 2021. Con esa traza se habrían borrado símbolos que pagan. La traza se arma con
+`get_yfinance` + `valoracion_historial`, el mismo armado que la categoría.
+
+**"Sigue pagando" mira también el año anterior.** El historial de yfinance de HMC, MUFG, KT y CEPU no trae los
+pagos de 2026, así que el dividendo de 12 meses sale 0 aunque la empresa pague. Por eso `dividendo_maduro` acepta
+lo pagado el año anterior.
+
+**Quien empezó a pagar hace poco queda afuera hasta cumplir 3 años, y se decidió así a propósito.** Caso testigo:
+NOMD paga desde febrero de 2024, así que tiene 2 años completos y recién califica el 2027-01-01. Hoy no sale porque
+está en cartera. Se descartó bajar el umbral del universo a 2 años: `market` es para dividendo maduro. El rechazo no
+es permanente, porque `_EXCLUIDOS_DIAS` lo reevalúa a los 30 días y el símbolo entra solo al completar los 3 años.
+
+**Una descarga vacía no decide nada.** Si Yahoo no devuelve el símbolo, no trae `quoteType` o trae la serie vacía
+con `dividendRate > 0`, el motivo es `""` y la fila se conserva. Es la misma regla que `categoriaActivo`.
+
+**Memoria de rechazados:** `tmp/market_excluidos.json`, con forma `{symbol: {motivo, fecha}}`. `sync_market` no
+vuelve a evaluar durante 30 días un símbolo rechazado (`_EXCLUIDOS_DIAS`); sin eso bajaría Yahoo todos los días
+para los mismos símbolos. Los deslistados no se anotan ahí: el archivo distingue "salió del universo" de
+"dejó de cotizar", que la validación del plan de valoración no puede tratar igual (`plan-valoracion.md` § 9.3).
+
+**SEC:** User-Agent genérico (`_SEC_HEADERS`) y 0,11 s entre llamadas, por debajo del límite de 10 por segundo.
+Si el padrón de la SEC no baja, `sync_market` no inserta nada esa corrida y `cleanup_market` no evalúa `otc` ni
+`fondo_cerrado`, que necesita el cik del padrón.
+
+**Medido el 2026-11-23 sobre la cuenta U4214563**, antes de la primera corrida:
+
+- 1.027 filas sujetas a la regla y 45 fuera de su alcance (cartera, `X`, `C`).
+- 72 sin sector en la BD; Yahoo lo confirma en 32.
+- 2 OTC: GLBZ y TAIT.
+- 147 fondos cerrados después de las otras exclusiones.
+- Unos 55 deslistados.
+- CEPU, HMC, KT y MUFG se salvan por la regla del año anterior.
+
+El conteo final sale en la línea `CleanupMarket:` de `agentes.log`.
+
+**Punto de atención — `Agente_CleanupMarketNoScore` es otro agente y no se tocó.** Borra las filas sin
+`inst_score` ni `fh_count`, y probablemente es la causa de que 118 REIT maduros de NASDAQ no estén en `market`:
+BACKLOG 110.
+
+---
+
 ## Autonomía del usuario
 
 - **Nunca ejecutar scripts ni procesos largos en background sin que el usuario lo pida.**
@@ -1308,6 +1372,7 @@ Si el commit toca el código de la izquierda, revisar el doc de la derecha antes
 | `Class_AsesorIA`, `Chatbot` (vistas, `_enviar`) | `20-Proyecto/design-agente-ia.md` § "Asistente de Inversión (Chat)" |
 | `trailingAnnualDividendRate`, `freeCashflow`, `totalDebt`, o cualquier cociente contra `lastPrice`/`marketCap` | sección "Moneda de los datos de Yahoo" en este archivo |
 | `valoracion_radar`, `sync_valoracion_semanal`, `Agente_ValoracionSemanal`, tabla `valoracion_historia` | `20-Proyecto/plan-valoracion.md` (Estado, § 5 y § 9) |
+| `sync_market`, `cleanup_market`, `_motivo_fuera_de_universo`, `dividendo_maduro`, `Agente_CleanupMarket` | sección "Universo de `market`" en este archivo + `20-Proyecto/spec-consenso.md` § "Limpieza" |
 | Cualquier hallazgo de la revisión Opus (H1–H10) | `30-Gestion/resultado-revision-opus-preservation-gainscapture.md` + `30-Gestion/BACKLOG.md` |
 
 Los docs viven en `AppOO/Doc/` (= `20-Proyecto/` del vault vía junction) y se comitean en el

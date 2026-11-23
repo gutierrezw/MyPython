@@ -177,6 +177,18 @@ def valoracion_historial(info, datos):
     return y_datos, valoracion(dict(info, lastPrice=precio, trazaDividends=y_datos))
 
 
+def dividendo_maduro(traza):
+    """True si paga dividendo hace al menos MIN_ANIOS_DIVIDENDO años completos y sigue pagando; None sin traza.
+    Seguir pagando es el dividendo de 12 meses o lo pagado el año anterior: a varios ADR japoneses y coreanos
+    (HMC, MUFG, KT) el historial de yfinance no les trae los pagos del año en curso."""
+    filas = _leer_traza(traza)
+    if filas is None:
+        return None
+    if len(filas) - 1 < MIN_ANIOS_DIVIDENDO:
+        return False
+    return filas[-1][2] > 0 or filas[-2][1] > 0
+
+
 def pares_por_grupo(filas):
     """{metrica: {(nivel, nombre): valores ordenados}} por sector e industria. Se arma una vez por pasada."""
     pares = {m: {} for m in _METRICAS}

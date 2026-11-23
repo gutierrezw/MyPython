@@ -18,6 +18,7 @@ from Class_IbFlex import Class_IbFlex
 from Class_IbReconcile import Class_IbReconcile
 from Class_Screener import (
     sync_market,
+    cleanup_market,
     sync_prices,
     audit_portfolio,
     refresh_consenso_tags,
@@ -167,10 +168,19 @@ class AgentManager:
             result = sync_market(account=self.account)
             self._log_stock.warning(
                 f"MarketScreener: descargados={result['descargados']} insertados={result['insertados']} "
-                f"omitidos={result['omitidos']} actualizados={result['actualizados']}"
+                f"omitidos={result['omitidos']} rechazados={result['rechazados']} actualizados={result['actualizados']}"
             )
         except Exception as e:
             self._log_stock.error(f"Agente_MarketScreener(): {e}")
+
+    @wait_rate(604800, persist=True, nivel=2, ventana=(0, 6),
+               desc="Limpia market: deslistados, preferentes, OTC, fondos cerrados, no maduros (7d)")
+    def Agente_CleanupMarket(self):
+        try:
+            result = cleanup_market(account=self.account)
+            self._log_stock.warning(f"CleanupMarket: {result}")
+        except Exception as e:
+            self._log_stock.error(f"Agente_CleanupMarket(): {e}")
 
     @wait_rate(43200, persist=True, initial_delay=120)
     def Agente_PriceSync(self):
@@ -1615,6 +1625,7 @@ class AgentManager:
         """Registra agentes de larga duración como threads independientes."""
         _threads = [
             ("Agente_MarketScreener", self.Agente_MarketScreener, 300),
+            ("Agente_CleanupMarket", self.Agente_CleanupMarket, 300),
             ("Agente_PriceSync", self.Agente_PriceSync, 300),
             ("Agente_InstitucionalScore", self.Agente_InstitucionalScore, 300),
             ("Agente_ConsensoCache", self.Agente_ConsensoCache, 300),
