@@ -1973,9 +1973,11 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 campos = {}
                 ddatos, x_categoria, x_meses = self.rendimiento_dividends(activo=activo, datos=pdatos, symbol=x_symbol)
                 qt = (activo.get("quoteType") or "").upper()
-                if not ddatos.empty:
-                    # None = la valoracion no decide (traza corta o dividendo incoherente): se conserva la
-                    # vigente, y solo un simbolo sin categoria toma la de default
+                # 'N' con la traza vacia es un hallazgo: el historial no trae pagos y dividendRate tampoco. Se guarda
+                # la traza vacia porque la foto semanal lee de market sin descargar
+                if not ddatos.empty or x_categoria == "N":
+                    # None = la valoracion no decide (traza corta, dividendo incoherente o historial vacio con
+                    # dividendRate): se conserva la vigente, y solo un simbolo sin categoria toma la de default
                     if x_categoria is None and not categorias_actuales.get(x_symbol):
                         x_categoria = categoria_default(qt)
                     if x_categoria is not None:
@@ -2018,7 +2020,9 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 qt = (yf_activo.get("quoteType") or "").upper()
                 if qt in _ETF_TYPES or symbol in _ETF_SYMBOLS:
                     continue  # ETF/fondo — no insertar en market
-                if not ind_update and ("dividendYield" in yf_activo) and ("Dividends" in datos):
+                # quoteType y no dividendYield: Yahoo omite dividendYield en quien no paga, y sin esta rama nunca
+                # recibia su 'N'. Las klines de Crypto no traen Dividends y siguen yendo a la rama de abajo
+                if not ind_update and qt and ("Dividends" in datos):
                     self._validate_dividend_data_freshness(symbol, yf_activo, datos["Dividends"])
                     fields, categoria, meses = construct_info_dividends(ticket, yf_activo, datos)
                     columnas, values = [], []

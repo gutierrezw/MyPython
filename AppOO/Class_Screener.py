@@ -1313,9 +1313,9 @@ class Screener(tk.Frame):
                 if tiene_div:
                     activo, datos = get_yfinance(ticket=symbol, vehiculo="Stock")
                     _update_info_panel(activo, datos)
-                    trailing = (activo.get("trailingAnnualDividendRate") or 0) if activo else 0
-                    if datos is not None and "Dividends" in datos and trailing > 0:
-                        y_datos, val = valoracion_historial(activo, datos)
+                    # Lo decide el historial, no el trailing de Yahoo: viene en 0 para empresas que pagan (BDX, ERIC)
+                    if datos is not None and "Dividends" in datos:
+                        y_datos, val = valoracion_historial(activo or {}, datos)
                         if not y_datos.empty:
                             dlabl = {
                                 "symbol": symbol,
@@ -3553,25 +3553,22 @@ def sync_dividend_status_screener(account: str, limit: int = 150) -> dict:
 
             if qt in _ETF_TYPES or symbol in _ETF_SYMBOLS:
                 categoria, traza, meses_str = "X", None, ""
-            elif trailing_annual == 0:
-                # No paga dividendos: 'N' es un hallazgo real, no una descarga fallida
-                categoria, traza, meses_str = "N", None, ""
-            elif "Dividends" not in datos or datos.empty:
-                # Paga dividendo pero la descarga vino vacia: no hay nada que actualizar.
+            elif not qt or "Dividends" not in datos or datos.empty:
+                # La descarga vino vacia: no hay nada que actualizar.
                 # Escribir 'N' aca degradaba 'I'/'S' y mandaba el activo al universo de GainsCapture.
                 categoria, traza, meses_str = None, None, ""
             else:
                 try:
+                    # Si paga lo decide el historial, no el trailing de Yahoo: viene en 0 para empresas que pagan
+                    # (BDX, ERIC). None = la valoracion no decide (traza corta, dividendo incoherente o historial
+                    # vacio con dividendRate): se conserva la vigente
                     y_datos, val = valoracion_historial(activo, datos)
-                    if y_datos.empty:
-                        categoria, traza, meses_str = None, None, ""
-                    else:
-                        # None = la valoracion no decide (traza corta o dividendo incoherente): se conserva la vigente
-                        categoria = val["categoria"]
-                        pagos = datos[datos["Dividends"] != 0]
-                        anterior = pagos[pagos.index.year == pd.Timestamp.now().year - 1]
-                        meses_str = ", ".join(anterior.index.strftime("%B"))
-                        traza = y_datos.to_json(orient="split")
+                    categoria = val["categoria"]
+                    pagos = datos[datos["Dividends"] != 0]
+                    anterior = pagos[pagos.index.year == pd.Timestamp.now().year - 1]
+                    meses_str = ", ".join(anterior.index.strftime("%B"))
+                    # La traza vacia se guarda cuando decide 'N': la foto semanal lee de market sin descargar
+                    traza = y_datos.to_json(orient="split") if not y_datos.empty or categoria == "N" else None
                 except Exception as inner_e:
                     _logger.warning(f"sync_dividend_status_screener dividend calc ({symbol}): {inner_e}")
                     categoria, traza, meses_str = None, None, ""

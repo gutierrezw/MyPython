@@ -36,13 +36,14 @@ _METRICAS = (
 def valoracion(row, pares=None):
     """Decide si la acción está barata o cara contra su referencia. Primer método que aplica:
 
-    1. `dividendo`: paga y tiene >= 3 años completos de traza → yield de 12 meses contra la media de esos años.
+    1. `dividendo`: tiene >= 3 años completos de traza → yield de 12 meses contra la media de esos años.
     2. `pb_industria`: banco o aseguradora → P/B contra la mediana de su industria (o sector).
     3. `pe_forward` / `pe_trailing`: P/E contra la mediana de su sector en la misma base, nunca mezcladas. Forward
        si Yahoo lo da; trailing si no hay forward. Un forward <= 0 (pérdida esperada) se abstiene.
 
     Si a un método le faltan pares (< MIN_PARES) se pasa al siguiente. Sin método, el voto se abstiene.
-    `categoria` es el signo de la comparación de dividendo, sin banda; None = el llamador conserva la vigente.
+    `categoria` es el signo de la comparación de dividendo, sin banda; 'N' si la traza dice que no paga; None = el
+    llamador conserva la vigente.
     `trampa`: el dividendo actual no lo cubre ni la ganancia esperada ni el flujo de caja → el voto no pasa de 0.
     `cobertura` es la mejor de esas pruebas (la parte del dividendo que se lleva). `motivos` explica por qué la
     valoración se abstuvo o quedó limitada.
@@ -64,11 +65,11 @@ def valoracion(row, pares=None):
     trailing = _num(row.get("trailingAnnualDividendRate"))
     tasa = _num(row.get("dividendRate"))
     precio = _num(row.get("lastPrice"))
-    if trailing == 0:
+    serie = _leer_traza(row.get("trazaDividends"))
+    if _paga_dividendo(serie, tasa) is False:
         res["categoria"] = "N"
 
-    serie = _leer_traza(row.get("trazaDividends"))
-    if trailing and trailing > 0 and serie and len(serie) - 1 >= MIN_ANIOS_DIVIDENDO:
+    if serie and len(serie) - 1 >= MIN_ANIOS_DIVIDENDO:
         div12 = serie[-1][0] * serie[-1][2] if serie[-1][0] else None
         media = sum(r[2] for r in serie[:-1]) / (len(serie) - 1)
         if div12 and not _dividendo_coherente(div12, tasa, serie[-2][1]):
@@ -133,7 +134,8 @@ def serie_rendimiento_anual(m_datos, precio):
     los dos del historial — el trailing de Yahoo viene en la moneda del balance en emisores extranjeros y por
     acción ordinaria en algunos ADR. Los 12 meses se anclan al último pago para no contar 13 pagos mensuales ni
     5 trimestrales; si el último pago tiene más de DIVIDENDO_VIGENTE_DIAS, el dividendo ya no está vigente (0).
-    Si este año todavía no pagó, la fila se agrega en vez de pisar el año anterior.
+    Si este año todavía no pagó, la fila se agrega en vez de pisar el año anterior. Los años sin pago entre el último
+    pago y el año anterior entran con 0: sin ellos quien dejó de pagar en 2023 tendría la traza 2019..2023 y 2026.
     """
     columnas = ["Close", "Dividends", "Rendimiento"]
     m = m_datos[m_datos["Dividends"] != 0].copy()
@@ -156,6 +158,9 @@ def serie_rendimiento_anual(m_datos, precio):
     previos = [i for i in y_datos.index if i.year < hoy.year]
     if len(previos) > MIN_ANIOS_DIVIDENDO and pagos.loc[previos[0]] < _mediana(sorted(pagos.loc[previos[1:]])):
         y_datos = y_datos.drop(previos[0])
+    anios = pd.date_range(y_datos.index[0], pd.Timestamp(year=hoy.year - 1, month=12, day=31), freq="YE")
+    y_datos = y_datos.reindex(y_datos.index.union(anios))
+    y_datos[["Dividends", "Rendimiento"]] = y_datos[["Dividends", "Rendimiento"]].fillna(0.0)
 
     ultimo = m.index[-1]
     div12 = 0.0
@@ -178,15 +183,14 @@ def valoracion_historial(info, datos):
 
 
 def dividendo_maduro(traza):
-    """True si paga dividendo hace al menos MIN_ANIOS_DIVIDENDO años completos y sigue pagando; None sin traza.
-    Seguir pagando es el dividendo de 12 meses o lo pagado el año anterior: a varios ADR japoneses y coreanos
-    (HMC, MUFG, KT) el historial de yfinance no les trae los pagos del año en curso."""
+    """True si paga dividendo hace al menos MIN_ANIOS_DIVIDENDO años completos y sigue pagando (`_sigue_pagando`);
+    None sin traza."""
     filas = _leer_traza(traza)
-    if filas is None:
+    if not filas:
         return None
     if len(filas) - 1 < MIN_ANIOS_DIVIDENDO:
         return False
-    return filas[-1][2] > 0 or filas[-2][1] > 0
+    return _sigue_pagando(filas)
 
 
 def pares_por_grupo(filas):
@@ -228,17 +232,17 @@ def ejes_radar(row, val, pares):
 
 
 def _eje_dividendo(row, nivel, cobertura):
-    trailing = _num(row.get("trailingAnnualDividendRate"))
-    if trailing is None:
+    serie = _leer_traza(row.get("trazaDividends"))
+    paga = _paga_dividendo(serie, _num(row.get("dividendRate")))
+    if paga is None:
         return None
-    if trailing == 0:
+    if not paga:
         return 0.0
     sostenibilidad = None
     if cobertura is not None:
         sostenibilidad = max(0.0, min(1.0, (1 - cobertura) / (1 - PAYOUT_SANO)))
     continuidad = None
-    serie = _leer_traza(row.get("trazaDividends"))
-    if serie and len(serie) > 1:
+    if len(serie) > 1:
         anios = 0
         for r in reversed(serie[:-1]):
             if r[1] <= 0:
@@ -279,6 +283,22 @@ def _dividendo_coherente(div12, tasa, anterior):
     lo, hi = COHERENCIA_DIVIDENDO
     cocientes = [div12 / ref for ref in (tasa, anterior) if ref and ref > 0]
     return not cocientes or any(lo <= q <= hi for q in cocientes)
+
+
+def _sigue_pagando(filas):
+    """Dividendo de 12 meses, o pagos este año o el anterior: a varios ADR japoneses y coreanos (HMC, MUFG, KT) el
+    historial de yfinance no les trae los pagos del año en curso."""
+    return bool(filas) and (filas[-1][2] > 0 or filas[-1][1] > 0 or (len(filas) > 1 and filas[-2][1] > 0))
+
+
+def _paga_dividendo(filas, tasa):
+    """True paga, False no paga, None sin dato o si el historial y `dividendRate` se contradicen. El trailing de Yahoo
+    no decide: viene en 0 para empresas que pagan (BDX, ERIC)."""
+    if filas is None:
+        return None
+    if _sigue_pagando(filas):
+        return True
+    return None if tasa and tasa > 0 else False
 
 
 def _pruebas_cobertura(row, div, precio):
@@ -337,7 +357,7 @@ def _leer_traza(traza):
             filas = [[f[p] for p in pos] for _, f in sorted(zip(d["index"], d["data"]), key=lambda x: x[0])]
     except (ValueError, KeyError, TypeError, AttributeError):
         return None
-    return [[_num(f[0]), _num(f[1]) or 0.0, _num(f[2]) or 0.0] for f in filas] or None
+    return [[_num(f[0]), _num(f[1]) or 0.0, _num(f[2]) or 0.0] for f in filas]
 
 
 def _mediana(valores):

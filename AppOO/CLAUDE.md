@@ -361,6 +361,9 @@ y UNIT terminan en 2021. Con esa traza se habrían borrado símbolos que pagan. 
 pagos de 2026, así que el dividendo de 12 meses sale 0 aunque la empresa pague. Por eso `dividendo_maduro` acepta
 lo pagado el año anterior.
 
+Desde el 2026-11-23 los años sin pago del final de la traza entran con 0. Antes, quien dejó de pagar en 2023
+tenía la traza 2019..2023 y 2026: el año anterior figuraba con pago y pasaba por maduro.
+
 **Quien empezó a pagar hace poco queda afuera hasta cumplir 3 años, y se decidió así a propósito.** Caso testigo:
 NOMD paga desde febrero de 2024, así que tiene 2 años completos y recién califica el 2027-01-01. Hoy no sale porque
 está en cartera. Se descartó bajar el umbral del universo a 2 años: `market` es para dividendo maduro. El rechazo no
@@ -653,7 +656,7 @@ Borrado el 9. Inocuo, se registra para no volver a investigarlo.
 | market | `volume` / `averageVolume` | `bigint`, no `float`: son conteos como el supply y `float` es exacto solo hasta 2^24 — **28 filas de `volume` y 25 de `averageVolume` lo pasaban** (peor caso INTC 173.770.300 → ...304). **En cripto el volumen de Yahoo viene en USD, no en unidades** (semántica 2026-11-08) |
 | market | `lastPrice` | En Stock sale de `currentPrice` de Yahoo; en cripto de `regularMarketPrice`, porque **`currentPrice` no existe en el `info` de un par** y leerlo habría escrito 0 (semántica 2026-11-08) |
 | valoracion_historia | `consenso_tag` / `consenso_suma` | **Copia** de `market` el día de la foto, no un cálculo. Existe para `encartera` Y y N; **NULL en el resto del universo**, que no tiene Señal calculada (semántica 2026-11-23) |
-| valoracion_historia | `eje_dividendo` | **0 = no paga**, es una nota medida. **NULL = sin dato**. No se promedian como lo mismo (semántica 2026-11-23). **Hoy el 0 se decide con el trailing de Yahoo, que viene en 0 para empresas que pagan**: en la primera foto, 194 filas en 0, y al menos 126 son falta de dato o pagan (`plan-valoracion.md` § 9.3) |
+| valoracion_historia | `eje_dividendo` | **0 = no paga**, es una nota medida. **NULL = sin dato**. No se promedian como lo mismo (semántica 2026-11-23). En la primera foto el 0 lo decidía el trailing de Yahoo, que viene en 0 para empresas que pagan: 194 filas en 0, y al menos 126 eran falta de dato o pagaban. **Desde el 2026-11-23 lo decide el historial** (`_paga_dividendo`, ver `categoriaActivo`) |
 | valoracion_historia | `val_cobertura` | Cobertura del dividendo por ganancia o flujo. **NULL si es infinita** (nada lo cubre: la trampa queda en `val_motivos`) **o si no se mide** (sector exento, sin dividendo) (semántica 2026-11-23) |
 | valoracion_historia | `trailingAnnualDividendRate` | `DEFAULT NULL`, **no el `'0'` de `market`**: en la foto un 0 significa "no paga" y "sin dato" queda NULL (semántica 2026-11-23) |
 
@@ -761,7 +764,8 @@ El comentario de la columna en MySQL repite este motivo — `SHOW FULL COLUMNS F
 en cada corrida y bajaban a `'N'` cuando Yahoo no devolvía dividendos, mandando activos `'I'`/`'S'` al
 universo de GainsCapture (que solo debe tomar `'N'`). Hoy la categoría solo se escribe si hay dato
 real; si no lo hay se conserva la vigente y solo se asigna `'N'` a símbolos que aún no tienen ninguna.
-`trailing_annual == 0` sí escribe `'N'`: es un hallazgo, no un fallo de descarga.
+Que no pague sí escribe `'N'`: es un hallazgo, no un fallo de descarga. Hasta el 2026-11-23 lo decidía
+`trailing_annual == 0`; ver la reversión abajo.
 La fecha, en cambio, se sella **siempre** — un símbolo que falla debe irse al final de la cola o los
 fallos repetidos bloquean la rotación.
 
@@ -771,9 +775,37 @@ vigente.
 
 **Revertido el 2026-11-23: el `trailing_annual == 0` de Yahoo no es un hallazgo.** Yahoo devuelve `0.0` escrito
 para empresas que pagan: BDX, con `dividendRate` 4,24, y ERIC, con 0,32. ASH lo devuelve en 0 de forma
-intermitente. Con esa regla hoy hay **56 ex-cartera que pagan clasificadas `'N'`**, ninguna en cartera. La regla
-sigue en el código hasta el arreglo: decidir si paga con el dividendo de 12 meses del historial. Detalle y lugares
-en `Doc/plan-valoracion.md` § 9.3.
+intermitente. Con esa regla había **56 ex-cartera que pagan clasificadas `'N'`**, ninguna en cartera. Detalle y
+lugares en `Doc/plan-valoracion.md` § 9.3.
+
+**Cerrado el mismo día: si paga lo decide el historial.** `_paga_dividendo(traza, dividendRate)`
+(`AppValuations/valoracion_radar.py`) es el único criterio. Lo usan la categoría (`valoracion()`) y el eje Dividendo
+de la foto semanal:
+
+| Historial | `dividendRate` | Resultado |
+|---|---|---|
+| Sigue pagando: 12 meses, este año o el anterior (`_sigue_pagando`) | cualquiera | paga |
+| Sin pagos recientes | vacío o 0 | `'N'` y eje 0 |
+| Sin pagos recientes | > 0 | no decide: se conserva la vigente y el eje queda NULL |
+| Sin traza | — | no decide |
+
+El trailing ya no decide si paga en ningún camino. Se sigue guardando en su columna, y en la prueba de cobertura
+entra como dividendo de respaldo cuando falta `dividendRate` y las monedas coinciden.
+
+Para que el criterio funcionara hubo que cambiar tres cosas más:
+
+- **La traza no tenía los años sin pago del final.** `serie_rendimiento_anual` agrupa por año los pagos que hay. Por
+  eso quien dejó de pagar en 2023 tenía el año anterior con pago y "sigue pagando" daba True. Hoy los años hasta el
+  anterior entran con 0. Los huecos del medio ya entraban en 0.
+- **La traza vacía se guarda cuando decide `'N'`.** La foto semanal lee de `market` sin descargar: sin traza el eje
+  quedaría NULL en vez de 0.
+- **El lazo de cartera de `DashMain` exigía `dividendYield`.** Yahoo lo omite en quien no paga, así que esas
+  posiciones nunca recibían categoría ni traza. Hoy exige `quoteType`. Medido antes del cambio: 15 posiciones de
+  Stock sin traza y con trailing 0.
+
+El efecto aparece en la corrida siguiente de cada camino: la cartera en el ciclo del panel, la ex-cartera con la
+rotación de `categoria_update` (unos 27 días). Hasta que les llegue la rotación, las 63 filas del universo sin traza
+y con trailing 0 pasan del eje 0 a NULL.
 
 **`categoriaActivo = 'C'` — un par cripto necesita marca propia porque el default es la peor casilla**
 (2026-11-08). La etapa 4 de [[plan-market-crypto]] le da fila en `market` a los 12 pares de cartera, y

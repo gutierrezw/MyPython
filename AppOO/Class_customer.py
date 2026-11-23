@@ -2947,9 +2947,9 @@ class TickerInfo(MyOrders):
         Returns:
             tuple: (y_datos, value, meses)
                 - y_datos: serie anual [Close, Dividends, Rendimiento]; la última fila es el año en curso
-                - value: "I" (rinde más que su media) / "S" (menos) / None (la valoración no decide: traza corta o
-                  dividendo incoherente, el llamador conserva la categoría vigente). "X" si no paga dividendo
-                  (trailingAnnualDividendRate = 0) y "E" si el historial no trae pagos.
+                - value: "I" (rinde más que su media) / "S" (menos) / "N" (el historial dice que no paga) / None (la
+                  valoración no decide: traza corta, dividendo incoherente o historial vacío con dividendRate; el
+                  llamador conserva la categoría vigente). "E" si falla. Con "N" y_datos puede venir vacío.
                 - meses: meses de pago del año anterior (o el del exDividendDate)
         """
         try:
@@ -2960,24 +2960,12 @@ class TickerInfo(MyOrders):
 
                 if isinstance(activo, yf.Ticker):
                     empresa = activo.info["shortName"]
-                    # trailingAnnualDividendRate solo decide si paga dividendo: viene en la moneda del balance
-                    trailing_annual = (
-                        activo.info["trailingAnnualDividendRate"] if "trailingAnnualDividendRate" in activo.info else 0
-                    )
                 else:
                     # pasa por aca cuando carga los activos en ts_yfinance_symbol()
                     empresa = activo["shortName"] if "shortName" in activo else symbol
-                    trailing_annual = (
-                        activo["trailingAnnualDividendRate"] if "trailingAnnualDividendRate" in activo else 0
-                    )
 
-                # ============================================================================
-                # VALIDACIÓN: No listar símbolos que no reportan dividendos
-                # Si trailingAnnualDividendRate = 0 → el activo NO paga dividendos → SKIP
-                # ============================================================================
-                if trailing_annual == 0:
-                    return pd.DataFrame(), "X", []  # Retornar vacío
-
+                # Si paga lo decide el historial, no trailingAnnualDividendRate: Yahoo lo trae en 0 para empresas
+                # que pagan (BDX, ERIC)
                 if "Dividends" not in datos:
                     raise ValueError("El symbol (" + symbol + ") No se construyo info() 'Dividends'")
 
@@ -2990,36 +2978,35 @@ class TickerInfo(MyOrders):
                     anual = m_div[m_div.index.year == year]
                     meses = list(anual.index.strftime("%B"))
                     if not meses:
-                        if "exDividendDate" in activo:
+                        if activo.get("exDividendDate"):
                             exdiv = datetime.fromtimestamp(activo["exDividendDate"])
                             meses = [exdiv.strftime("%B")]
 
-                    if not m_div.empty:
-                        pd.options.mode.copy_on_write = True
-                        info = activo.info if isinstance(activo, yf.Ticker) else activo
-                        y_datos, val = valoracion_historial(info, datos)
-                        value = val["categoria"]
+                    pd.options.mode.copy_on_write = True
+                    info = activo.info if isinstance(activo, yf.Ticker) else activo
+                    y_datos, val = valoracion_historial(info, datos)
+                    value = val["categoria"]
 
-                        if plot == "yes":
-                            dlabl = {
-                                "symbol": symbol,
-                                "buy": "Zona buy",
-                                "sell": "Zona sell",
-                                "legend": "outside upper left",
-                            }
-                            asset = {
-                                "ticket": symbol,
-                                "name": empresa,
-                                "aspect": 0.25,
-                                "valoracion": val,
-                            }
-                            chart_rendimiento_dividendos(
-                                fg=fg,
-                                datos=y_datos,
-                                dlabl=dlabl,
-                                asset=asset,
-                                cchart=self.cchart,
-                            )
+                    if not y_datos.empty and plot == "yes":
+                        dlabl = {
+                            "symbol": symbol,
+                            "buy": "Zona buy",
+                            "sell": "Zona sell",
+                            "legend": "outside upper left",
+                        }
+                        asset = {
+                            "ticket": symbol,
+                            "name": empresa,
+                            "aspect": 0.25,
+                            "valoracion": val,
+                        }
+                        chart_rendimiento_dividendos(
+                            fg=fg,
+                            datos=y_datos,
+                            dlabl=dlabl,
+                            asset=asset,
+                            cchart=self.cchart,
+                        )
 
                 return y_datos, value, meses
         except Exception as e:
