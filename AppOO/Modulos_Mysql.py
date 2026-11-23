@@ -2246,11 +2246,12 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
         finally:
             conn.close()
 
-    def load_cartera_inst(self, account, categoria=None, orden=None) -> list:
+    def load_cartera_inst(self, account, categoria=None, orden=None, encartera="Y") -> list:
         """Retorna lista de dicts con campos institucionales para activos en cartera (encartera='Y').
         @param account: id de cuenta, o lista de ids cuando el llamador abarca varias cuentas
         @param categoria: categoriaActivo exacta a traer; sin ella se excluyen los ETF ('X')
         @param orden: columna de orden; por defecto inst_score DESC, que en cripto es NULL
+        @param encartera: 'N' trae la ex-cartera con los mismos campos
         """
         conn = self._conectar(tabla="select.market")
         cursor = conn.cursor()
@@ -2266,14 +2267,48 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 "analyst_rec, analyst_mean, analyst_count, categoriaActivo, "
                 "floatShares, sharesOutstanding, volume, insider_ownership_pct, website, "
                 "marketCap, averageVolume, fiftyTwoWeekHigh, fiftyTwoWeekLow, consenso_tag, consenso_suma "
-                "FROM market WHERE account IN ({}) AND encartera = 'Y' AND {} "
-                "ORDER BY {}".format(acc_in, filtro, orden or "inst_score DESC")
+                "FROM market WHERE account IN ({}) AND encartera = '{}' AND {} "
+                "ORDER BY {}".format(acc_in, encartera, filtro, orden or "inst_score DESC")
             )
             cols = [c[0] for c in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
         except (Exception, connect.Error) as error:
             _logger.error(f"load_cartera_inst({account}): {error}")
             return []
+        finally:
+            conn.close()
+
+    def set_reingreso(self, account, symbol, motivo=None):
+        """Pone o quita la marca de no reingreso (plan-valoracion § 5b). La pone siempre una persona.
+        @param symbol: un simbolo o una lista de simbolos
+        @param motivo: con motivo se marca, y solo a una ex-cartera (encartera 'N'); sin motivo se quita la marca
+        @return: filas cambiadas; None si fallo la BD
+        """
+        syms = [symbol] if isinstance(symbol, str) else list(symbol)
+        if not syms:
+            return 0
+        marcas = ",".join(["%s"] * len(syms))
+        if motivo:
+            sql = (
+                "UPDATE market SET reingreso = 'N', reingreso_motivo = %s, reingreso_update = %s "
+                "WHERE account = %s AND symbol IN ({}) AND encartera = 'N'".format(marcas)
+            )
+            params = [motivo[:120], datetime.now(), account] + syms
+        else:
+            sql = (
+                "UPDATE market SET reingreso = NULL, reingreso_motivo = NULL, reingreso_update = %s "
+                "WHERE account = %s AND symbol IN ({}) AND reingreso IS NOT NULL".format(marcas)
+            )
+            params = [datetime.now(), account] + syms
+        conn = self._conectar(tabla="update.market")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            conn.commit()
+            return cursor.rowcount
+        except (Exception, connect.Error) as error:
+            _logger.error(f"set_reingreso({account}, {symbol}): {error}")
+            return None
         finally:
             conn.close()
 
@@ -9473,7 +9508,8 @@ class IaTraceScreen(BDsystem):  # ----------------------------------------------
             conn.close()
 
     def select_candidatos_ia(self, account: str, consenso_min: int = 4) -> list:
-        """Activos con buen consenso que NO están en cartera — candidatos de entrada."""
+        """Ex-cartera con buen consenso y sin marca de no reingreso — candidatos de entrada.
+        Una empresa nueva entra a cartera siempre por criterio humano (plan-valoracion § 5b)."""
         conn = self._conectar(tabla="ia_trace.candidatos")
         try:
             cursor = conn.cursor()
@@ -9482,7 +9518,7 @@ class IaTraceScreen(BDsystem):  # ----------------------------------------------
                 "inst_score, inst_ownership_pct, dividendYield, categoriaActivo "
                 "FROM market "
                 "WHERE account = %s AND consenso_suma >= %s "
-                "AND (encartera IS NULL OR encartera != 'Y') "
+                "AND encartera = 'N' AND reingreso IS NULL "
                 "AND categoriaActivo NOT IN ('X') "
                 "ORDER BY consenso_suma DESC, inst_score DESC "
                 "LIMIT 10",

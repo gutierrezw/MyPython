@@ -51,6 +51,7 @@ from Modulos_python import (
     ImageTk,
     Image,
     messagebox,
+    simpledialog,
     datetime,
     timezone,
     time,
@@ -142,7 +143,7 @@ def rotacion_tag(categoria, volume, market_cap, float_shares, shares_outstanding
     return "— BAJA"
 
 
-def bind_tv_web_menu(tree, win, colors=None, col_symbol="#1", get_url=None, on_analisis=None):
+def bind_tv_web_menu(tree, win, colors=None, col_symbol="#1", get_url=None, on_analisis=None, extras=None):
     """Agrega menú contextual TradingView/Web/Análisis al hacer click en columna Symbol de un Treeview.
 
     Args:
@@ -152,6 +153,7 @@ def bind_tv_web_menu(tree, win, colors=None, col_symbol="#1", get_url=None, on_a
         col_symbol: columna que activa el menú (default '#1').
         get_url: callable(symbol) → url str | None (opcional).
         on_analisis: callable(symbol) → None (opcional). Si se pasa, agrega opción "Análisis".
+        extras: callable(symbol) → [(texto, accion)] (opcional). Opciones que dependen del símbolo, al pie.
     """
     bgcolor = (colors or {}).get("bgcolor", "black")
     cgcolor = (colors or {}).get("cgcolor", "DarkCyan")
@@ -220,6 +222,15 @@ def bind_tv_web_menu(tree, win, colors=None, col_symbol="#1", get_url=None, on_a
                 text="Análisis",
                 command=lambda sym=symbol: (menu.destroy(), on_analisis(sym)),
                 **btn_cfg,
+            ).pack(fill=tk.X, padx=1, pady=(0, 1))
+
+        for texto, accion in extras(symbol) if extras else []:
+            tk.Frame(menu, bg="white", height=1).pack(fill=tk.X, padx=2)
+            tk.Button(
+                menu,
+                text=texto,
+                command=lambda a=accion, sym=symbol: (menu.destroy(), a(sym)),
+                **{**btn_cfg, "width": max(15, len(texto))},
             ).pack(fill=tk.X, padx=1, pady=(0, 1))
 
         menu.geometry(f"+{win.winfo_pointerx() + 5}+{win.winfo_pointery()}")
@@ -608,7 +619,13 @@ class Screener(tk.Frame):
 
             self.ctree_widget.tree_scroll.bind("<Double-1>", _open_website)
 
-            bind_tv_web_menu(self.ctree_widget.tree_fixed, self.root, colors=self.colors, on_analisis=self._analisis_for_symbol)
+            bind_tv_web_menu(
+                self.ctree_widget.tree_fixed,
+                self.root,
+                colors=self.colors,
+                on_analisis=self._analisis_for_symbol,
+                extras=self._reingreso_opciones,
+            )
 
             # set position of all above objects by pack panel
             imagen_tk = BDsystem.select_image(idd=200, size=(32, 32))
@@ -1109,6 +1126,44 @@ class Screener(tk.Frame):
             short_name = sym
             categ = ""
         self._show_analisis_popup(sym, short_name, categ)
+
+    def _reingreso_opciones(self, sym):
+        if not self.ix or "reingreso" not in self.ix:
+            return []
+        fila = next((r for r in (self.market or []) if r[self.ix.index("symbol")] == sym), None)
+        if fila is None:
+            return []
+        if fila[self.ix.index("reingreso")] == "N":
+            return [("Permitir recompra", self._reingreso_quitar)]
+        if fila[self.ix.index("encartera")] == "N":
+            return [("No recomprar…", self._reingreso_poner)]
+        return []
+
+    def _reingreso_poner(self, sym):
+        motivo = simpledialog.askstring("No recomprar", f"Motivo para no recomprar {sym}:", parent=self.root)
+        if not motivo or not motivo.strip():
+            return
+        self._reingreso_set(sym, motivo.strip())
+
+    def _reingreso_quitar(self, sym):
+        if messagebox.askyesno("Permitir recompra", f"¿Quitar la marca de no recompra de {sym}?", parent=self.root):
+            self._reingreso_set(sym, None)
+
+    def _reingreso_set(self, sym, motivo):
+        i_sym = self.ix.index("symbol")
+        pos, fila = next(((i, r) for i, r in enumerate(self.market) if r[i_sym] == sym), (None, None))
+        if fila is None:
+            return
+        n = self.ScMarket.set_reingreso(fila[self.ix.index("account")], sym, motivo)
+        if not n:
+            messagebox.showerror("No recomprar", f"No se pudo guardar la marca de {sym}.", parent=self.root)
+            return
+        nueva = list(fila)
+        nueva[self.ix.index("reingreso")] = "N" if motivo else None
+        nueva[self.ix.index("reingreso_motivo")] = motivo[:120] if motivo else None
+        self.market[pos] = tuple(nueva)
+        estado = f"marcada para no recomprar: {motivo}" if motivo else "puede volver a comprarse"
+        messagebox.showinfo("No recomprar", f"{sym} {estado}", parent=self.root)
 
     def _show_analisis_popup(self, symbol, shortName, categoriaActivo):
         if self._analisis_win is not None and self._analisis_win.winfo_exists():
@@ -3400,23 +3455,26 @@ def senal_votos(votos):
 
 
 def refresh_consenso_tags(account):
-    """Recalcula consenso_tag y consenso_suma (votos de votos_consenso) para todos los símbolos
-    en cartera y los persiste en market. Llamado por Agente_ConsensoCache cada 5 min."""
+    """Recalcula consenso_tag y consenso_suma (votos de votos_consenso) para la cartera y la ex-cartera
+    y los persiste en market. Llamado por Agente_ConsensoCache cada 5 min."""
     mkt = MarketScreen()
     cartera = mkt.load_cartera_inst(account)
     if not cartera:
         return {"actualizados": 0, "total": 0}
 
+    # La ex-cartera es lo unico que un camino autonomo puede recomprar (plan-valoracion § 5b): necesita
+    # Senal propia. Los percentiles se miden solo contra la cartera, para que no muevan la de las posiciones.
     ctx = contexto_consenso(account, cartera)
+    filas = cartera + mkt.load_cartera_inst(account, encartera="N")
     actualizados = 0
-    for row in cartera:
+    for row in filas:
         sym = row["symbol"]
         tag, suma, _ = senal_votos(votos_consenso(row, ctx))
         _suma_persist = None if tag == "— S/D" else int(suma)
         mkt.update(upd=["consenso_tag", "consenso_suma"], val=[tag, _suma_persist], symbol=sym, account=account)
         actualizados += 1
 
-    return {"actualizados": actualizados, "total": len(cartera)}
+    return {"actualizados": actualizados, "total": len(filas)}
 
 
 def sync_prices(account):

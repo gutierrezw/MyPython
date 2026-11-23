@@ -89,7 +89,7 @@ from cachetools import cached, TTLCache
 
 from functools import wraps
 
-from tkinter import ttk, messagebox, VERTICAL, HORIZONTAL, N, S, E, W
+from tkinter import ttk, messagebox, simpledialog, VERTICAL, HORIZONTAL, N, S, E, W
 from datetime import datetime, date, timedelta, timezone
 from zoneinfo import ZoneInfo
 from base64 import b64encode

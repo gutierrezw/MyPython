@@ -2051,6 +2051,12 @@ class DatosVehivulo(TickerInfo, MyOrders):
                         values.extend(perfil_vals)
                     update_tabla_market(symbol, columnas, values)
 
+            # Recomprar borra la marca de no reingreso (plan-valoracion § 5b): sin esto, al volver a vender la
+            # posicion el veto viejo se aplicaria de nuevo en silencio
+            limpias = self.Market.set_reingreso(self.account, list(activos))
+            if limpias:
+                self.logger.warning("dividends_en_market_stock(): marca de no reingreso borrada en {}".format(limpias))
+
             if self.vehiculo == "Stock":
                 # el SQL filtra i.tipoinv = 'Stock': en Crypto devolveria 0 filas y un log cada 5 min
                 filas = self.Market.sync_market_to_inversion(self.account)
