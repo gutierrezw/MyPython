@@ -1644,9 +1644,13 @@ class DatosVehivulo(TickerInfo, MyOrders):
                 # y la BD ya tuvieran la nueva — medido en SMR, 40 contra 71 durante 9 minutos.
                 # useraccount no está en p y el contrato del struct lo exige: se agrega sin mutar la fila.
                 # solo_portfolio deja los campos de precio al websocket, que los tiene en vivo: este camino
-                # corre cada 60s y el panel alternaba entre las dos fuentes
+                # corre cada 60s y el panel alternaba entre las dos fuentes.
+                # p["dividendo"] es por accion (dividendRate: lo que leen amount_div y update_inversion), y el
+                # panel muestra el total anual -- el websocket manda amount * stock. Pasarlo por accion dejaba
+                # la columna alternando entre las dos unidades, y sin socket quedaba en la de por accion
                 for pos in x_positions:
-                    self.update_symbol_en_positions({**pos, "useraccount": self.account}, solo_portfolio=True)
+                    struct = {**pos, "useraccount": self.account, "dividendo": pos["dividendo"] * pos["position"]}
+                    self.update_symbol_en_positions(struct, solo_portfolio=True)
 
                 return x_positions
             except Exception as e:

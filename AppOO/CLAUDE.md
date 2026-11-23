@@ -1050,6 +1050,19 @@ lo termina tras 5 min sin `smd+` con el mercado abierto. El resultado del respal
 `IBroks_Client` con los símbolos sin precio: por `ClassMyOrders` (en ERROR) no llegaba a ningún log, y el
 11-20 no se pudo saber si había corrido.
 
+**Corregido el 2026-11-23 — `solo_portfolio` no cubrió el dividendo, que también tenía dos escritores con
+unidades distintas.** La columna *Dividendos* del panel es el **total anual de la posición**: acciones ×
+dividendo anual por acción. El websocket lo manda así (`amount_div * stock`), pero el camino de portfolio
+pasaba `p["dividendo"]`, que es **por acción** (`dividendRate`). Desde `bdb57a9` cada ciclo de 60 s lo
+escribía en el panel, y `b647c72` protegió `mrkprice`/`open`/`dgyp`, no el dividendo. Efecto: la columna
+alternaba entre las dos unidades, y **sin socket quedaba fija en la de por acción** (CCI 4,25, DLR 4,88, MPT
+0,36, BTG 0,08), que parecía un dividendo desaparecido. Desde el 11-20, con el respaldo de yfinance, eso es
+todo el tiempo que IB está caído. Hoy el llamador pasa `pos["dividendo"] * pos["position"]`.
+
+`p["dividendo"]` **sigue siendo por acción a propósito**: lo leen `amount_div` (que el websocket multiplica)
+y `update_inversion`, que en Stock persiste `dividendo * position` (`Modulos_Mysql.py:4507`). Pasarlo al total
+en origen duplicaría la multiplicación en los dos.
+
 **`inversion.conid` es el mercado donde operó la cuenta, no una propiedad del ticker** (2026-09-16). La
 compra de un símbolo fuera de cartera tomaba el primer resultado de la búsqueda de IB, que es difusa y no
 trae `currency`: ENB salió en Toronto (TSE, en CAD) antes que en NYSE, y BIL devolvía BHP antes que el ETF.
