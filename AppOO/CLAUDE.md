@@ -246,6 +246,63 @@ desaparece, **no** para saber si la Señal predice. Y sale cargada a la baja (22
 positivos): cuando el libro entero se mueve junto, la historia propia lo lee como par por par.
 `UNANIME`/`CONSENSO`/`SALIDA` siguen sin emitirse: un solo eje.
 
+## Moneda de los datos de Yahoo — regla transversal (2026-11-23)
+
+**Un cociente vale solo si el numerador y el denominador están en la misma moneda y en la misma unidad.**
+Yahoo no declara la moneda de cada campo. Solo trae dos referencias: `currency` es la moneda de cotización y
+`financialCurrency` la de los estados contables. En un emisor extranjero las dos conviven en la misma fila de
+`market`.
+
+| Campo | En qué moneda viene |
+|---|---|
+| `lastPrice`, `marketCap`, `dividendRate` | Cotización (USD por ADR) |
+| `freeCashflow`, `totalDebt`, `trailingAnnualDividendRate` | Balance (`financialCurrency`). En algunos ADR (BP, DEO, HSBC, BHP) el trailing además es **por acción ordinaria** |
+| `forwardEps`, `trailingEps` y los ratios que los usan (`forwardPE`, `priceToBook`) | No declarada: el `forwardEps` de ENIC es 539 veces su trailing |
+
+El detalle está en `Doc/plan-valoracion.md` § 0.5.
+
+**Medido el 2026-11-23** sobre la cuenta de Stock, sin `X` ni `C`:
+
+- 1.200 filas son USD/USD.
+- **70 tienen el balance en otra moneda, repartidas en 15 monedas.**
+- 84 no traen `financialCurrency`.
+- En cartera hay 12 con balance en 5 monedas:
+  - CAD: ENB, SNDL, TU
+  - BRL: ABEV, CIG, PBR, TIMB, VALE
+  - EUR: NOMD, UL
+  - CNY: BABA
+  - GBP: RELX
+- El cociente `trailingAnnualDividendRate / dividendRate` **reproduce el tipo de cambio**: CAD 1,43 contra un 1/fx de
+  1,43; GBP 0,76 contra 0,76. Esa diferencia no es ruido: es la moneda.
+
+Reglas:
+
+- **Un total del balance contra el precio o contra `marketCap`** se convierte con `{moneda}USD=X` o no se compara. El
+  patrón ya existe en `Class_customer.py:2888`.
+- **Un dato del balance expresado por acción no se arregla con el tipo de cambio.** Además de la moneda carga la
+  relación ADR/acción, y Yahoo no la informa. En su lugar se usa el total contra `marketCap`, o un dato que ya esté en
+  la moneda de cotización: `dividendRate` o la historia de dividendos de yfinance.
+- **Un `financialCurrency` vacío se trata como misma moneda.** Son 84 filas y ninguna está en cartera.
+
+Inventario de los lugares que la rompen o la rozan:
+
+| Lugar | Qué hace | Estado |
+|---|---|---|
+| `sync_dividend_status_screener` (`Class_Screener.py:3372`) y `rendimiento_dividends` (`Class_customer.py:3083`) | Ponen `trailingAnnualDividendRate / precio` como último año de la serie. Con esa serie escriben `categoriaActivo`: el primero en ex-cartera, el segundo en cartera | **Abierto.** Ver el detalle debajo de la tabla |
+| Gráfico de dividendos del Screener (`Class_Screener.py:1263`) | Calcula el mismo cociente, pero solo para mostrar | Abierto. Lo cierra la etapa 3 |
+| `valoracion_radar` (prueba del FCF en la trampa, eje Salud) | Tiene la guarda `_misma_moneda`: con monedas distintas el componente se apaga | Protegido. Convertir en vez de apagar es la Decisión 7 del plan |
+| Columnas `Free CF` / `Total Debt` / `Ann Div $` del Screener | Muestran el dato en la moneda del balance, junto a `Fin Cur` | Correcto: no divide |
+| `forwardPE` / `priceToBook` de Yahoo | Heredan la unidad del EPS o del valor libro | Decisión 4 del plan (caso ENIC) |
+| `detalle_dividendos` (`DashMain.py`) | Calcula con `dividendRate`; el trailing solo actúa como filtro | Correcto |
+
+**Detalle de la primera fila.** Sobre los 53 pagadores extranjeros, **45** tienen el trailing fuera de [0,8 ; 1,25]
+veces el `dividendRate`. De esos 45, 30 están clasificados `I` y 15 `S`.
+
+- En cartera: ABEV, CIG, PBR, VALE, ENB, TU, BABA y RELX. En ex-cartera: BTI.
+- CIG figura con un rendimiento de 70% contra un 8,5% real. De ahí sale el `+1` del `Val` viejo de su Señal.
+- Lo cierra la etapa 3 del plan de valoración, que arma la serie con `serie_rendimiento_anual` en la moneda de
+  cotización.
+
 ---
 
 ## Autonomía del usuario
@@ -1209,6 +1266,7 @@ Si el commit toca el código de la izquierda, revisar el doc de la derecha antes
 | `performa_asset`, `select_performa_inversion`, el gráfico de performance | sección "Gráfico de performance — la fuente es `performa_inversion`" en este archivo |
 | `FinanceScreen`, `Class_Finance`, tablas `fin_*` | `20-Proyecto/spec-finanzas.md` (§0: objetivos, etapas, regla de KPIs, mapa de categorías) |
 | `Class_AsesorIA`, `Chatbot` (vistas, `_enviar`) | `20-Proyecto/design-agente-ia.md` § "Asistente de Inversión (Chat)" |
+| `trailingAnnualDividendRate`, `freeCashflow`, `totalDebt`, o cualquier cociente contra `lastPrice`/`marketCap` | sección "Moneda de los datos de Yahoo" en este archivo |
 | Cualquier hallazgo de la revisión Opus (H1–H10) | `30-Gestion/resultado-revision-opus-preservation-gainscapture.md` + `30-Gestion/BACKLOG.md` |
 
 Los docs viven en `AppOO/Doc/` (= `20-Proyecto/` del vault vía junction) y se comitean en el
