@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TradingView — App Panel
 // @namespace    http://tampermonkey.net/
-// @version      2.8
+// @version      2.9
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -30,6 +30,18 @@
             const api = unsafeWindow.TradingViewApi;
             return api ? api.activeChart() : null;
         } catch (_) { return null; }
+    }
+
+    // createShape/createMultipointShape devuelven una promesa: el id llega resuelto y el rechazo
+    // (por ejemplo, el tope de dibujos del plan Basic) no lo atrapa un try/catch.
+    // Todos los dibujos del script van con disableSave: no entran al layout guardado. El plan Basic
+    // cuenta contra un tope de 30 los dibujos de TODOS los simbolos del layout, y cada simbolo
+    // abierto dejaba guardados los suyos.
+    function crearDibujo(crear, guardarId) {
+        Promise.resolve()
+            .then(crear)
+            .then(guardarId)
+            .catch(e => console.log("[tv_panel] dibujo no creado:", e && e.message));
     }
 
     function clearTvShapes() {
@@ -89,62 +101,59 @@
 
         // Zona de compra: rectángulo desde primera compra hasta hoy
         if (t1 && maxP > minP) {
-            try {
-                _tvShapes.zona = ac.createMultipointShape(
-                    [{ time: t1, price: maxP }, { time: t2, price: minP }],
-                    {
-                        shape: "rectangle",
-                        lock: false,
-                        overrides: {
-                            backgroundColor: "rgba(200,170,0,0.12)",
-                            borderColor: "rgba(255,210,0,0.35)",
-                            linewidth: 1,
-                        },
-                    }
-                );
-            } catch (_) { }
+            crearDibujo(() => ac.createMultipointShape(
+                [{ time: t1, price: maxP }, { time: t2, price: minP }],
+                {
+                    shape: "rectangle",
+                    lock: false,
+                    disableSave: true,
+                    overrides: {
+                        backgroundColor: "rgba(200,170,0,0.12)",
+                        borderColor: "rgba(255,210,0,0.35)",
+                        linewidth: 1,
+                    },
+                }
+            ), id => { _tvShapes.zona = id; });
         }
 
         // Línea avgcost punteada amarilla
         if (avgcost) {
-            try {
-                _tvShapes.avgline = ac.createShape(
-                    { price: avgcost },
-                    {
-                        shape: "horizontal_line",
-                        lock: false,
-                        overrides: {
-                            linecolor: "#FFD700",
-                            linewidth: 2,
-                            linestyle: 1,
-                            showLabel: true,
-                            text: `base $${avgcost.toFixed(_dec)}`,
-                            textcolor: "#FFD700",
-                        },
-                    }
-                );
-            } catch (_) { }
+            crearDibujo(() => ac.createShape(
+                { price: avgcost },
+                {
+                    shape: "horizontal_line",
+                    lock: false,
+                    disableSave: true,
+                    overrides: {
+                        linecolor: "#FFD700",
+                        linewidth: 2,
+                        linestyle: 1,
+                        showLabel: true,
+                        text: `base $${avgcost.toFixed(_dec)}`,
+                        textcolor: "#FFD700",
+                    },
+                }
+            ), id => { _tvShapes.avgline = id; });
         }
 
         // Línea objetivo azul
         if (objetivo) {
-            try {
-                _tvShapes.objline = ac.createShape(
-                    { price: objetivo },
-                    {
-                        shape: "horizontal_line",
-                        lock: false,
-                        overrides: {
-                            linecolor: "#2196F3",
-                            linewidth: 2,
-                            linestyle: 1,
-                            showLabel: true,
-                            text: `obj $${objetivo.toFixed(_dec)}`,
-                            textcolor: "#2196F3",
-                        },
-                    }
-                );
-            } catch (_) { }
+            crearDibujo(() => ac.createShape(
+                { price: objetivo },
+                {
+                    shape: "horizontal_line",
+                    lock: false,
+                    disableSave: true,
+                    overrides: {
+                        linecolor: "#2196F3",
+                        linewidth: 2,
+                        linestyle: 1,
+                        showLabel: true,
+                        text: `obj $${objetivo.toFixed(_dec)}`,
+                        textcolor: "#2196F3",
+                    },
+                }
+            ), id => { _tvShapes.objline = id; });
         }
 
         // Una linea punteada por orden, al precio en que se opero o se espera operar.
@@ -158,23 +167,22 @@
             const etiqueta = abierta
                 ? `${o.side} ${fmt(o.qty, _dec)} abierta $${precio.toFixed(_dec)}`
                 : `${o.side} ${fmt(o.qty, _dec)} $${precio.toFixed(_dec)}`;
-            try {
-                _tvShapes.ordenes.push(ac.createShape(
-                    { price: precio },
-                    {
-                        shape: "horizontal_line",
-                        lock: false,
-                        overrides: {
-                            linecolor: color,
-                            linewidth: 1,
-                            linestyle: 1,
-                            showLabel: true,
-                            text: etiqueta,
-                            textcolor: color,
-                        },
-                    }
-                ));
-            } catch (_) { }
+            crearDibujo(() => ac.createShape(
+                { price: precio },
+                {
+                    shape: "horizontal_line",
+                    lock: false,
+                    disableSave: true,
+                    overrides: {
+                        linecolor: color,
+                        linewidth: 1,
+                        linestyle: 1,
+                        showLabel: true,
+                        text: etiqueta,
+                        textcolor: color,
+                    },
+                }
+            ), id => { _tvShapes.ordenes.push(id); });
         });
     }
 
