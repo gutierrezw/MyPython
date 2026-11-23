@@ -2314,7 +2314,9 @@ def chart_rendimiento_dividendos(fg=None, datos=None, dlabl=None, cchart=None, a
         )
         activo = asset["ticket"] + ": " + asset["name"]
 
-        forward = asset["forward"]
+        # la última fila es el año en curso: su rendimiento es el de 12 meses que compara la valoración
+        forward = datos["Rendimiento"].iloc[-1]
+        v = asset.get("valoracion") or {}
         d_index = datos.index
 
         describe = datos.describe()
@@ -2348,66 +2350,68 @@ def chart_rendimiento_dividendos(fg=None, datos=None, dlabl=None, cchart=None, a
         ax.yaxis.set_major_formatter(currency)
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
 
-        # construcción de 2.º eje, para mostrar % rendimiento de capital + dividendos
+        # construcción de 2.º eje, para mostrar % rendimiento de capital + dividendos. La media y la banda son las
+        # de la valoración (años completos, ±BANDA_VAL): el gráfico muestra el mismo corte con el que se vota
         off = 0.001
-        y = describe["Rendimiento"]["mean"] + describe["Rendimiento"]["std"]
-        x = describe["Rendimiento"]["mean"] - describe["Rendimiento"]["std"]
-        m = describe["Rendimiento"]["mean"]
-        av.scatter(d_index, datos["Rendimiento"], marker="o", color=cchart["2eje"])
-        av.fill_between(
-            d_index,
-            datos["Rendimiento"].values,
-            m,
-            where=(m < datos["Rendimiento"]),
-            facecolor=cchart["plot1"],
-            alpha=0.4,
-            interpolate=True,
-        )
-        av.fill_between(
-            d_index,
-            datos["Rendimiento"].values,
-            m,
-            where=(m > datos["Rendimiento"]),
-            facecolor=cchart["plot3"],
-            alpha=0.4,
-            interpolate=True,
-        )
+        rend = datos["Rendimiento"]
+        limites = [rend.min(), rend.max()]
+        av.scatter(d_index, rend, marker="o", color=cchart["2eje"])
+        if v.get("metodo") == "dividendo":
+            m, y, x = v["media"], v["banda_alta"], v["banda_baja"]
+            limites += [y, x]
+            av.fill_between(
+                d_index,
+                rend.values,
+                m,
+                where=(m < rend),
+                facecolor=cchart["plot1"],
+                alpha=0.4,
+                interpolate=True,
+            )
+            av.fill_between(
+                d_index,
+                rend.values,
+                m,
+                where=(m > rend),
+                facecolor=cchart["plot3"],
+                alpha=0.4,
+                interpolate=True,
+            )
 
-        lbl_idx = d_index[min(2, len(d_index) - 1)]
-        av.axhline(y, linewidth=0.6, ls="--", color=cchart["plot1"])
-        av.text(
-            lbl_idx,
-            y + off,
-            "{:>+4.1%} Infravalorado el activo".format(y),
-            fontsize=6,
-            color=cchart["texto"],
-        )
-        av.axhline(m, linewidth=0.6, ls="--", color=cchart["texto"])
-        av.axhline(x, linewidth=0.6, ls="--", color=cchart["plot3"])
-        av.text(
-            lbl_idx,
-            x - off,
-            "{:>+4.1%} Sobrevalorado el activo".format(x),
-            fontsize=6,
-            color=cchart["texto"],
-        )
-        av.text(
-            d_index[-1],
-            forward,
-            "{:>+4.1%} forward".format(forward),
-            fontsize=6,
-            ha="right",
-            color=cchart["texto"],
-        )
+            lbl_idx = d_index[min(2, len(d_index) - 1)]
+            av.axhline(y, linewidth=0.6, ls="--", color=cchart["plot1"])
+            av.text(
+                lbl_idx,
+                y + off,
+                "{:>+4.1%} Infravalorado el activo".format(y),
+                fontsize=6,
+                color=cchart["texto"],
+            )
+            av.axhline(m, linewidth=0.6, ls="--", color=cchart["texto"])
+            av.axhline(x, linewidth=0.6, ls="--", color=cchart["plot3"])
+            av.text(
+                lbl_idx,
+                x - off,
+                "{:>+4.1%} Sobrevalorado el activo".format(x),
+                fontsize=6,
+                color=cchart["texto"],
+            )
+        if pd.notna(forward):
+            av.text(
+                d_index[-1],
+                forward,
+                "{:>+4.1%} forward".format(forward),
+                fontsize=6,
+                ha="right",
+                color=cchart["texto"],
+            )
 
         av.set_ylabel("Rendimiento Dividendo", fontsize=6, color=cchart["2eje"])
         av.tick_params(axis="y", labelcolor=cchart["2eje"])
         av.yaxis.set_major_formatter(porcentaje)
 
-        # calcula limites del eje rendimiento, considera el max entre forward, limites infravalorado y sobrevalorado
-        l_max = max(describe["Rendimiento"]["max"], y)
-        l_min = min(describe["Rendimiento"]["min"], x)
-        av.set(ylim=(l_min * 0.95, l_max * 1.05))
+        # limites del eje rendimiento: la serie y, si hay valoración, la banda
+        av.set(ylim=(min(limites) * 0.95, max(limites) * 1.05))
 
         tlabels = av.get_yticklabels()
         plt.setp(tlabels, ha="left", fontsize=6, color=cchart["2eje"])

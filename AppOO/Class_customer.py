@@ -85,6 +85,7 @@ from Modulos_Mysql import (
 )
 from Class_Analisis import AnalisisFCI, AnalisisCrypto, AnalisisStock
 from AppValuations.rebalance_engine import RebalanceEngine
+from AppValuations.valoracion_radar import valoracion_historial
 from Class_ApiIBrks import IB
 from Class_ApiBinnace import BinanceClient, BinanceStreamClient, BinanceWSApiClient
 from Class_BrowserBridge import abrir_tradingview
@@ -2929,75 +2930,27 @@ class TickerInfo(MyOrders):
     # define estrategia por dividendos
     def rendimiento_dividends(self, fg=None, activo=None, datos=None, symbol=None, plot="no", period="5y"):
         """
-        Calcula el rendimiento histórico de dividendos y genera estrategia de inversión.
+        Serie anual de rendimiento por dividendo y categoría I/S del activo, con gráfico opcional.
 
-        Este método analiza el historial de dividendos de un activo, calcula rendimientos
-        anuales (dividendo/precio), y determina si es momento de compra, venta o mantener
-        basándose en la comparación del rendimiento forward vs. rendimiento promedio histórico.
+        La serie y la categoría salen de `valoracion_historial` (AppValuations/valoracion_radar.py), el mismo armado
+        que usa el Screener ex-cartera: el año en curso es el dividendo de 12 meses del historial sobre el último
+        cierre, y la categoría lo compara contra la media de los años completos. No usa trailingAnnualDividendRate
+        como numerador: en emisores extranjeros viene en la moneda del balance.
 
         Args:
-            fg: Figure object de matplotlib para graficar (opcional)
-            activo: Objeto yf.Ticker o dict con información del activo (opcional).
-                   Si es None, se obtiene automáticamente usando ts_yfinance_symbol()
-            datos: DataFrame con datos históricos del activo incluyendo columna 'Dividends' (opcional).
-                   Si es None, se obtiene automáticamente
-            symbol (str): Símbolo del activo a analizar (ej: "AAPL", "O", "PFE"). Requerido.
-            plot (str): "yes" para generar gráfico de rendimientos, "no" para omitir. Default: "no"
-            period (str): Período histórico para análisis (no utilizado actualmente). Default: "5y"
+            fg: Figure de matplotlib para graficar (opcional)
+            activo: yf.Ticker o dict con el info de Yahoo. Si es None, se obtiene con ts_yfinance_symbol()
+            datos: historial con columnas 'Close' y 'Dividends'
+            symbol (str): símbolo del activo. Requerido.
+            plot (str): "yes" para graficar. Default: "no"
 
         Returns:
-            tuple: (y_datos, value, meses) donde:
-                - y_datos (pd.DataFrame): DataFrame con datos anuales conteniendo:
-                    * 'Close': Precio promedio anual
-                    * 'Dividends': Suma de dividendos pagados en el año
-                    * 'Rendimiento': Rendimiento anual (Dividends/Close)
-                - value (str): Estrategia de inversión:
-                    * "I" = Inversión/Compra (forward yield > promedio histórico)
-                    * "S" = Sell/Venta (forward yield < promedio histórico)
-                    * "N" = Neutral (forward yield = promedio histórico)
-                    * "E" = Error (sin datos válidos)
-                - meses (list): Lista con nombres de meses en que se pagan dividendos
-                                (ej: ["March", "June", "September", "December"])
-
-        Raises:
-            ValueError: Si el símbolo no contiene información de dividendos en datos['Dividends']
-            Exception: Errores generales capturados y mostrados con print
-
-        Lógica del método:
-            1. Obtiene información del activo desde yfinance si no se provee
-            2. Extrae trailingAnnualDividendRate (TTM), dividendRate y shortName
-            3. VALIDACIÓN: Si trailingAnnualDividendRate = 0 → OMITIR (no paga dividendos)
-            4. Filtra datos históricos para obtener solo pagos de dividendos (Dividends != 0)
-            5. Identifica meses de pago analizando el año anterior
-            6. Calcula rendimiento mensual: Dividends / Close (PAGOS REALES del extracto)
-            7. Agrupa datos por año (resample YE) para obtener:
-               - Precio promedio anual
-               - Suma de dividendos anuales (HISTÓRICO - NO se modifica)
-               - Rendimiento anual total
-            8. Calcula rendimiento forward usando trailingAnnualDividendRate y precio actual
-               (ESTIMADO basado en TTM de últimos 12 meses)
-            9. Compara forward yield vs. promedio histórico para generar señal de trading
-            10. Opcionalmente genera gráfico mostrando zonas de compra/venta
-
-        Notas importantes:
-            - ALINEADO con validaciones de DashMainV9_ia.py
-            - Usa trailingAnnualDividendRate (TTM) para rendimiento forward (NO dividendRate)
-            - Solo procesa activos con trailingAnnualDividendRate > 0 (omite activos sin dividendos)
-            - Lo PAGADO viene del historial (extracto) y NO se modifica
-            - Lo ESTIMADO (forward yield) se calcula: trailingAnnualDividendRate / precio_actual
-            - Los datos se agrupan por año fiscal (YE = Year End)
-            - El método asume que datos contiene columnas: 'Close' y 'Dividends'
-            - Si no hay dividendos en el año anterior, intenta usar exDividendDate
-
-        Ejemplo de uso:
-            >>> customer = Class_customer(...)
-            >>> y_datos, strategy, payment_months = customer.rendimiento_dividends(
-            ...     symbol="O",  # Realty Income Corp
-            ...     plot="yes"
-            ... )
-            >>> print(f"Estrategia: {strategy}")
-            >>> print(f"Meses de pago: {payment_months}")
-            >>> print(y_datos.tail())
+            tuple: (y_datos, value, meses)
+                - y_datos: serie anual [Close, Dividends, Rendimiento]; la última fila es el año en curso
+                - value: "I" (rinde más que su media) / "S" (menos) / None (la valoración no decide: traza corta o
+                  dividendo incoherente, el llamador conserva la categoría vigente). "X" si no paga dividendo
+                  (trailingAnnualDividendRate = 0) y "E" si el historial no trae pagos.
+                - meses: meses de pago del año anterior (o el del exDividendDate)
         """
         try:
             y_datos, value, meses = pd.DataFrame(), "E", []
@@ -3007,19 +2960,16 @@ class TickerInfo(MyOrders):
 
                 if isinstance(activo, yf.Ticker):
                     empresa = activo.info["shortName"]
-                    # ALINEACIÓN: Usar trailingAnnualDividendRate (TTM) en lugar de dividendRate
-                    # trailingAnnualDividendRate = suma de dividendos pagados en últimos 12 meses
+                    # trailingAnnualDividendRate solo decide si paga dividendo: viene en la moneda del balance
                     trailing_annual = (
                         activo.info["trailingAnnualDividendRate"] if "trailingAnnualDividendRate" in activo.info else 0
                     )
-                    dividend_rate = activo.info["dividendRate"] if "dividendRate" in activo.info else 0
                 else:
                     # pasa por aca cuando carga los activos en ts_yfinance_symbol()
                     empresa = activo["shortName"] if "shortName" in activo else symbol
                     trailing_annual = (
                         activo["trailingAnnualDividendRate"] if "trailingAnnualDividendRate" in activo else 0
                     )
-                    dividend_rate = activo["dividendRate"] if "dividendRate" in activo else 0
 
                 # ============================================================================
                 # VALIDACIÓN: No listar símbolos que no reportan dividendos
@@ -3045,83 +2995,31 @@ class TickerInfo(MyOrders):
                             meses = [exdiv.strftime("%B")]
 
                     if not m_div.empty:
-
-                        # llamado necesario para obtener close['Close']
                         pd.options.mode.copy_on_write = True
-                        x_none, pdatos = get_yfinance(ticket=symbol, vehiculo="Stock")
+                        info = activo.info if isinstance(activo, yf.Ticker) else activo
+                        y_datos, val = valoracion_historial(info, datos)
+                        value = val["categoria"]
 
-                        # datos.insert(datos.shape[1], 'Close', 0)
-                        datos.index = datos.index.tz_localize(None)
-                        d_index = datos.index
-
-                        # filtra los meses de pago de dividendos y calcula su rendimiento
-                        m_datos = datos[datos["Dividends"] != 0]
-                        m_datos["Rendimiento"] = m_datos["Dividends"] / m_datos["Close"]
-                        m_index = m_datos.index
-
-                        # replantea el dividendo anual y su rendimiento
-                        y_datos = pd.DataFrame(columns=["Close", "Dividends", "Rendimiento"])
-                        y_datos["Close"] = m_datos["Close"].resample("YE").mean()
-                        y_datos["Dividends"] = m_datos["Dividends"].resample("YE").sum()
-                        y_datos["Rendimiento"] = m_datos["Rendimiento"].resample("YE").sum()
-
-                        y_index = y_datos.index
-                        if len(d_index) > 0:
-                            # ============================================================================
-                            # ALINEACIÓN: Recalcular rendimiento estimado (forward) usando TTM
-                            # - Lo PAGADO viene del extracto (historial) → NO cambia
-                            # - Lo ESTIMADO se calcula con trailingAnnualDividendRate (últimos 12 meses)
-                            # - Solo se recalcula si trailingAnnualDividendRate > 0 (ya validado arriba)
-                            # ============================================================================
-
-                            # Calcular rendimiento forward usando TTM (trailing annual)
-                            # TTM refleja lo que REALMENTE pagó en últimos 12 meses
-                            current_price = datos.loc[d_index[-1], "Close"]
-
-                            # Rendimiento forward = TTM dividendos / precio actual
-                            # Esto da el rendimiento anualizado basado en pagos reales recientes
-                            forward_yield_calculated = trailing_annual / current_price
-
-                            # Actualizar último año (año en curso) con rendimiento forward
-                            if len(y_index) > 0:
-                                y_datos.loc[y_index[-1], "Rendimiento"] = forward_yield_calculated
-                                y_datos.loc[y_index[-1], "Close"] = current_price
-
-                            # NOTA: También podríamos actualizar el dividendo proyectado del año actual
-                            # pero mantenemos solo el histórico. El forward solo sirve para comparar yields.
-                            # y_datos.loc[y_index[-1], "Dividends"] = trailing_annual  # Opcional
-
-                            forward_yield = forward_yield_calculated
-
-                            # se maneja el plot del gráfico
-                            if plot == "yes":
-                                dlabl = {
-                                    "symbol": symbol,
-                                    "buy": "Zona buy",
-                                    "sell": "Zona sell",
-                                    "legend": "outside upper left",
-                                }
-                                asset = {
-                                    "ticket": symbol,
-                                    "forward": forward_yield,
-                                    "name": empresa,
-                                    "aspect": 0.25,
-                                }
-                                chart_rendimiento_dividendos(
-                                    fg=fg,
-                                    datos=y_datos,
-                                    dlabl=dlabl,
-                                    asset=asset,
-                                    cchart=self.cchart,
-                                )
-
-                            m = y_datos.describe()["Rendimiento"]["mean"]
-                            i = y_datos[y_datos["Rendimiento"] > m]["Rendimiento"].mean()
-                            s = y_datos[y_datos["Rendimiento"] < m]["Rendimiento"].mean()
-
-                            if len(y_index) > 0:
-                                dforward = y_datos.loc[y_index[-1], "Rendimiento"]
-                                value = ("I" if dforward > m else "S" if dforward < m else "N",)
+                        if plot == "yes":
+                            dlabl = {
+                                "symbol": symbol,
+                                "buy": "Zona buy",
+                                "sell": "Zona sell",
+                                "legend": "outside upper left",
+                            }
+                            asset = {
+                                "ticket": symbol,
+                                "name": empresa,
+                                "aspect": 0.25,
+                                "valoracion": val,
+                            }
+                            chart_rendimiento_dividendos(
+                                fg=fg,
+                                datos=y_datos,
+                                dlabl=dlabl,
+                                asset=asset,
+                                cchart=self.cchart,
+                            )
 
                 return y_datos, value, meses
         except Exception as e:

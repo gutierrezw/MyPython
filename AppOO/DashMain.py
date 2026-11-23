@@ -1968,15 +1968,20 @@ class DatosVehivulo(TickerInfo, MyOrders):
             try:
                 campos = {}
                 ddatos, x_categoria, x_meses = self.rendimiento_dividends(activo=activo, datos=pdatos, symbol=x_symbol)
+                qt = (activo.get("quoteType") or "").upper()
                 if not ddatos.empty:
-                    campos.update({"categoriaActivo": x_categoria[0]})
+                    # None = la valoracion no decide (traza corta o dividendo incoherente): se conserva la
+                    # vigente, y solo un simbolo sin categoria toma la de default
+                    if x_categoria is None and not categorias_actuales.get(x_symbol):
+                        x_categoria = categoria_default(qt)
+                    if x_categoria is not None:
+                        campos.update({"categoriaActivo": x_categoria})
                     campos.update({"categoria_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
                     campos.update({"trazaDividends": ddatos.to_json(orient="split")})
                 else:
                     # Sin traza de dividendos no hay nada que actualizar: la categoria vigente se
                     # conserva. Degradarla a 'N' por una descarga vacia mandaba activos con dividendo
                     # ('I'/'S') al universo de GainsCapture, que solo debe tomar 'N'.
-                    qt = (activo.get("quoteType") or "").upper()
                     if not categorias_actuales.get(x_symbol):
                         campos.update({"categoriaActivo": categoria_default(qt)})
                         campos.update({"categoria_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
@@ -1988,7 +1993,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     exdivi = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
                 campos.update({"exDividendDate": exdivi})
                 campos.update({"previousClose": activo.get("previousClose", 0)})
-                return campos, x_categoria[0], x_meses
+                return campos, x_categoria, x_meses
             except Exception as error:
                 self.logger.error("construct_info_dividends({}): {}".format(x_symbol, error), exc_info=True)
 

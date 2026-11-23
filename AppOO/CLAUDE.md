@@ -288,8 +288,8 @@ Inventario de los lugares que la rompen o la rozan:
 
 | Lugar | Qué hace | Estado |
 |---|---|---|
-| `sync_dividend_status_screener` (`Class_Screener.py:3372`) y `rendimiento_dividends` (`Class_customer.py:3083`) | Ponen `trailingAnnualDividendRate / precio` como último año de la serie. Con esa serie escriben `categoriaActivo`: el primero en ex-cartera, el segundo en cartera | **Abierto.** Ver el detalle debajo de la tabla |
-| Gráfico de dividendos del Screener (`Class_Screener.py:1263`) | Calcula el mismo cociente, pero solo para mostrar | Abierto. Lo cierra la etapa 3 |
+| `sync_dividend_status_screener` (`Class_Screener.py:3372`) y `rendimiento_dividends` (`Class_customer.py:3083`) | Ponían `trailingAnnualDividendRate / precio` como último año de la serie. Con esa serie escriben `categoriaActivo`: el primero en ex-cartera, el segundo en cartera | **Cerrado 2026-11-23.** Los dos llaman a `valoracion_historial`. Ver el detalle debajo de la tabla |
+| Gráfico de dividendos del Screener (`Class_Screener.py:1263`) y del popup de cartera | Calculaba el mismo cociente, pero solo para mostrar | **Cerrado 2026-11-23.** Dibuja la serie y la banda de `valoracion_historial` |
 | `valoracion_radar` (prueba del FCF en la trampa, eje Salud) | Tiene la guarda `_misma_moneda`: con monedas distintas el componente se apaga | Protegido. Convertir en vez de apagar es la Decisión 7 del plan |
 | Columnas `Free CF` / `Total Debt` / `Ann Div $` del Screener | Muestran el dato en la moneda del balance, junto a `Fin Cur` | Correcto: no divide |
 | `forwardPE` / `priceToBook` de Yahoo | Heredan la unidad del EPS o del valor libro | Decisión 4 del plan (caso ENIC) |
@@ -302,6 +302,32 @@ veces el `dividendRate`. De esos 45, 30 están clasificados `I` y 15 `S`.
 - CIG figura con un rendimiento de 70% contra un 8,5% real. De ahí sale el `+1` del `Val` viejo de su Señal.
 - Lo cierra la etapa 3 del plan de valoración, que arma la serie con `serie_rendimiento_anual` en la moneda de
   cotización.
+
+**Cerrado el 2026-11-23, adelantando la etapa 3.** `serie_rendimiento_anual` se había comiteado en la etapa 1 sin
+llamadores, así que era una cuarta copia de la serie: las dos de arriba, el gráfico y `dividends_rendimiento.py`.
+Hoy hay un solo armado, `valoracion_historial(info, datos)` (`AppValuations/valoracion_radar.py`), y lo usan los
+cuatro lugares: la categoría de cartera, la de ex-cartera, el gráfico del Screener y el del popup de cartera.
+`dividends_rendimiento.py` se borró porque nadie lo importaba.
+
+- **El año en curso** es el dividendo de 12 meses del historial sobre el último cierre, en la moneda de cotización.
+- **La media** es la de los años completos. Antes entraba el año en curso, que es justo el valor que se compara.
+- **La categoría** es la de `valoracion()["categoria"]`. Si la traza tiene menos de 3 años completos o el dividendo
+  no es coherente, devuelve `None` y se conserva la categoría vigente.
+- **El gráfico** dibuja la media y la banda de ±10% del voto. Antes dibujaba la media ± un desvío de la serie, una
+  banda que nada usaba.
+
+Medido sobre los 62 símbolos con `encartera` Y o N:
+
+- **9 cambian** entre `I` y `S`:
+  - De `I` a `S`: BABA, CCI, CIG, O, SWK y VALE.
+  - De `S` a `I`: B, GOLD y RELX.
+- 4 conservan la categoría vigente:
+  - ABEV y TIMB, por dividendo incoherente.
+  - NOMD y ABX, por traza corta.
+- **CIG** pasa de `I` a `S`: rinde 7,6% contra una media de 17%. El 70% era el trailing en BRL.
+
+La base se reescribe en la corrida siguiente de cada camino: la cartera en cada ciclo del panel, la ex-cartera por la
+rotación de `categoria_update`.
 
 ---
 
@@ -537,7 +563,7 @@ Borrado el 9. Inocuo, se registra para no volver a investigarlo.
 | market | `inst_update` | Última corrida de `sync_13f_scores` que escribió la fila. **Columna muerta hasta el 2026-11-07** — existía en la BD y ningún código la tocaba. Solo se sella cuando hay dato real; los `skipped` quedan en NULL |
 | market | `inst_ownership_pct` | % del float en manos institucionales, **de Yahoo** (`heldPercentInstitutions`). Dueño único: `sync_institutional`. Puede pasar de 1 por desfase float/holdings — la UI lo acota a 100% |
 | market | `inst_score` | Score institucional compuesto. Dueño único: `sync_13f_scores`. **No tiene techo** — el término `log(fh_count)` solo ya vale 1,68 con 4.482 fondos |
-| market | `categoriaActivo` | Mezcla dos cosas en una columna: **cómo se valúa** (`I`/`S`/`N`, por dividendos) y **qué es el activo** (`X` ETF/fondo, `C` par cripto). `char(4) NOT NULL` — **NULL es imposible**, y el `insert` escribe `'N'` cuando el llamador la omite (`C` creada 2026-11-08) |
+| market | `categoriaActivo` | Mezcla dos cosas en una columna: **cómo se valúa** (`I`/`S`/`N`, por dividendos) y **qué es el activo** (`X` ETF/fondo, `C` par cripto). `char(4) NOT NULL` — **NULL es imposible**, y el `insert` escribe `'N'` cuando el llamador la omite (`C` creada 2026-11-08). `I`/`S` sale de `valoracion_historial`: el rendimiento de 12 meses contra la media de los años completos (desde 2026-11-23) |
 | market | `categoria_update` | Última vez que se recalculó `categoriaActivo` (creada 2026-08-25) |
 | fund_filings | `processed` | `0` en cola, `1` cargado en `fund_holdings`, **`2` no cargable — no reintentar**: el XML no está en disco o el fondo no está registrado. Sin el 2 el filing se recorre en cada corrida sin avanzar nunca, porque `sync_fund_filings` solo reintenta la accession más reciente de cada fondo. Medido 2026-11-06: **4.152 filings atascados** así (creada la semántica 2026-11-07) |
 | order_trader | `sync_broker` | Si podemos creerle a la fila — **independiente de `status`** (creada 2026-08-29) |
@@ -668,6 +694,10 @@ real; si no lo hay se conserva la vigente y solo se asigna `'N'` a símbolos que
 `trailing_annual == 0` sí escribe `'N'`: es un hallazgo, no un fallo de descarga.
 La fecha, en cambio, se sella **siempre** — un símbolo que falla debe irse al final de la cola o los
 fallos repetidos bloquean la rotación.
+
+Desde el 2026-11-23 la misma regla cubre una valoración que no decide. Si la traza es corta o el dividendo es
+incoherente, `valoracion()` devuelve `categoria` `None`, y eso se trata igual que una descarga vacía: se conserva la
+vigente.
 
 **`categoriaActivo = 'C'` — un par cripto necesita marca propia porque el default es la peor casilla**
 (2026-11-08). La etapa 4 de [[plan-market-crypto]] le da fila en `market` a los 12 pares de cartera, y

@@ -169,6 +169,14 @@ def serie_rendimiento_anual(m_datos, precio):
     return y_datos.sort_index()
 
 
+def valoracion_historial(info, datos):
+    """Serie anual y valoración desde el historial de yfinance, al precio del último cierre. Es el único armado de la
+    categoría I/S/N (cartera y ex-cartera) y de la banda de los dos gráficos de rendimiento por dividendo."""
+    precio = float(datos["Close"].iloc[-1]) if not datos.empty else None
+    y_datos = serie_rendimiento_anual(datos, precio)
+    return y_datos, valoracion(dict(info, lastPrice=precio, trazaDividends=y_datos))
+
+
 def pares_por_grupo(filas):
     """{metrica: {(nivel, nombre): valores ordenados}} por sector e industria. Se arma una vez por pasada."""
     pares = {m: {} for m in _METRICAS}

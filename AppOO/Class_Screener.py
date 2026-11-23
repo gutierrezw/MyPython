@@ -25,6 +25,7 @@ from AppValuations.consenso_score import (
     UMBRAL_DIVERGENCIA_CRIPTO,
     DIAS_HISTORIA_DIVERGENCIA_CRIPTO,
 )
+from AppValuations.valoracion_radar import valoracion_historial
 from Modulos_python import (
     tk,
     ttk,
@@ -1251,22 +1252,24 @@ class Screener(tk.Frame):
                     _update_info_panel(activo, datos)
                     trailing = (activo.get("trailingAnnualDividendRate") or 0) if activo else 0
                     if datos is not None and "Dividends" in datos and trailing > 0:
-                        m_datos = datos[datos["Dividends"] != 0].copy()
-                        if not m_datos.empty:
-                            m_datos["Rendimiento"] = m_datos["Dividends"] / m_datos["Close"]
-                            y_datos = pd.DataFrame(columns=["Close", "Dividends", "Rendimiento"])
-                            y_datos["Close"] = m_datos["Close"].resample("YE").mean()
-                            y_datos["Dividends"] = m_datos["Dividends"].resample("YE").sum()
-                            y_datos["Rendimiento"] = m_datos["Rendimiento"].resample("YE").sum()
-                            if len(y_datos) > 0:
-                                last_price = float(datos["Close"].iloc[-1])
-                                forward_yield = trailing / last_price
-                                y_datos.loc[y_datos.index[-1], "Rendimiento"] = forward_yield
-                                y_datos.loc[y_datos.index[-1], "Close"] = last_price
-                                dlabl = {"symbol": symbol, "buy": "Zona buy", "sell": "Zona sell", "legend": "outside upper left"}
-                                asset = {"ticket": symbol, "forward": forward_yield, "name": shortName or symbol, "aspect": 0.25}
-                                _safe_render(lambda: (chart_rendimiento_dividendos(fg=fg, datos=y_datos, dlabl=dlabl, asset=asset, cchart=cchart), cv.draw()))
-                                return
+                        y_datos, val = valoracion_historial(activo, datos)
+                        if not y_datos.empty:
+                            dlabl = {
+                                "symbol": symbol,
+                                "buy": "Zona buy",
+                                "sell": "Zona sell",
+                                "legend": "outside upper left",
+                            }
+                            asset = {"ticket": symbol, "name": shortName or symbol, "aspect": 0.25, "valoracion": val}
+                            _safe_render(
+                                lambda: (
+                                    chart_rendimiento_dividendos(
+                                        fg=fg, datos=y_datos, dlabl=dlabl, asset=asset, cchart=cchart
+                                    ),
+                                    cv.draw(),
+                                )
+                            )
+                            return
                     # fallback: sin datos de dividendos → rentabilidad
                     veh = "Crypto" if "usdt" in symbol.lower() else "hist"
                     _, hist = get_yfinance(ticket=symbol, vehiculo=veh)
@@ -3356,28 +3359,15 @@ def sync_dividend_status_screener(account: str, limit: int = 150) -> dict:
                 categoria, traza, meses_str = None, None, ""
             else:
                 try:
-                    datos.index = datos.index.tz_localize(None)
-                    m_datos = datos[datos["Dividends"] != 0].copy()
-                    if m_datos.empty:
+                    y_datos, val = valoracion_historial(activo, datos)
+                    if y_datos.empty:
                         categoria, traza, meses_str = None, None, ""
                     else:
-                        m_datos["Rendimiento"] = m_datos["Dividends"] / m_datos["Close"]
-                        y_datos = pd.DataFrame(columns=["Close", "Dividends", "Rendimiento"])
-                        y_datos["Close"] = m_datos["Close"].resample("YE").mean()
-                        y_datos["Dividends"] = m_datos["Dividends"].resample("YE").sum()
-                        y_datos["Rendimiento"] = m_datos["Rendimiento"].resample("YE").sum()
-                        y_index = y_datos.index
-                        current_price = float(datos["Close"].iloc[-1])
-                        if len(y_index) > 0 and current_price > 0:
-                            forward_yield = trailing_annual / current_price
-                            y_datos.loc[y_index[-1], "Rendimiento"] = forward_yield
-                            y_datos.loc[y_index[-1], "Close"] = current_price
-                        m_mean = y_datos.describe()["Rendimiento"]["mean"]
-                        dforward = float(y_datos.loc[y_index[-1], "Rendimiento"]) if len(y_index) > 0 else 0.0
-                        categoria = "I" if dforward > m_mean else "S" if dforward < m_mean else "N"
-                        year = pd.Timestamp.now().year - 1
-                        meses = list(m_datos[m_datos.index.year == year].index.strftime("%B"))
-                        meses_str = ", ".join(meses)
+                        # None = la valoracion no decide (traza corta o dividendo incoherente): se conserva la vigente
+                        categoria = val["categoria"]
+                        pagos = datos[datos["Dividends"] != 0]
+                        anterior = pagos[pagos.index.year == pd.Timestamp.now().year - 1]
+                        meses_str = ", ".join(anterior.index.strftime("%B"))
                         traza = y_datos.to_json(orient="split")
                 except Exception as inner_e:
                     _logger.warning(f"sync_dividend_status_screener dividend calc ({symbol}): {inner_e}")
