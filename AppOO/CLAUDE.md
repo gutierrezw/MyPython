@@ -1361,6 +1361,14 @@ Medido con la función real contra la consulta vieja, en las 5 cuentas:
 símbolo sale entero de la consulta hasta que cambia el mes, y su costo desaparece del `costo_base`. No se
 corrigió: va al BACKLOG.
 
+**La reconstrucción escribía el día de la corrida.** `detalle_book` no recortaba el libro, y con `accion="cartera"`
+—el camino de `AppTest/run_rebuild_diaria_cartera.py` y de `Batch_reproceso_insert_performan.py`— recibe el libro
+entero. Una compra del mismo día abría una fila de hoy: tras la reconstrucción del 11-25, CHPT y WKHS quedaron con
+fila del 11-25, y la diaria siguiente no les habría escrito el 11-24, porque escribe solo fechas posteriores a la
+última fila. Las dos filas se borraron a mano. Importa porque es el comando que recomienda el ERROR del validador.
+Hoy `detalle_book` descarta los movimientos posteriores a `f_hasta`. En `diaria_app` no cambia nada, porque la
+consulta ya recorta.
+
 ## Gráfico de performance — la fuente es `performa_inversion`, no un recálculo (2026-11-11)
 
 **Reversión de `9986292` (2026-03-08), que cambió la fuente sin declarar motivo.** Ese commit hizo

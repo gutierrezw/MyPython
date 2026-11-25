@@ -386,12 +386,14 @@ def detalle_book(account=None, vehiculo=None, book=None, ix=None, option="inicio
                 ]
             )
 
-            ebook = enumerate(book)
-            eof_book, read = next(ebook, (None, None))
-
-            # procesa hasta el dia anterior
+            # procesa hasta el dia anterior. diaria_app ya recorta en la consulta; accion="cartera" (la
+            # reconstruccion) trae el libro entero, y un movimiento del dia de la corrida abria fila de hoy
             hasta = datetime.now() - timedelta(days=1)
             f_hasta = hasta.date()
+            book = [r for r in book if r[ix.index("fechahora")].date() <= f_hasta]
+
+            ebook = enumerate(book)
+            eof_book, read = next(ebook, (None, None))
 
             # por cada symbol itera sobre su historia desde f_hasta, siempre que datos no este vacio
             while eof_book is not None:
