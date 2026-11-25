@@ -659,6 +659,7 @@ Borrado el 9. Inocuo, se registra para no volver a investigarlo.
 | valoracion_historia | `eje_dividendo` | **0 = no paga**, es una nota medida. **NULL = sin dato**. No se promedian como lo mismo (semántica 2026-11-23). En la primera foto el 0 lo decidía el trailing de Yahoo, que viene en 0 para empresas que pagan: 194 filas en 0, y al menos 126 eran falta de dato o pagaban. **Desde el 2026-11-23 lo decide el historial** (`_paga_dividendo`, ver `categoriaActivo`) |
 | valoracion_historia | `val_cobertura` | Cobertura del dividendo por ganancia o flujo. **NULL si es infinita** (nada lo cubre: la trampa queda en `val_motivos`) **o si no se mide** (sector exento, sin dividendo) (semántica 2026-11-23) |
 | valoracion_historia | `trailingAnnualDividendRate` | `DEFAULT NULL`, **no el `'0'` de `market`**: en la foto un 0 significa "no paga" y "sin dato" queda NULL (semántica 2026-11-23) |
+| valoracion_historia | `fx_balance` | Tipo de cambio `financialCurrency → currency` con que la foto convirtió `freeCashflow` y `totalDebt`. Lo baja `tipos_de_cambio` una vez por corrida. **NULL = misma moneda o sin tasa**: en los dos casos el componente no se convirtió (creada 2026-11-25) |
 
 **`encartera` no se bajaba en el cierre normal de una posición, y el criterio de baja era el valor,
 no las unidades** (2026-11-08). `update_inversion` tiene **dos** caminos de baja y hacían cosas

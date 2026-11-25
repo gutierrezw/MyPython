@@ -3961,7 +3961,7 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
             "consenso_tag", "consenso_suma", "trailingPE", "forwardPE", "priceToBook", "trailingEps", "forwardEps",
             "dividendYield", "dividendRate", "trailingAnnualDividendRate", "payoutRatio", "returnOnEquity",
             "returnOnAssets", "operatingMargins", "revenueGrowth", "earningsGrowth", "totalDebt", "freeCashflow",
-            "marketCap", "targetMeanPrice", "inst_score", "fh_count", "currency", "financialCurrency",
+            "marketCap", "targetMeanPrice", "inst_score", "fh_count", "currency", "financialCurrency", "fx_balance",
         )
         clave = ("account", "symbol", "fecha")
         conn = self._conectar(tabla="insert.valoracion_historia")
