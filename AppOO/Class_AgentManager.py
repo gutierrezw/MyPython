@@ -359,10 +359,10 @@ class AgentManager:
                     for a in result["anomalias"]:
                         sym, fecha, ratio = a["symbol"], a["fecha"], a.get("ratio")
                         if a.get("hueco"):
-                            estado = "en cuarentena" if a.get("quarantined") else "pendiente de regenerar"
-                            self._log_performa.warning(
-                                f"PerformaValidator {veh}: {sym} {fecha} HUECO — sin fila con posición abierta, "
-                                f"{estado} (no se purga: el borrado no repara un hueco)"
+                            # la diaria no rellena un hueco interior: solo lo repara una reconstruccion
+                            self._log_performa.error(
+                                f"PerformaValidator {veh}: {sym} {fecha} HUECO — sin fila con posición abierta. "
+                                f"No se repara solo: correr AppTest/run_rebuild_diaria_cartera.py --desde {fecha}"
                             )
                             CacheHut.add_bypass(sym)
                         elif a.get("extrema", False):

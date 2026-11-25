@@ -1142,7 +1142,8 @@ class IPerformance(BDsystem):  # -----------------------------------------------
 
         Detecta además huecos: símbolo con posición abierta que no tiene fila ese día. LAG no los
         ve (una fila ausente no produce ratio) y el día agrega un portafolio más chico, dejando
-        performa_inversion subestimada. Entran a la misma purga quirúrgica para que se regeneren.
+        performa_inversion subestimada. Un hueco solo se reporta: no purga ni retrocede el schedule,
+        porque la diaria escribe solo fechas posteriores a la última fila del símbolo y no lo rellena.
 
         Para Crypto: extreme_threshold=100 por defecto (detecta 100x+). Para Stock: usa threshold normal.
 
@@ -1320,7 +1321,10 @@ class IPerformance(BDsystem):  # -----------------------------------------------
                     a["quarantined"] = True
                     continue
                 a["quarantined"] = False
-                symbols_ok.append(sym)
+                # symbols_ok dispara el borrado de performa_inversion y el retroceso del schedule: un
+                # hueco no entra (ver la nota de la purga)
+                if not a.get("hueco"):
+                    symbols_ok.append(sym)
                 # purge_history cuenta PURGAS, no detecciones: un hueco no se purga, asi que no suma.
                 # Si sumara, un hueco persistente se cuarentenaria a si mismo en 3 horas y quedaria
                 # bloqueando su propia regeneracion
@@ -1332,8 +1336,12 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             # Un hueco NO se purga. Es una fila ausente: en esa fecha no hay nada que borrar y el
             # DELETE desde ahi se lleva las filas POSTERIORES, que son las buenas — y justamente la
             # condicion del hueco exige una fila posterior, asi que el borrado destruye la evidencia
-            # sin reparar nada y el hueco vuelve a detectarse a la hora siguiente. Lo unico que
-            # regenera un hueco es el retroceso del schedule
+            # sin reparar nada y el hueco vuelve a detectarse a la hora siguiente.
+            # Revertido 2026-11-25: se decia que el retroceso del schedule regeneraba el hueco. No lo
+            # hace — read_csv_insert_diaria y carry_forward escriben solo Date > ultima fila del
+            # simbolo, asi que un hueco interior nunca se rellena. El retroceso borraba la performa de
+            # Stock cada hora y schedule_diario la reinsertaba: la serie quedo cortada en el 11-13.
+            # Hoy el hueco solo se reporta; lo repara run_rebuild_diaria_cartera.py
             simbolos_purgados = set()
             for a in anomalias:
                 if a.get("quarantined") or a.get("hueco"):
@@ -1355,7 +1363,7 @@ class IPerformance(BDsystem):  # -----------------------------------------------
             # schedule que la reconstruya, que es el estado en el que quedo Stock el 2026-11-10
             fechas_reset = []
             if symbols_ok:
-                fecha_min = min(a["fecha"] for a in anomalias if not a.get("quarantined"))
+                fecha_min = min(a["fecha"] for a in anomalias if not a.get("quarantined") and not a.get("hueco"))
                 fechas_reset.append(fecha_min)
                 conn2 = self._conectar(tabla="validate_performa.purga_pi")
                 try:
@@ -6194,6 +6202,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                         True,
                         """SELECT * FROM bdinv.booktrading WHERE cuenta = '%s'""",
                     )
+                    vivos = set()
 
                     for i, row in enumerate(sqx):
 
@@ -6202,6 +6211,7 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                             row[ix.index("cantidad")] <= 0 and row[ix.index("fechahora")].date() > desde.date()
                         ):
 
+                            vivos.add(row[ix.index("simbolo")])
                             fecha_dia = row[ix.index("fechahora")].strftime("%Y-%m-%d")
                             if inicio_qry:
                                 concatena = """ AND ((simbolo, DATE(fechahora)) = ('%s', '%s')""" % (
@@ -6215,6 +6225,26 @@ class RepositorioOportunidadesBuySell(PlanInversion):  # -----------------------
                                     fecha_dia,
                                 )
                             qry += concatena
+
+                    # el simbolo arranca en el movimiento vigente en su ultima fila de la diaria, con
+                    # todos los posteriores. Sin esto una compra del dia D lo arrancaba en D y el dia
+                    # D-1, aun sin escribir (yfinance cierra en D+2), quedaba como hueco interior que
+                    # nada rellena: la diaria escribe solo fechas posteriores a la ultima fila
+                    # (FMC y CRNT el 2026-11-23). Un simbolo sin diaria no cambia
+                    cursor.execute(
+                        """SELECT b.simbolo, DATE(b.fechahora)
+                           FROM bdinv.booktrading b
+                           JOIN (SELECT symbol, MAX(Date) AS ultima FROM bdinv.diaria_performance
+                                 WHERE account = %s GROUP BY symbol) d ON d.symbol = b.simbolo
+                           WHERE b.cuenta = %s AND DATE(b.fechahora) <= %s
+                             AND b.fechahora >= (SELECT MAX(v.fechahora) FROM bdinv.booktrading v
+                                                 WHERE v.cuenta = b.cuenta AND v.simbolo = b.simbolo
+                                                   AND DATE(v.fechahora) <= d.ultima)""",
+                        (account, account, f_hasta),
+                    )
+                    for simbolo, fecha in cursor.fetchall():
+                        if simbolo in vivos:
+                            qry += """ OR (simbolo, DATE(fechahora)) = ('%s', '%s')""" % (simbolo, fecha)
 
                     qry += ") ORDER by simbolo, fechahora ASC;" ""
                     cursor.execute(qry % account)

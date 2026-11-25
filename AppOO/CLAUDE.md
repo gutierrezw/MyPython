@@ -1317,6 +1317,50 @@ de FIRY— y con el filtro quedan **0**. Crypto y BotCrypto ya estaban en 0.
 `gprealizadas`:** `carry_forward` escribe `gyp_dia` 0 por diseño. Con este arreglo FIRY no entra en
 cuarentena, pero el agujero existe para cualquier otra causa de cuarentena.
 
+### Un hueco interior no lo rellena nadie: el validador lo reporta y no purga (2026-11-25)
+
+**`performa_inversion` de Stock quedó cortada en el 11-13 durante 11 días, y esta vez no hubo ningún precio
+roto.** `validate_performa` encontraba huecos interiores en la diaria: PHYS y TLT el 11-16 y el 11-17, y CRNT y
+FMC el 11-23. Ante un hueco hacía lo mismo que ante un precio corrupto: cada hora borraba la performa de Stock
+desde el 11-16 y retrocedía `diaria_Stock`. `schedule_diario`, cada 3 horas, la volvía a escribir, y a la hora
+siguiente el validador la borraba otra vez.
+
+**Revertido: el código decía que el retroceso del schedule regeneraba el hueco, y no es así.**
+`read_csv_insert_diaria` y `carry_forward` escriben solo fechas posteriores a la última fila del símbolo, así que
+un hueco interior no se rellena nunca. Hoy un hueco:
+
+- no borra la performa ni retrocede el schedule;
+- no suma purgas para la cuarentena;
+- se loguea a ERROR en el log del agente, con el comando que lo repara:
+  `AppTest/run_rebuild_diaria_cartera.py --desde <fecha>`.
+
+**El hueco lo abría la consulta `diaria_app`.** La diaria del día D se escribe en D+2: `f_hasta` es ayer y el
+`end` de `yf.download` es exclusivo. La consulta tomaba el último movimiento de cada símbolo y los del mes, así
+que una compra del día D arrancaba el símbolo en D. El día D-1 todavía no estaba escrito y quedaba como hueco
+interior. Hoy la consulta agrega, para cada símbolo con posición, **el movimiento vigente en su última fila de la
+diaria y todos los posteriores**. Un símbolo sin diaria no cambia.
+
+**El mismo cambio cierra unidades fantasma.** El filtro de la consulta suma la fila de la posición con la del
+movimiento cuando las dos tienen la misma `fechahora`. Una venta mayor que lo que queda da una suma ≤ 0, y pasados
+10 días se descartaba. Si el símbolo tenía otra compra en el mes, arrancaba en esa compra y la diaria escribía la
+cantidad previa a la venta:
+
+- **SANT0001 / Super Ahorro Plus**: 1.407,12 unidades del 11-12 al 11-24 contra las 0,0075 que quedaron tras la
+  venta del 11-03.
+- **FIRY** habría entrado con 112 unidades en vez de 7 desde el 11-28: la venta del 11-18 deja 7 y el mes tiene
+  las compras del 11-04 y el 11-16.
+
+Medido con la función real contra la consulta vieja, en las 5 cuentas:
+
+- **U4214563**: los 46 símbolos se mantienen. Solo cambia el arranque de GOEVQ, que es inocuo porque está
+  deslistado y va por la rama de stock 0.
+- **SANT0001**: Super Ahorro Plus suma la venta del 11-03.
+- **Las demás cuentas**: sin cambios.
+
+**Punto de atención: la suma del filtro sigue ahí.** Si la única fila del mes de un símbolo es esa venta, el
+símbolo sale entero de la consulta hasta que cambia el mes, y su costo desaparece del `costo_base`. No se
+corrigió: va al BACKLOG.
+
 ## Gráfico de performance — la fuente es `performa_inversion`, no un recálculo (2026-11-11)
 
 **Reversión de `9986292` (2026-03-08), que cambió la fuente sin declarar motivo.** Ese commit hizo
