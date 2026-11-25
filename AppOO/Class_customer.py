@@ -2840,6 +2840,33 @@ class TickerInfo(MyOrders):
                         }
                     )
 
+    def dividendo_yfinance(self, activo, precio):
+        # dividendo anual por accion, yield y fecha ex desde el info de Yahoo. Lo usan el ciclo de portfolio (con IB)
+        # y ib_offline_sync (sin IB): las dos fuentes del panel calculan igual
+        exDividendDate, dividendo = "9999-12-31", 0.0
+        dividendYield = activo.get("dividendYield", 0)
+        # el info de la sesion puede venir sin precio (10 posiciones el 2026-11-24, TLT entre ellas: con
+        # dividendYield y sin previousClose ni open) y el ETF quedaba con dividendo 0: respaldo, el precio del llamador
+        price = activo.get("previousClose") or precio
+
+        if activo.get("quoteType") in ("STK", "EQUITY"):
+
+            # si ha pagado dividndo en los ultimos 12 meses
+            if activo.get("trailingAnnualDividendRate", 0) > 0:
+                dividendo = price * dividendYield / 100
+
+                # ultima instaancia -- para obtener el dividendo
+                if "dividendRate" in activo:
+                    dividendo = activo["dividendRate"]
+
+        if activo.get("quoteType") == "ETF":
+            dividendo = price * dividendYield / 100
+
+        if "exDividendDate" in activo:
+            exDividendDate = datetime.fromtimestamp(activo["exDividendDate"])
+
+        return dividendo, dividendYield, exDividendDate
+
     def ib_offline_sync(self):
         # Reemplaza la actualización de precios e indicadores que normalmente provee el websocket IB.
         # Cuando IB no está disponible, descarga en batch los precios de cierre más recientes vía
@@ -2850,6 +2877,8 @@ class TickerInfo(MyOrders):
         #   3. Llama ts_yfinance_symbol() para poblar DataHub.info[symbol]["datos_tecnicos"]
         #      (EMAs, RSI, MACD) — necesarios para predecir_modelo(); sin esto el modelo falla
         #      con "EMA020_d not in index"
+        #   4. Con ese mismo info recalcula el dividendo anual de la posición (dividendo_yfinance × cantidad),
+        #      el que el ciclo de portfolio calcula con IB. Sin quoteType conserva el valor cargado de la BD
         # El método es invocado por schedule_ib_offline_sync() cada 5 min mientras el socket de IB no está
         # conectado (DataHub.ws_stock_connected=False).
         try:
@@ -2902,9 +2931,11 @@ class TickerInfo(MyOrders):
                     last_price = float(col.dropna().iloc[-1])
                     if last_price > 0:
                         # Convertir a USD si corresponde
+                        precio_nativo, fx = last_price, 1.0
                         currency = fx_map.get(symbol)
                         if currency:
-                            last_price = last_price * fx_rates.get(currency, 1.0)
+                            fx = fx_rates.get(currency, 1.0)
+                            last_price = last_price * fx
                         qty = position.get("position", 0)
                         xopen = position.get("open", 0)
                         position["mrkprice"] = last_price
@@ -2917,7 +2948,12 @@ class TickerInfo(MyOrders):
                             precio={symbol: {"last": last_price}},
                         )
                         # puebla datos_tecnicos (EMAs/RSI/MACD) para que predecir_modelo() funcione offline
-                        self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
+                        activo, _, _ = self.ts_yfinance_symbol(symbol=symbol, vehiculo=self.vehiculo)
+                        # el panel muestra el total anual de la posicion; un info sin quoteType es una descarga
+                        # vacia y no baja a 0 el dividendo que dejo la BD
+                        if activo.get("quoteType"):
+                            dividendo, _, _ = self.dividendo_yfinance(activo, precio_nativo)
+                            position["dividendo"] = dividendo * fx * qty
                         actualizados += 1
                 except Exception:
                     fallidos.append(symbol)

@@ -1097,6 +1097,28 @@ todo el tiempo que IB está caído. Hoy el llamador pasa `pos["dividendo"] * pos
 y `update_inversion`, que en Stock persiste `dividendo * position` (`Modulos_Mysql.py:4507`). Pasarlo al total
 en origen duplicaría la multiplicación en los dos.
 
+**Corregido el 2026-11-24 — el dividendo de un ETF dependía de un precio de Yahoo que puede no venir.** En un ETF,
+`get_dividends_yfinance` calcula `previousClose * dividendYield`. El `info` que `ts_yfinance_symbol` guarda en
+caché toda la sesión puede venir sin campos de precio. En la corrida de las 00:37 del 2026-11-24, 10 de las 41
+posiciones de Stock venían sin `open`, `previousClose` ni `exDividendDate`, pero con `quoteType`, `dividendYield`
+y `dividendRate`: BABA, T, SNDL, SWK, CIG, TLT, BBAI, MPT, BTG y RIO. Las acciones no perdieron el dividendo,
+porque lo toman de `dividendRate`. TLT sí, porque el ETF es el único caso que lo calcula con el precio. Su fila de
+`inversion` quedó con `dividendo` en 0. Hoy, si falta `previousClose`, se usa el `mktPrice` de IB, que está
+siempre y viene en la misma moneda.
+
+- **El cálculo del ETF no cambió.** Es el mismo desde `DashMainV9_ia.py`: el trailing solo filtra a las acciones,
+  nunca entró en el ETF.
+- **El trailing tampoco sirve como respaldo para TLT.** Yahoo informa 2,152, mientras que el historial de 12 meses
+  suma unos 3,9 y yield × precio da 3,877.
+- **Sin IB el dividendo ya no depende de la BD.** En modo Offline el ciclo de portfolio no corre y el arranque
+  carga `inversion.dividendo`, así que un 0 guardado quedaba en pantalla hasta que volviera IB. El cálculo pasó a
+  `TickerInfo.dividendo_yfinance` (`Class_customer.py`), y lo usan los dos caminos: el ciclo de portfolio y
+  `ib_offline_sync`, que cada 5 minutos ya bajaba el precio y el `info` de Yahoo. Sin IB usa el precio que acaba de
+  bajar, y si el `info` no trae `quoteType` conserva el valor de la BD. El cálculo offline queda en memoria, igual
+  que el precio; la BD la escribe el ciclo con IB.
+- **La ventana *Diversificación vs Performance Sector* no se arregla con esto.** Lee de `market`, y
+  `audit_portfolio` borra los ETF de esa tabla, así que TLT siempre salió en 0 ahí.
+
 **`inversion.conid` es el mercado donde operó la cuenta, no una propiedad del ticker** (2026-09-16). La
 compra de un símbolo fuera de cartera tomaba el primer resultado de la búsqueda de IB, que es difusa y no
 trae `currency`: ENB salió en Toronto (TSE, en CAD) antes que en NYSE, y BIL devolvía BHP antes que el ETF.
@@ -1411,7 +1433,7 @@ Si el commit toca el código de la izquierda, revisar el doc de la derecha antes
 | Agentes nuevos / `AGENTES_SCHEDULE` | sección "Patrón para agregar un nuevo agente" en este archivo |
 | `add_alert`, `insert_incidencia`, tab Alertas | sección "Columnas con semántica propia" en este archivo |
 | `load_target_prices`, `api_vehiculo_iteractive`, columna Objetivo | sección "Precio objetivo — fuente única" en este archivo |
-| `update_symbol_en_positions`, `procesa_stock`, el dGyP del panel | bloque `inversion.dgyp` en "Columnas con semántica propia" |
+| `update_symbol_en_positions`, `procesa_stock`, `dividendo_yfinance`, `ib_offline_sync`, el dGyP y el dividendo del panel | bloque `inversion.dgyp` en "Columnas con semántica propia" |
 | `sync_objetivo_cartera`, `Agente_ObjetivoCrypto`, `otros_activos.objetivo` | sección "Precio objetivo — fuente única" § Crypto, en este archivo |
 | `detalle_book`, `carry_forward`, la cuarentena de la diaria | sección "Diaria — un símbolo sin precio del día aporta su fila igual" en este archivo |
 | `performa_asset`, `select_performa_inversion`, el gráfico de performance | sección "Gráfico de performance — la fuente es `performa_inversion`" en este archivo |

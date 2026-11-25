@@ -1486,30 +1486,6 @@ class DatosVehivulo(TickerInfo, MyOrders):
 
         # p_cartera instancia API vs p_positions tabla inversión
         def update_inversion_stock(p_cartera, p_positions):
-            def get_dividends_yfinance():
-
-                exDividendDate, dividendo = "9999-12-31", 0.0
-                dividendYield = yf_activo.get("dividendYield", 0)
-                price = yf_activo.get("previousClose", 0)
-
-                if yf_activo.get("quoteType") in ("STK", "EQUITY"):
-
-                    # si ha pagado dividndo en los ultimos 12 meses
-                    if yf_activo.get("trailingAnnualDividendRate", 0) > 0:
-                        dividendo = price * dividendYield / 100
-
-                        # ultima instaancia -- para obtener el dividendo
-                        if "dividendRate" in yf_activo:
-                            dividendo = yf_activo["dividendRate"]
-
-                if yf_activo.get("quoteType") == "ETF":
-                    dividendo = price * dividendYield / 100
-
-                if "exDividendDate" in yf_activo:
-                    exDividendDate = datetime.fromtimestamp(yf_activo["exDividendDate"])
-
-                return dividendo, dividendYield, exDividendDate
-
             try:
                 # acumular en local para evitar race condition con schedule_operativo
                 x_activos, x_positions = [], []
@@ -1537,7 +1513,7 @@ class DatosVehivulo(TickerInfo, MyOrders):
                     price = key["mktPrice"]
 
                     # captura el dividendo del activo
-                    dividendo, dividendYield, exDividendDate = get_dividends_yfinance()
+                    dividendo, dividendYield, exDividendDate = self.dividendo_yfinance(yf_activo, key["mktPrice"])
 
                     x_open = yf_activo.get("open", 0) * factor
                     x_cierre = yf_activo.get("previousClose", 0) * factor
