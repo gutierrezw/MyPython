@@ -33,6 +33,7 @@ from AppValuations.valoracion_radar import (
     valoracion,
     ejes_radar,
     dividendo_maduro,
+    monedas_de_balance,
 )
 from Modulos_python import (
     tk,
@@ -3606,13 +3607,44 @@ def sync_dividend_status_screener(account: str, limit: int = 150) -> dict:
     return {"processed": processed, "errors": errors, "total": len(symbols), "sync_inversion": sincronizados}
 
 
+def tipos_de_cambio(pares):
+    """{(desde, hacia): tasa} con el último cierre de `{desde}{hacia}=X` en Yahoo, en una sola descarga. Un par que no
+    baja queda fuera: quien lo consume lo lee como "sin tipo de cambio" y no compara, nunca como 1."""
+    if not pares:
+        return {}
+    tickers = {f"{desde}{hacia}=X": (desde, hacia) for desde, hacia in pares}
+    try:
+        df = yf.download(" ".join(sorted(tickers)), period="5d", threads=False, progress=False, auto_adjust=True)
+    except Exception as e:
+        _logger.error(f"tipos_de_cambio yf.download: {e}")
+        return {}
+    if df.empty:
+        return {}
+    tasas = {}
+    is_multi = isinstance(df.columns, pd.MultiIndex)
+    for ticker, par in tickers.items():
+        try:
+            serie = (df["Close"][ticker] if is_multi else df["Close"]).dropna()
+        except KeyError:
+            continue
+        if not serie.empty and float(serie.iloc[-1]) > 0:
+            tasas[par] = float(serie.iloc[-1])
+    return tasas
+
+
 def sync_valoracion_semanal(account: str) -> dict:
     """Foto semanal de valoración en valoracion_historia: los 5 ejes, el voto y sus insumos crudos, de todo Stock.
 
-    Sale entera de `market` (la traza de dividendos incluida), sin descargas. La Señal se copia de `market`: existe
-    para encartera Y/N y queda NULL en el resto del universo (Doc/plan-valoracion.md § 5)."""
+    Sale de `market` (la traza de dividendos incluida). Lo único que se baja son los tipos de cambio del balance, en una
+    descarga por corrida: sin ellos el FCF y la deuda de un emisor extranjero no se comparan contra marketCap. La Señal
+    se copia de `market`: existe para encartera Y/N y queda NULL en el resto del universo (Doc/plan-valoracion.md § 5).
+    """
     market = MarketScreen()
     universo = market.load_universo_valoracion(account)
+    monedas = monedas_de_balance(universo)
+    fx = tipos_de_cambio(monedas)
+    for row in universo:
+        row["fx_balance"] = fx.get((row.get("financialCurrency"), row.get("currency")))
     pares = pares_por_grupo(universo)
     fecha = datetime.now().date()
     filas, errors = [], 0
@@ -3643,7 +3675,13 @@ def sync_valoracion_semanal(account: str) -> dict:
             errors += 1
 
     escritas = market.insert_valoracion_historia(filas)
-    return {"enviadas": len(filas), "errors": errors, "total": len(universo), "error_bd": bool(filas) and not escritas}
+    return {
+        "enviadas": len(filas),
+        "errors": errors,
+        "total": len(universo),
+        "fx": f"{len(fx)}/{len(monedas)}",
+        "error_bd": bool(filas) and not escritas,
+    }
 
 
 if __name__ == "__main__":

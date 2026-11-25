@@ -193,6 +193,12 @@ def dividendo_maduro(traza):
     return _sigue_pagando(filas)
 
 
+def monedas_de_balance(filas):
+    """Pares (moneda del balance, moneda de cotización) distintos: los tipos de cambio que necesita `fx_balance` para
+    comparar un total del balance contra el precio o contra marketCap."""
+    return {(r["financialCurrency"], r["currency"]) for r in filas if not _misma_moneda(r)}
+
+
 def pares_por_grupo(filas):
     """{metrica: {(nivel, nombre): valores ordenados}} por sector e industria. Se arma una vez por pasada."""
     pares = {m: {} for m in _METRICAS}
@@ -261,7 +267,10 @@ def _metricas(row):
         v = _num(row.get(campo))
         return v if v and v > 0 else None
 
-    misma = _misma_moneda(row)
+    def sobre_cap(campo):
+        n, cap = _en_cotizacion(row, campo), _num(row.get("marketCap"))
+        return n / cap if n is not None and cap and cap > 0 else None
+
     rinde = cociente("dividendRate", "lastPrice")
     return {
         "trailingPE": positivo("trailingPE"),
@@ -271,8 +280,8 @@ def _metricas(row):
         "returnOnEquity": _num(row.get("returnOnEquity")),
         "returnOnAssets": _num(row.get("returnOnAssets")),
         "operatingMargins": _num(row.get("operatingMargins")),
-        "deuda_cap": cociente("totalDebt", "marketCap") if misma else None,
-        "fcf_cap": cociente("freeCashflow", "marketCap") if misma else None,
+        "deuda_cap": sobre_cap("totalDebt"),
+        "fcf_cap": sobre_cap("freeCashflow"),
         "yield": rinde if rinde and rinde > 0 else None,
     }
 
@@ -303,16 +312,27 @@ def _paga_dividendo(filas, tasa):
 
 def _pruebas_cobertura(row, div, precio):
     """Parte del dividendo que se lleva la ganancia esperada y el flujo de caja (> 1 = no lo cubre). Un denominador
-    <= 0 no cubre nada. El FCF está en la moneda del balance: solo se compara si coincide con la de cotización."""
+    <= 0 no cubre nada. El FCF está en la moneda del balance y se lleva a la de cotización (`_en_cotizacion`)."""
     pruebas = []
     eps = _num(row.get("forwardEps"))
     if eps is not None:
         pruebas.append(div / eps if eps > 0 else math.inf)
-    fcf = _num(row.get("freeCashflow"))
+    fcf = _en_cotizacion(row, "freeCashflow")
     cap = _num(row.get("marketCap"))
-    if fcf is not None and cap and cap > 0 and precio and precio > 0 and _misma_moneda(row):
+    if fcf is not None and cap and cap > 0 and precio and precio > 0:
         pruebas.append(div / precio * cap / fcf if fcf > 0 else math.inf)
     return pruebas
+
+
+def _en_cotizacion(row, campo):
+    """Un total del balance (`freeCashflow`, `totalDebt`) en la moneda de cotización, con el tipo de cambio de
+    `fx_balance`. None si las monedas difieren y no hay tipo de cambio. Un dato por acción no pasa por acá: además de
+    la moneda carga la relación ADR/acción, que Yahoo no informa."""
+    valor = _num(row.get(campo))
+    if valor is None or _misma_moneda(row):
+        return valor
+    fx = _num(row.get("fx_balance"))
+    return valor * fx if fx and fx > 0 else None
 
 
 def _misma_moneda(row):

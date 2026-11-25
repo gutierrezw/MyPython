@@ -290,9 +290,9 @@ Inventario de los lugares que la rompen o la rozan:
 |---|---|---|
 | `sync_dividend_status_screener` (`Class_Screener.py:3372`) y `rendimiento_dividends` (`Class_customer.py:3083`) | Ponían `trailingAnnualDividendRate / precio` como último año de la serie. Con esa serie escriben `categoriaActivo`: el primero en ex-cartera, el segundo en cartera | **Cerrado 2026-11-23.** Los dos llaman a `valoracion_historial`. Ver el detalle debajo de la tabla |
 | Gráfico de dividendos del Screener (`Class_Screener.py:1263`) y del popup de cartera | Calculaba el mismo cociente, pero solo para mostrar | **Cerrado 2026-11-23.** Dibuja la serie y la banda de `valoracion_historial` |
-| `valoracion_radar` (prueba del FCF en la trampa, eje Salud) | Tiene la guarda `_misma_moneda`: con monedas distintas el componente se apaga | Protegido. Convertir en vez de apagar es la Decisión 7 del plan |
+| `valoracion_radar` (prueba del FCF en la trampa, eje Salud) | Hasta el 2026-11-25 tenía la guarda `_misma_moneda`, que con monedas distintas apagaba el componente. Hoy `_en_cotizacion` convierte `freeCashflow` y `totalDebt` con `fx_balance`, que `sync_valoracion_semanal` baja con `tipos_de_cambio` (`Class_Screener.py`). Sin tasa, el componente no entra; nunca se usa 1 | **Cerrado 2026-11-25** (Decisión 7 del plan). El respaldo del trailing para `dividendRate` sigue exigiendo misma moneda, porque es un dato por acción |
 | Columnas `Free CF` / `Total Debt` / `Ann Div $` del Screener | Muestran el dato en la moneda del balance, junto a `Fin Cur` | Correcto: no divide |
-| `forwardPE` / `priceToBook` de Yahoo | Heredan la unidad del EPS o del valor libro | Decisión 4 del plan (caso ENIC) |
+| `forwardPE` / `priceToBook` de Yahoo | Heredan la unidad del EPS o del valor libro | **Cerrado 2026-11-25: se deja así** (Decisión 4 del plan). ENIC es el único error de unidad medido. Las otras 41 filas fuera de rango tienen un trailing deprimido o inflado, y la guarda que se probó creaba 6 trampas falsas |
 | `detalle_dividendos` (`DashMain.py`) | Calcula con `dividendRate`; el trailing solo actúa como filtro | Correcto |
 
 **Detalle de la primera fila.** Sobre los 53 pagadores extranjeros, **45** tienen el trailing fuera de [0,8 ; 1,25]
