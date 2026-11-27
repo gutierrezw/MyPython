@@ -15,7 +15,7 @@ SEÑALES (6 votos)
 2. Options     — Ratio CALL/(CALL+PUT) en posiciones de opciones 13F
 3. Analistas   — Recomendación de Wall Street (yfinance recommendationKey)
 4. Modelo IA   — Señal del modelo propio (CSVs buy/sell generados por el IA)
-5. Valuación   — Clasificación fundamental del activo (categoriaActivo)
+5. Valuación   — Barata o cara contra su referencia (valoracion_radar.valoracion)
 6. Cobertura   — Número de fondos institucionales con posición en el activo
 
 NIVELES DE CONSENSO
@@ -35,6 +35,9 @@ REVISAR     — resto
 
 inst_score = inst_ownership_pct * 0.40 + log(max(fh_count,1)) * 0.40 + fh_buy_ratio * 0.20
 """
+
+from AppValuations.valoracion_radar import valoracion
+
 
 # ---------------------------------------------------------------------------
 # Umbrales del modelo (fuente única de verdad)
@@ -157,17 +160,13 @@ def voto_analistas(analyst_rec: str) -> int | None:
     return None
 
 
-def voto_valuacion(categoria_activo: str) -> int | None:
-    """Voto Valuación: clasificación fundamental del activo.
-    I=Infravalorado → +1 | N=Neutral → 0 | S=Sobrevalorado → -1
-    X=Excluido (ETF/fondo) | T=Descubierto 13F → abstienen (None)."""
-    if categoria_activo == "I":
-        return 1
-    if categoria_activo == "S":
-        return -1
-    if categoria_activo == "N":
-        return 0
-    return None  # X, T, o vacío: abstiene
+def voto_valuacion(fila: dict | None, pares: dict) -> int | None:
+    """Voto Valuación: el voto de `valoracion` (Doc/plan-valoracion.md § 2). +1 barata y −1 cara, fuera de la banda
+    de ±10% contra su referencia; 0 dentro de la banda o con trampa de yield; None si ningún método aplica.
+    `fila` es la del universo de valoración: sin fila (ETF, par cripto) se abstiene."""
+    if not fila:
+        return None
+    return valoracion(fila, pares)["voto"]
 
 
 def voto_cobertura(fh_count: int) -> int | None:

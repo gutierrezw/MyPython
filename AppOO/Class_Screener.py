@@ -1772,7 +1772,6 @@ class Screener(tk.Frame):
         exits = row.get("full_exits") or 0
         rec = (row.get("analyst_rec") or "").lower().replace(" ", "_")
         n_ana = row.get("analyst_count") or 0
-        categ = row.get("categoriaActivo") or ""
 
         v_net, v_opt, v_flujo = votos["Net"], votos["Opt"], votos["Flujo"]
         v_ana, v_val, v_cob, v_sent = votos["Ana"], votos["Val"], votos["Cob"], votos["Sent"]
@@ -1807,14 +1806,22 @@ class Screener(tk.Frame):
         rec_lbl = rec.replace("_", " ") if rec else "—"
         d_ana = f"{rec_lbl}  ({n_ana} analistas)" if rec else "sin recomendación"
 
-        _CATEG = {
-            "I": "Infravalorado",
-            "S": "Sobrevalorado",
-            "N": "Neutral",
-            "X": "ETF/Fondo  →  abstiene",
-            "T": "Descubierto 13F  →  abstiene",
+        _METODO = {
+            "dividendo": "yield vs su media",
+            "pb_industria": "P/B vs industria",
+            "pe_forward": "P/E fwd vs sector",
+            "pe_trailing": "P/E trail vs sector",
         }
-        d_val = _CATEG.get(categ, categ)
+        fila_val = ctx["valoracion"].get(symbol)
+        if not fila_val:
+            d_val = "ETF/fondo o fuera del universo  →  abstiene"
+        else:
+            val = valoracion(fila_val, ctx["pares"])
+            motivos = f"  ({', '.join(val['motivos'])})" if val["motivos"] else ""
+            if val["metodo"]:
+                d_val = f"{_METODO[val['metodo']]}  desvío {val['desvio']:+.0%}{motivos}"
+            else:
+                d_val = f"sin método  →  abstiene{motivos}"
         if fh_count:
             level_cob = "≥20" if fh_count >= 20 else ("≥5" if fh_count >= 5 else "<5")
             d_cob = f"{fh_count} fondos 13F  ({level_cob})"
@@ -1866,7 +1873,7 @@ class Screener(tk.Frame):
             (
                 "5. VALUACION",
                 d_val,
-                "I = Infravalorado → +1     N = Neutral → 0     S = Sobrevalorado → −1     X/T → abstiene",
+                "desvío > +10% → +1 (barata)   ±10% o trampa → 0   < −10% → −1 (cara)   sin método → abstiene",
                 v_val,
                 False,
             ),
@@ -3407,10 +3414,15 @@ def _load_csv_signals():
 
 
 def contexto_consenso(account, cartera):
-    """Lo que los votos miden contra toda la cartera, leido una vez por pasada (no por simbolo)."""
+    """Lo que los votos miden contra toda la cartera, leido una vez por pasada (no por simbolo).
+
+    El voto Val compara contra el universo de valoracion, no contra la cartera: `valoracion` lee las filas por simbolo
+    y las medianas de sus pares. El tipo de cambio del balance es el de la ultima foto semanal; no se baja aca, que
+    corre cada 5 min (Doc/plan-valoracion.md § 6)."""
     p33_net, p67_net = _build_net_percentiles(cartera)
     p33_flujo, p67_flujo = _build_flujo_percentiles(cartera)
     syms_buy, syms_sell = _load_csv_signals()
+    universo = MarketScreen().load_universo_valoracion(account)
     return {
         "p33_net": p33_net,
         "p67_net": p67_net,
@@ -3420,6 +3432,8 @@ def contexto_consenso(account, cartera):
         "syms_sell": syms_sell,
         "sentiment": load_sentiment(account),
         "analysis": load_analysis(account),
+        "valoracion": {r["symbol"]: r for r in universo},
+        "pares": pares_por_grupo(universo),
     }
 
 
@@ -3443,7 +3457,7 @@ def votos_consenso(row, ctx):
         ),
         "Ana": voto_analistas(row.get("analyst_rec")),
         "Mod": 1 if sym in ctx["syms_buy"] else (-1 if sym in ctx["syms_sell"] else 0),
-        "Val": voto_valuacion(row.get("categoriaActivo") or ""),
+        "Val": voto_valuacion(ctx["valoracion"].get(sym), ctx["pares"]),
         "Cob": voto_cobertura(fh_count),
         "Sent": voto_tech_alignment(sym, ctx["sentiment"], ctx["analysis"]),
     }

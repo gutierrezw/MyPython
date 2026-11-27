@@ -181,8 +181,8 @@ recibe `accounts=[stock, crypto]`. **Ensanchar sólo la lectura es seguro porque
 pasa de 1.359 a **1.378** filas y **En Cartera de 38 a 57** (38 Stock + 19 pares).
 
 **La Señal se partió en dos ventanas porque los 8 votos del Consenso se abstienen en un par, no por comodidad.**
-`Net`/`Opt`/`Flujo`/`Cob` necesitan los `fh_*` del 13F, `Ana` necesita `analyst_rec`, `Val` ve `'C'` y se
-abstiene, `Mod` lee los CSV del modelo de Stock y `Sent` el sentimiento de Stock. Con `MIN_VOTOS_SENAL = 3`,
+`Net`/`Opt`/`Flujo`/`Cob` necesitan los `fh_*` del 13F, `Ana` necesita `analyst_rec`, `Val` no encuentra el par
+en el universo de valoración (excluye `X` y `C`; desde el 2026-11-27) y se abstiene, `Mod` lee los CSV del modelo de Stock y `Sent` el sentimiento de Stock. Con `MIN_VOTOS_SENAL = 3`,
 `senal_consenso([], 0)` devuelve `— S/D`: los 19 pares tienen `consenso_suma` y `consenso_tag` **NULL** en
 `market`. Mezclados en la ventana de Stock serían 19 filas en blanco ordenadas al final por
 `_TAG_ORDER.get("— S/D", 99)`, con los contadores del pie sin moverse.

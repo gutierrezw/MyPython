@@ -3932,19 +3932,28 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
 
     def load_universo_valoracion(self, account) -> list:
         """Filas de `market` que entran a la foto semanal de valoración: Stock sin ETF ('X') ni cripto ('C').
-        Trae los insumos de `valoracion` y `ejes_radar`, más los que la foto guarda crudos."""
+        Trae los insumos de `valoracion` y `ejes_radar`, más los que la foto guarda crudos.
+
+        `fx_balance` es el de la última foto: el voto Val de la Señal corre cada 5 min y no baja tipos de cambio.
+        `sync_valoracion_semanal` lo pisa con la tasa del día. NULL si el símbolo no estaba en esa foto."""
+        columnas = (
+            "symbol", "encartera", "sector", "industry", "lastPrice", "currency", "financialCurrency",
+            "trailingAnnualDividendRate", "dividendRate", "dividendYield", "payoutRatio", "trazaDividends",
+            "trailingPE", "forwardPE", "priceToBook", "trailingEps", "forwardEps", "revenueGrowth", "earningsGrowth",
+            "returnOnEquity", "returnOnAssets", "operatingMargins", "totalDebt", "freeCashflow", "marketCap",
+            "targetMeanPrice", "inst_score", "fh_count", "consenso_tag", "consenso_suma",
+        )
         conn = self._conectar(tabla="select.market")
         cursor = None
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT symbol, encartera, sector, industry, lastPrice, currency, financialCurrency, "
-                "trailingAnnualDividendRate, dividendRate, dividendYield, payoutRatio, trazaDividends, "
-                "trailingPE, forwardPE, priceToBook, trailingEps, forwardEps, revenueGrowth, earningsGrowth, "
-                "returnOnEquity, returnOnAssets, operatingMargins, totalDebt, freeCashflow, marketCap, "
-                "targetMeanPrice, inst_score, fh_count, consenso_tag, consenso_suma "
-                "FROM market WHERE account = %s AND categoriaActivo NOT IN ('X', 'C')",
-                (account,),
+                f"SELECT {', '.join('m.' + c for c in columnas)}, vh.fx_balance "
+                "FROM market m "
+                "LEFT JOIN valoracion_historia vh ON vh.account = m.account AND vh.symbol = m.symbol "
+                "AND vh.fecha = (SELECT MAX(fecha) FROM valoracion_historia WHERE account = %s) "
+                "WHERE m.account = %s AND m.categoriaActivo NOT IN ('X', 'C')",
+                (account, account),
             )
             cols = [c[0] for c in cursor.description]
             return [dict(zip(cols, row)) for row in cursor.fetchall()]

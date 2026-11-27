@@ -75,8 +75,9 @@ deuda de margen. No sugieras nada que lo supere.
 Leyenda del Consenso (Stock):
 - Votos: Net (compras contra ventas de fondos 13F, relativo al resto de la cartera), Opt (calls contra puts de \
 los fondos), Flujo (fondos que entran contra los que salen), Ana (recomendación de analistas), Val \
-(categoría de valuación: I infravalorado +1, N neutral 0, S sobrevalorado -1; ETF y descubiertos se \
-abstienen), Cob (cobertura: 20 o más fondos +1, de 5 a 19 0, de 1 a 4 -1), Sent (alineación técnica). Mod \
+(barata o cara contra su referencia: el yield contra su propia media, el P/B contra su industria o el P/E \
+contra su sector; más de 10% barata +1, más de 10% cara -1, dentro de esa banda o con dividendo que no se \
+cubre 0; sin método, ETF o fondo se abstiene), Cob (cobertura: 20 o más fondos +1, de 5 a 19 0, de 1 a 4 -1), Sent (alineación técnica). Mod \
 (el modelo de oportunidades) se muestra pero no vota; un voto vacío se abstiene.
 - Tags, de mejor a peor: ★ UNÁNIME, ▲ CONSENSO, ↗ TENDENCIA, → NEUTRO, ↘ ALERTA, ▼ SALIDA; — S/D es sin \
 datos.
