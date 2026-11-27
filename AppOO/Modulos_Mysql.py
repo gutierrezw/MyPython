@@ -4003,6 +4003,40 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 cursor.close()
             conn.close()
 
+    def load_radar(self, account, symbol=None, fotos=1) -> list:
+        """Ejes del radar de las últimas `fotos` fechas de `valoracion_historia`, sin calcular nada.
+
+        Sin `symbol` trae la cartera (`encartera = 'Y'` de cada foto); con `symbol`, solo ese símbolo.
+        Devuelve dicts ordenados por símbolo y fecha DESC: la primera fila de cada símbolo es la última foto.
+        [] si no hay foto o la BD falla."""
+        columnas = (
+            "symbol", "fecha", "encartera", "sector", "industry", "precio", "eje_valor", "eje_futuro",
+            "eje_pasado", "eje_salud", "eje_dividendo", "consenso_tag", "consenso_suma",
+        )
+        filtro, params = ("vh.symbol = %s", [symbol]) if symbol else ("vh.encartera = 'Y'", [])
+        conn = self._conectar(tabla="select.valoracion_historia")
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT {', '.join('vh.' + c for c in columnas)} "
+                "FROM valoracion_historia vh "
+                "JOIN (SELECT DISTINCT fecha FROM valoracion_historia WHERE account = %s "
+                "ORDER BY fecha DESC LIMIT %s) f ON f.fecha = vh.fecha "
+                f"WHERE vh.account = %s AND {filtro} "
+                "ORDER BY vh.symbol, vh.fecha DESC",
+                [account, int(fotos), account] + params,
+            )
+            cols = [c[0] for c in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except (Exception, connect.Error) as error:
+            _logger.error(f"[Mysql::load_radar]: {error}")
+            return []
+        finally:
+            if cursor:
+                cursor.close()
+            conn.close()
+
 
 
 class PlanInversion(BDsystem):  # ------------------------------------------------------------------------------------

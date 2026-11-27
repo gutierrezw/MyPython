@@ -75,6 +75,9 @@ from Class_DataFrame import (
     chart_rendimiento_dividendos,
     CacheHut,
     show_strategy_chart,
+    draw_rentabilidad,
+    draw_radar,
+    color_senal,
 )
 from Modulos_Mysql import (
     PlanInversion,
@@ -5133,14 +5136,29 @@ class WidgetVehiculo(TickerInfo):
                         )
                         cv2.draw()
 
-                # fg1 — Rentabilidad por períodos (siempre visible)
+                # fg1 — Rentabilidad por períodos (60%) y el radar de la última foto de valoración (40%)
                 _veh_r = self.vehiculo
                 result_r = self.ts_yfinance_symbol(symbol=self.symbol, vehiculo=_veh_r)
                 if result_r is None or not isinstance(result_r, tuple) or len(result_r) != 3:
                     pdatos_r = pd.DataFrame()
                 else:
                     _, pdatos_r, _ = result_r
-                self.graph_returns_periodos(fg=fg1, datos=pdatos_r, symbol=self.symbol)
+                fondo_r = self.cchart.get("fondo_fig", self.bgcolor)
+                gs_r = fg1.add_gridspec(1, 2, width_ratios=[3, 2])
+                draw_rentabilidad(
+                    fg=fg1, cv=None, datos=pdatos_r, symbol=self.symbol, cchart=self.cchart, cgcolor=fondo_r,
+                    ax=fg1.add_subplot(gs_r[0]),
+                )
+                ax_radar = fg1.add_subplot(gs_r[1], projection="polar")
+                ax_radar.set_facecolor(fondo_r)
+                foto = self.Market.load_radar(account=self.account, symbol=self.symbol)
+                ultima = foto[0] if foto else None
+                draw_radar(ax_radar, ultima, color_senal(ultima["consenso_tag"] if ultima else None))
+                if ultima:
+                    ax_radar.set_title(
+                        f"Valoración {ultima['fecha']:%d/%m}", color=self.cchart.get("titulo", "white"), fontsize=8,
+                        pad=12,
+                    )
                 cv1.draw()
 
                 # Gráfica performance acumulado para el symbol
@@ -6625,85 +6643,6 @@ class WidgetVehiculo(TickerInfo):
                 pass
         except Exception as e:
             print(f"graph_performace_portafolio(): {e}")
-
-    def graph_returns_periodos(self, fg=None, datos=None, symbol=""):
-        try:
-            fg.clear()
-            ax = fg.add_subplot(111)
-            ax.set_facecolor(self.cchart.get("fondo_fig", self.bgcolor))
-            fg.set_facecolor(self.cchart.get("fondo_fig", self.bgcolor))
-
-            if datos is None or datos.empty:
-                return
-
-            # Filtrar solo filas con Close válido (no NaN) — yfinance a veces trae últimas filas vacías
-            datos_valid = datos[datos["Close"].notna()]
-            if datos_valid.empty:
-                print(f"[graph_returns_periodos({symbol})]: datos_valid vacío después de filtrar NaN")
-                ax.set_title(f"Rentabilidad {symbol} — sin datos", color=self.cchart.get("titulo", "white"), fontsize=8)
-                return
-
-            now = datos_valid.index[-1]
-            price_now = float(datos_valid["Close"].iloc[-1])
-            tz = datos_valid.index.tz
-
-            def price_at(offset_date):
-                subset = datos_valid[datos_valid.index <= offset_date]
-                return float(subset["Close"].iloc[-1]) if not subset.empty else None
-
-            periodos = [
-                ("1S",  now - pd.DateOffset(weeks=1)),
-                ("1M",  now - pd.DateOffset(months=1)),
-                ("3M",  now - pd.DateOffset(months=3)),
-                ("6M",  now - pd.DateOffset(months=6)),
-                ("YTD", pd.Timestamp(now.year, 1, 1, tz=tz)),
-                ("1A",  now - pd.DateOffset(years=1)),
-                ("3A",  now - pd.DateOffset(years=3)),
-            ]
-
-            labels, returns, colors = [], [], []
-            for label, desde in periodos:
-                p = price_at(desde)
-                if p is None or p == 0:
-                    continue
-                ret = (price_now - p) / p * 100
-                labels.append(label)
-                returns.append(ret)
-                colors.append(self.cchart.get("plot2", "green") if ret >= 0 else self.cchart.get("plot1", "red"))
-
-            if not returns:
-                ax.set_title(f"Rentabilidad {symbol} — sin datos", color=self.cchart.get("titulo", "white"), fontsize=8)
-                return
-
-            bars = ax.barh(labels, returns, color=colors, alpha=0.75, height=0.5)
-
-            x_range = max(abs(v) for v in returns) or 1
-            pad = x_range * 0.03
-            small = x_range * 0.12  # umbral barra "pequeña"
-            for bar, val in zip(bars, returns):
-                y_mid = bar.get_y() + bar.get_height() / 2
-                if val >= 0:
-                    if val > small:  # barra grande: etiqueta dentro
-                        xpos, ha = val - pad, "right"
-                    else:            # barra chica: etiqueta fuera a la derecha
-                        xpos, ha = val + pad, "left"
-                else:
-                    if abs(val) > small:  # barra grande: etiqueta dentro
-                        xpos, ha = val + pad, "left"
-                    else:                 # barra chica negativa: etiqueta a la derecha del cero
-                        xpos, ha = pad, "left"
-                ax.text(xpos, y_mid, f"{val:+.1f}%", va="center", ha=ha, color="white", fontsize=7)
-
-            ax.axvline(0, color="gray", linewidth=0.8, alpha=0.6)
-            ax.set_title(f"Rentabilidad {symbol}", color=self.cchart.get("titulo", "white"), fontsize=8, pad=3)
-            ax.tick_params(colors="white", labelsize=7)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
-            ax.spines["bottom"].set_color("gray")
-            ax.spines["left"].set_color("gray")
-            ax.set_xlim(left=min(returns) * 1.25, right=max(returns) * 1.25)
-        except Exception as e:
-            print(f"[graph_returns_periodos()]: {e}")
 
     # (thread): coordinador de actualización de graficos
     def run_graficos(self):

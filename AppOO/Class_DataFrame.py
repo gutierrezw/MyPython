@@ -3055,12 +3055,25 @@ def show_strategy_chart(
 
 
 # Gráfico de rentabilidad por períodos (YTD, 6M, 3M, 1M, 1S)
-def draw_rentabilidad(fg, cv, datos, symbol, cchart, cgcolor="#1a1a1a"):
-    """Dibuja gráfico de barras horizontales con rentabilidad por período."""
-    fg.clear()
-    ax = fg.add_subplot(111)
+def draw_rentabilidad(fg, cv, datos, symbol, cchart, cgcolor="#1a1a1a", ax=None):
+    """Dibuja gráfico de barras horizontales con rentabilidad por período.
+
+    Sin `ax` ocupa la figura entera. Con `ax` dibuja solo en ese eje: Análisis {symbol} comparte la figura con el
+    radar. Con `cv` None no redibuja; lo hace quien arma la figura."""
+    if ax is None:
+        fg.clear()
+        ax = fg.add_subplot(111)
     ax.set_facecolor(cgcolor)
     fg.set_facecolor(cgcolor)
+    _barras_rentabilidad(ax, datos, symbol, cchart)
+    if cv is not None:
+        cv.draw()
+
+
+def _barras_rentabilidad(ax, datos, symbol, cchart):
+    def _price_at(offset):
+        sub = datos_valid[datos_valid.index <= offset]
+        return float(sub["Close"].iloc[-1]) if not sub.empty else None
 
     if datos is None or datos.empty or "Close" not in datos.columns:
         ax.text(0.5, 0.5, "Sin datos históricos\ndisponibles", ha="center", va="center",
@@ -3068,7 +3081,6 @@ def draw_rentabilidad(fg, cv, datos, symbol, cchart, cgcolor="#1a1a1a"):
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.axis("off")
-        cv.draw()
         return
 
     # Filtrar filas con Close válido (no NaN) — yfinance a veces trae últimas filas vacías
@@ -3079,16 +3091,11 @@ def draw_rentabilidad(fg, cv, datos, symbol, cchart, cgcolor="#1a1a1a"):
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.axis("off")
-        cv.draw()
         return
 
     now = datos_valid.index[-1]
     price_now = float(datos_valid["Close"].iloc[-1])
     tz = datos_valid.index.tz
-
-    def _price_at(offset):
-        sub = datos_valid[datos_valid.index <= offset]
-        return float(sub["Close"].iloc[-1]) if not sub.empty else None
 
     periodos = [
         ("1S", now - pd.DateOffset(weeks=1)),
@@ -3112,7 +3119,6 @@ def draw_rentabilidad(fg, cv, datos, symbol, cchart, cgcolor="#1a1a1a"):
 
     if not returns:
         ax.set_title(f"Rentabilidad {symbol} — sin datos", color=cchart.get("titulo", "white"), fontsize=8)
-        cv.draw()
         return
 
     bars = ax.barh(labels, returns, color=colors_bar, alpha=0.75, height=0.5)
@@ -3124,11 +3130,14 @@ def draw_rentabilidad(fg, cv, datos, symbol, cchart, cgcolor="#1a1a1a"):
         if val >= 0:
             xpos = bar.get_width() - x_range * 0.01 if val > small else bar.get_width() + x_range * 0.01
             ha = "right" if val > small else "left"
-        else:
-            xpos = bar.get_width() + x_range * 0.01 if abs(val) > small else bar.get_width() - x_range * 0.01
-            ha = "left" if abs(val) > small else "right"
+        else:  # la negativa chica va a la derecha del cero: a la izquierda pisaba los nombres de los períodos
+            xpos = bar.get_width() + x_range * 0.01 if abs(val) > small else x_range * 0.01
+            ha = "left"
         ax.text(xpos, y_mid, f"{val:+.1f}%", va="center", ha=ha, color="white", fontsize=5)
 
+    # Las etiquetas que van afuera de la barra salen siempre hacia la derecha: se les deja lugar
+    lo, hi = ax.get_xlim()
+    ax.set_xlim(lo, hi + (hi - lo) * 0.12)
     ax.axvline(0, color="gray", linewidth=0.8, alpha=0.6)
     ax.set_title(f"Rentabilidad {symbol}", color=cchart.get("titulo", "white"), fontsize=8, pad=3)
     ax.tick_params(colors="white", labelsize=7)
@@ -3136,4 +3145,73 @@ def draw_rentabilidad(fg, cv, datos, symbol, cchart, cgcolor="#1a1a1a"):
     ax.spines["right"].set_visible(False)
     ax.spines["bottom"].set_color("gray")
     ax.spines["left"].set_color("gray")
-    cv.draw()
+
+
+# Radar de valoración — 5 ejes de valoracion_historia (plan-valoracion.md § 3 y § 7)
+_EJES_RADAR = (
+    ("eje_valor", "Valor"),
+    ("eje_futuro", "Futuro"),
+    ("eje_pasado", "Pasado"),
+    ("eje_salud", "Salud"),
+    ("eje_dividendo", "Div"),
+)
+
+# La paleta de la Señal del Screener. S/D o sin tag → gris
+_COLOR_SENAL = {
+    "UNANIME": "#FFD700",
+    "CONSENSO": "#00FF88",
+    "TENDENCIA": "cyan",
+    "NEUTRO": "#888888",
+    "ALERTA": "#FFA500",
+    "SALIDA": "#FF6060",
+}
+
+
+def color_senal(tag):
+    """Color de la Señal para un `consenso_tag` tal como se guarda ("↗ TENDENCIA", "★ UNÁNIME")."""
+    clave = str(tag or "").strip().split()[-1].upper() if tag else ""
+    for acento, llano in (("Á", "A"), ("É", "E"), ("Í", "I"), ("Ó", "O"), ("Ú", "U")):
+        clave = clave.replace(acento, llano)
+    return _COLOR_SENAL.get(clave, "#555555")
+
+
+def draw_radar(ax, ejes, color):
+    """Radar de los 5 ejes de valoración (0..1) sobre un eje polar, sin números.
+
+    `ejes` es una fila de `load_radar` (o cualquier dict con las claves `eje_*`). Un eje sin dato no se dibuja
+    como 0: su rayo y el lado que lo saltea van punteados. Sin fila deja la leyenda "sin foto"."""
+    n = len(_EJES_RADAR)
+    angulos = [2 * math.pi * i / n for i in range(n)]
+    ax.set_theta_offset(math.pi / 2)
+    ax.set_theta_direction(-1)
+    ax.set_ylim(0, 1)
+    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels([])
+    ax.set_xticks(angulos)
+    ax.grid(color="gray", alpha=0.3, linewidth=0.5)
+    ax.spines["polar"].set_color("gray")
+    ax.spines["polar"].set_alpha(0.4)
+
+    valores = [(ejes or {}).get(clave) for clave, _ in _EJES_RADAR]
+    ax.set_xticklabels([nombre for _, nombre in _EJES_RADAR], fontsize=6)
+    for etiqueta, valor in zip(ax.get_xticklabels(), valores):
+        etiqueta.set_color("#cccccc" if valor is not None else "gray")
+
+    if not ejes or all(v is None for v in valores):
+        ax.text(0.5, 0.5, "sin foto" if not ejes else "sin dato", transform=ax.transAxes,
+                ha="center", va="center", color="gray", fontsize=8)
+        return
+
+    validos = [(i, angulos[i], float(v)) for i, v in enumerate(valores) if v is not None]
+    if len(validos) >= 3:
+        ax.fill([a for _, a, _ in validos], [v for _, _, v in validos], color=color, alpha=0.35)
+    for j, (i, a, v) in enumerate(validos):
+        i2, a2, v2 = validos[(j + 1) % len(validos)]
+        if len(validos) == 1 or (len(validos) == 2 and j == 1):
+            break
+        estilo = "-" if (i + 1) % n == i2 else ":"
+        ax.plot([a, a2], [v, v2], color=color, linewidth=1.0, linestyle=estilo)
+    for i, v in enumerate(valores):
+        if v is None:
+            ax.plot([angulos[i], angulos[i]], [0, 1], color="gray", linewidth=0.8, linestyle=":")
+    ax.scatter([a for _, a, _ in validos], [v for _, _, v in validos], color=color, s=4, zorder=3)
