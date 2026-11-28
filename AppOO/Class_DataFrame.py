@@ -3164,12 +3164,12 @@ _COLOR_SENAL = {
 
 def color_senal(tag):
     """Color de la Señal para un `consenso_tag` tal como se guarda ("↗ TENDENCIA", "★ UNÁNIME")."""
-    return _COLOR_SENAL.get(_clave_senal(tag), "#555555")
+    return _COLOR_SENAL.get(clave_senal(tag), "#555555")
 
 
 def orden_senal(tag):
     """Posición de la Señal en el orden del Screener (UNÁNIME primero). S/D o sin tag va al final."""
-    clave = _clave_senal(tag)
+    clave = clave_senal(tag)
     return list(_COLOR_SENAL).index(clave) if clave in _COLOR_SENAL else 99
 
 
@@ -3180,7 +3180,8 @@ def rotulo_senal(tag, suma):
     return tag or "— S/D"
 
 
-def _clave_senal(tag):
+def clave_senal(tag):
+    """La Señal sin símbolo ni acento: "★ UNÁNIME" → "UNANIME", "— S/D" → "S/D". Sin tag → ""."""
     clave = str(tag or "").strip().split()[-1].upper() if tag and str(tag).strip() else ""
     for acento, llano in (("Á", "A"), ("É", "E"), ("Í", "I"), ("Ó", "O"), ("Ú", "U")):
         clave = clave.replace(acento, llano)

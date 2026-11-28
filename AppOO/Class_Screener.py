@@ -8,6 +8,7 @@ from Class_DataFrame import (
     draw_radar,
     color_senal,
     orden_senal,
+    clave_senal,
 )
 from Modulos_Utilitarios import (
     style_app,
@@ -2103,6 +2104,23 @@ class Screener(tk.Frame):
             tag, s, n = senal_consenso(votos_activos, suma)
             return _TAG_DISPLAY.get(tag, tag), s, n
 
+        def _filtrar(clave):
+            # Un clic en un contador deja solo esa Señal; otro clic en la misma, o en "Todas", las muestra todas
+            filtro["clave"] = None if clave == filtro["clave"] else clave
+            visibles = [f for f in filas if filtro["clave"] in (None, f["tag"])]
+            # insert_row() y no insert() directo en cada arbol: es el unico camino que llena
+            # CustomTreeview._id_map, de donde sync_fixed_selection/sync_scroll_selection sacan
+            # el iid gemelo. Sin el mapa la linea de seleccion queda suelta entre las dos mitades.
+            ct.delete_row()
+            for f in visibles:
+                ct.insert_row(values=f["values"], tag=f["tag"])
+            if filtro["clave"] is None:
+                hdr.config(text=f"Señales — Stock en Cartera ({len(filas)} activos)")
+            else:
+                hdr.config(text=f"Señales — Stock en Cartera ({len(visibles)} de {len(filas)} activos)")
+            for k, lbl in contador_lbl.items():
+                lbl.config(bg="#333333" if k == filtro["clave"] else "#111111")
+
         cartera = self.ScMarket.load_cartera_inst(self.account)
         ctx = contexto_consenso(self.account, cartera)
 
@@ -2180,7 +2198,9 @@ class Screener(tk.Frame):
                         consenso,
                         row.get("website") or "",
                     ),
-                    "tag": tag,
+                    # La clave pelada ("TENDENCIA") y no la etiqueta de senal_consenso ("↗ TENDENCIA"):
+                    # con la etiqueta, el orden, los contadores, el color y el filtro no encontraban nada
+                    "tag": clave_senal(tag),
                     "categ": categ,
                 }
             )
@@ -2266,12 +2286,6 @@ class Screener(tk.Frame):
             ct.tree_fixed.tag_configure(tag, foreground=color)
             ct.tree_scroll.tag_configure(tag, foreground=color)
 
-        # insert_row() y no insert() directo en cada arbol: es el unico camino que llena
-        # CustomTreeview._id_map, de donde sync_fixed_selection/sync_scroll_selection sacan
-        # el iid gemelo. Sin el mapa la linea de seleccion queda suelta entre las dos mitades.
-        for f in filas:
-            ct.insert_row(values=f["values"], tag=f["tag"])
-
         def _open_website_consenso(event):
             tree = event.widget
             col = tree.identify_column(event.x)
@@ -2324,15 +2338,32 @@ class Screener(tk.Frame):
             ("ALERTA", "↘ ALERTA", "#FFA500"),
             ("SALIDA", "▼ SALIDA", "#FF6060"),
         ]
+        filtro = {"clave": None}
+        contador_lbl = {}
+        lbl_todas = tk.Label(
+            resumen_frame,
+            text=f"Todas: {len(filas)}",
+            bg="#111111",
+            fg="white",
+            font=("Arial", 9),
+            cursor="hand2",
+        )
+        lbl_todas.pack(side=tk.LEFT, padx=10, pady=2)
+        lbl_todas.bind("<Button-1>", lambda _e: _filtrar(None) if filtro["clave"] else None)
         for key, label, color in etiquetas:
             n = contadores.get(key, 0)
-            tk.Label(
+            lbl = tk.Label(
                 resumen_frame,
                 text=f"{label}: {n}",
                 bg="#111111",
                 fg=color,
                 font=("Arial", 9),
-            ).pack(side=tk.LEFT, padx=10, pady=2)
+                cursor="hand2",
+            )
+            lbl.pack(side=tk.LEFT, padx=10, pady=2)
+            lbl.bind("<Button-1>", lambda _e, k=key: _filtrar(k))
+            contador_lbl[key] = lbl
+        _filtrar(None)
 
         ttk.Button(
             resumen_frame,
