@@ -4003,17 +4003,27 @@ class MarketScreen(BDsystem):  # -----------------------------------------------
                 cursor.close()
             conn.close()
 
-    def load_radar(self, account, symbol=None, fotos=1) -> list:
+    def load_radar(self, account, symbol=None, fotos=1, universo=False) -> list:
         """Ejes del radar de las últimas `fotos` fechas de `valoracion_historia`, sin calcular nada.
 
-        Sin `symbol` trae la cartera (`encartera = 'Y'` de cada foto); con `symbol`, solo ese símbolo.
-        Devuelve dicts ordenados por símbolo y fecha DESC: la primera fila de cada símbolo es la última foto.
-        [] si no hay foto o la BD falla."""
+        Con `symbol`, solo ese símbolo. Con `universo`, todas las filas: los pares de la mediana del sector.
+        Si no, los símbolos en cartera en la última foto, con su historia completa aunque antes no estuvieran
+        en cartera. Devuelve dicts ordenados por símbolo y fecha DESC: la primera fila de cada símbolo es su
+        foto más nueva. [] si no hay foto o la BD falla."""
         columnas = (
             "symbol", "fecha", "encartera", "sector", "industry", "precio", "eje_valor", "eje_futuro",
             "eje_pasado", "eje_salud", "eje_dividendo", "consenso_tag", "consenso_suma",
         )
-        filtro, params = ("vh.symbol = %s", [symbol]) if symbol else ("vh.encartera = 'Y'", [])
+        if symbol:
+            filtro, params = "vh.symbol = %s", [symbol]
+        elif universo:
+            filtro, params = "1 = 1", []
+        else:
+            filtro = (
+                "vh.symbol IN (SELECT symbol FROM valoracion_historia WHERE account = %s AND encartera = 'Y' "
+                "AND fecha = (SELECT MAX(fecha) FROM valoracion_historia WHERE account = %s))"
+            )
+            params = [account, account]
         conn = self._conectar(tabla="select.valoracion_historia")
         cursor = None
         try:

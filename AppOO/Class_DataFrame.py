@@ -1,3 +1,4 @@
+from AppValuations.valoracion_radar import COLUMNAS_EJES
 from Modulos_Mysql import PlanInversion, MarketScreen, IPerformance
 from Modulos_Utilitarios import (
     is_none,
@@ -3148,15 +3149,9 @@ def _barras_rentabilidad(ax, datos, symbol, cchart):
 
 
 # Radar de valoración — 5 ejes de valoracion_historia (plan-valoracion.md § 3 y § 7)
-_EJES_RADAR = (
-    ("eje_valor", "Valor"),
-    ("eje_futuro", "Futuro"),
-    ("eje_pasado", "Pasado"),
-    ("eje_salud", "Salud"),
-    ("eje_dividendo", "Div"),
-)
+_EJES_RADAR = tuple(zip(COLUMNAS_EJES, ("Valor", "Futuro", "Pasado", "Salud", "Div")))
 
-# La paleta de la Señal del Screener. S/D o sin tag → gris
+# La paleta de la Señal del Screener, en el orden en que el Screener ordena la Señal. S/D o sin tag → gris
 _COLOR_SENAL = {
     "UNANIME": "#FFD700",
     "CONSENSO": "#00FF88",
@@ -3169,17 +3164,38 @@ _COLOR_SENAL = {
 
 def color_senal(tag):
     """Color de la Señal para un `consenso_tag` tal como se guarda ("↗ TENDENCIA", "★ UNÁNIME")."""
-    clave = str(tag or "").strip().split()[-1].upper() if tag else ""
+    return _COLOR_SENAL.get(_clave_senal(tag), "#555555")
+
+
+def orden_senal(tag):
+    """Posición de la Señal en el orden del Screener (UNÁNIME primero). S/D o sin tag va al final."""
+    clave = _clave_senal(tag)
+    return list(_COLOR_SENAL).index(clave) if clave in _COLOR_SENAL else 99
+
+
+def rotulo_senal(tag, suma):
+    """La Señal con el formato del popup del Screener: "↗ TENDENCIA (+2)", el tag solo si no hay suma, o "— S/D"."""
+    if tag and suma is not None:
+        return f"{tag} ({int(suma):+d})"
+    return tag or "— S/D"
+
+
+def _clave_senal(tag):
+    clave = str(tag or "").strip().split()[-1].upper() if tag and str(tag).strip() else ""
     for acento, llano in (("Á", "A"), ("É", "E"), ("Í", "I"), ("Ó", "O"), ("Ú", "U")):
         clave = clave.replace(acento, llano)
-    return _COLOR_SENAL.get(clave, "#555555")
+    return clave
 
 
-def draw_radar(ax, ejes, color):
+def draw_radar(ax, ejes, color, referencia=None, etiquetas=True, fontsize=6):
     """Radar de los 5 ejes de valoración (0..1) sobre un eje polar, sin números.
 
     `ejes` es una fila de `load_radar` (o cualquier dict con las claves `eje_*`). Un eje sin dato no se dibuja
-    como 0: su rayo y el lado que lo saltea van punteados. Sin fila deja la leyenda "sin foto"."""
+    como 0: su rayo y el lado que lo saltea van punteados. Sin fila deja la leyenda "sin foto".
+    Debajo del radar escribe la Señal de la fila (`consenso_tag` y `consenso_suma`) en su color.
+    `referencia` (mismas claves, por ejemplo la mediana del sector) se superpone en punteado blanco.
+    `etiquetas=False` oculta los nombres de los ejes, para la grilla de radares chicos.
+    `fontsize` es el de los nombres de los ejes; la Señal va un punto más grande."""
     n = len(_EJES_RADAR)
     angulos = [2 * math.pi * i / n for i in range(n)]
     ax.set_theta_offset(math.pi / 2)
@@ -3193,9 +3209,22 @@ def draw_radar(ax, ejes, color):
     ax.spines["polar"].set_alpha(0.4)
 
     valores = [(ejes or {}).get(clave) for clave, _ in _EJES_RADAR]
-    ax.set_xticklabels([nombre for _, nombre in _EJES_RADAR], fontsize=6)
+    ax.set_xticklabels([nombre for _, nombre in _EJES_RADAR] if etiquetas else [], fontsize=fontsize)
     for etiqueta, valor in zip(ax.get_xticklabels(), valores):
         etiqueta.set_color("#cccccc" if valor is not None else "gray")
+    if ejes:
+        # En puntos y no en fracción del eje: en un radar chico los nombres de Salud y Pasado llegan al borde
+        tag = ejes.get("consenso_tag")
+        ax.annotate(rotulo_senal(tag, ejes.get("consenso_suma")), xy=(0.5, 0), xycoords="axes fraction",
+                    xytext=(0, -1.6 * fontsize if etiquetas else -4), textcoords="offset points", ha="center",
+                    va="top", color=color_senal(tag), fontsize=fontsize + 1)
+
+    ref = [(angulos[i], float(v)) for i, v in enumerate((referencia or {}).get(c) for c, _ in _EJES_RADAR)
+           if v is not None]
+    if ref:
+        cierre = ref + ref[:1] if len(ref) >= 3 else ref
+        ax.plot([a for a, _ in cierre], [v for _, v in cierre], color="white", alpha=0.7, linewidth=1.0,
+                linestyle="--")
 
     if not ejes or all(v is None for v in valores):
         ax.text(0.5, 0.5, "sin foto" if not ejes else "sin dato", transform=ax.transAxes,

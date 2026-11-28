@@ -1,5 +1,14 @@
 from Modulos_Mysql import MarketScreen, BDsystem
-from Class_DataFrame import set_yf_rate_limited, get_yf_status, get_yfinance, chart_rendimiento_dividendos, draw_rentabilidad
+from Class_DataFrame import (
+    set_yf_rate_limited,
+    get_yf_status,
+    get_yfinance,
+    chart_rendimiento_dividendos,
+    draw_rentabilidad,
+    draw_radar,
+    color_senal,
+    orden_senal,
+)
 from Modulos_Utilitarios import (
     style_app,
     is_null,
@@ -34,6 +43,13 @@ from AppValuations.valoracion_radar import (
     ejes_radar,
     dividendo_maduro,
     monedas_de_balance,
+    mediana_ejes,
+    cambios_radar,
+    avisos_radar,
+    area_radar,
+    COLUMNAS_EJES,
+    UMBRAL_CAMBIO_EJE,
+    MIN_PARES,
 )
 from Modulos_python import (
     tk,
@@ -342,6 +358,7 @@ class Screener(tk.Frame):
         self.counter = 0
         self._inst_win = None
         self._cripto_win = None
+        self._radar_win = None
         self._cand_win = None
         self._exp_win = None
         self._analisis_win = None
@@ -857,6 +874,13 @@ class Screener(tk.Frame):
                 text="Señal Cripto",
                 width=12,
                 command=self._show_cripto_cartera,
+            ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
+
+            ttk.Button(
+                btn_frame,
+                text="Radar",
+                width=8,
+                command=self._show_radar_cartera,
             ).pack(side=tk.LEFT, padx=(0, 6), pady=5)
 
             ttk.Button(
@@ -2592,9 +2616,230 @@ class Screener(tk.Frame):
 
         bind_tv_web_menu(ct.tree_fixed, win, colors=self.colors)
 
+    def _show_radar_cartera(self):
+        def _mover(event):
+            symbol = por_ax.get(event.inaxes)
+            if symbol is None:
+                _ocultar(event)
+                return
+            if tip["symbol"] != symbol:
+                tip["symbol"] = symbol
+                tip["texto"].config(text=textos[symbol])
+            x, y = win.winfo_pointerxy()
+            tip["win"].geometry(f"+{x + 16}+{y + 12}")
+            tip["win"].deiconify()
+            tip["win"].lift()
+
+        def _ocultar(_event):
+            tip["symbol"] = None
+            tip["win"].withdraw()
+
+        def _clic(event):
+            symbol = por_ax.get(event.inaxes)
+            if symbol is not None and event.button == 1:
+                _ocultar(event)
+                self._radar_detalle(win, por_symbol[symbol], pares)
+
+        def _cerrar():
+            win.destroy()
+            self._radar_win = None
+
+        if self._radar_win is not None and self._radar_win.winfo_exists():
+            self._radar_win.lift()
+            return
+
+        historia = self.ScMarket.load_radar(self.account, fotos=12)
+        if not historia:
+            messagebox.showinfo(
+                "Radar", "No hay foto de valoración de la cartera: la escribe Agente_ValoracionSemanal.", parent=self
+            )
+            return
+
+        # load_radar ordena por símbolo y fecha DESC: la primera fila de cada símbolo es su última foto
+        por_symbol = {}
+        for fila in historia:
+            por_symbol.setdefault(fila["symbol"], []).append(fila)
+        # Los pares de la mediana salen de la última foto del universo, la misma que dibuja cada radar
+        pares = pares_por_grupo(self.ScMarket.load_radar(self.account, universo=True), COLUMNAS_EJES)
+        orden = sorted(
+            por_symbol,
+            key=lambda s: (orden_senal(por_symbol[s][0]["consenso_tag"]), -area_radar(por_symbol[s][0]), s),
+        )
+
+        # Los valores van solo en el tooltip: la grilla no lleva números (plan-valoracion.md § 7)
+        textos, avisos, contadores = {}, {}, {}
+        for s in orden:
+            fila = por_symbol[s][0]
+            tag = fila["consenso_tag"] or "— S/D"
+            contadores[tag] = contadores.get(tag, 0) + 1
+            avisos[s] = avisos_radar(por_symbol[s])
+            lineas = [f"{s}   {tag}"]
+            for c in COLUMNAS_EJES:
+                valor = "s/d" if fila[c] is None else f"{fila[c]:.2f}"
+                lineas.append(f"{c[4:].capitalize():<10}{valor:>6}")
+            lineas.append(f"Área {area_radar(fila):.2f}   ·   foto {fila['fecha']:%d/%m/%Y}")
+            lineas += [f"⚠ {a}" for a in avisos[s]]
+            textos[s] = "\n".join(lineas)
+
+        columnas = 10
+        filas_grilla = math.ceil(len(orden) / columnas)
+        fecha = max(f["fecha"] for f in historia)
+
+        win = tk.Toplevel(self)
+        self._radar_win = win
+        win.protocol("WM_DELETE_WINDOW", _cerrar)
+        win.title("Radar — cartera Stock")
+        win.configure(bg="black")
+        win.geometry(f"1240x{min(140 * filas_grilla + 190, 900)}+{120}+{60}")
+
+        tk.Label(
+            win,
+            text=f"Radar de valoración — cartera Stock ({len(orden)} símbolos)   ·   foto {fecha:%d/%m/%Y}",
+            bg="black",
+            fg="cyan",
+            font=("Arial", 11, "bold"),
+        ).pack(pady=(8, 2))
+        tk.Label(
+            win,
+            text=(
+                "Ejes en sentido horario desde arriba: " + " · ".join(c[4:].capitalize() for c in COLUMNAS_EJES)
+                + "   ·   debajo: la Señal y su suma, en su color   ·   "
+                "orden: Señal y, dentro de cada una, el área   ·   ⚠ aviso   ·   clic: detalle"
+            ),
+            bg="black",
+            fg="#999999",
+            font=("Arial", 9),
+        ).pack(pady=(0, 4))
+
+        pie = tk.Frame(win, bg="#111111")
+        pie.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(2, 6))
+        for tag, cantidad in contadores.items():
+            tk.Label(pie, text=f"{tag}: {cantidad}", bg="#111111", fg=color_senal(tag), font=("Arial", 9)).pack(
+                side=tk.LEFT, padx=10, pady=2
+            )
+        tk.Label(
+            pie, text=f"⚠ con aviso: {sum(1 for s in orden if avisos[s])}", bg="#111111", fg="#FFA500",
+            font=("Arial", 9),
+        ).pack(side=tk.LEFT, padx=10, pady=2)
+        ttk.Button(pie, text="Cancel", width=10, command=_cerrar).pack(side=tk.RIGHT, padx=8, pady=2)
+
+        fig = Figure(figsize=(12.2, 1.4 * filas_grilla), dpi=100, facecolor="black")
+        fig.subplots_adjust(left=0.02, right=0.98, top=0.93, bottom=0.03, wspace=0.45, hspace=0.55)
+        por_ax = {}
+        for i, s in enumerate(orden):
+            fila = por_symbol[s][0]
+            color = color_senal(fila["consenso_tag"])
+            ax = fig.add_subplot(filas_grilla, columnas, i + 1, projection="polar")
+            ax.set_facecolor("#111111")
+            draw_radar(ax, fila, color, etiquetas=False)
+            ax.set_title(s + (" ⚠" if avisos[s] else ""), color=color, fontsize=8, pad=3)
+            por_ax[ax] = s
+        canvas = FigureCanvasTkAgg(fig, master=win)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=8)
+
+        tip = {"symbol": None, "win": tk.Toplevel(win)}
+        tip["win"].withdraw()
+        tip["win"].overrideredirect(True)
+        tip["texto"] = tk.Label(
+            tip["win"], bg="#222222", fg="white", font=("Consolas", 9), justify=tk.LEFT, padx=6, pady=4
+        )
+        tip["texto"].pack()
+        canvas.mpl_connect("motion_notify_event", _mover)
+        canvas.mpl_connect("figure_leave_event", _ocultar)
+        canvas.mpl_connect("button_press_event", _clic)
+
+    def _radar_detalle(self, parent, filas, pares):
+        fila = filas[0]
+        color = color_senal(fila["consenso_tag"])
+        mediana = mediana_ejes(pares, fila["sector"], fila["industry"])
+        cambios = cambios_radar(filas)
+        avisos = avisos_radar(filas)
+        nombres = {c: c[4:].capitalize() for c in COLUMNAS_EJES}
+
+        win = tk.Toplevel(parent)
+        win.title(f"Radar — {fila['symbol']}")
+        win.configure(bg="black")
+        win.geometry(f"1060x660+{180}+{100}")
+        tk.Label(
+            win,
+            text=f"{fila['symbol']}   ·   {fila['consenso_tag'] or '— S/D'}   ·   foto {fila['fecha']:%d/%m/%Y}",
+            bg="black",
+            fg=color,
+            font=("Arial", 11, "bold"),
+        ).pack(pady=(8, 2))
+        if all(v is None for v in mediana.values()):
+            referencia = f"Sin mediana de pares: su grupo tiene menos de {MIN_PARES} símbolos con dato"
+        elif fila["sector"] == "Financial Services":
+            referencia = (f"Punteado blanco: mediana de su industria ({fila['industry']}), o del sector si la "
+                          f"industria tiene menos de {MIN_PARES} pares")
+        else:
+            referencia = f"Punteado blanco: mediana de su sector ({fila['sector']})"
+        tk.Label(win, text=referencia, bg="black", fg="#999999", font=("Arial", 9)).pack(pady=(0, 4))
+
+        # El pie primero y con side=BOTTOM: así el Cancel y los avisos no se recortan si falta alto
+        pie = tk.Frame(win, bg="#111111")
+        pie.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(0, 6))
+        ttk.Button(pie, text="Cancel", width=10, command=win.destroy).pack(side=tk.RIGHT, padx=8, pady=2)
+        info = tk.Frame(win, bg="#111111")
+        info.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(2, 0))
+        if cambios is None:
+            texto = "Sin historia: hace falta una segunda foto semanal para ver qué cambió y cómo se mueven los ejes"
+        elif not cambios:
+            texto = f"Qué cambió: ningún eje se movió más de {UMBRAL_CAMBIO_EJE} desde la foto anterior"
+        else:
+            texto = "Qué cambió: " + "   ·   ".join(
+                f"{nombres[c]} {antes:.2f} → {ahora:.2f}" for c, antes, ahora in cambios
+            )
+        tk.Label(info, text=texto, bg="#111111", fg="white", font=("Arial", 9)).pack(anchor=tk.W, padx=10, pady=2)
+        tk.Label(
+            info, text="Avisos (no generan órdenes):" if avisos else "Avisos: ninguno", bg="#111111", fg="#777777",
+            font=("Arial", 9),
+        ).pack(anchor=tk.W, padx=10, pady=(2, 0))
+        for aviso in avisos:
+            tk.Label(info, text=f"⚠ {aviso}", bg="#111111", fg="#FFA500", font=("Arial", 9, "bold")).pack(
+                anchor=tk.W, padx=24, pady=1
+            )
+
+        fig = Figure(figsize=(10.4, 4.9), dpi=100, facecolor="black")
+        if len(filas) >= 2:
+            gs = fig.add_gridspec(1, 2, width_ratios=[2, 3], wspace=0.3, bottom=0.2)
+            ax = fig.add_subplot(gs[0], projection="polar")
+        else:
+            ax = fig.add_subplot(1, 1, 1, projection="polar")
+        ax.set_facecolor("#111111")
+        draw_radar(ax, fila, color, referencia=mediana, fontsize=9)
+
+        if len(filas) >= 2:
+            serie = filas[::-1]
+            x = range(len(serie))
+            axh = fig.add_subplot(gs[1])
+            axh.set_facecolor("#111111")
+            for c, color_eje in zip(COLUMNAS_EJES, ("#4FC3F7", "#81C784", "#FFB74D", "#E57373", "#BA68C8")):
+                axh.plot(x, [np.nan if f[c] is None else f[c] for f in serie], color=color_eje, marker="o",
+                         markersize=3, linewidth=1.2, label=nombres[c])
+            axh.set_ylim(0, 1.02)
+            axh.set_xticks(list(x))
+            axh.set_xticklabels([f"{f['fecha']:%d/%m}" for f in serie], fontsize=7, color="#cccccc")
+            axh.tick_params(axis="y", labelsize=7, colors="#cccccc")
+            for lado in axh.spines.values():
+                lado.set_color("gray")
+            axh.set_title(f"Ejes y precio en las últimas {len(serie)} fotos", color="white", fontsize=9)
+            eje_precio = axh.twinx()
+            eje_precio.plot(x, [np.nan if f["precio"] is None else f["precio"] for f in serie], color="#BBBBBB",
+                            linestyle="--", linewidth=1.0, label="Precio")
+            eje_precio.tick_params(axis="y", labelsize=7, colors="#999999")
+            h_ejes, l_ejes = axh.get_legend_handles_labels()
+            h_precio, l_precio = eje_precio.get_legend_handles_labels()
+            axh.legend(h_ejes + h_precio, l_ejes + l_precio, fontsize=7, loc="upper center",
+                       bbox_to_anchor=(0.5, -0.1), ncol=6, facecolor="#111111", edgecolor="gray", labelcolor="white")
+
+        canvas = FigureCanvasTkAgg(fig, master=win)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=8)
 
 
-_SEC_HEADERS = {"User-Agent": "AppOO research@appoo.com"}
+_SEC_HEADERS ={"User-Agent": "AppOO research@appoo.com"}
 _SEC_NCSR_URL = (
     "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={:010d}&type=N-CSR"
     "&dateb=&owner=include&count=10&output=atom"

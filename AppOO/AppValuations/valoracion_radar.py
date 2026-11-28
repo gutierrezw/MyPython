@@ -18,6 +18,11 @@ VENTANA_DIVIDENDO_DIAS = 350
 DIVIDENDO_VIGENTE_DIAS = 400
 SECTORES_SIN_PAYOUT = ("Real Estate",)
 INDUSTRIAS_SIN_PAYOUT = ("Asset Management", "Oil & Gas Midstream")
+# Columnas de `valoracion_historia` con los 5 ejes, en el orden en que se dibujan (sentido horario desde arriba)
+COLUMNAS_EJES = ("eje_valor", "eje_futuro", "eje_pasado", "eje_salud", "eje_dividendo")
+UMBRAL_CAMBIO_EJE = 0.15
+SALUD_MIN_COMPRA = 0.3
+EJES_CAIDA_VENTA = 3
 
 _METRICAS = (
     "trailingPE",
@@ -199,12 +204,15 @@ def monedas_de_balance(filas):
     return {(r["financialCurrency"], r["currency"]) for r in filas if not _misma_moneda(r)}
 
 
-def pares_por_grupo(filas):
-    """{metrica: {(nivel, nombre): valores ordenados}} por sector e industria. Se arma una vez por pasada."""
-    pares = {m: {} for m in _METRICAS}
+def pares_por_grupo(filas, columnas=None):
+    """{metrica: {(nivel, nombre): valores ordenados}} por sector e industria. Se arma una vez por pasada.
+
+    Con `columnas` agrupa esas columnas de la fila tal cual vienen (los ejes de una foto) en vez de las métricas."""
+    pares = {m: {} for m in (columnas or _METRICAS)}
     for row in filas:
         grupos = [(n, row.get(n)) for n in ("sector", "industry") if row.get(n)]
-        for metrica, valor in _metricas(row).items():
+        valores = {c: row.get(c) for c in columnas} if columnas else _metricas(row)
+        for metrica, valor in valores.items():
             if valor is None:
                 continue
             for grupo in grupos:
@@ -224,7 +232,7 @@ def ejes_radar(row, val, pares):
 
     sector = row.get("sector") or ""
     industria = row.get("industry") or ""
-    niveles = ("industry", "sector") if sector == "Financial Services" else ("sector",)
+    niveles = _niveles(sector)
     met = _metricas(row)
     val = val or valoracion(row, pares)
     deuda = pct("deuda_cap")
@@ -235,6 +243,64 @@ def ejes_radar(row, val, pares):
         "salud": _promedio([None if deuda is None else 1 - deuda, pct("fcf_cap")]),
         "dividendo": _eje_dividendo(row, pct("yield"), val["cobertura"]),
     }
+
+
+def mediana_ejes(pares, sector, industria):
+    """Mediana de cada eje entre los pares del símbolo: la referencia punteada del detalle del radar (§ 7).
+
+    `pares` sale de `pares_por_grupo(filas_de_la_foto, COLUMNAS_EJES)`. El grupo es el mismo de los percentiles
+    (§ 3); un eje con menos de `MIN_PARES` pares con dato queda None."""
+    return {c: _mediana_grupo(pares, c, sector or "", industria or "", _niveles(sector)) for c in COLUMNAS_EJES}
+
+
+def cambios_radar(historia, umbral=UMBRAL_CAMBIO_EJE):
+    """[(columna, antes, ahora)] de los ejes que se movieron más de `umbral` desde la foto anterior.
+
+    `historia` son las filas de un símbolo, la foto más nueva primero. None con menos de dos fotos; un eje sin dato
+    en alguna de las dos no entra."""
+    if len(historia) < 2:
+        return None
+    ahora, antes = historia[0], historia[1]
+    return [
+        (c, antes[c], ahora[c]) for c in COLUMNAS_EJES
+        if ahora.get(c) is not None and antes.get(c) is not None and abs(ahora[c] - antes[c]) > umbral
+    ]
+
+
+def avisos_radar(historia):
+    """Las dos reglas candidatas de § 4 como textos. Son avisos: no generan órdenes.
+
+    - La Salud de la última foto está bajo `SALUD_MIN_COMPRA`.
+    - `EJES_CAIDA_VENTA` ejes o más cayeron en las dos últimas comparaciones, o sea en tres fotos. Cuenta cualquier
+      baja, sin umbral, como dice la regla."""
+    avisos = []
+    if not historia:
+        return avisos
+    salud = historia[0].get("eje_salud")
+    if salud is not None and salud < SALUD_MIN_COMPRA:
+        avisos.append(f"No comprar más: Salud {salud:.2f}, bajo {SALUD_MIN_COMPRA}")
+    if len(historia) >= 3:
+        f0, f1, f2 = historia[:3]
+        caen = [c for c in COLUMNAS_EJES if None not in (f0.get(c), f1.get(c), f2.get(c)) and f0[c] < f1[c] < f2[c]]
+        if len(caen) >= EJES_CAIDA_VENTA:
+            nombres = ", ".join(c[4:].capitalize() for c in caen)
+            avisos.append(f"Revisar la venta: {nombres} caen dos fotos seguidas")
+    return avisos
+
+
+def area_radar(fila):
+    """Área del polígono que dibuja el radar, de 0 a 1 (1 = los 5 ejes en 1): el orden dentro de cada Señal (§ 7).
+
+    Solo entran los ejes con dato, como en el dibujo; con menos de 3 el radar no encierra área y devuelve 0."""
+    n = len(COLUMNAS_EJES)
+    puntos = [
+        (float(v) * math.cos(2 * math.pi * i / n), float(v) * math.sin(2 * math.pi * i / n))
+        for i, v in enumerate((fila or {}).get(c) for c in COLUMNAS_EJES) if v is not None
+    ]
+    if len(puntos) < 3:
+        return 0.0
+    doble = abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(puntos, puntos[1:] + puntos[:1])))
+    return doble / (n * math.sin(2 * math.pi / n))
 
 
 def _eje_dividendo(row, nivel, cobertura):
@@ -338,6 +404,11 @@ def _en_cotizacion(row, campo):
 def _misma_moneda(row):
     balance, cotiza = row.get("financialCurrency"), row.get("currency")
     return not balance or not cotiza or balance == cotiza
+
+
+def _niveles(sector):
+    """Dónde se buscan los pares (§ 3): primero la industria en Financial Services, el sector en el resto."""
+    return ("industry", "sector") if sector == "Financial Services" else ("sector",)
 
 
 def _mediana_grupo(pares, metrica, sector, industria, niveles):
